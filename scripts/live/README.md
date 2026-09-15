@@ -92,8 +92,8 @@ Results should go under gitignored `live-results/` (added by the hygiene PR).
 ## End-of-work campaign (parallel retained instances)
 
 After local tests and release verification are green, launch **one GPU per
-lane in parallel**, keep them until backup and the case study exist, then
-teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
+lane in parallel**, keep them until validate + `docs/SMOKE_RESULTS.md` exist,
+then teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
 
 ```bash
 ./scripts/live/campaign.sh plan
@@ -101,9 +101,11 @@ teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
 ./scripts/live/campaign.sh launch --execute
 ./scripts/live/campaign.sh sweep --execute
 ./scripts/live/campaign.sh validate
-./scripts/live/campaign.sh backup --execute
+./scripts/live/campaign.sh report          # writes docs/SMOKE_RESULTS.md
 ./scripts/live/campaign.sh teardown --execute
 ```
+
+Artifacts ship via GitHub Releases (not private backup tooling).
 
 ## Teardown — always trap DELETE
 
