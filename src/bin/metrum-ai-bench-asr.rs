@@ -14,11 +14,9 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use simplelog::*;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     error::Error,
     fs::{self, File},
-    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -1286,18 +1284,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let endpoint_selector = metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints);
     let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
-    let stop_issuing = Arc::new(AtomicBool::new(false));
-    {
-        let stop = stop_issuing.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                stop.store(true, Ordering::Release);
-            }
-        });
-    }
+    let stop = metrumbench::runner::StopFlag::new();
+    metrumbench::runner::install_stop_handlers(stop.clone());
+    let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
     let mut completed = 0;
-    let mut last_percentage = 0; // Track last printed percentage
+    let mut last_percentage = 0;
 
     // Total number of requests to send
     let num_requests = args.num_requests.unwrap();
@@ -1307,18 +1299,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let start_time = Instant::now();
+    let (record_tx, mut record_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
     let slots = metrumbench::load::schedule(
-        args.common.arrival_kind(),
+        arrival_kind,
         u64::from(num_requests),
         args.common.request_rate.unwrap_or(0.0),
         &mut arrival_rng,
     );
     'request_loop: for slot in slots {
-        if stop_issuing.load(Ordering::Acquire) {
+        if stop.is_stopped() {
+            info!("Stop flag set; not issuing further requests");
             break 'request_loop;
         }
-        // Check if we should stop sending new requests
         if let Some(stop_after) = args.stop_after_seconds {
             if start_time.elapsed().as_secs() >= stop_after {
                 info!(
@@ -1335,7 +1329,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         let permit = semaphore.clone().acquire_owned().await?;
         let client = client.clone();
-        let queue_delay = start_time.elapsed().saturating_sub(slot.scheduled_delay);
+        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+            arrival_kind,
+            start_time.elapsed(),
+            slot.scheduled_delay,
+        );
         let i = slot.seq as u32;
 
         // Get the next audio sample (round-robin if fewer samples than requests)
@@ -1362,15 +1360,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         };
 
         let sample_duration = sample.duration;
+        let sample_id = sample.id.clone();
         let phase = metrumbench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
-        let record_started_at = Utc::now();
         let scheduled_delay = slot.scheduled_delay;
+        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let normalizer = args.normalizer;
+        let sink_task = sink.clone();
+        let record_tx = record_tx.clone();
 
         // Track request start
         metrics.total_requests_sent += 1;
         metrics.request_start_times.push(Instant::now());
 
         let handle = tokio::spawn(async move {
+            let started_at = Utc::now();
             let result = make_request(
                 &client,
                 &url,
@@ -1384,18 +1387,146 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .await;
             drop(permit);
             drop(endpoint_lease);
-            (
-                result,
-                sample.id,
-                ground_truth_sample,
-                sample_duration,
-                endpoint_name,
-                slot.seq,
-                phase,
-                record_started_at,
-                scheduled_delay,
-                queue_delay,
-            )
+
+            let record = match result {
+                Ok((
+                    response_time,
+                    transcription,
+                    inference_time,
+                    inference_time_source,
+                    bytes_sent,
+                    bytes_received,
+                )) => {
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, response_time);
+                    let word_count = transcription.split_whitespace().count();
+                    let char_count = transcription.chars().count();
+                    let words_per_second = if inference_time > 0.0 {
+                        word_count as f64 / inference_time
+                    } else {
+                        0.0
+                    };
+                    let chars_per_second = if inference_time > 0.0 {
+                        char_count as f64 / inference_time
+                    } else {
+                        0.0
+                    };
+                    let (rtf, audio_duration) = sample_duration
+                        .filter(|duration| *duration > 0.0)
+                        .map(|duration| (inference_time / duration, duration))
+                        .unzip();
+                    let rtfx = sample_duration
+                        .and_then(|d| metrumbench::asr::rtfx(d, response_time.as_secs_f64()));
+                    let (wer, cer) = ground_truth_sample
+                        .as_ref()
+                        .map(|gt| {
+                            (
+                                word_error_rate(gt, &transcription, normalizer),
+                                character_error_rate(gt, &transcription, normalizer),
+                            )
+                        })
+                        .unzip();
+                    let mut rec = metrumbench::record::RequestRecord::success(
+                        slot.seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        response_time,
+                        None,
+                        None,
+                        Vec::new(),
+                        0,
+                        0,
+                        0,
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    if let Some(value) = rtfx {
+                        rec.modality_metrics.insert("rtfx_client".into(), value);
+                    }
+                    if let Some(value) = wer {
+                        rec.modality_metrics.insert("wer".into(), value);
+                    }
+                    if let Some(value) = cer {
+                        rec.modality_metrics.insert("cer".into(), value);
+                    }
+                    if let Some(value) = rtf {
+                        rec.modality_metrics.insert("rtf".into(), value);
+                    }
+                    if let Some(value) = audio_duration {
+                        rec.modality_metrics
+                            .insert("audio_duration_s".into(), value);
+                    }
+                    rec.modality_metrics
+                        .insert("inference_time_s".into(), inference_time);
+                    rec.modality_metrics
+                        .insert("word_count".into(), word_count as f64);
+                    rec.modality_metrics
+                        .insert("char_count".into(), char_count as f64);
+                    rec.modality_metrics
+                        .insert("words_per_second".into(), words_per_second);
+                    rec.modality_metrics
+                        .insert("chars_per_second".into(), chars_per_second);
+                    rec.modality_metrics
+                        .insert("bytes_sent".into(), bytes_sent as f64);
+                    rec.modality_metrics
+                        .insert("bytes_received".into(), bytes_received as f64);
+                    rec.modality_metrics.insert(
+                        format!("inference_seconds_{inference_time_source}"),
+                        inference_time,
+                    );
+                    if let Some(audio_duration) = sample_duration {
+                        debug!(
+                            "RTF for sample {}: {:.2} (duration: {:.2}s, inference: {:.2}s)",
+                            sample_id,
+                            inference_time / audio_duration,
+                            audio_duration,
+                            inference_time
+                        );
+                    }
+                    if ground_truth_sample.is_some() {
+                        debug!(
+                            "Accuracy for sample {}: WER={:.2}%, CER={:.2}%",
+                            sample_id,
+                            wer.unwrap_or(0.0) * 100.0,
+                            cer.unwrap_or(0.0) * 100.0
+                        );
+                    }
+                    rec
+                }
+                Err(e) => {
+                    error!("Request failed for sample {}: {}", sample_id, e);
+                    if let Some(source) = std::error::Error::source(&*e) {
+                        error!("Caused by: {}", source);
+                    }
+                    let latency = Utc::now()
+                        .signed_duration_since(started_at)
+                        .to_std()
+                        .unwrap_or(Duration::ZERO);
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, latency);
+                    let mut rec = metrumbench::record::RequestRecord::failed(
+                        slot.seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        latency,
+                        metrumbench::jsonl::classify_error(e.as_ref()),
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    rec
+                }
+            };
+
+            if let Err(e) = sink_task.write(&record) {
+                warn!("Failed to write request JSONL: {e}");
+            }
+            let _ = record_tx.send(record);
         });
         handles.push(handle);
 
@@ -1405,184 +1536,115 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             info!("Launched {} requests...", i + 1);
         }
     }
+    drop(record_tx);
 
     info!("All requests launched. Waiting for completion...");
 
     let mut errors = 0;
     let mut records = Vec::new();
+    while let Some(rec) = record_rx.recv().await {
+        let endpoint_name = rec.endpoint.clone();
+        let phase = rec.phase;
+        if rec.is_success() {
+            let response_time = Duration::from_secs_f64(rec.latency_s);
+            let inference_time = rec
+                .modality_metrics
+                .get("inference_time_s")
+                .copied()
+                .unwrap_or(0.0);
+            let inference_time_duration = Duration::from_secs_f64(inference_time);
+            let word_count = rec
+                .modality_metrics
+                .get("word_count")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let char_count = rec
+                .modality_metrics
+                .get("char_count")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let words_per_second = rec
+                .modality_metrics
+                .get("words_per_second")
+                .copied()
+                .unwrap_or(0.0);
+            let chars_per_second = rec
+                .modality_metrics
+                .get("chars_per_second")
+                .copied()
+                .unwrap_or(0.0);
+            let bytes_sent = rec
+                .modality_metrics
+                .get("bytes_sent")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let bytes_received = rec
+                .modality_metrics
+                .get("bytes_received")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let rtf = rec.modality_metrics.get("rtf").copied();
+            let audio_duration = rec.modality_metrics.get("audio_duration_s").copied();
+            let wer = rec.modality_metrics.get("wer").copied();
+            let cer = rec.modality_metrics.get("cer").copied();
+
+            if phase == metrumbench::record::Phase::Warmup {
+                records.push(rec);
+                continue;
+            }
+
+            metrics.record_success(
+                &endpoint_name,
+                response_time,
+                inference_time_duration,
+                bytes_sent,
+                bytes_received,
+                word_count,
+                char_count,
+                words_per_second,
+                chars_per_second,
+                rtf,
+                audio_duration,
+                wer,
+                cer,
+            );
+            metrics.request_end_times.push(Instant::now());
+            completed += 1;
+            debug!(
+                "Request completed - RT: {:?}, Words: {}, Chars: {}",
+                response_time, word_count, char_count
+            );
+            let percentage = (completed * 100) / (num_requests as usize);
+            if percentage >= last_percentage + 10 {
+                info!(
+                    "{}% complete ({}/{} requests)",
+                    percentage, completed, num_requests
+                );
+                last_percentage = (percentage / 10) * 10;
+            }
+            if completed % 100 == 0 {
+                info!("Completed {} requests...", completed);
+            }
+            records.push(rec);
+        } else {
+            let err_msg = rec
+                .error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".into());
+            error!("Request failed: {err_msg}");
+            if phase != metrumbench::record::Phase::Warmup {
+                metrics.record_error(&endpoint_name, err_msg);
+            }
+            errors += 1;
+            records.push(rec);
+        }
+    }
+
     for handle in handles {
-        match handle.await {
-            Ok((
-                Ok((
-                    response_time,
-                    transcription,
-                    inference_time,
-                    inference_time_source,
-                    bytes_sent,
-                    bytes_received,
-                )),
-                sample_id,
-                ground_truth,
-                duration,
-                endpoint_name,
-                seq,
-                phase,
-                record_started_at,
-                scheduled_delay,
-                queue_delay,
-            )) => {
-                let inference_time_duration = Duration::from_secs_f64(inference_time);
-                let word_count = transcription.split_whitespace().count();
-                let char_count = transcription.chars().count();
-                let words_per_second = if inference_time > 0.0 {
-                    word_count as f64 / inference_time
-                } else {
-                    0.0
-                };
-                let chars_per_second = if inference_time > 0.0 {
-                    char_count as f64 / inference_time
-                } else {
-                    0.0
-                };
-                let (rtf, audio_duration) = duration
-                    .filter(|duration| *duration > 0.0)
-                    .map(|duration| (inference_time / duration, duration))
-                    .unzip();
-                let rtfx =
-                    duration.and_then(|d| metrumbench::asr::rtfx(d, response_time.as_secs_f64()));
-                let (wer, cer) = ground_truth
-                    .as_ref()
-                    .map(|gt| {
-                        (
-                            word_error_rate(gt, &transcription, args.normalizer),
-                            character_error_rate(gt, &transcription, args.normalizer),
-                        )
-                    })
-                    .unzip();
-                metrics.record_success(
-                    &endpoint_name,
-                    response_time,
-                    inference_time_duration,
-                    bytes_sent,
-                    bytes_received,
-                    word_count,
-                    char_count,
-                    words_per_second,
-                    chars_per_second,
-                    rtf,
-                    audio_duration,
-                    wer,
-                    cer,
-                );
-                metrics.request_end_times.push(Instant::now());
-                let mut record = metrumbench::record::RequestRecord::success(
-                    seq,
-                    phase,
-                    endpoint_name.clone(),
-                    record_started_at,
-                    metrumbench::runner::completed_at_from_start(record_started_at, response_time),
-                    response_time,
-                    None,
-                    None,
-                    Vec::new(),
-                    0,
-                    0,
-                    0,
-                )
-                .with_schedule(scheduled_delay, queue_delay);
-                if let Some(value) = rtfx {
-                    record.modality_metrics.insert("rtfx_client".into(), value);
-                }
-                if let Some(value) = wer {
-                    record.modality_metrics.insert("wer".into(), value);
-                }
-                if let Some(value) = cer {
-                    record.modality_metrics.insert("cer".into(), value);
-                }
-                record.modality_metrics.insert(
-                    format!("inference_seconds_{inference_time_source}"),
-                    inference_time,
-                );
-                sink.write(&record)?;
-                records.push(record);
-                if let Some(audio_duration) = duration {
-                    debug!(
-                        "RTF for sample {}: {:.2} (duration: {:.2}s, inference: {:.2}s)",
-                        sample_id,
-                        inference_time / audio_duration,
-                        audio_duration,
-                        inference_time
-                    );
-                }
-                if ground_truth.is_some() {
-                    debug!(
-                        "Accuracy for sample {}: WER={:.2}%, CER={:.2}%",
-                        sample_id,
-                        wer.unwrap_or(0.0) * 100.0,
-                        cer.unwrap_or(0.0) * 100.0
-                    );
-                }
-                completed += 1;
-                debug!(
-                    "Request completed - ID: {}, RT: {:?}, Words: {}, Chars: {}",
-                    sample_id, response_time, word_count, char_count
-                );
-                let percentage = (completed * 100) / (num_requests as usize);
-                if percentage >= last_percentage + 10 {
-                    info!(
-                        "{}% complete ({}/{} requests)",
-                        percentage, completed, num_requests
-                    );
-                    last_percentage = (percentage / 10) * 10;
-                }
-                if completed % 100 == 0 {
-                    info!("Completed {} requests...", completed);
-                }
-            }
-            Ok((
-                Err(e),
-                sample_id,
-                _,
-                _,
-                endpoint_name,
-                seq,
-                phase,
-                record_started_at,
-                scheduled_delay,
-                queue_delay,
-            )) => {
-                error!("Request failed for sample {}: {}", sample_id, e);
-                if let Some(source) = std::error::Error::source(&*e) {
-                    error!("Caused by: {}", source);
-                }
-                metrics.record_error(&endpoint_name, e.to_string());
-                let record = metrumbench::record::RequestRecord::failed(
-                    seq,
-                    phase,
-                    endpoint_name,
-                    record_started_at,
-                    metrumbench::runner::completed_at_from_start(record_started_at, Duration::ZERO),
-                    Duration::ZERO,
-                    metrumbench::jsonl::classify_error(&*e),
-                )
-                .with_schedule(scheduled_delay, queue_delay);
-                sink.write(&record)?;
-                records.push(record);
-                errors += 1;
-            }
-            Err(e) => {
-                error!("Task execution failed: {}", e);
-                if let Some(source) = std::error::Error::source(&e) {
-                    error!("Caused by: {}", source);
-                }
-                let endpoint_name = resolved_endpoints
-                    .endpoint_names_for_display()
-                    .first()
-                    .map(|(n, _)| n.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-                metrics.record_error(&endpoint_name, e.to_string());
-                errors += 1;
-            }
+        if let Err(e) = handle.await {
+            error!("Task join error: {e}");
+            errors += 1;
         }
     }
 
@@ -1591,32 +1653,30 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         completed, num_requests, errors
     );
     metrics.print_stats(&resolved_endpoints);
+    let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
+    let window_seconds = if window_seconds > 0.0 {
+        window_seconds
+    } else {
+        start_time.elapsed().as_secs_f64()
+    };
     let slos = args.common.parse_slos()?;
     let mut shared_summary = metrumbench::summary::RunSummary::from_records_with_options(
         &records,
-        start_time.elapsed().as_secs_f64(),
-        stop_issuing.load(Ordering::Acquire),
+        window_seconds,
+        stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
     );
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, args.model.clone());
-    sink.write(&shared_summary)?;
+    if let Err(e) = sink.write(&shared_summary) {
+        warn!("Failed to write summary JSONL: {e}");
+    }
 
-    // Log the final summary before potentially returning error
     let summary = create_log_record(&args, &metrics, &resolved_endpoints);
-    let mut data_log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&args.data_log)
-        .map_err(|e| format!("Failed to open data log file '{}': {}", args.data_log, e))?;
-
-    writeln!(
-        data_log_file,
-        "{}",
-        serde_json::to_string(&summary).map_err(|e| format!("Serialize summary: {}", e))?
-    )
-    .map_err(|e| format!("Failed to write to data log: {}", e))?;
+    if let Err(e) = sink.write(&summary) {
+        return Err(format!("Failed to write to data log: {e}").into());
+    }
 
     // Clean up temporary files
     info!("Cleaning up temporary audio files...");
@@ -1634,7 +1694,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
 
-    // After metrics collection, printing, and logging, check if there were any errors
     if !metrics.errors.is_empty() {
         Err("Test completed with errors".into())
     } else {

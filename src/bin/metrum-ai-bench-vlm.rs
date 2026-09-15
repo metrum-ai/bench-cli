@@ -21,8 +21,6 @@ use std::fs::File;
 use std::{
     collections::HashMap,
     error::Error,
-    io::Write,
-    sync::atomic::Ordering,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -1331,37 +1329,33 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let endpoint_selector = metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints);
     let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
-    let stop_issuing = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let stop = stop_issuing.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                stop.store(true, Ordering::Release);
-            }
-        });
-    }
+    let stop = metrumbench::runner::StopFlag::new();
+    metrumbench::runner::install_stop_handlers(stop.clone());
+    let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
     let mut completed = 0;
-    let mut last_percentage = 0; // Track last printed percentage
+    let mut last_percentage = 0;
     let mut metrics_started = false;
 
     let start_time = Instant::now();
     let ramp_up_start = start_time;
     let mut current_concurrency;
+    let (record_tx, mut record_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
 
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
     let slots = metrumbench::load::schedule(
-        args.common.arrival_kind(),
+        arrival_kind,
         u64::from(args.num_requests),
         args.common.request_rate.unwrap_or(0.0),
         &mut arrival_rng,
     );
     'request_loop: for slot in slots {
-        if stop_issuing.load(Ordering::Acquire) {
+        if stop.is_stopped() {
+            info!("Stop flag set; not issuing further requests");
             break 'request_loop;
         }
         let i = slot.seq as usize;
-        // Check if we should stop sending new requests
         if let Some(stop_after) = args.stop_after_seconds {
             if start_time.elapsed().as_secs() >= stop_after {
                 info!(
@@ -1400,7 +1394,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tokio::time::sleep(wait).await;
         }
         let permit = semaphore.clone().acquire_owned().await?;
-        let queue_delay = start_time.elapsed().saturating_sub(slot.scheduled_delay);
+        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+            arrival_kind,
+            start_time.elapsed(),
+            slot.scheduled_delay,
+        );
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
         let client_loop = client.clone();
@@ -1595,10 +1593,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let streaming = args.streaming;
         let selected_images_clone = selected_images.clone();
         let phase = metrumbench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
-        let record_started_at = Utc::now();
         let seq = slot.seq;
         let scheduled_delay = slot.scheduled_delay;
+        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let sink_task = sink.clone();
+        let record_tx = record_tx.clone();
         let handle = tokio::spawn(async move {
+            let started_at = Utc::now();
             let result = make_request(
                 &client_loop,
                 &url,
@@ -1611,15 +1612,103 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .await;
             drop(permit);
             drop(endpoint_lease);
-            (
-                result,
-                endpoint_name,
-                seq,
-                phase,
-                record_started_at,
-                scheduled_delay,
-                queue_delay,
-            )
+
+            let record = match result {
+                Ok((
+                    response_time,
+                    ttft,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    image_stats,
+                    first_reasoning,
+                    itl,
+                )) => {
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, response_time);
+                    let mut rec = metrumbench::record::RequestRecord::success(
+                        seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        response_time,
+                        ttft,
+                        first_reasoning,
+                        itl,
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    // Payload size is what the server actually received, so it
+                    // reflects --max-image-dimension and --reencode-jpeg.
+                    rec.modality_metrics
+                        .insert("image_count".to_string(), image_stats.len() as f64);
+                    rec.modality_metrics.insert(
+                        "image_bytes".to_string(),
+                        image_stats.iter().map(|(size, _)| *size).sum::<u64>() as f64,
+                    );
+                    // Carry image dims for console metrics via modality_metrics.
+                    for (idx, (size, (w, h))) in image_stats.iter().enumerate() {
+                        rec.modality_metrics
+                            .insert(format!("image_{idx}_bytes"), *size as f64);
+                        rec.modality_metrics
+                            .insert(format!("image_{idx}_width"), f64::from(*w));
+                        rec.modality_metrics
+                            .insert(format!("image_{idx}_height"), f64::from(*h));
+                    }
+                    rec
+                }
+                Err(e) => {
+                    error!("Request failed: {:#}", e);
+                    let mut source_opt = e.source();
+                    while let Some(source) = source_opt {
+                        error!("Caused by: {}", source);
+                        source_opt = source.source();
+                    }
+                    if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
+                        if let Some(status) = req_err.status() {
+                            error!("HTTP Status: {}", status);
+                        }
+                        if let Some(url) = req_err.url() {
+                            error!("URL: {}", url);
+                        }
+                        if req_err.is_timeout() {
+                            error!("Timeout occurred during request");
+                        }
+                        if req_err.is_body() {
+                            error!("Error reading body: {}", req_err);
+                        }
+                    }
+                    let latency = Utc::now()
+                        .signed_duration_since(started_at)
+                        .to_std()
+                        .unwrap_or(Duration::ZERO);
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, latency);
+                    let mut rec = metrumbench::record::RequestRecord::failed(
+                        seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        latency,
+                        metrumbench::jsonl::classify_error(e.as_ref()),
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    rec
+                }
+            };
+
+            if let Err(e) = sink_task.write(&record) {
+                warn!("Failed to write request JSONL: {e}");
+            }
+            let _ = record_tx.send(record);
         });
         handles.push(handle);
 
@@ -1637,151 +1726,121 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
         }
     }
+    drop(record_tx);
 
     info!("All requests launched. Waiting for completion...");
 
     let mut errors = 0;
-    let mut shared_records = Vec::new();
-    for handle in handles {
-        let (result, endpoint_name, seq, phase, record_started_at, scheduled_delay, queue_delay) =
-            match handle.await {
-                Ok(tuple) => tuple,
-                Err(e) => {
-                    error!("Task execution failed: {}", e);
-                    if let Some(source) = std::error::Error::source(&e) {
-                        error!("Caused by: {}", source);
-                    }
-                    metrics.record_error("unknown", e.to_string());
-                    errors += 1;
+    let mut records: Vec<metrumbench::record::RequestRecord> = Vec::new();
+    while let Some(rec) = record_rx.recv().await {
+        let endpoint_name = rec.endpoint.clone();
+        let phase = rec.phase;
+        if rec.is_success() {
+            let response_time = Duration::from_secs_f64(rec.latency_s);
+            let ttft = rec.ttft_s.map(Duration::from_secs_f64);
+            let prompt_tokens = rec.prompt_tokens;
+            let completion_tokens = rec.completion_tokens;
+            let total_tokens = rec.total_tokens;
+            let image_count = rec
+                .modality_metrics
+                .get("image_count")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let mut image_stats = Vec::with_capacity(image_count);
+            for idx in 0..image_count {
+                let size = rec
+                    .modality_metrics
+                    .get(&format!("image_{idx}_bytes"))
+                    .copied()
+                    .unwrap_or(0.0) as u64;
+                let w = rec
+                    .modality_metrics
+                    .get(&format!("image_{idx}_width"))
+                    .copied()
+                    .unwrap_or(0.0) as u32;
+                let h = rec
+                    .modality_metrics
+                    .get(&format!("image_{idx}_height"))
+                    .copied()
+                    .unwrap_or(0.0) as u32;
+                image_stats.push((size, (w, h)));
+            }
+
+            if let Some(ramp_up) = args.ramp_up_seconds {
+                if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
+                    metrics_started = true;
+                    info!("Ramp-up complete. Starting metrics collection...");
+                }
+                if !metrics_started {
+                    records.push(rec);
                     continue;
                 }
+            }
+            if phase == metrumbench::record::Phase::Warmup {
+                records.push(rec);
+                continue;
+            }
+
+            let tpot = match ttft {
+                Some(ttft) if completion_tokens > 1 => {
+                    response_time.checked_sub(ttft).and_then(|d| {
+                        if d.is_zero() {
+                            None
+                        } else {
+                            Some(d / (completion_tokens as u32 - 1))
+                        }
+                    })
+                }
+                _ => None,
             };
-        match result {
-            Ok((
+            metrics.record_success(
+                &endpoint_name,
                 response_time,
                 ttft,
+                tpot,
                 prompt_tokens,
                 completion_tokens,
                 total_tokens,
-                image_stats,
-                first_reasoning,
-                itl,
-            )) => {
-                // Only start collecting metrics after ramp-up is complete
-                if let Some(ramp_up) = args.ramp_up_seconds {
-                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
-                        metrics_started = true;
-                        info!("Ramp-up complete. Starting metrics collection...");
-                    }
-                    if !metrics_started {
-                        continue;
-                    }
-                }
-                let tpot = match ttft {
-                    Some(ttft) if completion_tokens > 1 => {
-                        response_time.checked_sub(ttft).and_then(|d| {
-                            if d.is_zero() {
-                                None
-                            } else {
-                                Some(d / (completion_tokens as u32 - 1))
-                            }
-                        })
-                    }
-                    _ => None,
-                };
-                if completed < args.common.warmup_requests as usize {
-                    completed += 1;
-                    continue;
-                }
-                metrics.record_success(
-                    &endpoint_name,
-                    response_time,
-                    ttft,
-                    tpot,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    &image_stats,
+                &image_stats,
+            );
+            completed += 1;
+            debug!(
+                "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
+                response_time, ttft, total_tokens
+            );
+            let percentage = (completed * 100) / (args.num_requests as usize);
+            if percentage >= last_percentage + 10 {
+                info!(
+                    "{}% complete ({}/{} requests)",
+                    percentage, completed, args.num_requests
                 );
-                let mut record = metrumbench::record::RequestRecord::success(
-                    seq,
-                    phase,
-                    endpoint_name.clone(),
-                    record_started_at,
-                    metrumbench::runner::completed_at_from_start(record_started_at, response_time),
-                    response_time,
-                    ttft,
-                    first_reasoning,
-                    itl,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                )
-                .with_schedule(scheduled_delay, queue_delay);
-                // Payload size is what the server actually received, so it
-                // reflects --max-image-dimension and --reencode-jpeg.
-                record
-                    .modality_metrics
-                    .insert("image_count".to_string(), image_stats.len() as f64);
-                record.modality_metrics.insert(
-                    "image_bytes".to_string(),
-                    image_stats.iter().map(|(size, _)| *size).sum::<u64>() as f64,
-                );
-                sink.write(&record)?;
-                shared_records.push(record);
-                completed += 1;
-                debug!(
-                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
-                    response_time, ttft, total_tokens
-                );
-                let percentage = (completed * 100) / (args.num_requests as usize);
-                if percentage >= last_percentage + 10 {
-                    info!(
-                        "{}% complete ({}/{} requests)",
-                        percentage, completed, args.num_requests
-                    );
-                    last_percentage = (percentage / 10) * 10;
-                }
-                if completed % 100 == 0 {
-                    info!("Completed {} requests...", completed);
-                }
+                last_percentage = (percentage / 10) * 10;
             }
-            Err(e) => {
-                error!("Request failed: {:#}", e);
-                let mut source_opt = e.source();
-                while let Some(source) = source_opt {
-                    error!("Caused by: {}", source);
-                    source_opt = source.source();
-                }
-                if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
-                    if let Some(status) = req_err.status() {
-                        error!("HTTP Status: {}", status);
-                    }
-                    if let Some(url) = req_err.url() {
-                        error!("URL: {}", url);
-                    }
-                    if req_err.is_timeout() {
-                        error!("Timeout occurred during request");
-                    }
-                    if req_err.is_body() {
-                        error!("Error reading body: {}", req_err);
-                    }
-                }
-                metrics.record_error(&endpoint_name, format!("{:?}", e));
-                let record = metrumbench::record::RequestRecord::failed(
-                    seq,
-                    phase,
-                    endpoint_name,
-                    record_started_at,
-                    metrumbench::runner::completed_at_from_start(record_started_at, Duration::ZERO),
-                    Duration::ZERO,
-                    metrumbench::jsonl::classify_error(&*e),
-                )
-                .with_schedule(scheduled_delay, queue_delay);
-                sink.write(&record)?;
-                shared_records.push(record);
-                errors += 1;
+            if completed % 100 == 0 {
+                info!("Completed {} requests...", completed);
             }
+            records.push(rec);
+        } else {
+            let err_msg = rec
+                .error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".into());
+            error!("Request failed: {err_msg}");
+            if (args.ramp_up_seconds.is_none() || metrics_started)
+                && phase != metrumbench::record::Phase::Warmup
+            {
+                metrics.record_error(&endpoint_name, err_msg);
+            }
+            errors += 1;
+            records.push(rec);
+        }
+    }
+
+    for handle in handles {
+        if let Err(e) = handle.await {
+            error!("Task join error: {e}");
+            errors += 1;
         }
     }
 
@@ -1791,33 +1850,30 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     metrics.print_stats(&resolved_endpoints);
 
-    // Log the final summary before potentially returning error
+    let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
+    let window_seconds = if window_seconds > 0.0 {
+        window_seconds
+    } else {
+        start_time.elapsed().as_secs_f64()
+    };
     let slos = args.common.parse_slos()?;
     let mut shared_summary = metrumbench::summary::RunSummary::from_records_with_options(
-        &shared_records,
-        start_time.elapsed().as_secs_f64(),
-        stop_issuing.load(Ordering::Acquire),
+        &records,
+        window_seconds,
+        stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
     );
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
-    sink.write(&shared_summary)?;
+    if let Err(e) = sink.write(&shared_summary) {
+        warn!("Failed to write summary JSONL: {e}");
+    }
     let summary = create_log_record(&args, &metrics, &resolved_endpoints);
-    let mut data_log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&args.data_log)
-        .map_err(|e| format!("Failed to open data log file '{}': {}", args.data_log, e))?;
+    if let Err(e) = sink.write(&summary) {
+        return Err(format!("Failed to write to data log: {e}").into());
+    }
 
-    writeln!(
-        data_log_file,
-        "{}",
-        serde_json::to_string(&summary).map_err(|e| format!("Serialize summary: {}", e))?
-    )
-    .map_err(|e| format!("Failed to write to data log: {}", e))?;
-
-    // After metrics collection, printing, and logging, check if there were any errors
     if !metrics.errors.is_empty() {
         Err("Test completed with errors".into())
     } else {

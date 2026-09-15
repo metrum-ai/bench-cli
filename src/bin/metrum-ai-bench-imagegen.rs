@@ -338,6 +338,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .append(true)
             .open(&args.data_log)?,
     ));
+    let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
             .create(true)
@@ -352,15 +353,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let started_at = Utc::now();
     let run_start = Instant::now();
-    let stop_issuing = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let stop = stop_issuing.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                stop.store(true, Ordering::Release);
-            }
-        });
-    }
+    let stop = metrumbench::runner::StopFlag::new();
+    metrumbench::runner::install_stop_handlers(stop.clone());
 
     let mut handles = Vec::new();
     use rand::SeedableRng;
@@ -371,6 +365,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         (Some(_), "poisson") => metrumbench::load::ArrivalKind::Poisson,
         (Some(_), _) => metrumbench::load::ArrivalKind::Constant,
     };
+    let (record_tx, mut record_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
     let slots = metrumbench::load::schedule(
         arrival_kind,
         u64::from(args.num_requests),
@@ -378,7 +374,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         &mut arrival_rng,
     );
     for slot in slots {
-        if stop_issuing.load(Ordering::Acquire) {
+        if stop.is_stopped() {
             break;
         }
         let wait = slot.scheduled_delay.saturating_sub(run_start.elapsed());
@@ -387,15 +383,25 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         let request_index = slot.seq as usize;
         let permit = sem.clone().acquire_owned().await?;
+        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+            arrival_kind,
+            run_start.elapsed(),
+            slot.scheduled_delay,
+        );
+        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let scheduled_delay = slot.scheduled_delay;
+        let phase = metrumbench::record::Phase::for_seq(slot.seq, args.warmup_requests);
         let args = args.clone();
         let endpoints = endpoints.clone();
         let runtime = runtime.clone();
         let client = client.clone();
         let prompts = prompts.clone();
         let data_log = data_log.clone();
+        let sink_task = sink.clone();
         let error_log = error_log.clone();
         let metrics = metrics.clone();
         let rr = rr.clone();
+        let record_tx = record_tx.clone();
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let outcome = run_logical_request(
@@ -423,25 +429,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 )
                 .await;
             }
-            metrics.lock().await.outcomes.push(outcome);
-        }));
-    }
-    for h in handles {
-        h.await?;
-    }
 
-    let completed_at = Utc::now();
-    let metrics = metrics.lock().await;
-    let shared_records: Vec<_> = metrics
-        .outcomes
-        .iter()
-        .enumerate()
-        .map(|(index, outcome)| {
-            let phase = metrumbench::record::Phase::for_seq(index as u64, args.warmup_requests);
             let latency = Duration::from_secs_f64(outcome.latency_ms / 1000.0);
             let mut record = if outcome.status == "success" {
                 metrumbench::record::RequestRecord::success(
-                    index as u64,
+                    slot.seq,
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
@@ -456,7 +448,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 )
             } else {
                 metrumbench::record::RequestRecord::failed(
-                    index as u64,
+                    slot.seq,
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
@@ -473,30 +465,56 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         }),
                 )
             };
+            if record_schedule {
+                record = record.with_schedule(scheduled_delay, queue_delay);
+            }
             record
                 .modality_metrics
                 .insert("images_requested".into(), f64::from(outcome.n_requested));
             record
                 .modality_metrics
                 .insert("images_returned".into(), f64::from(outcome.n_returned));
-            record
-        })
-        .collect();
+            if let Err(e) = sink_task.write(&record) {
+                let _ =
+                    write_error(&error_log, &format!("request_record_write_error: {}", e)).await;
+            }
+            let _ = record_tx.send(record);
+            metrics.lock().await.outcomes.push(outcome);
+        }));
+    }
+    drop(record_tx);
+
+    let mut shared_records = Vec::new();
+    while let Some(rec) = record_rx.recv().await {
+        shared_records.push(rec);
+    }
+    for h in handles {
+        h.await?;
+    }
+
+    let completed_at = Utc::now();
+    let metrics = metrics.lock().await;
+    let window_seconds = metrumbench::runner::window_seconds_from_records(&shared_records);
+    let window_seconds = if window_seconds > 0.0 {
+        window_seconds
+    } else {
+        run_start.elapsed().as_secs_f64()
+    };
     let mut shared_summary = metrumbench::summary::RunSummary::from_records(
         &shared_records,
-        run_start.elapsed().as_secs_f64(),
-        stop_issuing.load(Ordering::Acquire),
+        window_seconds,
+        stop.is_stopped(),
     );
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
-    metrumbench::jsonl::JsonlSink::create(&args.data_log)?.write(&shared_summary)?;
+    sink.write(&shared_summary)?;
     let summary = build_summary(
         &args,
         &metrics.outcomes,
         started_at,
         completed_at,
         run_start.elapsed(),
-        stop_issuing.load(Ordering::Acquire),
+        stop.is_stopped(),
     );
     fs::write(&args.summary_json, serde_json::to_string_pretty(&summary)?)?;
     println!("{}", serde_json::to_string_pretty(&summary)?);
