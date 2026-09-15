@@ -8,7 +8,8 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 pub type EndpointTuple = (String, String, String);
 pub type WeightedEndpoints = Vec<EndpointTuple>;
@@ -51,12 +52,18 @@ impl ResolvedEndpoints {
     }
 }
 
+/// Default temporary ejection window after a connect failure (least-inflight).
+pub const DEFAULT_CONNECT_EJECT_BACKOFF: Duration = Duration::from_secs(5);
+
 /// Shared endpoint selector. The returned guard decrements the endpoint's
 /// in-flight counter on drop, including cancellation and error paths.
 #[derive(Debug)]
 pub struct EndpointSelector {
     next: AtomicUsize,
     inflight: BTreeMap<String, Arc<AtomicUsize>>,
+    /// Temporary ejection deadlines after connect failures (least-inflight).
+    ejected_until: BTreeMap<String, Arc<Mutex<Option<Instant>>>>,
+    eject_backoff: Duration,
 }
 
 #[derive(Debug)]
@@ -72,14 +79,48 @@ impl Drop for EndpointLease {
 
 impl EndpointSelector {
     pub fn new(endpoints: &ResolvedEndpoints) -> Self {
-        let inflight = endpoints
-            .endpoint_names_for_display()
+        Self::with_eject_backoff(endpoints, DEFAULT_CONNECT_EJECT_BACKOFF)
+    }
+
+    pub fn with_eject_backoff(endpoints: &ResolvedEndpoints, eject_backoff: Duration) -> Self {
+        let names = endpoints.endpoint_names_for_display();
+        let inflight = names
+            .iter()
+            .map(|(name, _)| (name.clone(), Arc::new(AtomicUsize::new(0))))
+            .collect();
+        let ejected_until = names
             .into_iter()
-            .map(|(name, _)| (name, Arc::new(AtomicUsize::new(0))))
+            .map(|(name, _)| (name, Arc::new(Mutex::new(None))))
             .collect();
         Self {
             next: AtomicUsize::new(0),
             inflight,
+            ejected_until,
+            eject_backoff,
+        }
+    }
+
+    /// Temporarily eject an endpoint after a connect failure so least-inflight
+    /// prefers healthy peers for [`DEFAULT_CONNECT_EJECT_BACKOFF`] (or the
+    /// configured backoff).
+    pub fn note_connect_failure(&self, name: &str) {
+        if let Some(slot) = self.ejected_until.get(name) {
+            if let Ok(mut guard) = slot.lock() {
+                *guard = Some(Instant::now() + self.eject_backoff);
+            }
+        }
+    }
+
+    fn is_ejected(&self, name: &str) -> bool {
+        let Some(slot) = self.ejected_until.get(name) else {
+            return false;
+        };
+        let Ok(guard) = slot.lock() else {
+            return false;
+        };
+        match *guard {
+            Some(until) => Instant::now() < until,
+            None => false,
         }
     }
 
@@ -102,10 +143,15 @@ impl EndpointSelector {
                 .iter()
                 .enumerate()
                 .min_by_key(|(_, (_, _, name))| {
-                    self.inflight
+                    let ejected = self.is_ejected(name);
+                    let inflight = self
+                        .inflight
                         .get(name)
                         .map(|count| count.load(Ordering::Acquire))
-                        .unwrap_or(usize::MAX)
+                        .unwrap_or(usize::MAX);
+                    // Ejected endpoints sort after healthy ones; among equals,
+                    // prefer lower in-flight.
+                    (u8::from(ejected), inflight)
                 })
                 .map(|(index, _)| index)
                 .unwrap_or(0),
@@ -205,8 +251,42 @@ pub fn resolve_endpoints(
 
 #[cfg(test)]
 mod tests {
-    use super::{hostname_from_url, load_endpoints_file};
+    use super::{
+        hostname_from_url, load_endpoints_file, EndpointSelector, ResolvedEndpoints,
+        DEFAULT_CONNECT_EJECT_BACKOFF,
+    };
+    use crate::args_common::LoadBalancer;
     use std::io::Write;
+    use std::time::Duration;
+
+    #[test]
+    fn least_inflight_ejects_after_connect_failure() {
+        let endpoints = ResolvedEndpoints::Multi {
+            weighted_list: vec![
+                ("http://a.example/v1".into(), "ka".into(), "alive".into()),
+                ("http://b.example/v1".into(), "kb".into(), "dead".into()),
+            ],
+            endpoint_names_with_weights: vec![("alive".into(), 1), ("dead".into(), 1)],
+        };
+        let selector = EndpointSelector::with_eject_backoff(&endpoints, Duration::from_secs(60));
+
+        // Pin some in-flight on alive so without ejection, dead would win.
+        let (_alive_choice, _alive_lease) =
+            selector.select(&endpoints, LoadBalancer::LeastInflight);
+        // First pick should be either; force dead to look cheaper by ejecting… wait:
+        // After one select, alive has inflight=1. Next least-inflight picks dead.
+        let (choice, _lease) = selector.select(&endpoints, LoadBalancer::LeastInflight);
+        assert_eq!(choice.2, "dead");
+
+        selector.note_connect_failure("dead");
+        // With dead ejected, prefer alive even though it has higher inflight.
+        let (choice, _lease) = selector.select(&endpoints, LoadBalancer::LeastInflight);
+        assert_eq!(
+            choice.2, "alive",
+            "connect failure must eject dead from least-inflight"
+        );
+        let _ = DEFAULT_CONNECT_EJECT_BACKOFF;
+    }
 
     #[test]
     fn test_hostname_from_url() {
