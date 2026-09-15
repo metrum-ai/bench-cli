@@ -1,0 +1,7 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/metrum-ai/bench-cli/security/advisories/new
+    about: Please report vulnerabilities privately via GitHub Security Advisories.

@@ -14,6 +14,9 @@ import (
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/openai"
 )
 
+// Max request body size for local harness endpoints (16 MiB).
+const maxBodyBytes = 16 << 20
+
 // New builds the HTTP handler with all modality routes.
 func New(cfg *config.Config) http.Handler {
 	lim := limiter.New(cfg.ReqPerSec, cfg.TokensPerSec, cfg.MaxConcurrency)
@@ -32,6 +35,7 @@ func New(cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /v1/images/generations", img.Generations)
 
 	var h http.Handler = mux
+	h = limitBody(h, maxBodyBytes)
 	h = lim.Middleware(h)
 	if cfg.LogRequests {
 		h = requestLog(h)
@@ -41,6 +45,15 @@ func New(cfg *config.Config) http.Handler {
 
 func health(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+func limitBody(next http.Handler, maxBytes int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func requestLog(next http.Handler) http.Handler {

@@ -1,5 +1,5 @@
 Metrum AI Bench third-party license inventory
-Generated from Cargo.lock for version 0.1.80.
+Generated from Cargo.lock for version 0.1.82.
 
 All Rust dependencies are distributed under one or more of these permissive
 licenses:
@@ -10,15 +10,16 @@ Apache-2.0 WITH LLVM-exception
 BSD-2-Clause
 BSD-3-Clause
 BSL-1.0
-CC0-1.0
 CDLA-Permissive-2.0
 ISC
 MIT
 MIT-0
-NCSA
 Unicode-3.0
 Unlicense
 Zlib
+
+(Some crates additionally offer LGPL-2.1-or-later as an alternate choice in an
+OR expression; redistribution may use a permissive option.)
 
 The exact package/version dependency graph is locked in Cargo.lock. License
 expressions are enforced by `cargo deny check licenses` in CI.

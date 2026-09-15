@@ -40,11 +40,12 @@ pub mod banner {
 
 pub mod timecheck {
     use log::{debug, info, warn};
-    use ntp::request;
+    use std::net::UdpSocket;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    /// Opt-in NTP clock check. Returns absolute offset in milliseconds when a
-    /// server responds. Logs warnings for large offsets or unreachable servers;
-    /// never hard-fails.
+    /// Opt-in SNTP clock check (std-only; no third-party NTP crate).
+    /// Returns absolute offset in milliseconds when a server responds.
+    /// Logs warnings for large offsets or unreachable servers; never hard-fails.
     pub fn check_ntp_offset() -> Option<i64> {
         let ntp_servers = [
             "pool.ntp.org:123".to_string(),
@@ -64,18 +65,13 @@ pub mod timecheck {
             .and_then(|t| t.parse::<u64>().ok())
             .unwrap_or(10);
 
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
 
         while start_time.elapsed().as_secs() < timeout_secs {
             for server in &all_servers {
-                debug!("Attempting NTP sync check with server: {}", server);
-                match request(server) {
-                    Ok(packet) => {
-                        let ntp_time = ((packet.transmit_time.sec as i64 - 2208988800) * 1000)
-                            + (packet.transmit_time.frac as i64 * 1000 / 0x100000000);
-                        let system_time = chrono::Utc::now().timestamp_millis();
-                        let offset_ms = (system_time - ntp_time).abs();
-
+                debug!("Attempting SNTP sync check with server: {}", server);
+                match query_sntp_offset_ms(server) {
+                    Ok(offset_ms) => {
                         if offset_ms > 1000 {
                             warn!(
                                 "System clock offset from NTP is {:.3}s (server: {})",
@@ -98,7 +94,7 @@ pub mod timecheck {
                     }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(Duration::from_secs(1));
         }
 
         warn!(
@@ -107,6 +103,49 @@ pub mod timecheck {
         );
         println!("Warning: NTP check could not determine clock offset (servers unreachable)");
         None
+    }
+
+    /// Minimal SNTP client (RFC 5905 client mode). Absolute offset vs local clock.
+    fn query_sntp_offset_ms(server: &str) -> Result<i64, String> {
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .map_err(|e| e.to_string())?;
+        socket
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .map_err(|e| e.to_string())?;
+
+        // LI=0, VN=4, Mode=3 (client)
+        let mut req = [0u8; 48];
+        req[0] = 0x23;
+
+        let t1 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        socket.send_to(&req, server).map_err(|e| e.to_string())?;
+
+        let mut resp = [0u8; 48];
+        let (n, _) = socket.recv_from(&mut resp).map_err(|e| e.to_string())?;
+        if n < 48 {
+            return Err(format!("short NTP response ({n} bytes)"));
+        }
+        let t4 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+
+        let mode = resp[0] & 0x07;
+        if mode != 4 {
+            return Err(format!("unexpected NTP mode {mode}"));
+        }
+
+        // Transmit Timestamp (bytes 40..48), NTP epoch -> Unix
+        let tx_sec = u32::from_be_bytes([resp[40], resp[41], resp[42], resp[43]]) as i64;
+        let tx_frac = u32::from_be_bytes([resp[44], resp[45], resp[46], resp[47]]) as i64;
+        let ntp_unix_ms = (tx_sec - 2_208_988_800) * 1000 + (tx_frac * 1000) / 0x1_0000_0000;
+
+        // Approximate offset using mid-point of round trip vs server transmit time.
+        let local_mid_ms = ((t1.as_millis() + t4.as_millis()) / 2) as i64;
+        Ok((local_mid_ms - ntp_unix_ms).abs())
     }
 }
 
@@ -129,15 +168,12 @@ mod tests {
 }
 
 pub mod compile_time_info {
+    /// Build identity without embedding wall-clock compile datetime (reproducible).
     pub fn get_compile_info() -> std::collections::HashMap<String, String> {
         let mut info = std::collections::HashMap::new();
         info.insert(
-            "compile_datetime".to_string(),
-            compile_time::datetime_str!().to_string(),
-        );
-        info.insert(
             "rustc_version".to_string(),
-            compile_time::rustc_version_str!().to_string(),
+            env!("RUSTC_VERSION_STRING").to_string(),
         );
         info
     }
