@@ -148,7 +148,7 @@ fn llm_closed_loop_window_matches_record_span() {
         min_send = min_send.min(started);
         max_end = max_end.max(started + latency);
         assert!(
-            rec.get("scheduled_offset_s").map_or(true, |v| v.is_null()),
+            rec.get("scheduled_offset_s").is_none_or(|v| v.is_null()),
             "closed-loop must not fake schedule: {rec}"
         );
         let qd = rec
