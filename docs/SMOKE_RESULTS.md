@@ -36,27 +36,29 @@ Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 ## Results
 
+TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request `ttft_s` (never `first_byte_s`). When JSONL is absent, TTFT is recovered from cell `stdout.txt`.
+
 ### LLM — closed-loop (sheet conc 32/64/128)
 
 | Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Qwen_Qwen3.8-27B-FP8` | c128 | 254 | 2 | 93.124 | 169.348 | 0.041 | 0.466 | 230.2267 | 1.103 | yes |
-| `Qwen_Qwen3.8-27B-FP8` | c32 | 64 | 0 | 36.009 | 53.124 | 0.039 | 0.184 | 97.2582 | 0.658 | yes |
-| `Qwen_Qwen3.8-27B-FP8` | c64 | 128 | 0 | 50.181 | 85.189 | 0.040 | 0.260 | 131.4558 | 0.974 | yes |
-| `google_gemma-4-12B-it` | c128 | 256 | 0 | 21.788 | 42.760 | 0.042 | 1.479 | 52.3483 | 4.890 | yes |
-| `google_gemma-4-12B-it` | c32 | 64 | 0 | 7.355 | 14.154 | 0.038 | 0.241 | 21.1478 | 3.026 | yes |
-| `google_gemma-4-12B-it` | c64 | 128 | 0 | 11.992 | 22.632 | 0.039 | 0.282 | 30.4229 | 4.207 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c128 | 254 | 2 | 93.124 | 169.348 | 1.474 | 33.125 | 230.2267 | 1.103 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c32 | 64 | 0 | 36.009 | 53.124 | 0.622 | 7.308 | 97.2582 | 0.658 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c64 | 128 | 0 | 50.181 | 85.189 | 1.141 | 15.719 | 131.4558 | 0.974 | yes |
+| `google_gemma-4-12B-it` | c128 | 256 | 0 | 21.788 | 42.760 | 1.146 | 15.567 | 52.3483 | 4.890 | yes |
+| `google_gemma-4-12B-it` | c32 | 64 | 0 | 7.355 | 14.154 | 0.449 | 5.264 | 21.1478 | 3.026 | yes |
+| `google_gemma-4-12B-it` | c64 | 128 | 0 | 11.992 | 22.632 | 0.616 | 7.526 | 30.4229 | 4.207 | yes |
 
 ### VLM — closed-loop (sheet conc 8/16/32)
 
 | Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Qwen_Qwen3.8-27B-FP8` | c16 | 32 | 0 | 6.960 | 8.662 | 0.031 | 0.097 | 20.4994 | 1.561 | yes |
-| `Qwen_Qwen3.8-27B-FP8` | c32 | 64 | 0 | 9.814 | 13.639 | 0.040 | 0.144 | 25.3621 | 2.523 | yes |
-| `Qwen_Qwen3.8-27B-FP8` | c8 | 16 | 0 | 6.046 | 8.473 | 0.029 | 0.040 | 14.7532 | 1.085 | yes |
-| `google_gemma-4-12B-it` | c16 | 32 | 0 | 1.627 | 2.029 | 0.040 | 0.102 | 4.8716 | 6.569 | yes |
-| `google_gemma-4-12B-it` | c32 | 64 | 0 | 2.072 | 2.162 | 0.053 | 0.143 | 5.3183 | 12.034 | yes |
-| `google_gemma-4-12B-it` | c8 | 16 | 0 | 1.391 | 1.452 | 0.038 | 0.041 | 2.9095 | 5.499 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c16 | 32 | 0 | 6.960 | 8.662 | 0.331 | 1.219 | 20.4994 | 1.561 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c32 | 64 | 0 | 9.814 | 13.639 | 0.647 | 2.565 | 25.3621 | 2.523 | yes |
+| `Qwen_Qwen3.8-27B-FP8` | c8 | 16 | 0 | 6.046 | 8.473 | 0.321 | 0.539 | 14.7532 | 1.085 | yes |
+| `google_gemma-4-12B-it` | c16 | 32 | 0 | 1.627 | 2.029 | 0.271 | 0.794 | 4.8716 | 6.569 | yes |
+| `google_gemma-4-12B-it` | c32 | 64 | 0 | 2.072 | 2.162 | 0.369 | 0.601 | 5.3183 | 12.034 | yes |
+| `google_gemma-4-12B-it` | c8 | 16 | 0 | 1.391 | 1.452 | 0.241 | 0.282 | 2.9095 | 5.499 | yes |
 
 ### ASR — closed-loop (sheet conc 32/64/128)
 
@@ -91,3 +93,4 @@ Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3`
 - Qwen pass: gemma LLM/VLM instances deleted; new L40Sx2 pair loaded `Qwen/Qwen3.8-27B-FP8`; ASR instance retained through Qwen sweep.
 - Script: `scripts/live/matrix_smoke.sh` (+ `shadeform.sh` model/extra-args).
 - Secrets: `env.json` never printed or committed.
+- N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
