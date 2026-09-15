@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-## 1.0.0-rc.1
+## 1.0.0 (2026-09-15)
 
-- Release candidate after public-readiness and measurement fixes (runner window/flush, summary.v3 config, transport parity, modality CLI, legacy removal).
-
+Breaking / schema notes:
+- New campaigns reject unversioned or legacy (non-`request.v*` / `summary.v*`) JSONL lines.
+- Field-additive schema bump to `request.v3` / `summary.v3` / related config stamps (existing numeric meanings unchanged; keep a v2 reader for 0.1.82 audit).
+- Dual unversioned modality summaries removed; console and JSONL use `RunSummary` only.
+- `metrumbench-*` shims remain through v1.x and will be removed in v2.0.
+- Verified on Shadeform RTXPro6000 campaign `v1rc1-20260915-190838` (tag `v1.0.0-rc.1`); see `docs/SMOKE_RESULTS.md`.
 
 - Public readiness: full `cargo deny check` in CI; replace `ntp`/`lru` (std SNTP +
   hand-rolled VLM image LRU); drop compile-time wall-clock datetime for
