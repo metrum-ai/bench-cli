@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Smoke results — campaign `oss-20260915-smoke-rerun`
+# Smoke results — campaign `v1rc1-20260915-190838`
 
 Consolidated multi-modality smoke after local gates. Raw JSONL stays under
 gitignored `live-results/`; this document is the public, releasable summary
@@ -9,11 +9,11 @@ gitignored `live-results/`; this document is the public, releasable summary
 
 | Field | Value |
 |-------|-------|
-| Campaign ID | `oss-20260915-smoke-rerun` |
-| Bench package | `metrum-ai-bench-*` **0.1.82** |
+| Campaign ID | `v1rc1-20260915-190838` |
+| Bench package | `metrum-ai-bench-*` **1.0.0-rc.1** |
 | Date (UTC) | 2026-09-15 |
-| Validation | 12 result files, 490 measured request lines |
-| Modalities | llm, vlm, asr, imagegen |
+| Validation | 10 result files, 474 measured request lines |
+| Modalities | llm, vlm |
 
 ## Systems under test
 
@@ -21,17 +21,17 @@ gitignored `live-results/`; this document is the public, releasable summary
 
 | Item | Value |
 |------|-------|
-| Cloud / region | Shadeform → Massed Compute / kansascity-usa-6 |
-| Instance type | RTXPro6000 / gpu_1x_pro_6000_blackwell |
-| GPU | NVIDIA RTX PRO 6000 Blackwell Server Edition ×1 |
-| VRAM | 96 GiB |
-| Host OS | Ubuntu 22.04.5 LTS (ubuntu22.04_cuda13.0_shade_os) |
-| NVIDIA driver | **580.126.09** |
-| Host CUDA (driver) | **13.0** |
-| Model server | **vLLM 0.29.0** |
+| Cloud / region | massedcompute / beltsville-usa-1 |
+| Instance type | RTXPro6000 / RTXPro6000 |
+| GPU | RTXPro6000 ×1 |
+| VRAM | not captured GiB |
+| Host OS | Shadeform host (not probed) |
+| NVIDIA driver | **not captured (no SSH probe before teardown)** |
+| Host CUDA (driver) | **not captured** |
+| Model server | **vLLM vllm/vllm-openai:latest** |
 | Container image | `vllm/vllm-openai:latest` |
-| Image digest | `sha256:c2914767605584b6d8f45686b82de173ecc99e781897aa3d0a66dacd72c51ae1` |
-| Torch / CUDA (container) | 2.13.0+cu130 / 13.0 |
+| Image digest | `not recorded (Shadeform pull of :latest; digest unavailable after teardown)` |
+| Torch / CUDA (container) | — / — |
 | LLM model | `Qwen/Qwen2.5-7B-Instruct` |
 | VLM model | `Qwen/Qwen2.5-VL-7B-Instruct` |
 
@@ -46,38 +46,38 @@ validates CLI wiring and schemas only.
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| c1-n64 | 56 | 0.244 | 0.247 | 0.051 | 0.055 |
-| c2-n64 | 56 | 0.257 | 0.258 | 0.067 | 0.068 |
-| c4-n64 | 56 | 0.253 | 0.254 | 0.066 | 0.067 |
-| c8-n64 | 56 | 0.252 | 0.253 | 0.066 | 0.067 |
+| c1-n64 | 56 | 0.248 | 0.251 | 0.056 | 0.060 |
+| c2-n64 | 56 | 0.256 | 0.257 | 0.067 | 0.068 |
+| c4-n64 | 56 | 0.252 | 0.259 | 0.066 | 0.069 |
+| c8-n64 | 56 | 0.251 | 0.258 | 0.065 | 0.076 |
 
 ### LLM — open-loop request rate
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| rate16-n64 | 56 | 0.257 | 0.267 | 0.070 | 0.080 |
-| rate4-n64 | 56 | 0.243 | 0.245 | 0.051 | 0.054 |
-| rate8-n64 | 56 | 0.258 | 0.263 | 0.068 | 0.073 |
+| rate16-n64 | 56 | 0.254 | 0.259 | 0.069 | 0.074 |
+| rate4-n64 | 56 | 0.246 | 0.251 | 0.054 | 0.061 |
+| rate8-n64 | 56 | 0.259 | 0.264 | 0.069 | 0.075 |
 
 ### VLM — concurrency
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| c1-n32 | 24 | 0.285 | 0.345 | 0.053 | 0.057 |
-| c2-n32 | 24 | 0.284 | 0.356 | 0.067 | 0.068 |
-| c4-n32 | 24 | 0.292 | 0.385 | 0.066 | 0.068 |
+| c1-n32 | 24 | 0.296 | 0.501 | 0.059 | 0.061 |
+| c2-n32 | 24 | 0.310 | 0.437 | 0.076 | 0.079 |
+| c4-n32 | 24 | 0.289 | 0.370 | 0.076 | 0.079 |
 
 ### ASR — dummy-certified
 
 | Cell | n | latency p50 (s) | RTFx client p50 | WER p50 |
 | --- | --- | --- | --- | --- |
-| c1-n8 | 6 | 0.101 | 39.76 | 1.0 |
+| — | — | — | — | — |
 
 ### Imagegen — dummy-certified
 
 | Cell | Successful images | Images/s | Latency p50 (ms) |
 | --- | --- | --- | --- |
-| c1-n8 | 6 | 7.372 | 101.255 |
+| — | — | — | — |
 
 ## Reproducing
 
@@ -87,3 +87,27 @@ validates CLI wiring and schemas only.
 ./scripts/live/campaign.sh report
 ```
 
+## Throughput recompute (summary.v3 vs started_at+latency_s)
+
+Independent audit: `window_seconds` and `requests_per_second` must match
+`max(started_at + latency_s) - min(started_at)` over measured successes within 5%.
+
+| Cell | n | window_s | rps | recompute match |
+| --- | --- | --- | --- | --- |
+| `llm/c1-n64` | 56 | 13.9019 | 4.028 | yes |
+| `llm/c2-n64` | 56 | 7.2206 | 7.756 | yes |
+| `llm/c4-n64` | 56 | 3.6003 | 15.554 | yes |
+| `llm/c8-n64` | 56 | 1.8236 | 30.708 | yes |
+| `llm/rate16-n64` | 56 | 3.7000 | 15.135 | yes |
+| `llm/rate4-n64` | 56 | 13.9999 | 4.000 | yes |
+| `llm/rate8-n64` | 56 | 7.1298 | 7.854 | yes |
+| `vlm/c1-n32` | 24 | 7.5137 | 3.194 | yes |
+| `vlm/c2-n32` | 24 | 4.2284 | 5.676 | yes |
+| `vlm/c4-n32` | 24 | 1.9744 | 12.155 | yes |
+
+## Provenance notes
+
+- GPU ladder selected **RTXPro6000** on massedcompute / beltsville-usa-1 (no step-down).
+- Models: Qwen2.5-7B instruct family (<10B); last-resort documented default for rc smoke.
+- Launch flags in `sut.json` / create payloads; image digest not captured for `:latest`.
+- Hard GPU lifetime: 4 hours (`ttl.json`); instances torn down after validate+report.
