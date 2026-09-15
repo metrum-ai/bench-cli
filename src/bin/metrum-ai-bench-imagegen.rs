@@ -207,7 +207,7 @@ struct Args {
 
     #[arg(
         long,
-        help = "Optional path to write the legacy imagegen summary JSON (also printed to stdout)"
+        help = "Optional path to write summary.v3 JSON (same schema as the data-log summary line)"
     )]
     summary_json: Option<String>,
 
@@ -383,7 +383,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let sem = Arc::new(Semaphore::new(
         args.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
-    let started_at = Utc::now();
     let run_start = Instant::now();
     let run_id = metrumbench::unique_id::generate_uuid();
     let stop = metrumbench::runner::StopFlag::new();
@@ -538,7 +537,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         h.await?;
     }
 
-    let completed_at = Utc::now();
     let metrics = metrics.lock().await;
     let window_seconds = metrumbench::runner::window_seconds_from_records(&shared_records);
     let window_seconds = if window_seconds > 0.0 {
@@ -591,22 +589,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             "true_cfg_scale": args.true_cfg_scale,
         }),
         unique_prompt_nonce_template: None,
+        modality: [
+            ("size".into(), json!(args.size.clone())),
+            ("n".into(), json!(args.n)),
+            (
+                "response_format".into(),
+                json!(args.response_format.to_string()),
+            ),
+        ]
+        .into_iter()
+        .collect(),
     });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     sink.write(&shared_summary)?;
-    let summary = build_summary(
-        &args,
-        &metrics.outcomes,
-        started_at,
-        completed_at,
-        Duration::from_secs_f64(window_seconds),
-        stop.is_stopped(),
-    );
+    shared_summary.print_console();
     if let Some(path) = &args.summary_json {
-        fs::write(path, serde_json::to_string_pretty(&summary)?)?;
+        fs::write(path, serde_json::to_string_pretty(&shared_summary)?)?;
     }
-    println!("{}", serde_json::to_string_pretty(&summary)?);
     let failed = metrics
         .outcomes
         .iter()
@@ -1253,147 +1253,6 @@ async fn write_error(
     Ok(())
 }
 
-fn build_summary(
-    args: &Args,
-    outcomes: &[RequestOutcome],
-    started_at: DateTime<Utc>,
-    completed_at: DateTime<Utc>,
-    elapsed: Duration,
-    partial: bool,
-) -> Value {
-    let outcomes: Vec<&RequestOutcome> = outcomes
-        .iter()
-        .filter(|o| {
-            o.request_id
-                .parse::<u32>()
-                .ok()
-                .map(|n| n > args.warmup_requests)
-                .unwrap_or(true)
-        })
-        .collect();
-    let duration_seconds = elapsed.as_secs_f64().max(0.000001);
-    let successful: Vec<&RequestOutcome> = outcomes
-        .iter()
-        .copied()
-        .filter(|o| o.status == "success")
-        .collect();
-    let failed = outcomes.len() - successful.len();
-    let images_requested: u32 = outcomes.iter().map(|o| o.n_requested).sum();
-    let images_generated: u32 = outcomes.iter().map(|o| o.n_returned).sum();
-    let latencies: Vec<f64> = successful.iter().map(|o| o.latency_ms).collect();
-    let image_bytes: Vec<f64> = successful
-        .iter()
-        .flat_map(|o| o.image_artifacts.iter().map(|a| a.bytes as f64))
-        .collect();
-    let mut endpoint_map: HashMap<String, Vec<&RequestOutcome>> = HashMap::new();
-    for outcome in &outcomes {
-        endpoint_map
-            .entry(outcome.endpoint_name.clone())
-            .or_default()
-            .push(*outcome);
-    }
-    let endpoints = endpoint_map
-        .into_iter()
-        .map(|(name, rows)| {
-            let successes: Vec<&RequestOutcome> = rows
-                .iter()
-                .copied()
-                .filter(|o| o.status == "success")
-                .collect();
-            let images: u32 = rows.iter().map(|o| o.n_returned).sum();
-            let lats: Vec<f64> = successes.iter().map(|o| o.latency_ms).collect();
-            json!({
-                "name": name,
-                "url": rows.first().map(|o| o.endpoint_url.clone()).unwrap_or_default(),
-                "request_count": rows.len(),
-                "successful_requests": successes.len(),
-                "failed_requests": rows.len() - successes.len(),
-                "images_generated": images,
-                "images_per_second": images as f64 / duration_seconds,
-                "requests_per_second": rows.len() as f64 / duration_seconds,
-                "latency_ms_p50": percentile(&lats, 50.0),
-                "latency_ms_p90": percentile(&lats, 90.0),
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut errors: HashMap<(String, Option<u16>), usize> = HashMap::new();
-    for outcome in outcomes.iter().filter(|o| o.status != "success") {
-        let error_type = outcome
-            .error_type
-            .clone()
-            .unwrap_or_else(|| "error".to_string());
-        *errors.entry((error_type, outcome.http_status)).or_insert(0) += 1;
-    }
-    let errors = errors
-        .into_iter()
-        .map(|((error_type, http_status), count)| {
-            json!({
-                "error_type": error_type,
-                "http_status": http_status,
-                "count": count
-            })
-        })
-        .collect::<Vec<_>>();
-
-    json!({
-        "schema_version": "metrum-ai-bench-imagegen.summary.v1",
-        "tool": "metrum-ai-bench-imagegen",
-        "tool_version": VERSION,
-        "scenario": args.scenario,
-        "model": args.model,
-        "started_at": started_at.to_rfc3339(),
-        "completed_at": completed_at.to_rfc3339(),
-        "duration_seconds": duration_seconds,
-        "request_count": outcomes.len(),
-        "successful_requests": successful.len(),
-        "failed_requests": failed,
-        "timeout_requests": outcomes.iter().filter(|o| o.error_type.as_deref() == Some("timeout")).count(),
-        "images_requested": images_requested,
-        "images_generated": images_generated,
-        "images_per_second": images_generated as f64 / duration_seconds,
-        "requests_per_second": outcomes.len() as f64 / duration_seconds,
-        "success_rate": successful.len() as f64 / outcomes.len().max(1) as f64,
-        "latency_ms": stats(&latencies),
-        "image_bytes": stats(&image_bytes),
-        "endpoints": endpoints,
-        "errors": errors,
-        "partial": partial,
-        "pooled_mixture": endpoints.len() > 1,
-        "environment": metrumbench::environment::collect(None, Some(args.model.clone())),
-        "artifacts": {
-            "artifact_dir": args.artifact_dir,
-            "data_log": args.data_log,
-            "summary_json": args.summary_json,
-            "error_log": args.error_log,
-        }
-    })
-}
-
-fn stats(values: &[f64]) -> Value {
-    let summary = metrumbench::stats::DistSummary::from_values(values);
-    json!({
-        "n": summary.n,
-        "min": summary.min,
-        "mean": summary.avg,
-        "std": summary.std,
-        "mad": summary.mad,
-        "p50": summary.p50,
-        "p90": summary.p90,
-        "p95": summary.p95,
-        "p99": summary.p99,
-        "max": summary.max,
-        "percentile_method": summary.percentile_method,
-        "p90_unreliable": summary.p90_unreliable,
-        "p95_unreliable": summary.p95_unreliable,
-        "p99_unreliable": summary.p99_unreliable,
-    })
-}
-
-fn percentile(values: &[f64], p: f64) -> Option<f64> {
-    let sorted = metrumbench::stats::sort_finite(values.iter().copied());
-    metrumbench::stats::percentile_type7(&sorted, p)
-}
-
 fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{:02x}", b)).collect()
@@ -1412,180 +1271,6 @@ mod tests {
     fn parses_size() {
         assert_eq!(parse_size("1024x512"), Some((1024, 512)));
         assert_eq!(parse_size("bad"), None);
-    }
-
-    #[test]
-    fn summary_computes_images_per_second() {
-        let args = Args {
-            version_only: false,
-            ntp_check: false,
-            scenario: "smoke".to_string(),
-            url: Some("http://localhost:8000/v1".to_string()),
-            api_key: Some("k".to_string()),
-            endpoint: vec![],
-            endpoints_file: None,
-            load_balancer: LoadBalancer::RoundRobin,
-            endpoint_health_check: false,
-            health_path: "/models".to_string(),
-            max_endpoint_failures: 2,
-            endpoint_retry_attempts: 0,
-            endpoint_retry_backoff_ms: 100,
-            model: "m".to_string(),
-            num_requests: 1,
-            concurrency: 1,
-            request_rate: None,
-            arrival: "constant".to_string(),
-            max_concurrency: None,
-            prompt: Some("p".to_string()),
-            prompts: None,
-            prompt_field: "prompt".to_string(),
-            id_field: "id".to_string(),
-            shuffle_prompts: false,
-            warmup_requests: 0,
-            seed: Some(1),
-            seed_mode: SeedMode::Increment,
-            n: 1,
-            size: "64x64".to_string(),
-            response_format: ResponseFormat::B64Json,
-            negative_prompt: None,
-            num_inference_steps: None,
-            guidance_scale: None,
-            true_cfg_scale: None,
-            extra_body_json: None,
-            extra_body_file: None,
-            request_timeout: 1,
-            connect_timeout: 1,
-            pool_idle_timeout: 1,
-            tcp_keepalive: 1,
-            ca_cert: None,
-            insecure: false,
-            artifact_dir: "/tmp/a".to_string(),
-            data_log: "/tmp/d.jsonl".to_string(),
-            summary_json: Some("/tmp/s.json".to_string()),
-            debug_log: "/tmp/debug.log".to_string(),
-            error_log: "/tmp/error.log".to_string(),
-            save_response_json: false,
-            no_save_images: false,
-            overwrite_artifacts: false,
-            fail_on_error: false,
-        };
-        let now = Utc::now();
-        let outcome = RequestOutcome {
-            request_id: "000001".to_string(),
-            prompt_id: "p".to_string(),
-            prompt_sha256: "x".to_string(),
-            endpoint_name: "e".to_string(),
-            endpoint_url: "u".to_string(),
-            started_at: now,
-            completed_at: now,
-            latency_ms: 100.0,
-            first_byte_s: None,
-            status: "success".to_string(),
-            http_status: Some(200),
-            n_requested: 1,
-            n_returned: 1,
-            size: "64x64".to_string(),
-            response_format: "b64_json".to_string(),
-            seed: Some(1),
-            image_artifacts: vec![],
-            response_bytes: 10,
-            attempts: vec![],
-            error_type: None,
-            error_message: None,
-        };
-        let summary = build_summary(&args, &[outcome], now, now, Duration::from_secs(2), false);
-        assert_eq!(summary["images_generated"], 1);
-        assert_eq!(summary["images_per_second"], 0.5);
-    }
-
-    #[test]
-    fn summary_keeps_error_http_status() {
-        let args = Args {
-            version_only: false,
-            ntp_check: false,
-            scenario: "smoke".to_string(),
-            url: Some("http://localhost:8000/v1".to_string()),
-            api_key: Some("k".to_string()),
-            endpoint: vec![],
-            endpoints_file: None,
-            load_balancer: LoadBalancer::RoundRobin,
-            endpoint_health_check: false,
-            health_path: "/models".to_string(),
-            max_endpoint_failures: 2,
-            endpoint_retry_attempts: 0,
-            endpoint_retry_backoff_ms: 100,
-            model: "m".to_string(),
-            num_requests: 2,
-            concurrency: 1,
-            request_rate: None,
-            arrival: "constant".to_string(),
-            max_concurrency: None,
-            prompt: Some("p".to_string()),
-            prompts: None,
-            prompt_field: "prompt".to_string(),
-            id_field: "id".to_string(),
-            shuffle_prompts: false,
-            warmup_requests: 0,
-            seed: Some(1),
-            seed_mode: SeedMode::Increment,
-            n: 1,
-            size: "64x64".to_string(),
-            response_format: ResponseFormat::B64Json,
-            negative_prompt: None,
-            num_inference_steps: None,
-            guidance_scale: None,
-            true_cfg_scale: None,
-            extra_body_json: None,
-            extra_body_file: None,
-            request_timeout: 1,
-            connect_timeout: 1,
-            pool_idle_timeout: 1,
-            tcp_keepalive: 1,
-            ca_cert: None,
-            insecure: false,
-            artifact_dir: "/tmp/a".to_string(),
-            data_log: "/tmp/d.jsonl".to_string(),
-            summary_json: Some("/tmp/s.json".to_string()),
-            debug_log: "/tmp/debug.log".to_string(),
-            error_log: "/tmp/error.log".to_string(),
-            save_response_json: false,
-            no_save_images: false,
-            overwrite_artifacts: false,
-            fail_on_error: false,
-        };
-        let now = Utc::now();
-        let mut outcomes = Vec::new();
-        for (request_id, http_status) in [("000001", Some(429)), ("000002", Some(500))] {
-            outcomes.push(RequestOutcome {
-                request_id: request_id.to_string(),
-                prompt_id: "p".to_string(),
-                prompt_sha256: "x".to_string(),
-                endpoint_name: "e".to_string(),
-                endpoint_url: "u".to_string(),
-                started_at: now,
-                completed_at: now,
-                latency_ms: 100.0,
-                first_byte_s: None,
-                status: "http_error".to_string(),
-                http_status,
-                n_requested: 1,
-                n_returned: 0,
-                size: "64x64".to_string(),
-                response_format: "b64_json".to_string(),
-                seed: Some(1),
-                image_artifacts: vec![],
-                response_bytes: 0,
-                attempts: vec![],
-                error_type: Some("http_error".to_string()),
-                error_message: Some("failed".to_string()),
-            });
-        }
-
-        let summary = build_summary(&args, &outcomes, now, now, Duration::from_secs(2), false);
-        let errors = summary["errors"].as_array().expect("errors array");
-        assert_eq!(errors.len(), 2);
-        assert!(errors.iter().any(|e| e["http_status"] == 429));
-        assert!(errors.iter().any(|e| e["http_status"] == 500));
     }
 
     #[test]

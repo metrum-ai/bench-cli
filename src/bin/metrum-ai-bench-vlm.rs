@@ -8,8 +8,7 @@ use clap::Parser;
 use futures_util::StreamExt;
 use log::{debug, error, info, warn};
 use lru::LruCache;
-use metrumbench::compile_time_info;
-use metrumbench::endpoints::{resolve_endpoints, ResolvedEndpoints};
+use metrumbench::endpoints::resolve_endpoints;
 use metrumbench::prompt_inputs::{is_http_url, load_metrumbench_vlm_records};
 use metrumbench::unique_id;
 use rand::seq::SliceRandom;
@@ -19,7 +18,6 @@ use serde_json::{json, Value};
 use simplelog::*;
 use std::fs::File;
 use std::{
-    collections::HashMap,
     error::Error,
     sync::Arc,
     time::{Duration, Instant},
@@ -179,437 +177,6 @@ struct Args {
         help = "Whether to let the server download images instead of base64 encoding them"
     )]
     server_side_download: bool,
-}
-
-#[derive(Default, Clone)]
-struct EndpointMetrics {
-    response_times: Vec<Duration>,
-    ttft_times: Vec<Duration>,
-    tpot_times: Vec<Duration>,
-    prompt_tokens: Vec<u64>,
-    completion_tokens: Vec<u64>,
-    total_tokens: Vec<u64>,
-    errors: Vec<String>,
-    image_sizes: Vec<u64>,
-    images_per_request: Vec<u64>,
-    image_dimensions: Vec<(u32, u32)>,
-}
-
-struct Metrics {
-    response_times: Vec<Duration>,
-    ttft_times: Vec<Duration>,
-    tpot_times: Vec<Duration>,
-    prompt_tokens: Vec<u64>,
-    completion_tokens: Vec<u64>,
-    total_tokens: Vec<u64>,
-    start_time: Instant,
-    errors: Vec<String>,
-    scenario: String,
-    version: String,
-    image_sizes: Vec<u64>,             // Track image sizes in bytes
-    images_per_request: Vec<u64>,      // Track number of images per request
-    image_dimensions: Vec<(u32, u32)>, // Track image dimensions (width, height)
-    endpoint_metrics: HashMap<String, EndpointMetrics>,
-}
-
-impl Metrics {
-    fn new(scenario: String) -> Self {
-        Self {
-            response_times: Vec::new(),
-            ttft_times: Vec::new(),
-            tpot_times: Vec::new(),
-            prompt_tokens: Vec::new(),
-            completion_tokens: Vec::new(),
-            total_tokens: Vec::new(),
-            start_time: Instant::now(),
-            errors: Vec::new(),
-            scenario,
-            version: VERSION.to_string(),
-            image_sizes: Vec::new(),
-            images_per_request: Vec::new(),
-            image_dimensions: Vec::new(),
-            endpoint_metrics: HashMap::new(),
-        }
-    }
-
-    fn record_success(
-        &mut self,
-        endpoint_name: &str,
-        response_time: Duration,
-        ttft: Option<Duration>,
-        tpot: Option<Duration>,
-        prompt_tokens: u64,
-        completion_tokens: u64,
-        total_tokens: u64,
-        image_stats: &[(u64, (u32, u32))],
-    ) {
-        self.response_times.push(response_time);
-        if let Some(ttft) = ttft {
-            self.ttft_times.push(ttft);
-        }
-        if let Some(t) = tpot {
-            self.tpot_times.push(t);
-        }
-        self.prompt_tokens.push(prompt_tokens);
-        self.completion_tokens.push(completion_tokens);
-        self.total_tokens.push(total_tokens);
-        let images_in_request = image_stats.len() as u64;
-        for (size, dims) in image_stats {
-            self.image_sizes.push(*size);
-            self.image_dimensions.push(*dims);
-        }
-        self.images_per_request.push(images_in_request);
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        ep.response_times.push(response_time);
-        if let Some(ttft) = ttft {
-            ep.ttft_times.push(ttft);
-        }
-        if let Some(t) = tpot {
-            ep.tpot_times.push(t);
-        }
-        ep.prompt_tokens.push(prompt_tokens);
-        ep.completion_tokens.push(completion_tokens);
-        ep.total_tokens.push(total_tokens);
-        for (size, dims) in image_stats {
-            ep.image_sizes.push(*size);
-            ep.image_dimensions.push(*dims);
-        }
-        ep.images_per_request.push(images_in_request);
-    }
-
-    fn record_error(&mut self, endpoint_name: &str, error: String) {
-        self.errors.push(error.clone());
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        ep.errors.push(error);
-    }
-
-    fn calc_percentile(sorted_values: &[Duration], percentile: f64) -> Duration {
-        if sorted_values.is_empty() {
-            return Duration::default();
-        }
-        let index =
-            ((sorted_values.len() as f64 * percentile / 100.0).ceil() as usize).saturating_sub(1);
-        *sorted_values.get(index).unwrap_or(&Duration::default())
-    }
-
-    fn print_compact_block(
-        &self,
-        label: &str,
-        response_times: &[Duration],
-        ttft_times: &[Duration],
-        prompt_tokens: &[u64],
-        completion_tokens: &[u64],
-        total_tokens: &[u64],
-        errors: &[String],
-        elapsed_secs: f64,
-    ) {
-        let requests = response_times.len() + errors.len();
-        if elapsed_secs <= 0.0 {
-            println!("\n=== {} ===\n  (no timing data)", label);
-            return;
-        }
-        let req_rate = requests as f64 / elapsed_secs;
-        let total_pt: u64 = prompt_tokens.iter().sum();
-        let total_ct: u64 = completion_tokens.iter().sum();
-        let total_t: u64 = total_tokens.iter().sum();
-        let token_rate = total_t as f64 / elapsed_secs;
-        println!("\n=== {} ===", label);
-        println!("  Requests:    {}", requests);
-        println!("  Errors:      {}", errors.len());
-        if !response_times.is_empty() {
-            let mut sorted_rt = response_times.to_vec();
-            sorted_rt.sort();
-            let avg_rt = sorted_rt.iter().sum::<Duration>() / sorted_rt.len() as u32;
-            let p50 = Self::calc_percentile(&sorted_rt, 50.0);
-            let p99 = Self::calc_percentile(&sorted_rt, 99.0);
-            println!(
-                "  Avg RT:      {:.3}s  (p50: {:.3}s, p99: {:.3}s)",
-                avg_rt.as_secs_f64(),
-                p50.as_secs_f64(),
-                p99.as_secs_f64()
-            );
-        }
-        if !ttft_times.is_empty() {
-            let avg_ttft = ttft_times.iter().sum::<Duration>() / ttft_times.len() as u32;
-            println!("  Avg TTFT:    {:.3}s", avg_ttft.as_secs_f64());
-        }
-        println!(
-            "  Tokens:      {} prompt, {} completion",
-            total_pt, total_ct
-        );
-        println!("  Token Rate:  {:.1} tokens/sec", token_rate);
-        println!("  Req Rate:   {:.1} req/sec", req_rate);
-    }
-
-    fn print_stats(&self, resolved: &ResolvedEndpoints) {
-        let elapsed_secs = self.start_time.elapsed().as_secs_f64();
-        let names_with_weights = resolved.endpoint_names_for_display();
-        if names_with_weights.len() > 1 {
-            for (name, weight) in &names_with_weights {
-                if let Some(ep) = self.endpoint_metrics.get(name) {
-                    self.print_compact_block(
-                        &format!("Endpoint: {} (weight: {})", name, weight),
-                        &ep.response_times,
-                        &ep.ttft_times,
-                        &ep.prompt_tokens,
-                        &ep.completion_tokens,
-                        &ep.total_tokens,
-                        &ep.errors,
-                        elapsed_secs,
-                    );
-                }
-            }
-            self.print_compact_block(
-                "AGGREGATE",
-                &self.response_times,
-                &self.ttft_times,
-                &self.prompt_tokens,
-                &self.completion_tokens,
-                &self.total_tokens,
-                &self.errors,
-                elapsed_secs,
-            );
-            println!("\nScenario: {}", self.scenario);
-            println!("Version: {}", self.version);
-            return;
-        }
-        let calc_stats = |values: &[Duration]| {
-            if values.is_empty() {
-                return (
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                );
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort();
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<Duration>() / len.max(1) as u32;
-            let p50 = Self::calc_percentile(&sorted, 50.0);
-            let p90 = Self::calc_percentile(&sorted, 90.0);
-            let p95 = Self::calc_percentile(&sorted, 95.0);
-            let p99 = Self::calc_percentile(&sorted, 99.0);
-            (
-                *sorted.first().unwrap_or(&Duration::default()),
-                *sorted.last().unwrap_or(&Duration::default()),
-                avg,
-                p50,
-                p90,
-                p95,
-                p99,
-            )
-        };
-
-        let calc_stats_u64 = |values: &[u64]| {
-            if values.is_empty() {
-                return (0, 0, 0.0, 0);
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort();
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<u64>() as f64 / len.max(1) as f64;
-            (
-                *sorted.first().unwrap_or(&0),
-                *sorted.last().unwrap_or(&0),
-                avg,
-                *sorted.get(len / 2).unwrap_or(&0),
-            )
-        };
-
-        // Print response time stats only if we have successful responses
-        if !self.response_times.is_empty() {
-            let (rt_min, rt_max, rt_avg, rt_p50, rt_p90, rt_p95, rt_p99) =
-                calc_stats(&self.response_times);
-            println!("\nResponse Time Statistics:");
-            println!("Min: {:?}, Max: {:?}, Avg: {:?}", rt_min, rt_max, rt_avg);
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                rt_p50, rt_p90, rt_p95, rt_p99
-            );
-
-            let (ttft_min, ttft_max, ttft_avg, ttft_p50, ttft_p90, ttft_p95, ttft_p99) =
-                calc_stats(&self.ttft_times);
-            println!("\nTime to First Token Statistics:");
-            println!(
-                "Min: {:?}, Max: {:?}, Avg: {:?}",
-                ttft_min, ttft_max, ttft_avg
-            );
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                ttft_p50, ttft_p90, ttft_p95, ttft_p99
-            );
-
-            let (pt_min, pt_max, pt_avg, pt_median) = calc_stats_u64(&self.prompt_tokens);
-            let total_prompt_tokens: u64 = self.prompt_tokens.iter().sum();
-            println!("\nPrompt Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                pt_min, pt_max, pt_avg, pt_median
-            );
-            println!("Total Prompt Tokens: {}", total_prompt_tokens);
-
-            let (ct_min, ct_max, ct_avg, ct_median) = calc_stats_u64(&self.completion_tokens);
-            let total_completion_tokens: u64 = self.completion_tokens.iter().sum();
-            println!("\nCompletion Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                ct_min, ct_max, ct_avg, ct_median
-            );
-            println!("Total Completion Tokens: {}", total_completion_tokens);
-
-            let (tt_min, tt_max, tt_avg, tt_median) = calc_stats_u64(&self.total_tokens);
-            let total_all_tokens: u64 = self.total_tokens.iter().sum();
-            println!("\nTotal Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                tt_min, tt_max, tt_avg, tt_median
-            );
-            println!("Total Tokens Processed: {}", total_all_tokens);
-        } else {
-            println!("\nNo successful responses to calculate timing statistics.");
-        }
-
-        // Add TPOT statistics after TTFT statistics
-        if !self.tpot_times.is_empty() {
-            let (tpot_min, tpot_max, tpot_avg, tpot_p50, tpot_p90, tpot_p95, tpot_p99) =
-                calc_stats(&self.tpot_times);
-            println!("\nTime Per Output Token Statistics:");
-            println!(
-                "Min: {:?}, Max: {:?}, Avg: {:?}",
-                tpot_min, tpot_max, tpot_avg
-            );
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                tpot_p50, tpot_p90, tpot_p95, tpot_p99
-            );
-        }
-
-        // Add error statistics back
-        println!("\nError Statistics:");
-        println!("Total Errors: {}", self.errors.len());
-        let error_rate = (self.errors.len() as f64
-            / (self.response_times.len() + self.errors.len()) as f64)
-            * 100.0;
-        println!("Error Rate: {:.2}%", error_rate);
-
-        let mut error_counts: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
-        for error in &self.errors {
-            *error_counts.entry(error.as_str()).or_insert(0) += 1;
-        }
-
-        if !error_counts.is_empty() {
-            println!("\nError Breakdown:");
-            for (error_type, count) in error_counts.iter() {
-                println!("  {} occurrences: {}", count, error_type);
-            }
-        }
-
-        // Rest of the timing statistics...
-        let total_time = self.start_time.elapsed();
-        let requests = self.response_times.len();
-
-        // Calculate rates only if we have a non-zero elapsed time
-        let elapsed_secs = total_time.as_secs_f64();
-        if elapsed_secs > 0.0 {
-            let concurrent_requests = requests as f64 / elapsed_secs;
-            let tokens_per_second = self.total_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-            let prompt_tokens_per_second =
-                self.prompt_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-            let completion_tokens_per_second =
-                self.completion_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-
-            println!("\nTiming Statistics:");
-            println!("Total Time: {:.2?}", total_time);
-            if requests > 0 {
-                println!(
-                    "Average Request Latency: {:.2?}",
-                    total_time / requests as u32
-                );
-            }
-            println!("Average Requests/Second: {:.2}", concurrent_requests);
-            println!("Prompt Tokens/Second: {:.2}", prompt_tokens_per_second);
-            println!(
-                "Completion Tokens/Second: {:.2}",
-                completion_tokens_per_second
-            );
-            println!("Total Tokens/Second: {:.2}", tokens_per_second);
-        } else {
-            println!("\nTiming Statistics:");
-            println!("Total Time: {:.2?}", total_time);
-            println!("Not enough data to calculate rates (test duration too short)");
-        }
-
-        // Add detailed image statistics
-        if !self.image_sizes.is_empty() {
-            let (img_size_min, img_size_max, img_size_avg, img_size_median) =
-                calc_stats_u64(&self.image_sizes);
-            println!("\nImage Size Statistics (bytes):");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                img_size_min, img_size_max, img_size_avg, img_size_median
-            );
-
-            // Calculate and print dimension statistics
-            let total_images = self.image_dimensions.len();
-            let avg_width = self.image_dimensions.iter().map(|(w, _)| w).sum::<u32>() as f64
-                / total_images as f64;
-            let avg_height = self.image_dimensions.iter().map(|(_, h)| h).sum::<u32>() as f64
-                / total_images as f64;
-
-            println!("\nImage Dimension Statistics:");
-            println!(
-                "Average dimensions: {:.0}x{:.0} pixels",
-                avg_width, avg_height
-            );
-            println!("Total Images Processed: {}", total_images);
-
-            // Calculate and print multi-image statistics if we have any images_per_request data
-            if !self.images_per_request.is_empty() {
-                let (min_images, max_images, avg_images, median_images) =
-                    calc_stats_u64(&self.images_per_request);
-                println!("\nMulti-Image Statistics:");
-                println!(
-                    "Min images per request: {}, Max: {}, Avg: {:.2}, Median: {}",
-                    min_images, max_images, avg_images, median_images
-                );
-
-                // Count requests with multiple images
-                let multi_image_requests = self
-                    .images_per_request
-                    .iter()
-                    .filter(|&&count| count > 1)
-                    .count();
-                let total_requests = self.images_per_request.len();
-
-                if total_requests > 0 {
-                    let multi_image_percent =
-                        (multi_image_requests as f64 / total_requests as f64) * 100.0;
-                    println!(
-                        "Requests with multiple images: {} ({:.1}%)",
-                        multi_image_requests, multi_image_percent
-                    );
-                }
-            }
-
-            let total_time = self.start_time.elapsed().as_secs_f64();
-            println!("Images/Second: {:.2}", total_images as f64 / total_time);
-            println!("Average Size/Image: {:.2} KB", img_size_avg / 1024.0);
-        }
-
-        println!("\nScenario: {}", self.scenario);
-        println!("Version: {}", self.version);
-    }
 }
 
 async fn make_request(
@@ -812,160 +379,6 @@ async fn make_request(
         Vec::new(),
         completion_text,
     ))
-}
-
-fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoints) -> Value {
-    let mut sorted_rt = metrics.response_times.clone();
-    sorted_rt.sort();
-    let mut sorted_ttft = metrics.ttft_times.clone();
-    sorted_ttft.sort();
-    let mut sorted_tpot = metrics.tpot_times.clone();
-    sorted_tpot.sort();
-
-    let (config_url, config_endpoint, config_endpoints) = match resolved {
-        ResolvedEndpoints::Single { url, name, .. } => (url.clone(), Some(name.clone()), None),
-        ResolvedEndpoints::Multi {
-            endpoint_names_with_weights,
-            ..
-        } => {
-            let names: Vec<String> = endpoint_names_with_weights
-                .iter()
-                .map(|(n, _)| n.clone())
-                .collect();
-            (String::new(), None, Some(names))
-        }
-    };
-    let per_endpoint_json: serde_json::Map<String, Value> = metrics
-        .endpoint_metrics
-        .iter()
-        .map(|(name, ep)| {
-            let ep_requests = ep.response_times.len() + ep.errors.len();
-            let ep_elapsed = metrics.start_time.elapsed().as_secs_f64();
-            (
-                name.clone(),
-                json!({
-                    "requests": ep_requests,
-                    "errors": ep.errors.len(),
-                    "prompt_tokens_total": ep.prompt_tokens.iter().sum::<u64>(),
-                    "completion_tokens_total": ep.completion_tokens.iter().sum::<u64>(),
-                    "requests_per_second": if ep_elapsed > 0.0 { ep_requests as f64 / ep_elapsed } else { 0.0 }
-                }),
-            )
-        })
-        .collect();
-
-    json!({
-        "unique_id": unique_id::generate_uuid(),
-        "human_readable_id": unique_id::generate_human_readable_unique_id(3),
-        "timestamp": Utc::now().to_rfc3339(),
-        "metrumbench_version": VERSION,
-        "compile_info": compile_time_info::get_compile_info(),
-        "config": {
-            "scenario": args.scenario,
-            "url": config_url,
-            "endpoint": config_endpoint,
-            "endpoints": config_endpoints,
-            "model": args.model,
-            "num_requests": args.num_requests,
-            "concurrency": args.concurrency,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "log_level": args.log_level,
-            "prompts_file": args.prompts,
-            "data_log": args.data_log,
-            "debug_log": args.debug_log,
-            "error_log": args.error_log,
-            "request_timeout": args.request_timeout,
-            "connect_timeout": args.connect_timeout,
-            "pool_idle_timeout": args.pool_idle_timeout,
-            "tcp_keepalive": args.tcp_keepalive,
-            "stop_after_seconds": args.stop_after_seconds,
-            "ramp_up_seconds": args.ramp_up_seconds,
-            "num_images_batch": args.num_images_batch,
-            "image_cache_size": args.image_cache_size,
-            "max_image_dimension": args.max_image_dimension,
-            "reencode_jpeg": args.reencode_jpeg,
-            "image_detail": format!("{}", args.image_detail),
-            "server_side_download": args.server_side_download,
-        },
-        "metrics": {
-            "response_times": {
-                "min_ms": sorted_rt.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_rt.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": (sorted_rt.iter().sum::<Duration>() / sorted_rt.len().max(1) as u32).as_millis(),
-                "p50_ms": Metrics::calc_percentile(&sorted_rt, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_rt, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_rt, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_rt, 99.0).as_millis()
-            },
-            "ttft": {
-                "min_ms": sorted_ttft.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_ttft.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": (sorted_ttft.iter().sum::<Duration>() / sorted_ttft.len().max(1) as u32).as_millis(),
-                "p50_ms": Metrics::calc_percentile(&sorted_ttft, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_ttft, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_ttft, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_ttft, 99.0).as_millis()
-            },
-            "tpot": {
-                "min_ms": sorted_tpot.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_tpot.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": (sorted_tpot.iter().sum::<Duration>() / sorted_tpot.len().max(1) as u32).as_millis(),
-                "p50_ms": Metrics::calc_percentile(&sorted_tpot, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_tpot, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_tpot, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_tpot, 99.0).as_millis()
-            },
-            "tokens": {
-                "prompt": {
-                    "total": metrics.prompt_tokens.iter().sum::<u64>(),
-                    "min": metrics.prompt_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.prompt_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.prompt_tokens.iter().sum::<u64>() as f64 / metrics.prompt_tokens.len().max(1) as f64,
-                    "per_second": metrics.prompt_tokens.iter().sum::<u64>() as f64 / metrics.start_time.elapsed().as_secs_f64()
-                },
-                "completion": {
-                    "total": metrics.completion_tokens.iter().sum::<u64>(),
-                    "min": metrics.completion_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.completion_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.completion_tokens.iter().sum::<u64>() as f64 / metrics.completion_tokens.len().max(1) as f64,
-                    "per_second": metrics.completion_tokens.iter().sum::<u64>() as f64 / metrics.start_time.elapsed().as_secs_f64()
-                },
-                "total": {
-                    "total": metrics.total_tokens.iter().sum::<u64>(),
-                    "min": metrics.total_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.total_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.total_tokens.iter().sum::<u64>() as f64 / metrics.total_tokens.len().max(1) as f64,
-                    "per_second": metrics.total_tokens.iter().sum::<u64>() as f64 / metrics.start_time.elapsed().as_secs_f64()
-                }
-            },
-            "errors": {
-                "count": metrics.errors.len(),
-                "rate": (metrics.errors.len() as f64 / args.num_requests as f64) * 100.0
-            },
-            "timing": {
-                "total_time_seconds": metrics.start_time.elapsed().as_secs_f64(),
-                "requests_per_second": args.num_requests as f64 / metrics.start_time.elapsed().as_secs_f64(),
-                "successful_requests": metrics.response_times.len(),
-                "failed_requests": metrics.errors.len(),
-                "ramp_up_seconds": args.ramp_up_seconds,
-                "steady_state_seconds": metrics.start_time.elapsed().as_secs_f64() - args.ramp_up_seconds.unwrap_or(0) as f64,
-                "steady_state_requests_per_second": metrics.response_times.len() as f64 /
-                    (metrics.start_time.elapsed().as_secs_f64() - args.ramp_up_seconds.unwrap_or(0) as f64).max(1.0)
-            },
-            "images": {
-                "total_images": metrics.image_dimensions.len(),
-                "multi_image_requests": metrics.images_per_request.iter().filter(|&&count| count > 1).count(),
-                "total_requests_with_images": metrics.images_per_request.len(),
-                "images_per_request": {
-                    "min": metrics.images_per_request.iter().min().unwrap_or(&0),
-                    "max": metrics.images_per_request.iter().max().unwrap_or(&0),
-                    "avg": metrics.images_per_request.iter().sum::<u64>() as f64 / metrics.images_per_request.len().max(1) as f64
-                }
-            },
-            "per_endpoint": per_endpoint_json
-        }
-    })
 }
 
 // Structure to hold image data and metadata
@@ -1357,7 +770,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
         }
     }
-    let mut metrics = Metrics::new(args.scenario.clone());
     let semaphore = Arc::new(Semaphore::new(
         args.common.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
@@ -1465,9 +877,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 vec![]
             };
             if refs_to_check.iter().any(|r| !is_http_url(r)) {
-                metrics.record_error(
-                    &endpoint_name,
-                    "server_side_download requires http(s) URLs; local paths and file:// are not sent".to_string(),
+                error!(
+                    "server_side_download requires http(s) URLs; local paths and file:// are not sent (endpoint={})",
+                    endpoint_name
                 );
                 drop(permit);
                 continue 'request_loop;
@@ -1499,8 +911,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .await
                     {
                         Ok(image_data) => selected_images.push(image_data),
-                        Err(e) => {
-                            metrics.record_error(&endpoint_name, e.to_string());
+                        Err(_e) => {
                             drop(permit);
                             continue 'request_loop;
                         }
@@ -1530,8 +941,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .await
                     {
                         Ok(image_data) => selected_images.push(image_data),
-                        Err(e) => {
-                            metrics.record_error(&endpoint_name, e.to_string());
+                        Err(_e) => {
                             drop(permit);
                             continue 'request_loop;
                         }
@@ -1562,8 +972,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             .await
                         {
                             Ok(image_data) => selected_images.push(image_data),
-                            Err(e) => {
-                                metrics.record_error(&endpoint_name, e.to_string());
+                            Err(_e) => {
                                 drop(permit);
                                 continue 'request_loop;
                             }
@@ -1593,8 +1002,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .await
                 {
                     Ok(image_data) => selected_images.push(image_data),
-                    Err(e) => {
-                        metrics.record_error(&endpoint_name, e.to_string());
+                    Err(_e) => {
                         drop(permit);
                         continue 'request_loop;
                     }
@@ -1623,8 +1031,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.common.system_prompt.as_deref(),
         ) {
             Ok(b) => b,
-            Err(e) => {
-                metrics.record_error(&endpoint_name, e.to_string());
+            Err(_e) => {
                 drop(permit);
                 continue 'request_loop;
             }
@@ -1805,12 +1212,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut errors = 0;
     let mut records: Vec<metrumbench::record::RequestRecord> = Vec::new();
     while let Some(rec) = record_rx.recv().await {
-        let endpoint_name = rec.endpoint.clone();
+        let _endpoint_name = rec.endpoint.clone();
         let phase = rec.phase;
         if rec.is_success() {
             let response_time = Duration::from_secs_f64(rec.latency_s);
             let ttft = rec.ttft_s.map(Duration::from_secs_f64);
-            let prompt_tokens = rec.prompt_tokens;
+            let _prompt_tokens = rec.prompt_tokens;
             let completion_tokens = rec.completion_tokens;
             let total_tokens = rec.total_tokens;
             let image_count = rec
@@ -1853,7 +1260,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 continue;
             }
 
-            let tpot = match ttft {
+            let _tpot = match ttft {
                 Some(ttft) if completion_tokens > 1 => {
                     response_time.checked_sub(ttft).and_then(|d| {
                         if d.is_zero() {
@@ -1865,16 +1272,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
                 _ => None,
             };
-            metrics.record_success(
-                &endpoint_name,
-                response_time,
-                ttft,
-                tpot,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                &image_stats,
-            );
             completed += 1;
             debug!(
                 "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
@@ -1899,11 +1296,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "unknown".into());
             error!("Request failed: {err_msg}");
-            if (args.ramp_up_seconds.is_none() || metrics_started)
-                && phase != metrumbench::record::Phase::Warmup
-            {
-                metrics.record_error(&endpoint_name, err_msg);
-            }
             errors += 1;
             records.push(rec);
         }
@@ -1920,8 +1312,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, args.num_requests, errors
     );
-    metrics.print_stats(&resolved_endpoints);
-
     let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
@@ -1976,18 +1366,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
                 args.common.unique_prompts,
             ),
+        modality: [
+            (
+                "reencode_jpeg".into(),
+                serde_json::json!(args.reencode_jpeg),
+            ),
+            (
+                "image_detail".into(),
+                serde_json::json!(format!("{}", args.image_detail)),
+            ),
+            (
+                "max_image_dimension".into(),
+                serde_json::json!(args.max_image_dimension),
+            ),
+            (
+                "server_side_download".into(),
+                serde_json::json!(args.server_side_download),
+            ),
+        ]
+        .into_iter()
+        .collect(),
     });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
-    let summary = create_log_record(&args, &metrics, &resolved_endpoints);
-    if let Err(e) = sink.write(&summary) {
-        return Err(format!("Failed to write to data log: {e}").into());
-    }
-
-    if args.common.fail_on_error && !metrics.errors.is_empty() {
+    shared_summary.print_console();
+    let measure_errors = records
+        .iter()
+        .filter(|r| r.phase == metrumbench::record::Phase::Measure && !r.is_success())
+        .count();
+    if args.common.fail_on_error && measure_errors > 0 {
         Err("Test completed with errors".into())
     } else {
         Ok(())

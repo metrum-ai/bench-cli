@@ -153,9 +153,16 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
         &std::fs::read_to_string(&fixture.summary_json).expect("summary json"),
     )
     .expect("parse summary json");
-    assert_eq!(standalone["successful_requests"], 3);
-    assert_eq!(standalone["failed_requests"], 0);
-    assert_eq!(standalone["images_generated"], 3);
+    assert!(
+        standalone["schema_version"]
+            .as_str()
+            .expect("schema")
+            .contains("summary.v"),
+        "summary-json must be summary.v3, not legacy imagegen.summary.v1"
+    );
+    assert_eq!(standalone["successes"], 3);
+    assert_eq!(standalone["errors"], 0);
+    assert_eq!(standalone["latency_s"]["n"], 3);
 }
 
 /// Warmup requests are logged but excluded from the measured summary.

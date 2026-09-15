@@ -111,4 +111,15 @@ fn strategic_sweep_exports_all_formats() {
     assert!(mlperf.join("mlperf_log_summary.txt").is_file());
     assert!(mlperf.join("mlperf_log_detail.txt").is_file());
     assert!(mlperf.join("mlperf_log_accuracy.json").is_file());
+    let mlperf_summary =
+        fs::read_to_string(mlperf.join("mlperf_log_summary.txt")).expect("mlperf summary");
+    assert!(mlperf_summary.starts_with("UNOFFICIAL"));
+    assert!(mlperf_summary.contains("unofficial; see disclaimer"));
+    assert!(summary["points"]
+        .as_array()
+        .expect("points")
+        .iter()
+        .all(|point| point["n"].as_u64().unwrap_or(0) > 0
+            && point["latency_s"]["percentile_method"] == "hyndman_fan_type7"
+            && point["goodput_equals_throughput"] == true));
 }

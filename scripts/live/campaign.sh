@@ -251,15 +251,22 @@ for path in root.rglob("results.jsonl"):
         n += 1
         rec = json.loads(line)
         schema = rec.get("schema_version")
-        # Legacy modality summaries omit schema_version; request.v2 and
-        # summary.v2 / imagegen summary schemas must be present.
+        # New campaigns reject unversioned / legacy lines (fail, do not skip).
+        # request.v2 / summary.v2 from 0.1.82 remain accepted for regression audit.
         if schema is None:
-            if "latency_s" in rec or "ttft_s" in rec or "modality_metrics" in rec:
-                errors.append(f"{path}: line {n} request-like row missing schema_version")
+            errors.append(f"{path}: line {n} missing schema_version (legacy/unversioned JSONL rejected)")
             continue
-        if "request" in str(schema):
+        schema_s = str(schema)
+        if "request" in schema_s:
             saw_request = True
             request_lines += 1
+            if not any(v in schema_s for v in ("request.v2", "request.v3", "imagegen.request")):
+                errors.append(f"{path}: line {n} unsupported request schema_version={schema_s}")
+        elif "summary" in schema_s:
+            if not any(v in schema_s for v in ("summary.v2", "summary.v3", "imagegen.summary")):
+                errors.append(f"{path}: line {n} unsupported summary schema_version={schema_s}")
+        else:
+            errors.append(f"{path}: line {n} unrecognized schema_version={schema_s}")
     if n == 0:
         errors.append(f"{path}: empty")
     if not saw_request and "imagegen" not in str(path):
@@ -274,7 +281,7 @@ if request_lines == 0:
 if errors:
     print("\n".join(errors), file=sys.stderr)
     sys.exit(1)
-print(f"ok: {cells} result files under {root}; {request_lines} request.v2 lines")
+print(f"ok: {cells} result files under {root}; {request_lines} request lines (v2/v3)")
 PY
 }
 

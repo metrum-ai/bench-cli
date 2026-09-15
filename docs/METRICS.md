@@ -59,3 +59,10 @@ confidence interval.
 
 Multi-endpoint aggregate distributions are labeled `pooled_mixture`; the same
 full distributions are emitted independently per endpoint.
+
+## Console vs JSONL
+
+Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
+values written as `summary.v3`. There is no separate nearest-rank console
+estimator.
+

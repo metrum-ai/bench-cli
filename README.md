@@ -16,9 +16,10 @@ cargo test --all-targets
 ```
 
 The preferred entry point is `metrum-ai-bench` with `llm`, `vlm`, `asr`,
-`imagegen`, and `selftest` subcommands. During the compatibility period the
-four modality binaries can also be invoked directly. Run a command with
-`--help` for its authoritative flags.
+`imagegen`, and `selftest` subcommands. During the v1.x compatibility period the
+four modality binaries can also be invoked directly, and deprecated
+`metrumbench-*` shims remain (they print a v2.0 removal notice). Run a command
+with `--help` for its authoritative flags.
 
 ```bash
 target/release/metrum-ai-bench selftest
