@@ -36,8 +36,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Verify tag and package
         shell: bash
         run: |
@@ -61,8 +61,8 @@ jobs:
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --locked --release --features otlp --target "${{ matrix.target }}" --bins
@@ -88,17 +88,17 @@ jobs:
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json
           mv metrumbench.cdx.json "metrumbench-${{ matrix.target }}.cdx.json"
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
       - name: Sign with Sigstore keyless identity
         shell: bash
         run: |
           archive="$(ls metrumbench-v*-${{ matrix.target }}.tar.gz)"
           cosign sign-blob --yes \
             --bundle "${archive}.sigstore.json" "${archive}"
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
         with:
           subject-path: metrumbench-v*-${{ matrix.target }}.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -113,8 +113,8 @@ jobs:
     needs: artifacts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           pattern: release-*
           merge-multiple: true
@@ -123,11 +123,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/render_homebrew_formula.sh "${RELEASE_TAG}" . metrumbench.rb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: homebrew-formula
           path: metrumbench.rb
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
@@ -143,8 +143,8 @@ jobs:
     needs: artifacts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       # A missing token is a configuration choice, not a broken release: the
       # tarballs, SBOMs and signatures are already published by then.
       - name: cargo publish
@@ -165,10 +165,10 @@ jobs:
     needs: github-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: homebrew-formula
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
           ref: ${{ vars.HOMEBREW_TAP_BRANCH || 'main' }}
