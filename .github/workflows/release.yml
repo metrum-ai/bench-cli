@@ -145,9 +145,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish --locked --features otlp
+      # A missing token is a configuration choice, not a broken release: the
+      # tarballs, SBOMs and signatures are already published by then.
+      - name: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::warning::CRATES_IO_TOKEN is not configured; skipping the crates.io publish."
+            exit 0
+          fi
+          cargo publish --locked --features otlp
 
   homebrew:
     if: >-
