@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Arrival scheduling: closed-loop concurrency and open-loop constant/Poisson.
+//!
+//! Wall clocks are not used here. Tests drive time with [`FakeClock`].
 
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -20,14 +22,40 @@ pub struct RequestSlot {
     pub scheduled_delay: Duration,
 }
 
+/// A complete arrival schedule produced by [`schedule`].
+pub type ArrivalSchedule = Vec<RequestSlot>;
+
+/// Deterministic clock for scheduler tests. Production code uses
+/// `tokio::time` / `std::time::Instant` at the binary boundary.
+#[derive(Debug, Clone, Default)]
+pub struct FakeClock {
+    now: Duration,
+}
+
+impl FakeClock {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn now(&self) -> Duration {
+        self.now
+    }
+
+    pub fn advance(&mut self, by: Duration) {
+        self.now = self.now.saturating_add(by);
+    }
+
+    /// Sleep until `deadline` by advancing the fake clock (no real wait).
+    pub fn sleep_until(&mut self, deadline: Duration) {
+        if deadline > self.now {
+            self.now = deadline;
+        }
+    }
+}
+
 /// Issue `n` slots. Closed-loop: all delays zero (caller gates on semaphore).
 /// Open-loop: delays from a constant or exponential inter-arrival.
-pub fn schedule(
-    kind: ArrivalKind,
-    n: u64,
-    request_rate: f64,
-    rng: &mut StdRng,
-) -> Vec<RequestSlot> {
+pub fn schedule(kind: ArrivalKind, n: u64, request_rate: f64, rng: &mut StdRng) -> ArrivalSchedule {
     match kind {
         ArrivalKind::ClosedLoop => (0..n)
             .map(|seq| RequestSlot {
@@ -114,5 +142,36 @@ mod tests {
             .collect();
         let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
         assert!((mean - 0.05).abs() < 0.002, "mean={mean}");
+    }
+
+    #[test]
+    fn fake_clock_advances_to_scheduled_offsets() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let slots = schedule(ArrivalKind::Constant, 4, 10.0, &mut rng);
+        let mut clock = FakeClock::new();
+        let mut issued = Vec::new();
+        for slot in &slots {
+            clock.sleep_until(slot.scheduled_delay);
+            issued.push((slot.seq, clock.now()));
+        }
+        assert_eq!(
+            issued,
+            vec![
+                (0, Duration::ZERO),
+                (1, Duration::from_millis(100)),
+                (2, Duration::from_millis(200)),
+                (3, Duration::from_millis(300)),
+            ]
+        );
+    }
+
+    #[test]
+    fn fake_clock_advance_is_monotonic() {
+        let mut clock = FakeClock::new();
+        clock.advance(Duration::from_millis(50));
+        clock.sleep_until(Duration::from_millis(40)); // already past
+        assert_eq!(clock.now(), Duration::from_millis(50));
+        clock.sleep_until(Duration::from_millis(75));
+        assert_eq!(clock.now(), Duration::from_millis(75));
     }
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.82 (2026-09-15)
+
+- Load scheduler: `FakeClock` for deterministic open-loop tests; `docs/CLI.md` regenerated from clap `--help` via `scripts/render_cli_help.sh`.
+
 ## v0.1.81 (2026-09-15)
 
 - ASR: `--normalizer {whisper-english,whisper-basic,none}` selects the text normalization applied to both sides of WER/CER, and the choice is recorded in `config.normalizer`. WER/CER are pinned by a hand-computed reference table.
