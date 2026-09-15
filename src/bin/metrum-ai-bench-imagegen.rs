@@ -16,7 +16,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 
@@ -185,6 +185,20 @@ struct Args {
     #[arg(long, default_value = "60")]
     tcp_keepalive: u64,
 
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Additional PEM CA certificate for TLS (private gateways)"
+    )]
+    ca_cert: Option<String>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Disable TLS certificate verification (opt-in; stamped into config)"
+    )]
+    insecure: bool,
+
     #[arg(long, default_value = "metrum-ai-bench-imagegen-artifacts")]
     artifact_dir: String,
 
@@ -269,6 +283,8 @@ struct RequestOutcome {
     started_at: DateTime<Utc>,
     completed_at: DateTime<Utc>,
     latency_ms: f64,
+    /// Headers-received elapsed from send Instant (seconds), when measured.
+    first_byte_s: Option<f64>,
     status: String,
     http_status: Option<u16>,
     n_requested: u32,
@@ -287,6 +303,7 @@ struct RequestOutcome {
 struct EndpointRuntime {
     inflight: Arc<AtomicUsize>,
     failures: Arc<AtomicUsize>,
+    ejected_until: Arc<StdMutex<Option<Instant>>>,
 }
 
 #[derive(Default, Debug)]
@@ -320,11 +337,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect::<HashMap<_, _>>();
     let runtime = Arc::new(runtime);
 
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(args.connect_timeout))
-        .pool_idle_timeout(Duration::from_secs(args.pool_idle_timeout))
-        .tcp_keepalive(Duration::from_secs(args.tcp_keepalive))
-        .build()?;
+    let client = metrumbench::http_client::build_http_client(
+        metrumbench::http_client::HttpClientOptions {
+            request_timeout: None,
+            connect_timeout: Duration::from_secs(args.connect_timeout),
+            pool_max_idle_per_host: args.concurrency as usize,
+            pool_idle_timeout: Duration::from_secs(args.pool_idle_timeout),
+            tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
+            ca_cert: args.ca_cert.as_deref().map(std::path::Path::new),
+            insecure: args.insecure,
+        },
+    )?;
 
     if args.endpoint_health_check {
         health_check_endpoints(&client, &endpoints, &args.health_path, args.request_timeout)
@@ -434,7 +457,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let latency = Duration::from_secs_f64(outcome.latency_ms / 1000.0);
             let mut record = if outcome.status == "success" {
-                metrumbench::record::RequestRecord::success(
+                let mut rec = metrumbench::record::RequestRecord::success(
                     slot.seq,
                     phase,
                     outcome.endpoint_name.clone(),
@@ -447,16 +470,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     0,
                     0,
                     0,
-                )
+                );
+                if let Some(fb) = outcome.first_byte_s {
+                    rec = rec.with_first_byte(Duration::from_secs_f64(fb));
+                }
+                rec
             } else {
-                metrumbench::record::RequestRecord::failed(
-                    slot.seq,
-                    phase,
-                    outcome.endpoint_name.clone(),
-                    outcome.started_at,
-                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
-                    latency,
-                    outcome
+                let request_error = match outcome.error_type.as_deref() {
+                    Some("timeout") => metrumbench::error::RequestError::Timeout,
+                    Some("connect") | Some("connection_error") => {
+                        metrumbench::error::RequestError::Connect
+                    }
+                    _ => outcome
                         .http_status
                         .map(metrumbench::error::RequestError::from_status)
                         .unwrap_or_else(|| metrumbench::error::RequestError::Other {
@@ -465,6 +490,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                 .clone()
                                 .unwrap_or_else(|| outcome.status.clone()),
                         }),
+                };
+                metrumbench::record::RequestRecord::failed(
+                    slot.seq,
+                    phase,
+                    outcome.endpoint_name.clone(),
+                    outcome.started_at,
+                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
+                    latency,
+                    request_error,
                 )
             };
             if record_schedule {
@@ -530,6 +564,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tokenizer: None,
             slos: vec![],
             throughput_bin_seconds: 10.0,
+            insecure: args.insecure,
+            ca_cert: args.ca_cert.clone(),
         },
         effective_system_prompt: None,
         body_template: json!({
@@ -799,7 +835,7 @@ async fn run_logical_request(
         let latency_ms = attempt_start.elapsed().as_secs_f64() * 1000.0;
 
         match result {
-            Ok((status, artifacts, response_bytes, n_returned)) => {
+            Ok((status, artifacts, response_bytes, n_returned, first_byte)) => {
                 attempts.push(AttemptRecord {
                     attempt: attempt_index + 1,
                     endpoint_name: ep.name.clone(),
@@ -818,6 +854,7 @@ async fn run_logical_request(
                     started_at,
                     completed_at,
                     latency_ms: logical_latency_ms,
+                    first_byte_s: Some(first_byte.as_secs_f64()),
                     status: "success".to_string(),
                     http_status: Some(status),
                     n_requested: args.n,
@@ -840,6 +877,11 @@ async fn run_logical_request(
                     latency_ms,
                 });
                 ep_rt.failures.fetch_add(1, Ordering::SeqCst);
+                if err_type == "connect" || err_type == "connection_error" {
+                    if let Ok(mut guard) = ep_rt.ejected_until.lock() {
+                        *guard = Some(Instant::now() + Duration::from_secs(5));
+                    }
+                }
                 last_error_type = Some(err_type);
                 last_error_message = Some(err_message);
                 if attempt_index < args.endpoint_retry_attempts {
@@ -868,6 +910,7 @@ async fn run_logical_request(
         started_at,
         completed_at,
         latency_ms,
+        first_byte_s: None,
         status: last_error_type
             .clone()
             .unwrap_or_else(|| "error".to_string()),
@@ -892,14 +935,27 @@ fn choose_endpoint(
     rr: &AtomicUsize,
     random_index: usize,
 ) -> Endpoint {
+    let is_ejected = |name: &str| -> bool {
+        runtime
+            .get(name)
+            .and_then(|rt| {
+                rt.ejected_until
+                    .lock()
+                    .ok()
+                    .and_then(|g| (*g).map(|until| Instant::now() < until))
+            })
+            .unwrap_or(false)
+    };
     match strategy {
         LoadBalancer::LeastInflight => endpoints
             .iter()
             .min_by_key(|ep| {
-                runtime
+                let ejected = is_ejected(&ep.name);
+                let inflight = runtime
                     .get(&ep.name)
                     .map(|rt| rt.inflight.load(Ordering::SeqCst))
-                    .unwrap_or(usize::MAX)
+                    .unwrap_or(usize::MAX);
+                (u8::from(ejected), inflight)
             })
             .unwrap()
             .clone(),
@@ -941,7 +997,7 @@ async fn make_image_request(
     prompt: &PromptRow,
     seed: Option<i64>,
     size: &str,
-) -> Result<(u16, Vec<ImageArtifact>, usize, u32), (String, Option<u16>, String)> {
+) -> Result<(u16, Vec<ImageArtifact>, usize, u32, Duration), (String, Option<u16>, String)> {
     let url = format!("{}/images/generations", endpoint.url);
     let mut body = Map::new();
     body.insert("model".to_string(), json!(args.model));
@@ -979,6 +1035,7 @@ async fn make_image_request(
         }
     }
 
+    let send_start = Instant::now();
     let resp = client
         .post(&url)
         .bearer_auth(&endpoint.api_key)
@@ -987,12 +1044,11 @@ async fn make_image_request(
         .send()
         .await
         .map_err(|e| {
-            let err_type = if e.is_timeout() {
-                "timeout"
-            } else if e.is_connect() {
-                "connection_error"
-            } else {
-                "request_error"
+            let typed = metrumbench::error::RequestError::from_reqwest(&e);
+            let err_type = match typed {
+                metrumbench::error::RequestError::Timeout => "timeout",
+                metrumbench::error::RequestError::Connect => "connect",
+                _ => "request_error",
             };
             (
                 err_type.to_string(),
@@ -1000,11 +1056,17 @@ async fn make_image_request(
                 e.to_string(),
             )
         })?;
+    let first_byte = send_start.elapsed();
     let status = resp.status().as_u16();
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| ("connection_error".to_string(), Some(status), e.to_string()))?;
+    let bytes = resp.bytes().await.map_err(|e| {
+        let typed = metrumbench::error::RequestError::from_reqwest(&e);
+        let err_type = match typed {
+            metrumbench::error::RequestError::Connect => "connect",
+            metrumbench::error::RequestError::Timeout => "timeout",
+            _ => "connection_error",
+        };
+        (err_type.to_string(), Some(status), e.to_string())
+    })?;
     if !(200..300).contains(&status) {
         return Err((
             "http_error".to_string(),
@@ -1074,7 +1136,7 @@ async fn make_image_request(
             });
         }
     }
-    Ok((status, artifacts, response_bytes, data.len() as u32))
+    Ok((status, artifacts, response_bytes, data.len() as u32, first_byte))
 }
 
 fn load_extra_body(
@@ -1346,6 +1408,8 @@ mod tests {
             connect_timeout: 1,
             pool_idle_timeout: 1,
             tcp_keepalive: 1,
+            ca_cert: None,
+            insecure: false,
             artifact_dir: "/tmp/a".to_string(),
             data_log: "/tmp/d.jsonl".to_string(),
             summary_json: "/tmp/s.json".to_string(),
@@ -1365,6 +1429,7 @@ mod tests {
             started_at: now,
             completed_at: now,
             latency_ms: 100.0,
+            first_byte_s: None,
             status: "success".to_string(),
             http_status: Some(200),
             n_requested: 1,
@@ -1426,6 +1491,8 @@ mod tests {
             connect_timeout: 1,
             pool_idle_timeout: 1,
             tcp_keepalive: 1,
+            ca_cert: None,
+            insecure: false,
             artifact_dir: "/tmp/a".to_string(),
             data_log: "/tmp/d.jsonl".to_string(),
             summary_json: "/tmp/s.json".to_string(),
@@ -1447,6 +1514,7 @@ mod tests {
                 started_at: now,
                 completed_at: now,
                 latency_ms: 100.0,
+                first_byte_s: None,
                 status: "http_error".to_string(),
                 http_status,
                 n_requested: 1,

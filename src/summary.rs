@@ -438,6 +438,8 @@ mod tests {
             tokenizer: None,
             slos: vec![],
             throughput_bin_seconds: 10.0,
+            insecure: false,
+            ca_cert: None,
         }
     }
 

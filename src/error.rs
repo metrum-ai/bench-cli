@@ -28,6 +28,37 @@ impl RequestError {
         }
     }
 
+    /// Map a reqwest failure using typed predicates, not Display substrings.
+    pub fn from_reqwest(err: &reqwest::Error) -> Self {
+        if err.is_timeout() {
+            Self::Timeout
+        } else if err.is_connect() {
+            Self::Connect
+        } else if let Some(status) = err.status() {
+            Self::from_status(status.as_u16())
+        } else {
+            Self::Other {
+                message: err.to_string(),
+            }
+        }
+    }
+
+    /// Walk an error chain for a typed [`RequestError`] or [`reqwest::Error`].
+    /// Falls back to app-level message matching only (no transport Display heuristics).
+    pub fn from_error(err: &(dyn std::error::Error + 'static)) -> Self {
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+        while let Some(e) = current {
+            if let Some(typed) = e.downcast_ref::<RequestError>() {
+                return typed.clone();
+            }
+            if let Some(req) = e.downcast_ref::<reqwest::Error>() {
+                return Self::from_reqwest(req);
+            }
+            current = e.source();
+        }
+        crate::jsonl::classify_app_error(err)
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::Timeout => "timeout",
@@ -62,3 +93,82 @@ impl fmt::Display for RequestError {
 }
 
 impl std::error::Error for RequestError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn from_status_maps_5xx_and_429() {
+        assert_eq!(
+            RequestError::from_status(503),
+            RequestError::HttpStatus { status: 503 }
+        );
+        assert_eq!(RequestError::from_status(429), RequestError::RateLimit);
+    }
+
+    #[tokio::test]
+    async fn from_reqwest_timeout_uses_predicate_not_display() {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .connect_timeout(Duration::from_millis(50))
+            .build()
+            .expect("client");
+        // TEST-NET-1 is typically unroutable; short timeouts yield timeout or connect.
+        let err = client
+            .get("http://192.0.2.1:81/")
+            .send()
+            .await
+            .expect_err("expected network failure");
+        assert!(
+            err.is_timeout() || err.is_connect(),
+            "fixture must produce timeout/connect via predicates; got: {err}"
+        );
+        let mapped = RequestError::from_reqwest(&err);
+        if err.is_timeout() {
+            assert_eq!(mapped, RequestError::Timeout);
+        } else {
+            assert_eq!(mapped, RequestError::Connect);
+        }
+        // Classification must not depend on Display containing those words.
+        let display = err.to_string().to_ascii_lowercase();
+        assert!(
+            mapped == RequestError::Timeout || mapped == RequestError::Connect,
+            "mapped={mapped:?} display={display}"
+        );
+    }
+
+    #[tokio::test]
+    async fn from_reqwest_connect_uses_predicate_not_display() {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .connect_timeout(Duration::from_secs(2))
+            .build()
+            .expect("client");
+        // Port 1 is almost never listening → connect refused.
+        let err = client
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .expect_err("expected connect failure");
+        assert!(
+            err.is_connect(),
+            "expected is_connect(); got is_timeout={} display={err}",
+            err.is_timeout()
+        );
+        assert_eq!(RequestError::from_reqwest(&err), RequestError::Connect);
+        // Display for connect refused often lacks the substring "connect".
+        let _ = err.to_string();
+    }
+
+    #[test]
+    fn from_error_prefers_typed_request_error() {
+        let err: Box<dyn std::error::Error + 'static> =
+            Box::new(RequestError::HttpStatus { status: 502 });
+        assert_eq!(
+            RequestError::from_error(err.as_ref()),
+            RequestError::HttpStatus { status: 502 }
+        );
+    }
+}

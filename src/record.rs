@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::time::Duration;
 
-/// Field-additive schema bump (config, window bounds, first_byte_s land later).
+/// Request record schema (field-additive: config stamps, first_byte_s).
 pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench.request.v3";
 pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench.summary.v3";
 
@@ -47,6 +47,11 @@ pub struct RequestRecord {
     pub queue_delay_s: f64,
     /// Seconds from send to completion (monotonic).
     pub latency_s: f64,
+    /// Seconds from send start until response headers are received (after
+    /// `.send()` Ok). Distinct from TTFT, which is first visible user token
+    /// and includes connect/TLS/queue. `connect_s` is deferred post-v1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_byte_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +102,7 @@ impl RequestRecord {
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
+            first_byte_s: None,
             ttft_s: ttft.map(|d| d.as_secs_f64()),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
             itl_s: itl.iter().map(|d| d.as_secs_f64()).collect(),
@@ -132,6 +138,7 @@ impl RequestRecord {
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
+            first_byte_s: None,
             ttft_s: None,
             first_reasoning_s: None,
             itl_s: Vec::new(),
@@ -149,6 +156,11 @@ impl RequestRecord {
 
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
+        self
+    }
+
+    pub fn with_first_byte(mut self, first_byte: Duration) -> Self {
+        self.first_byte_s = Some(first_byte.as_secs_f64());
         self
     }
 

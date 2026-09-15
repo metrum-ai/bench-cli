@@ -12,7 +12,7 @@ Each line is a complete JSON object and carries `schema_version`.
 - optional `run_id` (same UUID as `summary.config.run_id` when stamped)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
 - ISO `started_at`/`completed_at`
-- monotonic `latency_s`, optional `ttft_s`, `first_reasoning_s`, and `itl_s`
+- monotonic `latency_s`, optional `ttft_s`, `first_byte_s`, `first_reasoning_s`, and `itl_s`
 - optional `scheduled_offset_s` and `queue_delay_s`
 - server usage counts plus optional `tokenized_*` counts and `usage_missing`
 - typed `error`, `partial`, and modality-specific numeric metrics
@@ -28,6 +28,11 @@ Each line is a complete JSON object and carries `schema_version`.
 Image-generation request records retain artifact hashes and response details
 under their modality schema because those fields are not token-oriented.
 
+`first_byte_s` is the monotonic elapsed time from send start until response
+headers are received (after a successful `.send()`). It is distinct from
+`ttft_s` (first visible user token), which includes connect/TLS/queue. A
+separate `connect_s` field is deferred (post-v1 / feature-flagged).
+
 ## Summary v3
 
 `metrum-ai-bench.summary.v3` is field-additive over v2. It contains measured
@@ -42,7 +47,8 @@ Additional v3 fields:
   - `common` — every `CommonBenchArgs` field (`seed`, `warmup_requests`,
     `request_rate`, `arrival`, `max_concurrency`, `load_balancer`, `ignore_eos`,
     `min_tokens`, `extra_body_json`, `system_prompt`, `unique_prompts`,
-    `tokenizer`, `slos`, `throughput_bin_seconds`)
+    `tokenizer`, `slos`, `throughput_bin_seconds`, `insecure`, optional
+    `ca_cert` path). Secrets are never stamped.
   - `effective_system_prompt` — system string actually sent (omitted/`null` when
     N/A or disabled); VLM currently records its hardcoded image-capable default
   - `body_template` — sanitized request skeleton with a `{{prompt}}` placeholder
