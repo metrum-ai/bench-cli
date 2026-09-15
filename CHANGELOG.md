@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Public readiness: full `cargo deny check` in CI; replace `ntp`/`lru` (std SNTP +
+  hand-rolled VLM image LRU); drop compile-time wall-clock datetime for
+  reproducible builds; MSRV 1.85 CI job; SHA-pinned Actions; govulncheck for
+  dummy-model-server; dummy-server body limits / timeouts / non-root Docker;
+  issue/PR templates; refreshed `THIRD_PARTY_LICENSES`.
 - Remove dual legacy summaries (F-05, F-25, F-26): modality binaries write only
   `request.v3` + `summary.v3` via `JsonlSink`; console stats render from
   `RunSummary` / `DistSummary` (type 7). Imagegen `--summary-json` writes
@@ -41,6 +46,10 @@
 - ASR: Whisper-like text normalization for WER; request clock starts after audio is read; `throughput.rtfx` = total audio seconds / wall time.
 - Imagegen: monotonic `Instant` latency; seeded prompt shuffle; `--warmup-requests`.
 - Dummy-server e2e test for LLM streaming timing (TTFT ~120 ms, RT ~500 ms at latency=100ms, chunk-interval=20ms, max_tokens=20).
+
+## v0.1.79 (skipped)
+
+- Intentionally skipped; numbering jumps from v0.1.78 to v0.1.80. No release artifacts were published for v0.1.79.
 
 ## v0.1.78 (2026-05-02)
 

@@ -27,7 +27,7 @@ pub fn collect(ntp_offset_ms: Option<i64>, server_model: Option<String>) -> serd
         cpu_cores: std::thread::available_parallelism()
             .map(std::num::NonZeroUsize::get)
             .unwrap_or(1),
-        rustc_version: compile_time::rustc_version_str!().to_string(),
+        rustc_version: env!("RUSTC_VERSION_STRING").to_string(),
         package_version: env!("CARGO_PKG_VERSION"),
         tokio_worker_threads: std::thread::available_parallelism()
             .map(std::num::NonZeroUsize::get)

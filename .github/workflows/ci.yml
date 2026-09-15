@@ -22,16 +22,16 @@ jobs:
       # Serialize rustc/link to reduce peak memory on GitHub-hosted runners.
       CARGO_BUILD_JOBS: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
       # The dummy-server end-to-end tests skip themselves without a Go
       # toolchain, so install one and require it below.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
-          go-version: "1.26.x"
+          go-version: "1.26.6"
           cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
         run: bash scripts/check_headers.sh
@@ -46,14 +46,30 @@ jobs:
       - name: package dry run
         run: cargo package --allow-dirty
 
+  msrv:
+    name: MSRV 1.85
+    runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.85.0"
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      - name: cargo check (MSRV)
+        run: cargo check --all-targets --all-features
+      - name: cargo test (MSRV lib)
+        run: cargo test --lib --all-features
+
   secrets:
     name: secret scanning (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
           go-version: stable
       - name: gitleaks
@@ -65,22 +81,24 @@ jobs:
     name: core line coverage (80%)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2
+        with:
+          tool: cargo-llvm-cov
       - name: enforce core coverage
         run: >-
           cargo llvm-cov --lib --all-features --fail-under-lines 80
           --ignore-filename-regex
           'src/(args_common|endpoints|error|jsonl|lib|prompt_inputs)\.rs'
 
-  licenses:
-    name: dependency licenses (cargo-deny)
+  deny:
+    name: cargo deny check (all)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: EmbarkStudios/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1 # v2.0.11
         with:
-          command: check licenses
+          command: check

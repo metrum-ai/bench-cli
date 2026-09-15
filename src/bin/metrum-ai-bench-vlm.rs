@@ -7,7 +7,6 @@ use chrono::Utc;
 use clap::Parser;
 use futures_util::StreamExt;
 use log::{debug, error, info, warn};
-use lru::LruCache;
 use metrumbench::endpoints::resolve_endpoints;
 use metrumbench::prompt_inputs::{is_http_url, load_metrumbench_vlm_records};
 use metrumbench::unique_id;
@@ -392,16 +391,46 @@ struct ImageData {
     url: String, // Add this field to store the original URL
 }
 
+/// Bounded LRU image cache (HashMap + VecDeque; no third-party lru crate).
 struct ImageCache {
-    cache: LruCache<String, ImageData>,
+    map: std::collections::HashMap<String, ImageData>,
+    order: std::collections::VecDeque<String>,
+    capacity: usize,
 }
 
 impl ImageCache {
     fn new(capacity: usize) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let cap = std::num::NonZeroUsize::new(capacity).ok_or("image_cache_size must be >= 1")?;
+        if capacity == 0 {
+            return Err("image_cache_size must be >= 1".into());
+        }
         Ok(Self {
-            cache: LruCache::new(cap),
+            map: std::collections::HashMap::with_capacity(capacity),
+            order: std::collections::VecDeque::with_capacity(capacity),
+            capacity,
         })
+    }
+
+    fn get(&mut self, key: &str) -> Option<ImageData> {
+        if !self.map.contains_key(key) {
+            return None;
+        }
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            let k = self.order.remove(pos).expect("index from position");
+            self.order.push_back(k);
+        }
+        self.map.get(key).cloned()
+    }
+
+    fn put(&mut self, key: String, value: ImageData) {
+        if self.map.contains_key(&key) {
+            self.order.retain(|k| k != &key);
+        } else if self.map.len() >= self.capacity {
+            if let Some(evicted) = self.order.pop_front() {
+                self.map.remove(&evicted);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, value);
     }
 
     async fn get_or_load(
@@ -412,9 +441,9 @@ impl ImageCache {
         timeout_secs: u64,
         reencode_jpeg: bool,
     ) -> Result<ImageData, Box<dyn Error + Send + Sync>> {
-        if let Some(data) = self.cache.get(path) {
+        if let Some(data) = self.get(path) {
             debug!("Cache hit for image: {}", path);
-            return Ok(data.clone());
+            return Ok(data);
         }
 
         debug!("Cache miss for image: {}", path);
@@ -519,7 +548,7 @@ impl ImageCache {
             url: path.to_string(), // Store the original URL/path
         };
 
-        self.cache.put(path.to_string(), image_data.clone());
+        self.put(path.to_string(), image_data.clone());
         Ok(image_data)
     }
 }

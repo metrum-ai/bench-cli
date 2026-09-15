@@ -1,0 +1,39 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+name: Feature request
+description: Propose an enhancement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Desired behavior or API shape.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: modality
+    attributes:
+      label: Affected modality / area
+      options:
+        - LLM
+        - VLM
+        - ASR
+        - Imagegen
+        - Strategic
+        - Packaging / CI
+        - Docs
+        - Other
+    validations:
+      required: true

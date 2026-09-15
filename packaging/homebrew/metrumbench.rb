@@ -32,7 +32,7 @@ class Metrumbench < Formula
   end
 
   test do
-    assert_match "Sweep and benchmark", shell_output("#{bin}/metrum-ai-bench --help")
+    assert_match "Benchmark OpenAI-compatible", shell_output("#{bin}/metrum-ai-bench --help")
     assert_match "Deterministic mock", shell_output("#{bin}/metrumbench-mock-server --help")
   end
 end
