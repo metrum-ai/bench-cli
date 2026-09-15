@@ -11,6 +11,11 @@ confidence-threshold = 0.8
 
 [advisories]
 yanked = "deny"
+# Transitive via `tokenizers` (optional `--features tokenizer`). No maintained
+# drop-in for `paste`; upstream issue tracked as RUSTSEC-2024-0436.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; pulled in by tokenizers only" },
+]
 
 [bans]
 multiple-versions = "allow"
