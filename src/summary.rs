@@ -1,10 +1,23 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::args_common::EffectiveCommonArgs;
 use crate::record::{Phase, RequestRecord, SCHEMA_VERSION_SUMMARY};
 use crate::stats::{bootstrap_mean_ci, ConfidenceInterval, DistSummary};
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+/// Effective workload configuration stamped onto `summary.v3`.
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectiveRunConfig {
+    pub run_id: String,
+    pub common: EffectiveCommonArgs,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_system_prompt: Option<String>,
+    pub body_template: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unique_prompt_nonce_template: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunSummary {
@@ -16,7 +29,10 @@ pub struct RunSummary {
     pub errors_by_type: BTreeMap<String, usize>,
     pub window_seconds: f64,
     pub requests_per_second: f64,
-    pub completion_tokens_per_second: f64,
+    pub usage_missing_count: usize,
+    pub completion_tokens_per_second: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_tokens_source: Option<&'static str>,
     pub latency_s: DistSummary,
     pub coordinated_omission_latency_s: DistSummary,
     pub ttft_s: DistSummary,
@@ -28,6 +44,8 @@ pub struct RunSummary {
     pub per_endpoint: BTreeMap<String, EndpointSummary>,
     pub environment: serde_json::Value,
     pub partial: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<EffectiveRunConfig>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -147,7 +165,8 @@ impl RunSummary {
             .iter()
             .flat_map(|r| r.itl_s.iter().copied())
             .collect();
-        let completion_tokens: u64 = successes.iter().map(|r| r.completion_tokens).sum();
+        let (usage_missing_count, completion_tokens, completion_tokens_source, ctps_valid) =
+            token_throughput_accounting(&successes);
         let window = if window_seconds > 0.0 {
             window_seconds
         } else {
@@ -167,6 +186,11 @@ impl RunSummary {
         .collect();
         let per_endpoint = endpoint_summaries(&pool);
         let bins = throughput_bins(&successes, window, bin_seconds);
+        let completion_tokens_per_second = if ctps_valid {
+            Some(completion_tokens as f64 / window)
+        } else {
+            None
+        };
         Self {
             schema_version: SCHEMA_VERSION_SUMMARY,
             attempted,
@@ -180,7 +204,13 @@ impl RunSummary {
             errors_by_type,
             window_seconds,
             requests_per_second: successes.len() as f64 / window,
-            completion_tokens_per_second: completion_tokens as f64 / window,
+            usage_missing_count,
+            completion_tokens_per_second,
+            completion_tokens_source: if ctps_valid {
+                completion_tokens_source
+            } else {
+                None
+            },
             latency_s: DistSummary::from_values(&lat),
             coordinated_omission_latency_s: DistSummary::from_values(&corrected_lat),
             ttft_s: DistSummary::from_values(&ttft),
@@ -201,8 +231,49 @@ impl RunSummary {
             per_endpoint,
             environment: crate::environment::collect(None, None),
             partial,
+            config: None,
         }
     }
+
+    /// Stamp effective run configuration after summary construction.
+    pub fn with_config(mut self, config: EffectiveRunConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+}
+
+/// Returns `(usage_missing_count, token_sum, source, ctps_valid)`.
+fn token_throughput_accounting(
+    successes: &[&RequestRecord],
+) -> (usize, u64, Option<&'static str>, bool) {
+    let mut usage_missing_count = 0usize;
+    let mut completion_tokens = 0u64;
+    let mut used_tokenizer_fallback = false;
+    let mut any_unfilled_gap = false;
+    for record in successes {
+        if record.usage_missing {
+            usage_missing_count += 1;
+            if let Some(tokens) = record.tokenized_completion_tokens {
+                completion_tokens += tokens;
+                used_tokenizer_fallback = true;
+            } else {
+                any_unfilled_gap = true;
+            }
+        } else {
+            completion_tokens += record.completion_tokens;
+        }
+    }
+    if any_unfilled_gap {
+        return (usage_missing_count, 0, None, false);
+    }
+    let source = if successes.is_empty() {
+        None
+    } else if used_tokenizer_fallback {
+        Some("tokenizer_fallback")
+    } else {
+        Some("server_usage")
+    };
+    (usage_missing_count, completion_tokens, source, true)
 }
 
 impl CrossRunSummary {
@@ -210,7 +281,7 @@ impl CrossRunSummary {
         let request_rates: Vec<_> = runs.iter().map(|r| r.requests_per_second).collect();
         let token_rates: Vec<_> = runs
             .iter()
-            .map(|r| r.completion_tokens_per_second)
+            .filter_map(|r| r.completion_tokens_per_second)
             .collect();
         Self {
             runs: runs.len(),
@@ -322,6 +393,7 @@ fn datetime_to_unix_secs(ts: chrono::DateTime<chrono::Utc>) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args_common::{EffectiveCommonArgs, LoadBalancer};
     use crate::error::RequestError;
     use crate::record::Phase;
     use chrono::Utc;
@@ -348,6 +420,25 @@ mod tests {
             tokens,
             18 + tokens,
         )
+    }
+
+    fn sample_common() -> EffectiveCommonArgs {
+        EffectiveCommonArgs {
+            seed: 7,
+            warmup_requests: 0,
+            request_rate: None,
+            arrival: "constant".into(),
+            max_concurrency: None,
+            load_balancer: LoadBalancer::RoundRobin,
+            ignore_eos: false,
+            min_tokens: None,
+            extra_body_json: None,
+            system_prompt: None,
+            unique_prompts: false,
+            tokenizer: None,
+            slos: vec![],
+            throughput_bin_seconds: 10.0,
+        }
     }
 
     #[test]
@@ -419,5 +510,52 @@ mod tests {
         assert_eq!(summary.requests_per_second.n, 2);
         assert_eq!(summary.requests_per_second.avg, Some(1.5));
         assert!(summary.requests_per_second_ci95.low.is_some());
+    }
+
+    #[test]
+    fn usage_missing_nulls_ctps_without_tokenizer() {
+        let mut rec = ok(0, 100, 20, 0, &[]);
+        rec.usage_missing = true;
+        let summary = RunSummary::from_records(&[rec], 1.0, false);
+        assert_eq!(summary.usage_missing_count, 1);
+        assert!(summary.completion_tokens_per_second.is_none());
+        assert!(summary.completion_tokens_source.is_none());
+        let value = serde_json::to_value(&summary).unwrap();
+        assert!(value["completion_tokens_per_second"].is_null());
+    }
+
+    #[test]
+    fn usage_missing_uses_tokenizer_fallback() {
+        let mut rec = ok(0, 100, 20, 0, &[]);
+        rec.usage_missing = true;
+        rec.tokenized_completion_tokens = Some(20);
+        let summary = RunSummary::from_records(&[rec], 1.0, false);
+        assert_eq!(summary.usage_missing_count, 1);
+        assert_eq!(summary.completion_tokens_per_second, Some(20.0));
+        assert_eq!(summary.completion_tokens_source, Some("tokenizer_fallback"));
+    }
+
+    #[test]
+    fn server_usage_source_when_present() {
+        let summary = RunSummary::from_records(&[ok(0, 100, 20, 8, &[])], 1.0, false);
+        assert_eq!(summary.usage_missing_count, 0);
+        assert_eq!(summary.completion_tokens_per_second, Some(8.0));
+        assert_eq!(summary.completion_tokens_source, Some("server_usage"));
+    }
+
+    #[test]
+    fn with_config_stamps_effective_run_config() {
+        let summary = RunSummary::from_records(&[ok(0, 100, 20, 8, &[])], 1.0, false).with_config(
+            EffectiveRunConfig {
+                run_id: "run-1".into(),
+                common: sample_common(),
+                effective_system_prompt: Some("You are a helpful assistant.".into()),
+                body_template: serde_json::json!({"prompt": "{{prompt}}"}),
+                unique_prompt_nonce_template: None,
+            },
+        );
+        let cfg = summary.config.expect("config stamped");
+        assert_eq!(cfg.run_id, "run-1");
+        assert_eq!(cfg.common.seed, 7);
     }
 }

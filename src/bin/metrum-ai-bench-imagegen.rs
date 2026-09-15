@@ -353,6 +353,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let started_at = Utc::now();
     let run_start = Instant::now();
+    let run_id = metrumbench::unique_id::generate_uuid();
     let stop = metrumbench::runner::StopFlag::new();
     metrumbench::runner::install_stop_handlers(stop.clone());
 
@@ -402,6 +403,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let metrics = metrics.clone();
         let rr = rr.clone();
         let record_tx = record_tx.clone();
+        let run_id_task = run_id.clone();
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let outcome = run_logical_request(
@@ -474,6 +476,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             record
                 .modality_metrics
                 .insert("images_returned".into(), f64::from(outcome.n_returned));
+            record = record.with_run_id(run_id_task);
             if let Err(e) = sink_task.write(&record) {
                 let _ =
                     write_error(&error_log, &format!("request_record_write_error: {}", e)).await;
@@ -504,7 +507,45 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         &shared_records,
         window_seconds,
         stop.is_stopped(),
-    );
+    )
+    .with_config(metrumbench::summary::EffectiveRunConfig {
+        run_id: run_id.clone(),
+        common: metrumbench::args_common::EffectiveCommonArgs {
+            seed: args.seed.unwrap_or(0) as u64,
+            warmup_requests: args.warmup_requests,
+            request_rate: args.request_rate,
+            arrival: args.arrival.clone(),
+            max_concurrency: args.max_concurrency,
+            load_balancer: match args.load_balancer {
+                LoadBalancer::LeastInflight => {
+                    metrumbench::args_common::LoadBalancer::LeastInflight
+                }
+                _ => metrumbench::args_common::LoadBalancer::RoundRobin,
+            },
+            ignore_eos: false,
+            min_tokens: None,
+            extra_body_json: args.extra_body_json.clone(),
+            system_prompt: None,
+            unique_prompts: false,
+            tokenizer: None,
+            slos: vec![],
+            throughput_bin_seconds: 10.0,
+        },
+        effective_system_prompt: None,
+        body_template: json!({
+            "model": args.model,
+            "prompt": "{{prompt}}",
+            "n": args.n,
+            "size": args.size,
+            "response_format": args.response_format.to_string(),
+            "seed": args.seed,
+            "negative_prompt": args.negative_prompt,
+            "num_inference_steps": args.num_inference_steps,
+            "guidance_scale": args.guidance_scale,
+            "true_cfg_scale": args.true_cfg_scale,
+        }),
+        unique_prompt_nonce_template: None,
+    });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     sink.write(&shared_summary)?;
@@ -1231,6 +1272,8 @@ fn stats(values: &[f64]) -> Value {
         "p99": summary.p99,
         "max": summary.max,
         "percentile_method": summary.percentile_method,
+        "p90_unreliable": summary.p90_unreliable,
+        "p95_unreliable": summary.p95_unreliable,
         "p99_unreliable": summary.p99_unreliable,
     })
 }

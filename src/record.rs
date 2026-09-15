@@ -31,6 +31,8 @@ impl Phase {
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestRecord {
     pub schema_version: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     pub seq: u64,
     pub phase: Phase,
     pub endpoint: String,
@@ -86,6 +88,7 @@ impl RequestRecord {
     ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION_REQUEST,
+            run_id: None,
             seq,
             phase,
             endpoint,
@@ -120,6 +123,7 @@ impl RequestRecord {
     ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION_REQUEST,
+            run_id: None,
             seq,
             phase,
             endpoint,
@@ -141,6 +145,11 @@ impl RequestRecord {
             error: Some(error),
             partial: false,
         }
+    }
+
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
     }
 
     pub fn is_success(&self) -> bool {

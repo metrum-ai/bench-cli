@@ -40,7 +40,7 @@ fn summary_matches_hand_computed_reference_16_requests() {
     assert!((summary.latency_s.avg.unwrap() - 0.500).abs() < 1e-12);
     assert!((summary.itl_s.avg.unwrap() - 0.020).abs() < 1e-12);
     assert!((summary.tpot_s.avg.unwrap() - 0.020).abs() < 1e-12);
-    assert!((summary.completion_tokens_per_second - 158.450_355_523).abs() < 1e-6);
+    assert!((summary.completion_tokens_per_second.unwrap() - 158.450_355_523).abs() < 1e-6);
     assert!((summary.requests_per_second - 7.922_517_776).abs() < 1e-6);
 }
 

@@ -79,6 +79,8 @@ pub struct DistSummary {
     pub p95: Option<f64>,
     pub p99: Option<f64>,
     pub percentile_method: &'static str,
+    pub p90_unreliable: bool,
+    pub p95_unreliable: bool,
     pub p99_unreliable: bool,
 }
 
@@ -98,6 +100,8 @@ impl DistSummary {
             p95: percentile_type7(&sorted, 95.0),
             p99: percentile_type7(&sorted, 99.0),
             percentile_method: "hyndman_fan_type7",
+            p90_unreliable: percentile_unreliable(n, 90.0),
+            p95_unreliable: percentile_unreliable(n, 95.0),
             p99_unreliable: percentile_unreliable(n, 99.0),
         }
     }
@@ -170,6 +174,24 @@ mod tests {
         assert!(percentile_unreliable(50, 99.0));
         assert!(!percentile_unreliable(100, 99.0));
         assert!(percentile_unreliable(0, 50.0));
+        // Threshold is n * (1 - p/100) < 1; use clear sides of the boundary
+        // (exact boundary values can trip floating-point for p=90/95).
+        assert!(percentile_unreliable(9, 90.0));
+        assert!(!percentile_unreliable(11, 90.0));
+        assert!(percentile_unreliable(19, 95.0));
+        assert!(!percentile_unreliable(21, 95.0));
+        let d9 = DistSummary::from_values(&[1.0; 9]);
+        assert!(d9.p90_unreliable);
+        assert!(d9.p95_unreliable);
+        assert!(d9.p99_unreliable);
+        let d21 = DistSummary::from_values(&[1.0; 21]);
+        assert!(!d21.p90_unreliable);
+        assert!(!d21.p95_unreliable);
+        assert!(d21.p99_unreliable);
+        let d100 = DistSummary::from_values(&[1.0; 100]);
+        assert!(!d100.p90_unreliable);
+        assert!(!d100.p95_unreliable);
+        assert!(!d100.p99_unreliable);
     }
 
     #[test]

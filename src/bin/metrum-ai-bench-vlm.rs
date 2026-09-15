@@ -1291,6 +1291,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.num_requests, args.concurrency
     );
 
+    let run_id = unique_id::generate_uuid();
+
     let client = Client::builder()
         .timeout(Duration::from_secs(args.request_timeout))
         .connect_timeout(Duration::from_secs(args.connect_timeout))
@@ -1573,6 +1575,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &selected_record.0,
                 i as u64,
                 args.common.unique_prompts,
+                args.common.seed,
+                &run_id,
             ),
             &selected_images,
             &image_detail_str,
@@ -1598,6 +1602,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
+        let run_id_task = run_id.clone();
         let handle = tokio::spawn(async move {
             let started_at = Utc::now();
             let result = make_request(
@@ -1660,7 +1665,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         rec.modality_metrics
                             .insert(format!("image_{idx}_height"), f64::from(*h));
                     }
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
                 Err(e) => {
                     error!("Request failed: {:#}", e);
@@ -1701,7 +1706,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
             };
 
@@ -1857,13 +1862,50 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         start_time.elapsed().as_secs_f64()
     };
     let slos = args.common.parse_slos()?;
+    let vlm_system = "You are a helpful assistant capable of understanding images.";
+    let image_detail_str = format!("{}", args.image_detail);
+    let mut body_template = build_request_body(
+        &args.model,
+        args.max_tokens,
+        args.temperature,
+        "{{prompt}}",
+        &[],
+        &image_detail_str,
+        args.server_side_download,
+        args.streaming,
+        args.common.ignore_eos,
+        args.common.extra_body_json.as_deref(),
+    )?;
+    if let Some(messages) = body_template["messages"].as_array_mut() {
+        if let Some(user) = messages.iter_mut().find(|m| m["role"] == "user") {
+            if let Some(content) = user["content"].as_array_mut() {
+                content.push(json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "<redacted>",
+                        "detail": image_detail_str
+                    }
+                }));
+            }
+        }
+    }
     let mut shared_summary = metrumbench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
         stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
-    );
+    )
+    .with_config(metrumbench::summary::EffectiveRunConfig {
+        run_id: run_id.clone(),
+        common: (&args.common).into(),
+        effective_system_prompt: Some(vlm_system.to_string()),
+        body_template,
+        unique_prompt_nonce_template:
+            metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
+                args.common.unique_prompts,
+            ),
+    });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     if let Err(e) = sink.write(&shared_summary) {
