@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Deprecated shim binary. Prefer `metrum-ai-bench-asr`.
+//! Deprecated shim binary (kept through v1.x; removed in v2.0). Prefer `metrum-ai-bench-asr`.
 
 use std::process::Command;
 
 fn main() {
-    eprintln!("warning: `metrumbench-asr` is deprecated; use `metrum-ai-bench-asr` instead");
+    // Always emit the v2.0 removal notice (including --help).
+    eprintln!("notice: `metrumbench-asr` shim will be removed in metrumbench v2.0");
+    eprintln!("warning: `metrumbench-asr` is deprecated and will be removed in v2.0; use `metrum-ai-bench-asr` instead");
     let mut sibling = std::env::current_exe().unwrap_or_else(|e| {
         eprintln!("failed to resolve current executable: {e}");
         std::process::exit(127);

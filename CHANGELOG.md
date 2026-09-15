@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Remove dual legacy summaries (F-05, F-25, F-26): modality binaries write only
+  `request.v3` + `summary.v3` via `JsonlSink`; console stats render from
+  `RunSummary` / `DistSummary` (type 7). Imagegen `--summary-json` writes
+  summary.v3 (no stdout pretty duplicate). Unused `modality.rs` / `transport.rs`
+  deleted. `metrumbench-*` shims kept through v1.x with explicit v2.0 removal
+  notices.
+- Strategic honesty (F-14, F-16): sweep points carry DistSummary (`n`, errors,
+  p99_unreliable), redacted config, shared warm HTTP pool; `--slo e2e=` for
+  goodput (without SLOs `goodput_equals_throughput`); MLPerf export files start
+  with an UNOFFICIAL disclaimer and never emit bare `Result is : VALID`.
+- Campaign `validate` rejects unversioned/legacy JSONL lines; `request.v2` /
+  `summary.v2` remain accepted for 0.1.82 regression audit
+  (`record::accepts_audit_schema`).
 - Modality CLI parity (F-08, F-10, F-21, F-22, F-28): non-streaming LLM reports `ttft_s: null` and stops the clock after the full body is read; VLM honors `--system-prompt` / `--min-tokens` / `--tokenizer` and stamps `effective_system_prompt`; ASR drops conflicting legacy `throughput.rtfx` (measured-phase `rtfx_client` only); imagegen accepts base or full `/images/generations` URLs, excludes decode/hash/write from service latency, and uses the measured-phase window for legacy throughput; `--summary-json` is optional for imagegen; shared `--fail-on-error` (default off) for consistent exit policy across modalities.
 - Transport parity (F-06, F-12, F-13, F-23): typed `RequestError` mapping at the failure site via `from_reqwest` / `from_status` (timeout/connect/5xx no longer depend on Display substrings); optional `first_byte_s` on `request.v3`; shared `--ca-cert` / `--insecure` (stamped into `config.common`, never secrets); least-inflight temporary ejection after connect failure; SSE blank-line framing with multiline `data:` joined by `\n`.
 - Deferred stretch: `connect_s` (connection-established Instant) remains post-v1 / feature-flagged; TTFT continues to include connect by design.

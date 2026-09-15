@@ -6,8 +6,7 @@ use chrono::Utc;
 use clap::Parser;
 use futures_util::StreamExt;
 use log::{debug, error, info, trace, warn};
-use metrumbench::compile_time_info;
-use metrumbench::endpoints::{resolve_endpoints, ResolvedEndpoints};
+use metrumbench::endpoints::resolve_endpoints;
 use metrumbench::prompt_inputs::load_metrumbench_llm_prompts;
 use metrumbench::unique_id;
 use rand::seq::SliceRandom;
@@ -17,7 +16,6 @@ use serde_json::{json, Value};
 use simplelog::*;
 use std::fs::File;
 use std::{
-    collections::HashMap,
     error::Error,
     sync::Arc,
     time::{Duration, Instant},
@@ -145,612 +143,6 @@ struct Args {
         help = "Ramp up period in seconds to gradually increase concurrency"
     )]
     ramp_up_seconds: Option<u64>,
-}
-
-/// Per-endpoint metrics (same shape as aggregate but keyed by endpoint name).
-#[derive(Default, Clone)]
-struct EndpointMetrics {
-    response_times: Vec<Duration>,
-    ttft_times: Vec<Duration>,
-    tpot_times: Vec<f64>,
-    prompt_tokens: Vec<u64>,
-    completion_tokens: Vec<u64>,
-    total_tokens: Vec<u64>,
-    prompt_words: Vec<usize>,
-    completion_words: Vec<usize>,
-    errors: Vec<String>,
-    error_types: HashMap<String, usize>,
-}
-
-/// Structure to collect and analyze performance metrics during load testing.
-///
-/// This struct maintains various timing, token, and error metrics to provide
-/// comprehensive performance analysis of the AI model endpoint.
-struct Metrics {
-    /// Response times for all successful requests
-    response_times: Vec<Duration>,
-    /// Time to first token for all successful requests
-    ttft_times: Vec<Duration>,
-    /// Time per output token for all successful requests (in seconds)
-    tpot_times: Vec<f64>,
-    /// Number of prompt tokens for each request
-    prompt_tokens: Vec<u64>,
-    /// Number of completion tokens for each request
-    completion_tokens: Vec<u64>,
-    /// Total tokens (prompt + completion) for each request
-    total_tokens: Vec<u64>,
-    /// Number of words in each prompt
-    prompt_words: Vec<usize>,
-    /// Number of words in each completion
-    completion_words: Vec<usize>,
-    /// Start time of the load test
-    start_time: Instant,
-    /// Start time of metrics collection (after ramp-up)
-    metrics_start_time: Option<Instant>,
-    /// Detailed error messages for failed requests
-    errors: Vec<String>,
-    /// Error types and their counts
-    error_types: HashMap<String, usize>,
-    /// Timestamps of errors for temporal analysis
-    error_timestamps: Vec<(String, Instant)>,
-    /// Description of the load test scenario
-    scenario: String,
-    /// Version of metrumbench
-    version: String,
-    /// Per-endpoint metrics (keyed by endpoint name)
-    endpoint_metrics: HashMap<String, EndpointMetrics>,
-}
-
-impl Metrics {
-    /// Creates a new Metrics instance for the given scenario.
-    fn new(scenario: String) -> Self {
-        Self {
-            response_times: Vec::new(),
-            ttft_times: Vec::new(),
-            tpot_times: Vec::new(),
-            prompt_tokens: Vec::new(),
-            completion_tokens: Vec::new(),
-            total_tokens: Vec::new(),
-            prompt_words: Vec::new(),
-            completion_words: Vec::new(),
-            start_time: Instant::now(),
-            metrics_start_time: None,
-            errors: Vec::new(),
-            error_types: HashMap::new(),
-            error_timestamps: Vec::new(),
-            scenario,
-            version: VERSION.to_string(),
-            endpoint_metrics: HashMap::new(),
-        }
-    }
-
-    /// Records a successful request for the given endpoint (and aggregate).
-    fn record_success(
-        &mut self,
-        endpoint_name: &str,
-        response_time: Duration,
-        ttft: Option<Duration>,
-        tpot: Option<f64>,
-        prompt_tokens: u64,
-        completion_tokens: u64,
-        total_tokens: u64,
-        prompt_words: usize,
-        completion_words: usize,
-    ) {
-        self.response_times.push(response_time);
-        if let Some(ttft) = ttft {
-            self.ttft_times.push(ttft);
-        }
-        if let Some(t) = tpot {
-            self.tpot_times.push(t);
-        }
-        self.prompt_tokens.push(prompt_tokens);
-        self.completion_tokens.push(completion_tokens);
-        self.total_tokens.push(total_tokens);
-        self.prompt_words.push(prompt_words);
-        self.completion_words.push(completion_words);
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        ep.response_times.push(response_time);
-        if let Some(ttft) = ttft {
-            ep.ttft_times.push(ttft);
-        }
-        if let Some(t) = tpot {
-            ep.tpot_times.push(t);
-        }
-        ep.prompt_tokens.push(prompt_tokens);
-        ep.completion_tokens.push(completion_tokens);
-        ep.total_tokens.push(total_tokens);
-        ep.prompt_words.push(prompt_words);
-        ep.completion_words.push(completion_words);
-    }
-
-    /// Records an error with its type and timestamp (aggregate and per-endpoint).
-    fn record_error(&mut self, endpoint_name: &str, error: String) {
-        // Extract error type from the error message
-        let error_type = error.split(':').next().unwrap_or("unknown").to_string();
-
-        // Record error type
-        *self.error_types.entry(error_type.clone()).or_insert(0) += 1;
-
-        // Record error with timestamp for temporal analysis
-        self.error_timestamps
-            .push((error_type.clone(), Instant::now()));
-
-        // Record full error message
-        self.errors.push(error.clone());
-        // Per-endpoint
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        *ep.error_types.entry(error_type).or_insert(0) += 1;
-        ep.errors.push(error);
-    }
-
-    /// Calculates the percentile value from a sorted list of durations.
-    fn calc_percentile(sorted_values: &[Duration], percentile: f64) -> Duration {
-        if sorted_values.is_empty() {
-            return Duration::default();
-        }
-        let index = (((sorted_values.len() - 1) as f64 * percentile / 100.0).round() as usize)
-            .min(sorted_values.len() - 1);
-        *sorted_values.get(index).unwrap_or(&Duration::default())
-    }
-
-    /// Calculates basic statistics for a list of usize values.
-    fn calc_stats_usize(&self, values: &[usize]) -> (usize, usize, f64, usize) {
-        if values.is_empty() {
-            return (0, 0, 0.0, 0);
-        }
-        let mut sorted = values.to_vec();
-        sorted.sort();
-        let len = sorted.len();
-        let avg = sorted.iter().sum::<usize>() as f64 / len as f64;
-        (
-            *sorted.first().unwrap_or(&0),
-            *sorted.last().unwrap_or(&0),
-            avg,
-            sorted[len / 2],
-        )
-    }
-
-    /// Prints one compact block (per-endpoint or aggregate style).
-    fn print_compact_block(
-        &self,
-        label: &str,
-        response_times: &[Duration],
-        ttft_times: &[Duration],
-        tpot_times: &[f64],
-        prompt_tokens: &[u64],
-        completion_tokens: &[u64],
-        total_tokens: &[u64],
-        errors: &[String],
-        elapsed_secs: f64,
-    ) {
-        let requests = response_times.len() + errors.len();
-        if elapsed_secs <= 0.0 {
-            println!("\n=== {} ===\n  (no timing data)", label);
-            return;
-        }
-        let req_rate = requests as f64 / elapsed_secs;
-        let total_pt: u64 = prompt_tokens.iter().sum();
-        let total_ct: u64 = completion_tokens.iter().sum();
-        let total_t: u64 = total_tokens.iter().sum();
-        let token_rate = total_t as f64 / elapsed_secs;
-        let pt_rate = total_pt as f64 / elapsed_secs;
-        let ct_rate = total_ct as f64 / elapsed_secs;
-        println!("\n=== {} ===", label);
-        println!("  Requests:    {}", requests);
-        println!("  Errors:      {}", errors.len());
-        if !response_times.is_empty() {
-            let mut sorted_rt = response_times.to_vec();
-            sorted_rt.sort();
-            let avg_rt: Duration = Duration::from_secs_f64(
-                sorted_rt.iter().map(|d| d.as_secs_f64()).sum::<f64>() / sorted_rt.len() as f64,
-            );
-            let p50 = Self::calc_percentile(&sorted_rt, 50.0);
-            let p99 = Self::calc_percentile(&sorted_rt, 99.0);
-            println!(
-                "  Avg RT:      {:.3}s  (p50: {:.3}s, p99: {:.3}s)",
-                avg_rt.as_secs_f64(),
-                p50.as_secs_f64(),
-                p99.as_secs_f64()
-            );
-        }
-        if !ttft_times.is_empty() {
-            let avg_ttft: Duration = Duration::from_secs_f64(
-                ttft_times.iter().map(|d| d.as_secs_f64()).sum::<f64>() / ttft_times.len() as f64,
-            );
-            println!("  Avg TTFT:    {:.3}s", avg_ttft.as_secs_f64());
-        }
-        if !tpot_times.is_empty() {
-            let avg_tpot = tpot_times.iter().sum::<f64>() / tpot_times.len() as f64;
-            println!("  Avg TPOT:    {:.3}s", avg_tpot);
-        }
-        println!(
-            "  Tokens:      {} prompt, {} completion",
-            total_pt, total_ct
-        );
-        println!(
-            "  Token Rate: {:.1} tokens/sec (prompt: {:.1}, completion: {:.1})",
-            token_rate, pt_rate, ct_rate
-        );
-        println!("  Req Rate:   {:.1} req/sec", req_rate);
-    }
-
-    /// Prints comprehensive statistics about the load test.
-    fn print_stats(&self, resolved: &ResolvedEndpoints) {
-        let metrics_elapsed_secs = if let Some(metrics_start) = self.metrics_start_time {
-            metrics_start.elapsed().as_secs_f64()
-        } else {
-            self.start_time.elapsed().as_secs_f64()
-        };
-
-        let names_with_weights = resolved.endpoint_names_for_display();
-        let multi = names_with_weights.len() > 1;
-
-        if multi {
-            for (name, weight) in &names_with_weights {
-                if let Some(ep) = self.endpoint_metrics.get(name) {
-                    self.print_compact_block(
-                        &format!("Endpoint: {} (weight: {})", name, weight),
-                        &ep.response_times,
-                        &ep.ttft_times,
-                        &ep.tpot_times,
-                        &ep.prompt_tokens,
-                        &ep.completion_tokens,
-                        &ep.total_tokens,
-                        &ep.errors,
-                        metrics_elapsed_secs,
-                    );
-                }
-            }
-            self.print_compact_block(
-                "AGGREGATE",
-                &self.response_times,
-                &self.ttft_times,
-                &self.tpot_times,
-                &self.prompt_tokens,
-                &self.completion_tokens,
-                &self.total_tokens,
-                &self.errors,
-                metrics_elapsed_secs,
-            );
-            println!("\nScenario: {}", self.scenario);
-            println!("Version: {}", self.version);
-            return;
-        }
-
-        let calc_stats = |values: &[Duration]| {
-            if values.is_empty() {
-                return (
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                );
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort();
-            let len = sorted.len();
-            let avg = {
-                let s = sorted.iter().map(|d| d.as_secs_f64()).sum::<f64>();
-                Duration::from_secs_f64(s / (len as f64))
-            };
-            let p50 = Self::calc_percentile(&sorted, 50.0);
-            let p90 = Self::calc_percentile(&sorted, 90.0);
-            let p95 = Self::calc_percentile(&sorted, 95.0);
-            let p99 = Self::calc_percentile(&sorted, 99.0);
-            (
-                *sorted.first().unwrap_or(&Duration::default()),
-                *sorted.last().unwrap_or(&Duration::default()),
-                avg,
-                p50,
-                p90,
-                p95,
-                p99,
-            )
-        };
-
-        let calc_stats_u64 = |values: &[u64]| {
-            if values.is_empty() {
-                return (0, 0, 0.0, 0);
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort();
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<u64>() as f64 / len.max(1) as f64;
-            (
-                *sorted.first().unwrap_or(&0),
-                *sorted.last().unwrap_or(&0),
-                avg,
-                *sorted.get(len / 2).unwrap_or(&0),
-            )
-        };
-
-        let calc_stats_f64 = |values: &[f64]| {
-            if values.is_empty() {
-                return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<f64>() / len as f64;
-            let p50_idx = (((len - 1) as f64 * 50.0 / 100.0).round() as usize).min(len - 1);
-            let p90_idx = (((len - 1) as f64 * 90.0 / 100.0).round() as usize).min(len - 1);
-            let p95_idx = (((len - 1) as f64 * 95.0 / 100.0).round() as usize).min(len - 1);
-            let p99_idx = (((len - 1) as f64 * 99.0 / 100.0).round() as usize).min(len - 1);
-            (
-                *sorted.first().unwrap_or(&0.0),
-                *sorted.last().unwrap_or(&0.0),
-                avg,
-                sorted[p50_idx],
-                sorted[p90_idx],
-                sorted[p95_idx],
-                sorted[p99_idx],
-            )
-        };
-
-        // Print response time stats only if we have successful responses
-        if !self.response_times.is_empty() {
-            let (rt_min, rt_max, rt_avg, rt_p50, rt_p90, rt_p95, rt_p99) =
-                calc_stats(&self.response_times);
-            println!("\nResponse Time Statistics:");
-            println!("Min: {:?}, Max: {:?}, Avg: {:?}", rt_min, rt_max, rt_avg);
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                rt_p50, rt_p90, rt_p95, rt_p99
-            );
-
-            let (ttft_min, ttft_max, ttft_avg, ttft_p50, ttft_p90, ttft_p95, ttft_p99) =
-                calc_stats(&self.ttft_times);
-            println!("\nTime to First Token Statistics:");
-            println!(
-                "Min: {:?}, Max: {:?}, Avg: {:?}",
-                ttft_min, ttft_max, ttft_avg
-            );
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                ttft_p50, ttft_p90, ttft_p95, ttft_p99
-            );
-
-            let (pt_min, pt_max, pt_avg, pt_median) = calc_stats_u64(&self.prompt_tokens);
-            let total_prompt_tokens: u64 = self.prompt_tokens.iter().sum();
-            println!("\nPrompt Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                pt_min, pt_max, pt_avg, pt_median
-            );
-            println!("Total Prompt Tokens: {}", total_prompt_tokens);
-
-            let (ct_min, ct_max, ct_avg, ct_median) = calc_stats_u64(&self.completion_tokens);
-            let total_completion_tokens: u64 = self.completion_tokens.iter().sum();
-            println!("\nCompletion Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                ct_min, ct_max, ct_avg, ct_median
-            );
-            println!("Total Completion Tokens: {}", total_completion_tokens);
-
-            let (tt_min, tt_max, tt_avg, tt_median) = calc_stats_u64(&self.total_tokens);
-            let total_all_tokens: u64 = self.total_tokens.iter().sum();
-            println!("\nTotal Tokens Statistics:");
-            println!(
-                "Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                tt_min, tt_max, tt_avg, tt_median
-            );
-            println!("Total Tokens Processed: {}", total_all_tokens);
-        } else {
-            println!("\nNo successful responses to calculate timing statistics.");
-        }
-
-        // Add TPOT statistics after TTFT statistics
-        if !self.tpot_times.is_empty() {
-            let (tpot_min, tpot_max, tpot_avg, tpot_p50, tpot_p90, tpot_p95, tpot_p99) =
-                calc_stats_f64(&self.tpot_times);
-            println!("\nTime Per Output Token Statistics:");
-            println!(
-                "Min: {:.6}s, Max: {:.6}s, Avg: {:.6}s",
-                tpot_min, tpot_max, tpot_avg
-            );
-            println!(
-                "p50: {:.6}s, p90: {:.6}s, p95: {:.6}s, p99: {:.6}s",
-                tpot_p50, tpot_p90, tpot_p95, tpot_p99
-            );
-        }
-
-        // Add word count statistics
-        println!("\nWord Count Statistics:");
-        if !self.prompt_words.is_empty() {
-            let (pw_min, pw_max, pw_avg, pw_median) = self.calc_stats_usize(&self.prompt_words);
-            let total_prompt_words: usize = self.prompt_words.iter().sum();
-            let word_elapsed = if let Some(metrics_start) = self.metrics_start_time {
-                metrics_start.elapsed().as_secs_f64()
-            } else {
-                self.start_time.elapsed().as_secs_f64()
-            };
-            let prompt_words_per_second = total_prompt_words as f64 / word_elapsed;
-            println!("Prompt Words:");
-            println!(
-                "  Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                pw_min, pw_max, pw_avg, pw_median
-            );
-            println!("  Total Prompt Words: {}", total_prompt_words);
-            println!("  Words Per Second: {:.2}", prompt_words_per_second);
-        }
-
-        if !self.completion_words.is_empty() {
-            let (cw_min, cw_max, cw_avg, cw_median) = self.calc_stats_usize(&self.completion_words);
-            let total_completion_words: usize = self.completion_words.iter().sum();
-            let word_elapsed = if let Some(metrics_start) = self.metrics_start_time {
-                metrics_start.elapsed().as_secs_f64()
-            } else {
-                self.start_time.elapsed().as_secs_f64()
-            };
-            let completion_words_per_second = total_completion_words as f64 / word_elapsed;
-            println!("Completion Words:");
-            println!(
-                "  Min: {}, Max: {}, Avg: {:.2}, Median: {}",
-                cw_min, cw_max, cw_avg, cw_median
-            );
-            println!("  Total Completion Words: {}", total_completion_words);
-            println!("  Words Per Second: {:.2}", completion_words_per_second);
-        }
-
-        // Add error analysis
-        println!("\nError Analysis:");
-        println!("Total Errors: {}", self.errors.len());
-
-        // Error type distribution
-        println!("\nError Type Distribution:");
-        if !self.errors.is_empty() {
-            for (error_type, count) in &self.error_types {
-                println!(
-                    "  {}: {} ({:.1}%)",
-                    error_type,
-                    count,
-                    (count * 100) as f64 / self.errors.len() as f64
-                );
-            }
-        } else {
-            println!("  No errors to analyze");
-        }
-
-        // Temporal error analysis
-        if let (Some(first), Some(last)) =
-            (self.error_timestamps.first(), self.error_timestamps.last())
-        {
-            let first_error = first.1;
-            let last_error = last.1;
-            let error_duration = last_error.duration_since(first_error);
-
-            println!("\nError Timing Analysis:");
-            println!(
-                "  First Error: {:?} after start",
-                first_error.duration_since(self.start_time)
-            );
-            println!(
-                "  Last Error: {:?} after start",
-                last_error.duration_since(self.start_time)
-            );
-            println!("  Error Duration: {:?}", error_duration);
-            let errors_per_second = if error_duration.as_secs_f64() > 0.0 {
-                self.errors.len() as f64 / error_duration.as_secs_f64()
-            } else {
-                0.0
-            };
-            println!("  Average Errors/Second: {:.2}", errors_per_second);
-        }
-
-        // Rest of the timing statistics...
-        let total_time = self.start_time.elapsed();
-        let successful_requests = self.response_times.len();
-        let total_requests = successful_requests + self.errors.len();
-
-        // Use metrics collection time if available (excludes ramp-up)
-        let metrics_elapsed = if let Some(metrics_start) = self.metrics_start_time {
-            metrics_start.elapsed()
-        } else {
-            self.start_time.elapsed()
-        };
-
-        // Calculate rates only if we have a non-zero elapsed time
-        let elapsed_secs = metrics_elapsed.as_secs_f64();
-        if elapsed_secs > 0.0 {
-            let requests_per_second = total_requests as f64 / elapsed_secs;
-            let tokens_per_second = self.total_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-            let prompt_tokens_per_second =
-                self.prompt_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-            let completion_tokens_per_second =
-                self.completion_tokens.iter().sum::<u64>() as f64 / elapsed_secs;
-
-            println!("\nTiming Statistics:");
-            println!("Total Time: {:?}", total_time);
-            if self.metrics_start_time.is_some() {
-                println!("Metrics Collection Time: {:?}", metrics_elapsed);
-            }
-            if successful_requests > 0 {
-                let avg_latency = {
-                    let s = self
-                        .response_times
-                        .iter()
-                        .map(|d| d.as_secs_f64())
-                        .sum::<f64>();
-                    Duration::from_secs_f64(s / (successful_requests as f64))
-                };
-                println!("Average Request Latency: {:?}", avg_latency);
-            }
-            println!(
-                "Requests/Second: {:.2} (successful: {}, failed: {})",
-                requests_per_second,
-                successful_requests,
-                self.errors.len()
-            );
-            println!("Prompt Tokens/Second: {:.2}", prompt_tokens_per_second);
-            println!(
-                "Completion Tokens/Second: {:.2}",
-                completion_tokens_per_second
-            );
-            println!("Total Tokens/Second: {:.2}", tokens_per_second);
-        } else {
-            println!("\nTiming Statistics:");
-            println!("Total Time: {:?}", total_time);
-            println!("Not enough data to calculate rates (test duration too short)");
-        }
-
-        println!("\nScenario: {}", self.scenario);
-        println!("Version: {}", self.version);
-    }
-}
-
-/// Classifies streaming errors with proper context and error chaining
-#[allow(dead_code)]
-fn classify_stream_error(e: &reqwest::Error, chunks_processed: usize) -> String {
-    let mut context = Vec::new();
-
-    // Classify by reqwest error kind
-    if e.is_timeout() {
-        context.push("Network timeout".to_string());
-    }
-    if e.is_connect() {
-        context.push("Connection failure".to_string());
-    }
-    if e.is_body() {
-        context.push("Body processing error".to_string());
-    }
-    if e.is_decode() {
-        context.push("Response decoding error".to_string());
-    }
-    if e.is_redirect() {
-        context.push("Redirect error".to_string());
-    }
-    if e.is_request() {
-        context.push("Request construction error".to_string());
-    }
-
-    // Add specific error details
-    if let Some(url) = e.url() {
-        context.push(format!("Failed URL: {}", url));
-    }
-    if let Some(status) = e.status() {
-        context.push(format!("HTTP status: {}", status));
-    }
-
-    // Add stream context
-    context.push(format!("Chunks processed: {}", chunks_processed));
-
-    // If no specific classification, use the error message
-    if context.is_empty() {
-        context.push(format!("Unknown error: {}", e));
-    }
-
-    context.join(" | ")
 }
 
 /// Makes a request to the AI model endpoint and measures various performance metrics.
@@ -1051,295 +443,7 @@ async fn make_request(
     }
 }
 
-fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoints) -> Value {
-    let mut sorted_rt = metrics.response_times.clone();
-    sorted_rt.sort();
-    let mut sorted_ttft = metrics.ttft_times.clone();
-    sorted_ttft.sort();
-    let mut sorted_tpot = metrics.tpot_times.clone();
-    sorted_tpot.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Calculate averages for Duration values outside the json! macro
-    let rt_avg_ms = if !sorted_rt.is_empty() {
-        let s = sorted_rt.iter().map(|d| d.as_secs_f64()).sum::<f64>();
-        Duration::from_secs_f64(s / (sorted_rt.len() as f64)).as_millis()
-    } else {
-        0
-    };
-
-    let ttft_avg_ms = if !sorted_ttft.is_empty() {
-        let s = sorted_ttft.iter().map(|d| d.as_secs_f64()).sum::<f64>();
-        Duration::from_secs_f64(s / (sorted_ttft.len() as f64)).as_millis()
-    } else {
-        0
-    };
-
-    // Helper to calculate f64 percentiles
-    let calc_percentile_f64 = |sorted: &[f64], percentile: f64| -> f64 {
-        if sorted.is_empty() {
-            return 0.0;
-        }
-        let idx = (((sorted.len() - 1) as f64 * percentile / 100.0).round() as usize)
-            .min(sorted.len() - 1);
-        sorted[idx]
-    };
-
-    let calc_percentile_u64 = |values: &[u64], percentile: f64| -> u64 {
-        if values.is_empty() {
-            return 0;
-        }
-        let mut sorted = values.to_vec();
-        sorted.sort();
-        let idx = (((sorted.len() - 1) as f64 * percentile / 100.0).round() as usize)
-            .min(sorted.len() - 1);
-        sorted[idx]
-    };
-
-    // Use the Metrics method directly
-    let (prompt_min, prompt_max, prompt_avg, _) = metrics.calc_stats_usize(&metrics.prompt_words);
-    let (completion_min, completion_max, completion_avg, _) =
-        metrics.calc_stats_usize(&metrics.completion_words);
-
-    // Determine how many requests actually completed (success or error)
-    let total_completed_requests = metrics.response_times.len() + metrics.errors.len();
-    let oom_occurred = metrics
-        .errors
-        .iter()
-        .any(|error| error_message_indicates_oom(error));
-
-    // Calculate metrics elapsed time (excluding ramp-up if applicable)
-    let metrics_elapsed_secs = if let Some(metrics_start) = metrics.metrics_start_time {
-        metrics_start.elapsed().as_secs_f64()
-    } else {
-        metrics.start_time.elapsed().as_secs_f64()
-    };
-
-    let (config_url, config_endpoint, config_endpoints) = match resolved {
-        ResolvedEndpoints::Single { url, name, .. } => (url.clone(), Some(name.clone()), None),
-        ResolvedEndpoints::Multi {
-            endpoint_names_with_weights,
-            ..
-        } => {
-            let names: Vec<String> = endpoint_names_with_weights
-                .iter()
-                .map(|(n, _)| n.clone())
-                .collect();
-            (String::new(), None, Some(names))
-        }
-    };
-
-    let per_endpoint_json: serde_json::Map<String, Value> = metrics
-        .endpoint_metrics
-        .iter()
-        .map(|(name, ep)| {
-            let ep_elapsed = metrics_elapsed_secs;
-            let ep_requests = ep.response_times.len() + ep.errors.len();
-            let ep_sorted_rt: Vec<Duration> = {
-                let mut v = ep.response_times.clone();
-                v.sort();
-                v
-            };
-            let ep_sorted_ttft: Vec<Duration> = {
-                let mut v = ep.ttft_times.clone();
-                v.sort();
-                v
-            };
-            let ep_sorted_tpot: Vec<f64> = {
-                let mut v = ep.tpot_times.clone();
-                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                v
-            };
-            (
-                name.clone(),
-                json!({
-                    "response_times": {
-                        "min_ms": ep_sorted_rt.first().map(|d| d.as_millis()).unwrap_or(0),
-                        "max_ms": ep_sorted_rt.last().map(|d| d.as_millis()).unwrap_or(0),
-                        "avg_ms": if ep_sorted_rt.is_empty() { 0.0 } else {
-                            ep_sorted_rt.iter().map(|d| d.as_secs_f64()).sum::<f64>() / ep_sorted_rt.len() as f64 * 1000.0
-                        },
-                        "p50_ms": Metrics::calc_percentile(&ep_sorted_rt, 50.0).as_millis(),
-                        "p99_ms": Metrics::calc_percentile(&ep_sorted_rt, 99.0).as_millis()
-                    },
-                    "ttft": {
-                        "avg_ms": if ep_sorted_ttft.is_empty() { 0.0 } else {
-                            ep_sorted_ttft.iter().map(|d| d.as_secs_f64()).sum::<f64>() / ep_sorted_ttft.len() as f64 * 1000.0
-                        }
-                    },
-                    "tpot": {
-                        "avg_s": if ep_sorted_tpot.is_empty() { 0.0 } else {
-                            ep_sorted_tpot.iter().sum::<f64>() / ep_sorted_tpot.len() as f64
-                        }
-                    },
-                    "tokens": {
-                        "prompt_total": ep.prompt_tokens.iter().sum::<u64>(),
-                        "prompt_p50": calc_percentile_u64(&ep.prompt_tokens, 50.0),
-                        "prompt_p95": calc_percentile_u64(&ep.prompt_tokens, 95.0),
-                        "completion_total": ep.completion_tokens.iter().sum::<u64>(),
-                        "completion_p50": calc_percentile_u64(&ep.completion_tokens, 50.0),
-                        "completion_p95": calc_percentile_u64(&ep.completion_tokens, 95.0),
-                        "total": ep.total_tokens.iter().sum::<u64>(),
-                        "total_p50": calc_percentile_u64(&ep.total_tokens, 50.0),
-                        "total_p95": calc_percentile_u64(&ep.total_tokens, 95.0),
-                        "prompt_per_second": if ep_elapsed > 0.0 { ep.prompt_tokens.iter().sum::<u64>() as f64 / ep_elapsed } else { 0.0 },
-                        "completion_per_second": if ep_elapsed > 0.0 { ep.completion_tokens.iter().sum::<u64>() as f64 / ep_elapsed } else { 0.0 }
-                    },
-                    "errors": {
-                        "count": ep.errors.len(),
-                        "types": &ep.error_types,
-                        "oom_occurred": ep
-                            .errors
-                            .iter()
-                            .any(|error| error_message_indicates_oom(error))
-                    },
-                    "requests": ep_requests,
-                    "requests_per_second": if ep_elapsed > 0.0 { ep_requests as f64 / ep_elapsed } else { 0.0 }
-                }),
-            )
-        })
-        .collect();
-
-    json!({
-        "unique_id": unique_id::generate_uuid(),
-        "human_readable_id": unique_id::generate_human_readable_unique_id(3),
-        "timestamp": Utc::now().to_rfc3339(),
-        "metrumbench_version": VERSION,
-        "compile_info": compile_time_info::get_compile_info(),
-        "config": {
-            "scenario": args.scenario,
-            "url": config_url,
-            "endpoint": config_endpoint,
-            "endpoints": config_endpoints,
-            "model": args.model,
-            "mode": format!("{}", args.mode),
-            "streaming": args.streaming,
-            "num_requests": args.num_requests,
-            "concurrency": args.concurrency,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "log_level": args.log_level,
-            "prompts_file": args.prompts,
-            "data_log": args.data_log,
-            "debug_log": args.debug_log,
-            "error_log": args.error_log,
-            "request_timeout": args.request_timeout,
-            "connect_timeout": args.connect_timeout,
-            "pool_idle_timeout": args.pool_idle_timeout,
-            "tcp_keepalive": args.tcp_keepalive,
-            "stop_after_seconds": args.stop_after_seconds,
-            "ramp_up_seconds": args.ramp_up_seconds,
-        },
-        "metrics": {
-            "words": {
-                "prompt": {
-                    "total": metrics.prompt_words.iter().sum::<usize>(),
-                    "min": prompt_min,
-                    "max": prompt_max,
-                    "avg": prompt_avg,
-                    "per_second": if metrics_elapsed_secs > 0.0 {
-                        metrics.prompt_words.iter().sum::<usize>() as f64 / metrics_elapsed_secs
-                    } else { 0.0 }
-                },
-                "completion": {
-                    "total": metrics.completion_words.iter().sum::<usize>(),
-                    "min": completion_min,
-                    "max": completion_max,
-                    "avg": completion_avg,
-                    "per_second": if metrics_elapsed_secs > 0.0 {
-                        metrics.completion_words.iter().sum::<usize>() as f64 / metrics_elapsed_secs
-                    } else { 0.0 }
-                }
-            },
-            "response_times": {
-                "min_ms": sorted_rt.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_rt.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": rt_avg_ms,
-                "p50_ms": Metrics::calc_percentile(&sorted_rt, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_rt, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_rt, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_rt, 99.0).as_millis()
-            },
-            "ttft": {
-                "min_ms": sorted_ttft.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_ttft.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": ttft_avg_ms,
-                "p50_ms": Metrics::calc_percentile(&sorted_ttft, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_ttft, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_ttft, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_ttft, 99.0).as_millis()
-            },
-            "tpot": {
-                "min_s": sorted_tpot.first().unwrap_or(&0.0),
-                "max_s": sorted_tpot.last().unwrap_or(&0.0),
-                "avg_s": if sorted_tpot.is_empty() { 0.0 } else { sorted_tpot.iter().sum::<f64>() / sorted_tpot.len() as f64 },
-                "p50_s": calc_percentile_f64(&sorted_tpot, 50.0),
-                "p90_s": calc_percentile_f64(&sorted_tpot, 90.0),
-                "p95_s": calc_percentile_f64(&sorted_tpot, 95.0),
-                "p99_s": calc_percentile_f64(&sorted_tpot, 99.0)
-            },
-            "tokens": {
-                "prompt": {
-                    "total": metrics.prompt_tokens.iter().sum::<u64>(),
-                    "min": metrics.prompt_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.prompt_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.prompt_tokens.iter().sum::<u64>() as f64 / metrics.prompt_tokens.len().max(1) as f64,
-                    "p50": calc_percentile_u64(&metrics.prompt_tokens, 50.0),
-                    "p95": calc_percentile_u64(&metrics.prompt_tokens, 95.0),
-                    "per_second": if metrics_elapsed_secs > 0.0 {
-                        metrics.prompt_tokens.iter().sum::<u64>() as f64 / metrics_elapsed_secs
-                    } else { 0.0 }
-                },
-                "completion": {
-                    "total": metrics.completion_tokens.iter().sum::<u64>(),
-                    "min": metrics.completion_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.completion_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.completion_tokens.iter().sum::<u64>() as f64 / metrics.completion_tokens.len().max(1) as f64,
-                    "p50": calc_percentile_u64(&metrics.completion_tokens, 50.0),
-                    "p95": calc_percentile_u64(&metrics.completion_tokens, 95.0),
-                    "per_second": if metrics_elapsed_secs > 0.0 {
-                        metrics.completion_tokens.iter().sum::<u64>() as f64 / metrics_elapsed_secs
-                    } else { 0.0 }
-                },
-                "total": {
-                    "total": metrics.total_tokens.iter().sum::<u64>(),
-                    "min": metrics.total_tokens.iter().min().unwrap_or(&0),
-                    "max": metrics.total_tokens.iter().max().unwrap_or(&0),
-                    "avg": metrics.total_tokens.iter().sum::<u64>() as f64 / metrics.total_tokens.len().max(1) as f64,
-                    "p50": calc_percentile_u64(&metrics.total_tokens, 50.0),
-                    "p95": calc_percentile_u64(&metrics.total_tokens, 95.0),
-                    "per_second": if metrics_elapsed_secs > 0.0 {
-                        metrics.total_tokens.iter().sum::<u64>() as f64 / metrics_elapsed_secs
-                    } else { 0.0 }
-                }
-            },
-            "errors": {
-                "count": metrics.errors.len(),
-                "rate": if total_completed_requests > 0 {
-                    (metrics.errors.len() as f64 / total_completed_requests as f64) * 100.0
-                } else { 0.0 },
-                "types": &metrics.error_types,
-                "oom_occurred": oom_occurred,
-                "messages": &metrics.errors
-            },
-            "timing": {
-                "total_time_seconds": metrics.start_time.elapsed().as_secs_f64(),
-                "requests_per_second": if metrics_elapsed_secs > 0.0 {
-                    total_completed_requests as f64 / metrics_elapsed_secs
-                } else { 0.0 },
-                "successful_requests": metrics.response_times.len(),
-                "failed_requests": metrics.errors.len(),
-                "ramp_up_seconds": args.ramp_up_seconds,
-                "metrics_collection_seconds": metrics_elapsed_secs,
-                "steady_state_seconds": metrics_elapsed_secs,
-                "steady_state_requests_per_second": if metrics_elapsed_secs > 0.0 {
-                    total_completed_requests as f64 / metrics_elapsed_secs
-                } else { 0.0 }
-            },
-            "per_endpoint": per_endpoint_json
-        }
-    })
-}
-
+#[cfg(test)]
 fn error_message_indicates_oom(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     if lower.contains("out of memory")
@@ -1542,7 +646,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     metrumbench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
 
-    let mut metrics = Metrics::new(args.scenario.clone());
     // Initialise semaphore with 1 permit if ramp-up is requested, otherwise with full capacity.
     let concurrency_limit = args.common.max_concurrency.unwrap_or(args.concurrency) as usize;
     let initial_permits: usize = if effective_ramp_up.is_some() {
@@ -1752,20 +855,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut records: Vec<metrumbench::record::RequestRecord> = Vec::new();
 
     while let Some(rec) = record_rx.recv().await {
-        let endpoint_name = rec.endpoint.clone();
+        let _endpoint_name = rec.endpoint.clone();
         let phase = rec.phase;
         if rec.is_success() {
             let response_time = Duration::from_secs_f64(rec.latency_s);
             let ttft = rec.ttft_s.map(Duration::from_secs_f64);
-            let prompt_tokens = rec.prompt_tokens;
+            let _prompt_tokens = rec.prompt_tokens;
             let completion_tokens = rec.completion_tokens;
             let total_tokens = rec.total_tokens;
-            let prompt_words = rec
+            let _prompt_words = rec
                 .modality_metrics
                 .get("prompt_words")
                 .copied()
                 .unwrap_or(0.0) as usize;
-            let completion_words = rec
+            let _completion_words = rec
                 .modality_metrics
                 .get("completion_words")
                 .copied()
@@ -1774,7 +877,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             if let Some(ramp_up) = effective_ramp_up {
                 if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
                     metrics_started = true;
-                    metrics.metrics_start_time = Some(Instant::now());
                     info!("Ramp-up complete. Starting metrics collection...");
                 }
                 if !metrics_started {
@@ -1787,7 +889,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 continue;
             }
 
-            let tpot = match ttft {
+            let _tpot = match ttft {
                 Some(ttft) if completion_tokens > 1 => {
                     response_time.checked_sub(ttft).and_then(|gen_time| {
                         if gen_time.is_zero() {
@@ -1799,17 +901,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
                 _ => None,
             };
-            metrics.record_success(
-                &endpoint_name,
-                response_time,
-                ttft,
-                tpot,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                prompt_words,
-                completion_words,
-            );
             completed += 1;
 
             debug!(
@@ -1837,11 +928,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "unknown".into());
             error!("Request failed: {err_msg}");
-            if (effective_ramp_up.is_none() || metrics_started)
-                && phase != metrumbench::record::Phase::Warmup
-            {
-                metrics.record_error(&endpoint_name, err_msg);
-            }
             errors += 1;
             records.push(rec);
         }
@@ -1859,13 +945,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, args.num_requests, errors
     );
-    metrics.print_stats(&resolved_endpoints);
-
     let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
     } else {
-        metrics.start_time.elapsed().as_secs_f64()
+        // Fallback if no measured records produced a span.
+        0.0
     };
     let slos = args.common.parse_slos()?;
     let body_template = build_request_body(
@@ -1899,22 +984,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
                 args.common.unique_prompts,
             ),
+        modality: Default::default(),
     });
     run_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
+    run_summary.print_console();
 
-    let summary = create_log_record(&args, &metrics, &resolved_endpoints);
-    if let Err(e) = sink.write(&summary) {
-        return Err(format!("Failed to write to data log: {e}").into());
-    }
-
-    // After metrics collection, printing, and logging, check if there were any errors
-    if args.common.fail_on_error && !metrics.errors.is_empty() {
+    let measure_errors = records
+        .iter()
+        .filter(|r| r.phase == metrumbench::record::Phase::Measure && !r.is_success())
+        .count();
+    if args.common.fail_on_error && measure_errors > 0 {
         Err(anyhow::anyhow!("Test completed with errors")
-            .context(format!("Total errors: {}", metrics.errors.len()))
+            .context(format!("Total errors: {measure_errors}"))
             .context("Load test encountered failures")
             .into())
     } else {

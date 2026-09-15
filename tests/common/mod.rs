@@ -110,7 +110,7 @@ pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
     None
 }
 
-/// Per-request `request.v2` records from a `--data-log`, in file order.
+/// Per-request `request.v*` records from a `--data-log`, in file order.
 pub fn request_records(data_log: &std::path::Path) -> Vec<Value> {
     let text = std::fs::read_to_string(data_log).expect("read data log");
     text.lines()
@@ -123,7 +123,7 @@ pub fn request_records(data_log: &std::path::Path) -> Vec<Value> {
         .collect()
 }
 
-/// The `summary.v2` record from a `--data-log`, if the run wrote one.
+/// The `summary.v*` record from a `--data-log`, if the run wrote one.
 pub fn summary_record(data_log: &std::path::Path) -> Option<Value> {
     let text = std::fs::read_to_string(data_log).expect("read data log");
     text.lines()
@@ -135,30 +135,24 @@ pub fn summary_record(data_log: &std::path::Path) -> Option<Value> {
         })
 }
 
-/// The legacy per-run record a binary appends to its `--data-log`, which is
-/// where modality-specific CLI fields (e.g. ASR `normalizer`) are echoed.
-/// Prefers a non-summary object so it is not confused with `summary.v3.config`.
+/// Effective run configuration from `summary.v3.config`, with modality fields
+/// flattened to the top level for test convenience.
 pub fn run_config(data_log: &std::path::Path) -> Value {
-    let text = std::fs::read_to_string(data_log).expect("read data log");
-    let records: Vec<Value> = text
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .collect();
-    records
-        .iter()
-        .find_map(|v| {
-            let is_summary = v
-                .get("schema_version")
-                .and_then(Value::as_str)
-                .is_some_and(|s| s.contains("summary.v"));
-            if is_summary {
-                None
-            } else {
-                v.get("config").cloned()
+    let summary = summary_record(data_log).expect("summary.v3 with config");
+    let mut config = summary
+        .get("config")
+        .cloned()
+        .expect("summary.config missing");
+    if let Some(obj) = config.as_object_mut() {
+        if let Some(modality) = obj.remove("modality") {
+            if let Some(map) = modality.as_object() {
+                for (k, v) in map {
+                    obj.insert(k.clone(), v.clone());
+                }
             }
-        })
-        .or_else(|| records.iter().find_map(|v| v.get("config").cloned()))
-        .expect("no run record with a config block")
+        }
+    }
+    config
 }
 
 /// A 2x2 PNG, used where a test needs real image bytes on disk.

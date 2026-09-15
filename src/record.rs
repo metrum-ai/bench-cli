@@ -10,6 +10,22 @@ use std::time::Duration;
 pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench.request.v3";
 pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench.summary.v3";
 
+/// Historical schemas still accepted when auditing 0.1.82 JSONL (read-only).
+pub const SCHEMA_VERSION_REQUEST_V2: &str = "metrum-ai-bench.request.v2";
+pub const SCHEMA_VERSION_SUMMARY_V2: &str = "metrum-ai-bench.summary.v2";
+
+/// Returns true for schema versions consumers may still parse for regression audit.
+pub fn accepts_audit_schema(schema_version: &str) -> bool {
+    matches!(
+        schema_version,
+        SCHEMA_VERSION_REQUEST
+            | SCHEMA_VERSION_SUMMARY
+            | SCHEMA_VERSION_REQUEST_V2
+            | SCHEMA_VERSION_SUMMARY_V2
+    ) || schema_version.contains("imagegen.request")
+        || schema_version.contains("imagegen.summary")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
@@ -213,5 +229,15 @@ mod tests {
         let tpot = rec.tpot_s().expect("tpot");
         let expected = (0.500 - 0.120) / 19.0;
         assert!((tpot - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn audit_schema_accepts_v2_and_v3() {
+        assert!(accepts_audit_schema(SCHEMA_VERSION_REQUEST_V2));
+        assert!(accepts_audit_schema(SCHEMA_VERSION_SUMMARY_V2));
+        assert!(accepts_audit_schema(SCHEMA_VERSION_REQUEST));
+        assert!(accepts_audit_schema(SCHEMA_VERSION_SUMMARY));
+        assert!(!accepts_audit_schema(""));
+        assert!(!accepts_audit_schema("legacy-unversioned"));
     }
 }
