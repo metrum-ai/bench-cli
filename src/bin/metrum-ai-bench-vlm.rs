@@ -1297,8 +1297,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client = metrumbench::http_client::build_http_client(
-        metrumbench::http_client::HttpClientOptions {
+    let client =
+        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
             request_timeout: Some(Duration::from_secs(args.request_timeout)),
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -1306,8 +1306,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.common.insecure,
-        },
-    )?;
+        })?;
 
     let mut records = load_metrumbench_vlm_records(&args.prompts)?;
     records.shuffle(&mut rand::rngs::StdRng::seed_from_u64(args.common.seed));
@@ -1337,8 +1336,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let semaphore = Arc::new(Semaphore::new(
         args.common.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
-    let endpoint_selector =
-        Arc::new(metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints));
+    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+        &resolved_endpoints,
+    ));
     let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
     let stop = metrumbench::runner::StopFlag::new();
     metrumbench::runner::install_stop_handlers(stop.clone());

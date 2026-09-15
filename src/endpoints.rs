@@ -263,21 +263,12 @@ mod tests {
     fn least_inflight_ejects_after_connect_failure() {
         let endpoints = ResolvedEndpoints::Multi {
             weighted_list: vec![
-                (
-                    "http://a.example/v1".into(),
-                    "ka".into(),
-                    "alive".into(),
-                ),
-                (
-                    "http://b.example/v1".into(),
-                    "kb".into(),
-                    "dead".into(),
-                ),
+                ("http://a.example/v1".into(), "ka".into(), "alive".into()),
+                ("http://b.example/v1".into(), "kb".into(), "dead".into()),
             ],
             endpoint_names_with_weights: vec![("alive".into(), 1), ("dead".into(), 1)],
         };
-        let selector =
-            EndpointSelector::with_eject_backoff(&endpoints, Duration::from_secs(60));
+        let selector = EndpointSelector::with_eject_backoff(&endpoints, Duration::from_secs(60));
 
         // Pin some in-flight on alive so without ejection, dead would win.
         let (_alive_choice, _alive_lease) =

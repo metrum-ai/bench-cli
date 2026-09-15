@@ -1503,8 +1503,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client = metrumbench::http_client::build_http_client(
-        metrumbench::http_client::HttpClientOptions {
+    let client =
+        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
             request_timeout: Some(Duration::from_secs(args.request_timeout)),
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -1512,8 +1512,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.common.insecure,
-        },
-    )?;
+        })?;
 
     let mut prompts = load_metrumbench_llm_prompts(&args.prompts)?;
 
@@ -1561,8 +1560,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    let endpoint_selector =
-        Arc::new(metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints));
+    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+        &resolved_endpoints,
+    ));
 
     let mut handles = vec![];
     let mut completed = 0;

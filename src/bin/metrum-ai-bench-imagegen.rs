@@ -337,8 +337,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect::<HashMap<_, _>>();
     let runtime = Arc::new(runtime);
 
-    let client = metrumbench::http_client::build_http_client(
-        metrumbench::http_client::HttpClientOptions {
+    let client =
+        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
             request_timeout: None,
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -346,8 +346,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.insecure,
-        },
-    )?;
+        })?;
 
     if args.endpoint_health_check {
         health_check_endpoints(&client, &endpoints, &args.health_path, args.request_timeout)
@@ -1136,7 +1135,13 @@ async fn make_image_request(
             });
         }
     }
-    Ok((status, artifacts, response_bytes, data.len() as u32, first_byte))
+    Ok((
+        status,
+        artifacts,
+        response_bytes,
+        data.len() as u32,
+        first_byte,
+    ))
 }
 
 fn load_extra_body(
