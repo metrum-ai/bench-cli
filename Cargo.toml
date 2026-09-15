@@ -1,6 +1,6 @@
 [package]
 name = "metrumbench"
-version = "0.1.82"
+version = "1.0.0-rc.1"
 edition = "2021"
 rust-version = "1.85"
 description = "Load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
