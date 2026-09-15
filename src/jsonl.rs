@@ -31,38 +31,24 @@ impl JsonlSink {
     }
 }
 
-pub fn classify_error(err: &dyn std::error::Error) -> crate::error::RequestError {
+/// Thin fallback for app-level failure messages only.
+///
+/// Transport failures (timeout, connect, HTTP status) must be mapped at the
+/// failure site via [`crate::error::RequestError::from_reqwest`] /
+/// [`crate::error::RequestError::from_status`] — not here.
+pub fn classify_app_error(err: &dyn std::error::Error) -> crate::error::RequestError {
     use crate::error::RequestError;
     let msg = err.to_string();
     let lower = msg.to_ascii_lowercase();
     if lower.contains("no output token") {
         RequestError::NoOutputToken
-    } else if lower.contains("stream truncated") || lower.contains("truncated") {
+    } else if lower.contains("stream truncated") {
         RequestError::StreamTruncated
-    } else if lower.contains("timeout") {
-        RequestError::Timeout
-    } else if lower.contains("connect") {
-        RequestError::Connect
-    } else if lower.contains("429") || lower.contains("rate_limit") {
-        RequestError::RateLimit
-    } else if let Some(status) = parse_http_status(&lower) {
-        RequestError::from_status(status)
     } else if lower.contains("api error") {
         RequestError::ApiError { message: msg }
     } else {
         RequestError::Other { message: msg }
     }
-}
-
-fn parse_http_status(lower: &str) -> Option<u16> {
-    let idx = lower.find("http error:")?;
-    let rest = lower[idx + "http error:".len()..].trim();
-    let code: u16 = rest
-        .split(|c: char| !c.is_ascii_digit())
-        .find(|s| !s.is_empty())?
-        .parse()
-        .ok()?;
-    Some(code)
 }
 
 #[cfg(test)]
@@ -74,8 +60,27 @@ mod tests {
     fn classifies_no_output_token() {
         let e = anyhow::anyhow!("no output token");
         assert!(matches!(
-            classify_error(e.as_ref()),
+            classify_app_error(e.as_ref()),
             RequestError::NoOutputToken
+        ));
+    }
+
+    #[test]
+    fn classifies_stream_truncated() {
+        let e = anyhow::anyhow!("stream truncated");
+        assert!(matches!(
+            classify_app_error(e.as_ref()),
+            RequestError::StreamTruncated
+        ));
+    }
+
+    #[test]
+    fn does_not_map_timeout_via_display() {
+        // Transport classification must not live here.
+        let e = anyhow::anyhow!("error sending request for url (http://x): timeout");
+        assert!(matches!(
+            classify_app_error(e.as_ref()),
+            RequestError::Other { .. }
         ));
     }
 }

@@ -6,6 +6,7 @@ pub mod asr;
 pub mod endpoints;
 pub mod environment;
 pub mod error;
+pub mod http_client;
 pub mod jsonl;
 pub mod load;
 pub mod modality;

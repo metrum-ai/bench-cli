@@ -96,6 +96,20 @@ pub struct CommonBenchArgs {
         help = "Throughput dispersion bin width in seconds"
     )]
     pub throughput_bin_seconds: f64,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Additional PEM CA certificate for TLS (private gateways)"
+    )]
+    pub ca_cert: Option<String>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Disable TLS certificate verification (opt-in; stamped into config)"
+    )]
+    pub insecure: bool,
 }
 
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
@@ -115,6 +129,9 @@ pub struct EffectiveCommonArgs {
     pub tokenizer: Option<String>,
     pub slos: Vec<String>,
     pub throughput_bin_seconds: f64,
+    pub insecure: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_cert: Option<String>,
 }
 
 impl From<&CommonBenchArgs> for EffectiveCommonArgs {
@@ -134,6 +151,8 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             tokenizer: common.tokenizer.clone(),
             slos: common.slos.clone(),
             throughput_bin_seconds: common.throughput_bin_seconds,
+            insecure: common.insecure,
+            ca_cert: common.ca_cert.clone(),
         }
     }
 }
@@ -220,6 +239,8 @@ mod tests {
             tokenizer: None,
             slos: vec![],
             throughput_bin_seconds: 10.0,
+            ca_cert: None,
+            insecure: false,
         };
         assert_eq!(
             args.effective_system_prompt("default"),

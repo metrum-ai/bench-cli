@@ -761,6 +761,7 @@ fn classify_stream_error(e: &reqwest::Error, chunks_processed: usize) -> String 
 ///
 struct StreamMetrics {
     latency: Duration,
+    first_byte: Duration,
     ttft: Duration,
     first_reasoning: Option<Duration>,
     itl: Vec<Duration>,
@@ -819,7 +820,6 @@ async fn make_request(
         {
             Ok(resp) => resp,
             Err(e) => {
-                // Log comprehensive error details
                 log_reqwest_error_details(&e, "HTTP Request Failed");
                 error!("Request context:");
                 error!("  URL: {}", url);
@@ -830,11 +830,10 @@ async fn make_request(
                 error!("  Timeout: {}s", request_timeout);
                 error!("  API Key Length: {} chars", api_key.len());
                 error!("  Streaming Mode: {}", streaming);
-                return Err(anyhow::anyhow!("HTTP request failed: {}", e)
-                    .context("Streaming request failed")
-                    .into());
+                return Err(metrumbench::error::RequestError::from_reqwest(&e).into());
             }
         };
+        let first_byte = start_time.elapsed();
 
         // Check for HTTP errors
         if !response.status().is_success() {
@@ -844,15 +843,6 @@ async fn make_request(
                 .text()
                 .await
                 .unwrap_or_else(|_| "No error body".to_string());
-
-            // Classify error type for metrics
-            let error_type = match status.as_u16() {
-                429 => "rate_limit",
-                401 | 403 => "authentication",
-                400 => "bad_request",
-                500..=599 => "server_error",
-                _ => "unknown_error",
-            };
 
             error!(
                 "Request failed with status: {} - Body: {}",
@@ -865,10 +855,7 @@ async fn make_request(
                 serde_json::to_string_pretty(&payload).unwrap_or_default()
             );
             error!("  Headers: {:?}", headers);
-            return Err(anyhow::anyhow!("HTTP error: {} - {}", status, error_body)
-                .context(format!("Request failed with status {}", status))
-                .context(format!("Error type: {}", error_type))
-                .into());
+            return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
         }
 
         trace!("Request started streaming");
@@ -886,7 +873,7 @@ async fn make_request(
         let mut completion_text = String::new();
 
         while let Some(item) = stream.next().await {
-            let bytes = item.map_err(|e| anyhow::anyhow!("stream error: {e}"))?;
+            let bytes = item.map_err(|e| metrumbench::error::RequestError::from_reqwest(&e))?;
             for event in parser.feed(&bytes) {
                 match event {
                     metrumbench::sse::SseEvent::Done => {
@@ -894,7 +881,10 @@ async fn make_request(
                     }
                     metrumbench::sse::SseEvent::Json(parsed) => {
                         if let Some(error) = parsed.get("error") {
-                            return Err(anyhow::anyhow!("API error in stream: {}", error).into());
+                            return Err(metrumbench::error::RequestError::ApiError {
+                                message: error.to_string(),
+                            }
+                            .into());
                         }
                         if let Some(usage) = parsed.get("usage") {
                             prompt_tokens = usage
@@ -945,15 +935,16 @@ async fn make_request(
         }
 
         if !done && !saw_finish {
-            return Err(anyhow::anyhow!("stream truncated").into());
+            return Err(metrumbench::error::RequestError::StreamTruncated.into());
         }
         let Some(ttft) = first_token_time else {
-            return Err(anyhow::anyhow!("no output token").into());
+            return Err(metrumbench::error::RequestError::NoOutputToken.into());
         };
         trace!("Request completed successfully");
         let completion_word_count = count_words(&completion_text);
         Ok(StreamMetrics {
             latency: start_time.elapsed(),
+            first_byte,
             ttft,
             first_reasoning: first_reasoning_time,
             itl,
@@ -967,29 +958,26 @@ async fn make_request(
         })
     } else {
         // Handle non-streaming response
-        let response: Response = client
+        let response: Response = match client
             .post(url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&payload)
             .timeout(Duration::from_secs(request_timeout))
             .send()
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => return Err(metrumbench::error::RequestError::from_reqwest(&e).into()),
+        };
+        let first_byte = start_time.elapsed();
 
         let total_time = start_time.elapsed();
         let status = response.status();
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|_| String::new());
-            let error_type = match status.as_u16() {
-                429 => "rate_limit",
-                401 | 403 => "authentication",
-                400 => "bad_request",
-                500..=599 => "server_error",
-                _ => "unknown_error",
-            };
-            return Err(anyhow::anyhow!("HTTP {}: {}", status, error_body.trim())
-                .context(format!("Error type: {}", error_type))
-                .into());
+            error!("HTTP {}: {}", status, error_body.trim());
+            return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
         }
         let json_resp: Value = response.json().await?;
 
@@ -1041,6 +1029,7 @@ async fn make_request(
 
         Ok(StreamMetrics {
             latency: total_time,
+            first_byte,
             ttft: total_time,
             first_reasoning: None,
             itl: Vec::new(),
@@ -1514,13 +1503,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(args.request_timeout))
-        .connect_timeout(Duration::from_secs(args.connect_timeout))
-        .pool_max_idle_per_host(args.concurrency as usize)
-        .pool_idle_timeout(Some(Duration::from_secs(args.pool_idle_timeout)))
-        .tcp_keepalive(Some(Duration::from_secs(args.tcp_keepalive)))
-        .build()?;
+    let client =
+        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
+            request_timeout: Some(Duration::from_secs(args.request_timeout)),
+            connect_timeout: Duration::from_secs(args.connect_timeout),
+            pool_max_idle_per_host: args.concurrency as usize,
+            pool_idle_timeout: Duration::from_secs(args.pool_idle_timeout),
+            tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
+            ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
+            insecure: args.common.insecure,
+        })?;
 
     let mut prompts = load_metrumbench_llm_prompts(&args.prompts)?;
 
@@ -1568,7 +1560,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    let endpoint_selector = metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints);
+    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+        &resolved_endpoints,
+    ));
 
     let mut handles = vec![];
     let mut completed = 0;
@@ -1611,6 +1605,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             slot.scheduled_delay,
         );
         let client = client.clone();
+        let endpoint_selector = endpoint_selector.clone();
         let prompt = metrumbench::args_common::CommonBenchArgs::unique_prompt(
             &prompts[i % prompts.len()],
             slot.seq,
@@ -1686,7 +1681,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         sm.prompt_tokens,
                         sm.completion_tokens,
                         sm.total_tokens,
-                    );
+                    )
+                    .with_first_byte(sm.first_byte);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1707,6 +1703,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .unwrap_or(Duration::ZERO);
                     let completed_at =
                         metrumbench::runner::completed_at_from_start(started_at, latency);
+                    let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
+                    if matches!(request_error, metrumbench::error::RequestError::Connect) {
+                        endpoint_selector.note_connect_failure(&endpoint_name);
+                    }
                     let mut rec = metrumbench::record::RequestRecord::failed(
                         seq,
                         phase,
@@ -1714,7 +1714,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         latency,
-                        metrumbench::jsonl::classify_error(e.as_ref()),
+                        request_error,
                     );
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);

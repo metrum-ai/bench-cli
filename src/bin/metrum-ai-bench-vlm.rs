@@ -623,6 +623,7 @@ async fn make_request(
 ) -> Result<
     (
         Duration,
+        Duration,
         Option<Duration>,
         u64,
         u64,
@@ -643,14 +644,19 @@ async fn make_request(
         debug!("Request payload: {}", payload_str);
     }
 
-    let response = client
+    let response = match client
         .post(url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&payload)
         .timeout(Duration::from_secs(request_timeout))
         .send()
-        .await?;
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => return Err(metrumbench::error::RequestError::from_reqwest(&e).into()),
+    };
+    let first_byte = start_time.elapsed();
 
     if !response.status().is_success() {
         let status = response.status();
@@ -660,14 +666,10 @@ async fn make_request(
             .await
             .unwrap_or_else(|_| "No error body".to_string());
         warn!(
-            "Request failed with status: {} - Body: {}",
-            status, error_body
-        );
-        return Err(format!(
-            "HTTP error: {} - {}. Headers: {:?}",
+            "Request failed with status: {} - Body: {} (headers: {:?})",
             status, error_body, headers
-        )
-        .into());
+        );
+        return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
     }
 
     let image_stats: Vec<(u64, (u32, u32))> = images
@@ -688,7 +690,7 @@ async fn make_request(
         let mut done = false;
         let mut saw_finish = false;
         while let Some(item) = stream.next().await {
-            let bytes = item.map_err(|e| anyhow::anyhow!("stream error: {e}"))?;
+            let bytes = item.map_err(|e| metrumbench::error::RequestError::from_reqwest(&e))?;
             for event in parser.feed(&bytes) {
                 match event {
                     metrumbench::sse::SseEvent::Done => done = true,
@@ -740,13 +742,14 @@ async fn make_request(
             }
         }
         if !done && !saw_finish {
-            return Err(anyhow::anyhow!("stream truncated").into());
+            return Err(metrumbench::error::RequestError::StreamTruncated.into());
         }
         let Some(ttft) = first_token_time else {
-            return Err(anyhow::anyhow!("no output token").into());
+            return Err(metrumbench::error::RequestError::NoOutputToken.into());
         };
         return Ok((
             start_time.elapsed(),
+            first_byte,
             Some(ttft),
             prompt_tokens,
             completion_tokens,
@@ -784,6 +787,7 @@ async fn make_request(
     // Non-streaming: TTFT is not measured (do not fabricate latency/tokens).
     Ok((
         total_time,
+        first_byte,
         None,
         prompt_tokens,
         completion_tokens,
@@ -1293,13 +1297,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(args.request_timeout))
-        .connect_timeout(Duration::from_secs(args.connect_timeout))
-        .pool_max_idle_per_host(args.concurrency as usize)
-        .pool_idle_timeout(Some(Duration::from_secs(args.pool_idle_timeout)))
-        .tcp_keepalive(Some(Duration::from_secs(args.tcp_keepalive)))
-        .build()?;
+    let client =
+        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
+            request_timeout: Some(Duration::from_secs(args.request_timeout)),
+            connect_timeout: Duration::from_secs(args.connect_timeout),
+            pool_max_idle_per_host: args.concurrency as usize,
+            pool_idle_timeout: Duration::from_secs(args.pool_idle_timeout),
+            tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
+            ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
+            insecure: args.common.insecure,
+        })?;
 
     let mut records = load_metrumbench_vlm_records(&args.prompts)?;
     records.shuffle(&mut rand::rngs::StdRng::seed_from_u64(args.common.seed));
@@ -1329,7 +1336,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let semaphore = Arc::new(Semaphore::new(
         args.common.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
-    let endpoint_selector = metrumbench::endpoints::EndpointSelector::new(&resolved_endpoints);
+    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+        &resolved_endpoints,
+    ));
     let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
     let stop = metrumbench::runner::StopFlag::new();
     metrumbench::runner::install_stop_handlers(stop.clone());
@@ -1404,6 +1413,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
         let client_loop = client.clone();
+        let endpoint_selector = endpoint_selector.clone();
         let selected_record = &records[i % records.len()];
         let mut selected_images = Vec::new();
 
@@ -1621,6 +1631,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let record = match result {
                 Ok((
                     response_time,
+                    first_byte,
                     ttft,
                     prompt_tokens,
                     completion_tokens,
@@ -1644,7 +1655,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         prompt_tokens,
                         completion_tokens,
                         total_tokens,
-                    );
+                    )
+                    .with_first_byte(first_byte);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1694,6 +1706,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .unwrap_or(Duration::ZERO);
                     let completed_at =
                         metrumbench::runner::completed_at_from_start(started_at, latency);
+                    let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
+                    if matches!(request_error, metrumbench::error::RequestError::Connect) {
+                        endpoint_selector.note_connect_failure(&endpoint_name);
+                    }
                     let mut rec = metrumbench::record::RequestRecord::failed(
                         seq,
                         phase,
@@ -1701,7 +1717,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         latency,
-                        metrumbench::jsonl::classify_error(e.as_ref()),
+                        request_error,
                     );
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);

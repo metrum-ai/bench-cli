@@ -10,7 +10,11 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
 - **TTFT**: first visible output delta minus send. Role and reasoning-only
-  deltas do not count. Missing visible output is `no_output_token`.
+  deltas do not count. Missing visible output is `no_output_token`. TTFT
+  includes connection setup, TLS, and queueing by design.
+- **First byte**: response headers received minus send (`first_byte_s`).
+  Separates gateway/header delay from prefill. `connect_s` is not yet
+  recorded (deferred post-v1).
 - **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
   minus send, reported separately from TTFT.
 - **ITL**: every successive visible-output chunk timestamp delta, pooled

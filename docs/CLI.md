@@ -67,6 +67,10 @@ Options:
           Repeatable goodput threshold: ttft=, tpot=, e2e=
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
+      --ca-cert <PATH>
+          Additional PEM CA certificate for TLS (private gateways)
+      --insecure
+          Disable TLS certificate verification (opt-in; stamped into config)
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -151,6 +155,10 @@ Options:
           Repeatable goodput threshold: ttft=, tpot=, e2e=
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
+      --ca-cert <PATH>
+          Additional PEM CA certificate for TLS (private gateways)
+      --insecure
+          Disable TLS certificate verification (opt-in; stamped into config)
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --max-tokens <MAX_TOKENS>
@@ -285,6 +293,12 @@ Options:
           Throughput dispersion bin width in seconds
           
           [default: 10]
+
+      --ca-cert <PATH>
+          Additional PEM CA certificate for TLS (private gateways)
+
+      --insecure
+          Disable TLS certificate verification (opt-in; stamped into config)
 
       --debug-log <DEBUG_LOG>
           Path to the debug log file
@@ -442,6 +456,10 @@ Options:
           [default: 60]
       --tcp-keepalive <TCP_KEEPALIVE>
           [default: 60]
+      --ca-cert <PATH>
+          Additional PEM CA certificate for TLS (private gateways)
+      --insecure
+          Disable TLS certificate verification (opt-in; stamped into config)
       --artifact-dir <ARTIFACT_DIR>
           [default: metrum-ai-bench-imagegen-artifacts]
       --data-log <DATA_LOG>
