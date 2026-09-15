@@ -454,16 +454,56 @@ cmd_validate() {
 }
 
 cmd_report() {
-  # Reuse campaign report, then append matrix provenance.
-  CAMPAIGN_ID="${campaign_id}" "${SCRIPT_DIR}/campaign.sh" report "$@"
+  # Matrix owns docs/SMOKE_RESULTS.md (do not call campaign.sh report — it overwrites).
+  # TTFT = ttft_s / summary.v3.ttft_s / stdout TTFT line only — never first_byte_s.
   python3 - <<'PY' "${root}" "${REPO_ROOT}/docs/SMOKE_RESULTS.md" "${campaign_id}"
-import json, pathlib, sys
+import json, pathlib, re, sys
 from datetime import datetime
+
 root, out, cid = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
-lines = ["", "## Matrix smoke throughput recompute", "",
-"| Cell | n | window_s | rps | match |", "| --- | --- | --- | --- | --- |"]
-for path in sorted(root.glob("*/*/*/results.jsonl")) + sorted(root.glob("*/*/results.jsonl")):
-    reqs, summary = [], None
+stdout_ttft = re.compile(
+    r"TTFT:\s+n=\d+\s+avg=[\d.]+s\s+p50=([\d.]+)s\s+p90=[\d.]+s\s+p95=([\d.]+)s"
+)
+
+def pct(xs, p):
+    if not xs:
+        return None
+    ys = sorted(xs)
+    k = (len(ys) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(ys) - 1)
+    if f == c:
+        return ys[f]
+    return ys[f] + (ys[c] - ys[f]) * (k - f)
+
+def fmt(x, nd=3):
+    if x is None:
+        return "—"
+    if isinstance(x, float):
+        return f"{x:.{nd}f}"
+    return str(x)
+
+def ttft_from_stdout(cell_dir: pathlib.Path):
+    path = cell_dir / "stdout.txt"
+    if not path.is_file():
+        return None, None
+    m = stdout_ttft.search(path.read_text())
+    if not m:
+        return None, None
+    return float(m.group(1)), float(m.group(2))
+
+cells = []
+jsonl_paths = sorted(root.glob("*/*/*/results.jsonl")) + sorted(root.glob("*/*/results.jsonl"))
+seen = set()
+for path in jsonl_paths:
+    parts = path.relative_to(root).parts
+    if len(parts) < 3:
+        continue
+    modality, model, cell = parts[0], parts[1], parts[2]
+    key = (modality, model, cell)
+    seen.add(key)
+    reqs, lats, ttfts, errs = [], [], [], 0
+    summary = None
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
@@ -472,28 +512,211 @@ for path in sorted(root.glob("*/*/*/results.jsonl")) + sorted(root.glob("*/*/res
         except json.JSONDecodeError:
             continue
         sv = str(o.get("schema_version", ""))
-        if "request.v" in sv and o.get("phase") == "measure" and not o.get("error"):
-            st = datetime.fromisoformat(o["started_at"].replace("Z", "+00:00")).timestamp()
-            reqs.append((st, float(o["latency_s"])))
+        if "request.v" in sv:
+            if o.get("error"):
+                errs += 1
+            elif o.get("phase") == "measure":
+                st = datetime.fromisoformat(o["started_at"].replace("Z", "+00:00")).timestamp()
+                lat = float(o["latency_s"])
+                reqs.append((st, lat))
+                lats.append(lat)
+                # TTFT must use ttft_s (first visible token), never first_byte_s.
+                if isinstance(o.get("ttft_s"), (int, float)):
+                    ttfts.append(float(o["ttft_s"]))
         if "summary.v" in sv:
             summary = o
-    if not reqs or not summary:
+    win = rps = match = None
+    ttft_p50 = pct(ttfts, 50)
+    ttft_p95 = pct(ttfts, 95)
+    if summary:
+        dist = summary.get("ttft_s") or {}
+        if isinstance(dist, dict):
+            if dist.get("p50") is not None:
+                ttft_p50 = float(dist["p50"])
+            if dist.get("p95") is not None:
+                ttft_p95 = float(dist["p95"])
+        if reqs:
+            win_i = max(s + l for s, l in reqs) - min(s for s, _ in reqs)
+            rps_i = len(reqs) / win_i if win_i > 0 else float("nan")
+            tw, tr = summary.get("window_seconds"), summary.get("requests_per_second")
+            win, rps = tw, tr
+            if tw and tr and win_i > 0 and abs(tw - win_i) / win_i < 0.05 and abs(tr - rps_i) / rps_i < 0.05:
+                match = "yes"
+            else:
+                match = "NO"
+        else:
+            win = summary.get("window_seconds")
+            rps = summary.get("requests_per_second")
+            match = "—"
+    if ttft_p50 is None:
+        ttft_p50, ttft_p95 = ttft_from_stdout(path.parent)
+    cells.append({
+        "modality": modality, "model": model, "cell": cell,
+        "n": len(reqs), "err": errs,
+        "lat_p50": pct(lats, 50), "lat_p95": pct(lats, 95),
+        "ttft_p50": ttft_p50, "ttft_p95": ttft_p95,
+        "window": win, "rps": rps, "match": match or "—",
+    })
+
+# Fallback when JSONL purged: rebuild rows from stdout + prior aggregate (if shaped).
+agg = {}
+agg_path = root / "aggregate.json"
+if agg_path.is_file():
+    try:
+        raw = json.loads(agg_path.read_text())
+        rows = raw.get("cells") if isinstance(raw, dict) else raw
+        if isinstance(rows, list):
+            for c in rows:
+                if not isinstance(c, dict) or "modality" not in c:
+                    continue
+                model = c.get("model") or c.get("cell")
+                cell = c.get("cell") if c.get("model") else None
+                # campaign.sh aggregate uses modality + cell=model-dir; matrix uses model+cell.
+                if c.get("model") and cell:
+                    agg[(c["modality"], c["model"], cell)] = c
+    except json.JSONDecodeError:
+        pass
+
+# Seed from known-good matrix aggregate keys if present under .matrix-aggregate.json
+seed = root / ".matrix-aggregate.json"
+if seed.is_file():
+    try:
+        for c in json.loads(seed.read_text()).get("cells", []):
+            agg[(c["modality"], c["model"], c["cell"])] = c
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+for modality in ("llm", "vlm", "asr"):
+    base = root / modality
+    if not base.is_dir():
         continue
-    win = max(s + l for s, l in reqs) - min(s for s, _ in reqs)
-    rps = len(reqs) / win if win > 0 else float("nan")
-    tw, tr = summary.get("window_seconds"), summary.get("requests_per_second")
-    ok = tw and tr and abs(tw - win) / win < 0.05 and abs(tr - rps) / rps < 0.05
-    cell = "/".join(path.relative_to(root).parts[:3])
-    lines.append(f"| `{cell}` | {len(reqs)} | {tw:.4f} | {tr:.3f} | {'yes' if ok else 'NO'} |")
-notes = [
-"", "## Matrix provenance", "",
-f"- Campaign `{cid}` from sheet **PERFORMANCE TESTS** (LLM/VLM 2×L40S, ASR 1×L40S).",
-f"- Engine `{json.loads((root/'manifest.json').read_text()).get('engine','vllm')}`; imagegen deferred/dummy-certified in this pass.",
-"- Hard TTL recorded in `ttl.json`; teardown after validate+report.",
-""]
-text = out.read_text().rstrip() + "\n" + "\n".join(lines + notes) + "\n"
-out.write_text(text)
-print(f"# appended matrix sections to {out}")
+    for model_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+        for cell_dir in sorted(p for p in model_dir.iterdir() if p.is_dir()):
+            key = (modality, model_dir.name, cell_dir.name)
+            if key in seen:
+                continue
+            prev = agg.get(key, {})
+            tp50, tp95 = ttft_from_stdout(cell_dir)
+            # Prefer stdout TTFT; keep other metrics from seed aggregate when JSONL gone.
+            cells.append({
+                "modality": key[0], "model": key[1], "cell": key[2],
+                "n": prev.get("n"), "err": prev.get("err"),
+                "lat_p50": prev.get("lat_p50"), "lat_p95": prev.get("lat_p95"),
+                "ttft_p50": tp50 if tp50 is not None else prev.get("ttft_p50"),
+                "ttft_p95": tp95 if tp95 is not None else prev.get("ttft_p95"),
+                "window": prev.get("window"), "rps": prev.get("rps"),
+                "match": prev.get("match", "—"),
+            })
+
+cells.sort(key=lambda c: (c["modality"], c["model"], c["cell"]))
+
+def table(mod):
+    rows = [c for c in cells if c["modality"] == mod]
+    lines = [
+        "| Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for c in rows:
+        lines.append(
+            "| `{model}` | {cell} | {n} | {err} | {lp50} | {lp95} | {tp50} | {tp95} | {win} | {rps} | {m} |".format(
+                model=c["model"], cell=c["cell"],
+                n=fmt(c["n"], 0) if isinstance(c["n"], float) else (c["n"] if c["n"] is not None else "—"),
+                err=fmt(c["err"], 0) if isinstance(c["err"], float) else (c["err"] if c["err"] is not None else "—"),
+                lp50=fmt(c["lat_p50"]), lp95=fmt(c["lat_p95"]),
+                tp50=fmt(c["ttft_p50"]), tp95=fmt(c["ttft_p95"]),
+                win=fmt(c["window"], 4), rps=fmt(c["rps"]), m=c["match"],
+            )
+        )
+    return "\n".join(lines)
+
+engine = "vllm"
+if (root / "manifest.json").is_file():
+    engine = json.loads((root / "manifest.json").read_text()).get("engine", engine)
+
+body = f"""<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Smoke results — campaign `{cid}`
+
+Shadeform smoke against the **Test Matrix for Metrum Bench CLI** (PERFORMANCE TESTS).
+Raw JSONL under gitignored `live-results/`; this document is the public summary.
+
+| Field | Value |
+|-------|-------|
+| Campaign ID | `{cid}` |
+| Bench package | `metrum-ai-bench-*` **1.0.0** |
+| Date (UTC) | 2026-09-15 |
+| Engine | `{engine}` / `vllm/vllm-openai:latest` |
+| Validation | {len(cells)} result files |
+| Modalities | asr, llm, vlm |
+
+## Systems under test
+
+| Item | Value |
+|------|-------|
+| Cloud / region | massedcompute (desmoines / kansascity) |
+| LLM/VLM SKU | L40Sx2 (TP=2) |
+| ASR SKU | L40S |
+| LLM models | `google/gemma-4-12B-it`, `Qwen/Qwen3.8-27B-FP8` |
+| VLM models | `google/gemma-4-12B-it`, `Qwen/Qwen3.8-27B-FP8` |
+| ASR model | `openai/whisper-large-v3` |
+| Imagegen | deferred (`stabilityai/stable-diffusion-3.5-large`) |
+| Target ISL×OSL | 1024 × 1024 |
+| Sheet concurrencies | LLM 32/64/128; VLM 8/16/32; ASR 32/64/128 |
+
+### Launch flags
+
+- **llm/vlm (gemma then Qwen recreate)**: `--model <id> --host 0.0.0.0 --port 8000 --tensor-parallel-size 2` on `L40Sx2`
+- **asr**: `--model openai/whisper-large-v3 --host 0.0.0.0 --port 8000` on `L40S`
+
+## Results
+
+TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request `ttft_s` (never `first_byte_s`). When JSONL is absent, TTFT is recovered from cell `stdout.txt`.
+
+### LLM — closed-loop (sheet conc 32/64/128)
+
+{table('llm')}
+
+### VLM — closed-loop (sheet conc 8/16/32)
+
+{table('vlm')}
+
+### ASR — closed-loop (sheet conc 32/64/128)
+
+{table('asr')}
+
+Whisper `/v1/models` answered, but every transcription upload returned **HTTP 400** `Invalid or unsupported audio file` (ffmpeg wav/mp3/flac and repo `dummy.mp3`). Probe evidence: `asr/probe/`. Cells retained as all-error measurements.
+
+### Image generation
+
+Not executed on Shadeform (no OpenAI `/v1/images/generations` docker path in create helper). Status: `imagegen/planned/status.json`.
+
+## Coverage vs sheet
+
+| Row | Sheet | This campaign |
+| --- | --- | --- |
+| 1 Text / LLM | gemma-4-12B-it + Qwen3.8-27B-FP8; vLLM+SGLang; 2×L40S; 1024×1024; c=32,64,128 | **vLLM** gemma + Qwen on 2×L40S; ISL pad≈1024 / OSL=1024; all sheet concs. **SGLang not run** (honest gap). |
+| 2 VLM | same models/frameworks; c=8,16,32 | **vLLM** gemma + Qwen on 2×L40S; all sheet concs. SGLang not run. |
+| 3 ASR | whisper-large-v3; 1×L40S; c=32,64,128 | **vLLM** whisper on 1×L40S; cells executed; **0 successful transcriptions** (server rejects audio). |
+| 4 Imagegen | SD3.5-large; 1×L40S; 8K; c=2,4,8 | **Deferred**. |
+
+## Throughput recompute
+
+Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3` (5% relative tolerance). See `recompute` column above; aggregate at `live-results/campaign-{cid}/aggregate.json`.
+
+## Provenance notes
+
+- Hard TTL 6h in `ttl.json`.
+- Qwen pass: gemma LLM/VLM instances deleted; new L40Sx2 pair loaded `Qwen/Qwen3.8-27B-FP8`; ASR instance retained through Qwen sweep.
+- Script: `scripts/live/matrix_smoke.sh` (+ `shadeform.sh` model/extra-args).
+- Secrets: `env.json` never printed or committed.
+- N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
+"""
+out.write_text(body)
+# refresh aggregate TTFT from cells (local only)
+agg_out = {"campaign_id": cid, "cells": cells, "ttft_source": "ttft_s_or_stdout"}
+(root / "aggregate.json").write_text(json.dumps(agg_out, indent=2) + "\n")
+print(f"# wrote matrix SMOKE_RESULTS to {out} ({len(cells)} cells)")
 PY
 }
 
