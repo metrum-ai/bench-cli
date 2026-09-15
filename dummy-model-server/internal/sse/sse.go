@@ -10,10 +10,10 @@ import (
 
 // Writer emits OpenAI-style SSE data lines with optional adversarial framing.
 type Writer struct {
-	W         http.ResponseWriter
-	Flusher   http.Flusher
-	SplitSSE  bool
-	OmitDone  bool
+	W        http.ResponseWriter
+	Flusher  http.Flusher
+	SplitSSE bool
+	OmitDone bool
 }
 
 // New prepares headers and returns a Writer. Caller must have set status 200.

@@ -3,11 +3,26 @@
 
 //! Whisper-compatible English normalization and ASR accuracy metrics.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[clap(rename_all = "kebab-case")]
 pub enum Normalizer {
+    /// Whisper basic normalization plus English contraction and numeral folding.
+    #[default]
     WhisperEnglish,
+    /// Case, punctuation and bracketed-filler folding only.
     WhisperBasic,
+    /// Compare raw strings.
     None,
+}
+
+impl std::fmt::Display for Normalizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Normalizer::WhisperEnglish => write!(f, "whisper-english"),
+            Normalizer::WhisperBasic => write!(f, "whisper-basic"),
+            Normalizer::None => write!(f, "none"),
+        }
+    }
 }
 
 pub fn normalize(text: &str, normalizer: Normalizer) -> String {
@@ -134,6 +149,74 @@ mod tests {
         assert_eq!(
             normalize("I can't count one, two.", Normalizer::WhisperEnglish),
             "i can not count 1 2"
+        );
+    }
+
+    #[test]
+    fn wer_and_cer_match_hand_computed_reference_pairs() {
+        // (reference, hypothesis, WER, CER) computed by hand on normalized text.
+        let table = [
+            ("the quick brown fox", "the quick brown fox", 0.0, 0.0),
+            // one substitution out of four words; "fox"->"cat" is 3 of 19 chars.
+            (
+                "the quick brown fox",
+                "the quick brown cat",
+                0.25,
+                3.0 / 19.0,
+            ),
+            // one deletion out of four words; " fox" is 4 of 19 chars.
+            ("the quick brown fox", "the quick brown", 0.25, 4.0 / 19.0),
+            // one insertion against three reference words.
+            ("the quick fox", "the very quick fox", 1.0 / 3.0, 5.0 / 13.0),
+        ];
+        for (reference, hypothesis, wer, cer) in table {
+            let got_wer = word_error_rate(reference, hypothesis, Normalizer::WhisperEnglish);
+            let got_cer = character_error_rate(reference, hypothesis, Normalizer::WhisperEnglish);
+            assert!(
+                (got_wer.unwrap() - wer).abs() < 1e-9,
+                "WER {reference:?} vs {hypothesis:?}: got {got_wer:?}, want {wer}"
+            );
+            assert!(
+                (got_cer.unwrap() - cer).abs() < 1e-9,
+                "CER {reference:?} vs {hypothesis:?}: got {got_cer:?}, want {cer}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalizer_choice_changes_the_score() {
+        let reference = "I can't count one";
+        let hypothesis = "i can not count 1";
+        assert_eq!(
+            word_error_rate(reference, hypothesis, Normalizer::WhisperEnglish),
+            Some(0.0)
+        );
+        // Basic normalization keeps the contraction and the spelled-out
+        // numeral: two substitutions and one insertion over four words.
+        assert_eq!(
+            word_error_rate(reference, hypothesis, Normalizer::WhisperBasic),
+            Some(0.75)
+        );
+        // Raw comparison additionally sees the leading capital.
+        assert_eq!(
+            word_error_rate(reference, hypothesis, Normalizer::None),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn empty_reference_scores_only_when_hypothesis_is_empty() {
+        assert_eq!(
+            word_error_rate("", "", Normalizer::WhisperEnglish),
+            Some(0.0)
+        );
+        assert_eq!(
+            word_error_rate("", "text", Normalizer::WhisperEnglish),
+            None
+        );
+        assert_eq!(
+            character_error_rate("", "text", Normalizer::WhisperEnglish),
+            None
         );
     }
 

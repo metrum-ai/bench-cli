@@ -162,6 +162,13 @@ struct Args {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "Re-encode images as JPEG instead of sending the original bytes"
+    )]
+    reencode_jpeg: bool,
+
+    #[arg(
+        long,
         default_value = "low",
         value_enum,
         help = "Image detail level: 'low' or 'high'"
@@ -859,6 +866,7 @@ fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoint
             "num_images_batch": args.num_images_batch,
             "image_cache_size": args.image_cache_size,
             "max_image_dimension": args.max_image_dimension,
+            "reencode_jpeg": args.reencode_jpeg,
             "image_detail": format!("{}", args.image_detail),
             "server_side_download": args.server_side_download,
         },
@@ -971,6 +979,7 @@ impl ImageCache {
         path: &str,
         max_dimension: Option<u32>,
         timeout_secs: u64,
+        reencode_jpeg: bool,
     ) -> Result<ImageData, Box<dyn Error + Send + Sync>> {
         if let Some(data) = self.cache.get(path) {
             debug!("Cache hit for image: {}", path);
@@ -1009,10 +1018,7 @@ impl ImageCache {
                 .map_err(|e| format!("Failed to read local image file '{}': {}", path, e))?
         };
 
-        let mut img = image::load_from_memory(&image_data)
-            .map_err(|e| format!("Failed to decode image from '{}': {}", path, e))?;
         let detected_format = image::guess_format(&image_data).ok();
-        let mut encoded = image_data;
         let mut mime_type = match detected_format {
             Some(image::ImageFormat::Png) => "image/png",
             Some(image::ImageFormat::Gif) => "image/gif",
@@ -1021,28 +1027,54 @@ impl ImageCache {
         }
         .to_string();
 
-        // Resize image if max_dimension is specified and image exceeds it
-        if let Some(max_dim) = max_dimension {
-            let width = img.width();
-            let height = img.height();
+        // Read the header for dimensions; the payload stays byte-identical to
+        // the source unless a resize or an explicit re-encode is requested.
+        let (source_width, source_height) =
+            image::ImageReader::new(std::io::Cursor::new(&image_data))
+                .with_guessed_format()
+                .map_err(|e| format!("Failed to read image header from '{}': {}", path, e))?
+                .into_dimensions()
+                .map_err(|e| format!("Failed to read image size from '{}': {}", path, e))?;
 
-            if width > max_dim || height > max_dim {
-                let scale = max_dim as f32 / width.max(height) as f32;
-                let new_width = (width as f32 * scale) as u32;
-                let new_height = (height as f32 * scale) as u32;
+        let oversized =
+            max_dimension.is_some_and(|max_dim| source_width > max_dim || source_height > max_dim);
 
+        let (encoded, width, height) = if oversized || reencode_jpeg {
+            let mut img = image::load_from_memory(&image_data)
+                .map_err(|e| format!("Failed to decode image from '{}': {}", path, e))?;
+            if oversized {
+                let max_dim = max_dimension.expect("oversized implies a limit");
+                let scale = max_dim as f32 / source_width.max(source_height) as f32;
+                let new_width = (source_width as f32 * scale) as u32;
+                let new_height = (source_height as f32 * scale) as u32;
                 img = img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3);
-                let mut cursor = std::io::Cursor::new(Vec::new());
-                img.write_to(&mut cursor, image::ImageFormat::Png)?;
-                encoded = cursor.into_inner();
-                mime_type = "image/png".to_string();
-
                 debug!(
                     "Resized image from {}x{} to {}x{}",
-                    width, height, new_width, new_height
+                    source_width, source_height, new_width, new_height
                 );
             }
-        }
+            let format = if reencode_jpeg {
+                image::ImageFormat::Jpeg
+            } else {
+                image::ImageFormat::Png
+            };
+            let mut cursor = std::io::Cursor::new(Vec::new());
+            // JPEG cannot store alpha; drop it rather than failing the request.
+            if format == image::ImageFormat::Jpeg {
+                image::DynamicImage::ImageRgb8(img.to_rgb8()).write_to(&mut cursor, format)?;
+            } else {
+                img.write_to(&mut cursor, format)?;
+            }
+            mime_type = match format {
+                image::ImageFormat::Jpeg => "image/jpeg",
+                _ => "image/png",
+            }
+            .to_string();
+            let dimensions = (img.width(), img.height());
+            (cursor.into_inner(), dimensions.0, dimensions.1)
+        } else {
+            (image_data, source_width, source_height)
+        };
 
         let base64_data = base64::engine::general_purpose::STANDARD.encode(&encoded);
         let size_bytes = encoded.len() as u64;
@@ -1050,8 +1082,8 @@ impl ImageCache {
         let image_data = ImageData {
             base64_data,
             mime_type,
-            width: img.width(),
-            height: img.height(),
+            width,
+            height,
             size_bytes,
             url: path.to_string(), // Store the original URL/path
         };
@@ -1279,7 +1311,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         for rec in &records {
             for url in &rec.1 {
                 if let Err(e) = image_cache
-                    .get_or_load(&client, url, args.max_image_dimension, args.request_timeout)
+                    .get_or_load(
+                        &client,
+                        url,
+                        args.max_image_dimension,
+                        args.request_timeout,
+                        args.reencode_jpeg,
+                    )
                     .await
                 {
                     warn!("Image preload failed for {url}: {e}");
@@ -1421,6 +1459,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             url,
                             args.max_image_dimension,
                             args.request_timeout,
+                            args.reencode_jpeg,
                         )
                         .await
                     {
@@ -1451,6 +1490,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             &selected_record.1[0],
                             args.max_image_dimension,
                             args.request_timeout,
+                            args.reencode_jpeg,
                         )
                         .await
                     {
@@ -1482,6 +1522,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                 &additional_record.1[0],
                                 args.max_image_dimension,
                                 args.request_timeout,
+                                args.reencode_jpeg,
                             )
                             .await
                         {
@@ -1512,6 +1553,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         &selected_record.1[0],
                         args.max_image_dimension,
                         args.request_timeout,
+                        args.reencode_jpeg,
                     )
                     .await
                 {
@@ -1661,7 +1703,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     total_tokens,
                     &image_stats,
                 );
-                let record = metrumbench::record::RequestRecord::success(
+                let mut record = metrumbench::record::RequestRecord::success(
                     seq,
                     phase,
                     endpoint_name.clone(),
@@ -1675,6 +1717,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     total_tokens,
                 )
                 .with_schedule(scheduled_delay, queue_delay);
+                // Payload size is what the server actually received, so it
+                // reflects --max-image-dimension and --reencode-jpeg.
+                record
+                    .modality_metrics
+                    .insert("image_count".to_string(), image_stats.len() as f64);
+                record.modality_metrics.insert(
+                    "image_bytes".to_string(),
+                    image_stats.iter().map(|(size, _)| *size).sum::<u64>() as f64,
+                );
                 sink.write(&record)?;
                 shared_records.push(record);
                 completed += 1;

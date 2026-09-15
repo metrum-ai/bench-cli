@@ -25,9 +25,16 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **Error rate**: measured failures divided by measured attempts.
 - **Goodput**: measured successes satisfying every configured TTFT, TPOT, and
   E2E SLO divided by the window.
-- **WER/CER**: edit distance after shared Whisper-English normalization,
-  divided by normalized reference word/character count.
+- **WER/CER**: edit distance after normalization, divided by the normalized
+  reference word/character count. `--normalizer` selects
+  `whisper-english` (default), `whisper-basic`, or `none`, and the choice is
+  recorded in the run configuration because scores are only comparable within
+  one setting.
 - **RTFx client**: audio duration divided by client request duration.
+- **VLM image payload**: the source bytes are sent unchanged, so
+  `modality_metrics.image_bytes` matches the input file. Re-encoding happens
+  only when `--max-image-dimension` forces a resize or `--reencode-jpeg` is
+  requested; either way the payload size reflects what the server received.
 
 Distributions report `n`, min, max, arithmetic mean, sample standard
 deviation, median absolute deviation, and Hyndman-Fan type 7 p50/p90/p95/p99.
