@@ -4,7 +4,3 @@ title = "metrum-ai-bench gitleaks configuration"
 
 [extend]
 useDefault = true
-
-[allowlist]
-description = "Assessment preserves historical findings verbatim by policy"
-paths = ['''docs/OSS_READINESS_ASSESSMENT\.md''']
