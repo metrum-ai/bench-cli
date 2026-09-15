@@ -41,8 +41,7 @@ computation, throughput windows, error accounting) must:
 3. Add or update a golden test that pins the new value on a fixed input.
 4. Bump the output `schema_version` when the JSON output shape changes.
 
-See docs/OSS_READINESS_ASSESSMENT.md for the current list of known
-methodology defects and the planned fixes.
+Track measurement and packaging gaps via GitHub issues labeled `measurement`, `oss-readiness`, and `severity/*`.
 
 ## Pull requests
 

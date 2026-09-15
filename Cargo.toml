@@ -18,7 +18,10 @@ exclude = [
     ".cursor/**",
     "dummy-model-server/**",
     "scripts/live/**",
-    "docs/OSS_READINESS_ASSESSMENT.md",
+    "docs/reviews/**",
+    "docs/CAMPAIGN.md",
+    "docs/HISTORY_REWRITE.md",
+    "CLAUDE.md",
 ]
 
 [features]
