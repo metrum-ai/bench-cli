@@ -11,7 +11,8 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   arrival and actual send. This is the headline open-loop latency.
 - **TTFT**: first visible output delta minus send. Role and reasoning-only
   deltas do not count. Missing visible output is `no_output_token`. TTFT
-  includes connection setup, TLS, and queueing by design.
+  includes connection setup, TLS, and queueing by design. Non-streaming
+  responses report `ttft_s: null` (undefined; never fabricated from E2E).
 - **First byte**: response headers received minus send (`first_byte_s`).
   Separates gateway/header delay from prefill. `connect_s` is not yet
   recorded (deferred post-v1).
@@ -34,11 +35,18 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   `whisper-english` (default), `whisper-basic`, or `none`, and the choice is
   recorded in the run configuration because scores are only comparable within
   one setting.
-- **RTFx client**: audio duration divided by client request duration.
+- **RTFx client**: audio duration divided by client request duration
+  (`modality_metrics.rtfx_client` on measured-phase ASR records). This is the
+  sole RTFx definition; legacy whole-run aggregates are not emitted.
+- **Imagegen latency**: time until the response body bytes are fully read.
+  Decode, hash, and artifact writes happen after the timer stops. Throughput
+  denominators use the measured-phase window (warmup excluded).
 - **VLM image payload**: the source bytes are sent unchanged, so
   `modality_metrics.image_bytes` matches the input file. Re-encoding happens
   only when `--max-image-dimension` forces a resize or `--reencode-jpeg` is
   requested; either way the payload size reflects what the server received.
+  VLM honors `--system-prompt` (empty disables), `--min-tokens`, and
+  `--tokenizer` like the LLM binary.
 
 Distributions report `n`, min, max, arithmetic mean, sample standard
 deviation, median absolute deviation, and Hyndman-Fan type 7 p50/p90/p95/p99.

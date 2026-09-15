@@ -205,8 +205,11 @@ struct Args {
     #[arg(long)]
     data_log: String,
 
-    #[arg(long)]
-    summary_json: String,
+    #[arg(
+        long,
+        help = "Optional path to write the legacy imagegen summary JSON (also printed to stdout)"
+    )]
+    summary_json: Option<String>,
 
     #[arg(long, default_value = "debug.log")]
     debug_log: String,
@@ -222,6 +225,13 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     overwrite_artifacts: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
+    )]
+    fail_on_error: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -565,6 +575,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             throughput_bin_seconds: 10.0,
             insecure: args.insecure,
             ca_cert: args.ca_cert.clone(),
+            fail_on_error: args.fail_on_error,
         },
         effective_system_prompt: None,
         body_template: json!({
@@ -589,11 +600,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         &metrics.outcomes,
         started_at,
         completed_at,
-        run_start.elapsed(),
+        Duration::from_secs_f64(window_seconds),
         stop.is_stopped(),
     );
-    fs::write(&args.summary_json, serde_json::to_string_pretty(&summary)?)?;
+    if let Some(path) = &args.summary_json {
+        fs::write(path, serde_json::to_string_pretty(&summary)?)?;
+    }
     println!("{}", serde_json::to_string_pretty(&summary)?);
+    let failed = metrics
+        .outcomes
+        .iter()
+        .filter(|o| {
+            o.request_id
+                .parse::<u32>()
+                .ok()
+                .map(|n| n > args.warmup_requests)
+                .unwrap_or(true)
+                && o.status != "success"
+        })
+        .count();
+    if args.fail_on_error && failed > 0 {
+        return Err(anyhow::anyhow!("Test completed with {failed} errors").into());
+    }
     Ok(())
 }
 
@@ -695,6 +723,17 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
 
 fn normalize_base_url(url: &str) -> String {
     url.trim_end_matches('/').to_string()
+}
+
+/// Accept either an OpenAI base URL (`.../v1`) or a full generations path
+/// (`.../v1/images/generations`).
+fn generations_url(endpoint_url: &str) -> String {
+    let trimmed = endpoint_url.trim_end_matches('/');
+    if trimmed.ends_with("/images/generations") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/images/generations")
+    }
 }
 
 fn endpoint_name(url: &str, idx: usize) -> String {
@@ -805,7 +844,6 @@ async fn run_logical_request(
     let size = prompt.size.clone().unwrap_or_else(|| args.size.clone());
     let prompt_sha256 = hex_sha256(prompt.prompt.as_bytes());
     let started_at = Utc::now();
-    let request_start = Instant::now();
     let mut attempts = Vec::new();
     let mut last_error_type = None;
     let mut last_error_message = None;
@@ -831,10 +869,9 @@ async fn run_logical_request(
         )
         .await;
         ep_rt.inflight.fetch_sub(1, Ordering::SeqCst);
-        let latency_ms = attempt_start.elapsed().as_secs_f64() * 1000.0;
-
         match result {
-            Ok((status, artifacts, response_bytes, n_returned, first_byte)) => {
+            Ok((status, artifacts, response_bytes, n_returned, first_byte, service_latency)) => {
+                let latency_ms = service_latency.as_secs_f64() * 1000.0;
                 attempts.push(AttemptRecord {
                     attempt: attempt_index + 1,
                     endpoint_name: ep.name.clone(),
@@ -843,7 +880,8 @@ async fn run_logical_request(
                 });
                 ep_rt.failures.store(0, Ordering::SeqCst);
                 let completed_at = Utc::now();
-                let logical_latency_ms = request_start.elapsed().as_secs_f64() * 1000.0;
+                // Sum attempt service times (excludes decode/hash/write and retry sleep).
+                let logical_latency_ms: f64 = attempts.iter().map(|a| a.latency_ms).sum();
                 return RequestOutcome {
                     request_id,
                     prompt_id: prompt.id,
@@ -869,6 +907,7 @@ async fn run_logical_request(
                 };
             }
             Err((err_type, http_status, err_message)) => {
+                let latency_ms = attempt_start.elapsed().as_secs_f64() * 1000.0;
                 attempts.push(AttemptRecord {
                     attempt: attempt_index + 1,
                     endpoint_name: ep.name.clone(),
@@ -891,7 +930,7 @@ async fn run_logical_request(
     }
 
     let completed_at = Utc::now();
-    let latency_ms = request_start.elapsed().as_secs_f64() * 1000.0;
+    let latency_ms: f64 = attempts.iter().map(|a| a.latency_ms).sum();
     let endpoint = attempts
         .last()
         .map(|a| a.endpoint_name.clone())
@@ -996,8 +1035,9 @@ async fn make_image_request(
     prompt: &PromptRow,
     seed: Option<i64>,
     size: &str,
-) -> Result<(u16, Vec<ImageArtifact>, usize, u32, Duration), (String, Option<u16>, String)> {
-    let url = format!("{}/images/generations", endpoint.url);
+) -> Result<(u16, Vec<ImageArtifact>, usize, u32, Duration, Duration), (String, Option<u16>, String)>
+{
+    let url = generations_url(&endpoint.url);
     let mut body = Map::new();
     body.insert("model".to_string(), json!(args.model));
     body.insert("prompt".to_string(), json!(prompt.prompt));
@@ -1066,6 +1106,9 @@ async fn make_image_request(
         };
         (err_type.to_string(), Some(status), e.to_string())
     })?;
+    // Service latency ends once the response body is fully read; decode/hash/write
+    // below are client-side and excluded from the measured interval.
+    let service_latency = send_start.elapsed();
     if !(200..300).contains(&status) {
         return Err((
             "http_error".to_string(),
@@ -1141,6 +1184,7 @@ async fn make_image_request(
         response_bytes,
         data.len() as u32,
         first_byte,
+        service_latency,
     ))
 }
 
@@ -1417,12 +1461,13 @@ mod tests {
             insecure: false,
             artifact_dir: "/tmp/a".to_string(),
             data_log: "/tmp/d.jsonl".to_string(),
-            summary_json: "/tmp/s.json".to_string(),
+            summary_json: Some("/tmp/s.json".to_string()),
             debug_log: "/tmp/debug.log".to_string(),
             error_log: "/tmp/error.log".to_string(),
             save_response_json: false,
             no_save_images: false,
             overwrite_artifacts: false,
+            fail_on_error: false,
         };
         let now = Utc::now();
         let outcome = RequestOutcome {
@@ -1500,12 +1545,13 @@ mod tests {
             insecure: false,
             artifact_dir: "/tmp/a".to_string(),
             data_log: "/tmp/d.jsonl".to_string(),
-            summary_json: "/tmp/s.json".to_string(),
+            summary_json: Some("/tmp/s.json".to_string()),
             debug_log: "/tmp/debug.log".to_string(),
             error_log: "/tmp/error.log".to_string(),
             save_response_json: false,
             no_save_images: false,
             overwrite_artifacts: false,
+            fail_on_error: false,
         };
         let now = Utc::now();
         let mut outcomes = Vec::new();
@@ -1540,5 +1586,25 @@ mod tests {
         assert_eq!(errors.len(), 2);
         assert!(errors.iter().any(|e| e["http_status"] == 429));
         assert!(errors.iter().any(|e| e["http_status"] == 500));
+    }
+
+    #[test]
+    fn generations_url_accepts_base_or_full_path() {
+        assert_eq!(
+            generations_url("http://localhost:8000/v1"),
+            "http://localhost:8000/v1/images/generations"
+        );
+        assert_eq!(
+            generations_url("http://localhost:8000/v1/"),
+            "http://localhost:8000/v1/images/generations"
+        );
+        assert_eq!(
+            generations_url("http://localhost:8000/v1/images/generations"),
+            "http://localhost:8000/v1/images/generations"
+        );
+        assert_eq!(
+            generations_url("http://localhost:8000/v1/images/generations/"),
+            "http://localhost:8000/v1/images/generations"
+        );
     }
 }

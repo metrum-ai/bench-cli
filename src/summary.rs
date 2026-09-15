@@ -440,6 +440,7 @@ mod tests {
             throughput_bin_seconds: 10.0,
             insecure: false,
             ca_cert: None,
+            fail_on_error: false,
         }
     }
 

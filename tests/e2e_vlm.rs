@@ -246,3 +246,37 @@ fn vlm_warmup_requests_are_logged_not_dropped() {
         "warmup request must not be measured"
     );
 }
+
+/// F-10: VLM honors --system-prompt (empty disables), --min-tokens, and stamps
+/// effective_system_prompt like the LLM binary.
+#[test]
+fn vlm_honors_system_prompt_and_min_tokens() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    run_vlm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        1,
+        &["--system-prompt", "", "--min-tokens", "3", "--ignore-eos"],
+    );
+
+    let summary = summary_record(&fixture.data_log).expect("shared summary");
+    let config = summary.get("config").expect("config");
+    assert!(
+        config["effective_system_prompt"].is_null(),
+        "empty --system-prompt must disable the system message"
+    );
+    assert_eq!(config["common"]["min_tokens"], 3);
+    assert_eq!(config["common"]["ignore_eos"], true);
+    let body = &config["body_template"];
+    let body_str = body.to_string();
+    assert!(
+        !body_str.contains("\"role\":\"system\"") && !body_str.contains("\"role\": \"system\""),
+        "body_template must omit system message when disabled: {body_str}"
+    );
+    assert_eq!(body["min_tokens"], 3);
+    assert_eq!(body["ignore_eos"], true);
+}

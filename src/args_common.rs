@@ -110,6 +110,13 @@ pub struct CommonBenchArgs {
         help = "Disable TLS certificate verification (opt-in; stamped into config)"
     )]
     pub insecure: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
+    )]
+    pub fail_on_error: bool,
 }
 
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
@@ -132,6 +139,7 @@ pub struct EffectiveCommonArgs {
     pub insecure: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_cert: Option<String>,
+    pub fail_on_error: bool,
 }
 
 impl From<&CommonBenchArgs> for EffectiveCommonArgs {
@@ -153,6 +161,7 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             throughput_bin_seconds: common.throughput_bin_seconds,
             insecure: common.insecure,
             ca_cert: common.ca_cert.clone(),
+            fail_on_error: common.fail_on_error,
         }
     }
 }
@@ -241,6 +250,7 @@ mod tests {
             throughput_bin_seconds: 10.0,
             ca_cert: None,
             insecure: false,
+            fail_on_error: false,
         };
         assert_eq!(
             args.effective_system_prompt("default"),
