@@ -229,7 +229,7 @@ impl Metrics {
         &mut self,
         endpoint_name: &str,
         response_time: Duration,
-        ttft: Duration,
+        ttft: Option<Duration>,
         tpot: Option<f64>,
         prompt_tokens: u64,
         completion_tokens: u64,
@@ -238,7 +238,9 @@ impl Metrics {
         completion_words: usize,
     ) {
         self.response_times.push(response_time);
-        self.ttft_times.push(ttft);
+        if let Some(ttft) = ttft {
+            self.ttft_times.push(ttft);
+        }
         if let Some(t) = tpot {
             self.tpot_times.push(t);
         }
@@ -252,7 +254,9 @@ impl Metrics {
             .entry(endpoint_name.to_string())
             .or_default();
         ep.response_times.push(response_time);
-        ep.ttft_times.push(ttft);
+        if let Some(ttft) = ttft {
+            ep.ttft_times.push(ttft);
+        }
         if let Some(t) = tpot {
             ep.tpot_times.push(t);
         }
@@ -762,7 +766,8 @@ fn classify_stream_error(e: &reqwest::Error, chunks_processed: usize) -> String 
 struct StreamMetrics {
     latency: Duration,
     first_byte: Duration,
-    ttft: Duration,
+    /// `None` for non-streaming responses (TTFT is undefined; do not fabricate).
+    ttft: Option<Duration>,
     first_reasoning: Option<Duration>,
     itl: Vec<Duration>,
     prompt_tokens: u64,
@@ -945,7 +950,7 @@ async fn make_request(
         Ok(StreamMetrics {
             latency: start_time.elapsed(),
             first_byte,
-            ttft,
+            ttft: Some(ttft),
             first_reasoning: first_reasoning_time,
             itl,
             prompt_tokens,
@@ -972,14 +977,15 @@ async fn make_request(
         };
         let first_byte = start_time.elapsed();
 
-        let total_time = start_time.elapsed();
         let status = response.status();
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|_| String::new());
             error!("HTTP {}: {}", status, error_body.trim());
             return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
         }
+        // Clock stops after the full body is consumed (not at headers).
         let json_resp: Value = response.json().await?;
+        let total_time = start_time.elapsed();
 
         // Check for multiple choices in non-streaming response
         if let Some(choices) = json_resp.get("choices").and_then(|c| c.as_array()) {
@@ -1027,10 +1033,11 @@ async fn make_request(
             .map(parse_token_count)
             .unwrap_or(0);
 
+        // Non-streaming: TTFT is not measured (do not fabricate latency as TTFT).
         Ok(StreamMetrics {
             latency: total_time,
             first_byte,
-            ttft: total_time,
+            ttft: None,
             first_reasoning: None,
             itl: Vec::new(),
             prompt_tokens,
@@ -1675,7 +1682,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         sm.latency,
-                        Some(sm.ttft),
+                        sm.ttft,
                         sm.first_reasoning,
                         sm.itl,
                         sm.prompt_tokens,
@@ -1749,7 +1756,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let phase = rec.phase;
         if rec.is_success() {
             let response_time = Duration::from_secs_f64(rec.latency_s);
-            let ttft = Duration::from_secs_f64(rec.ttft_s.unwrap_or(0.0));
+            let ttft = rec.ttft_s.map(Duration::from_secs_f64);
             let prompt_tokens = rec.prompt_tokens;
             let completion_tokens = rec.completion_tokens;
             let total_tokens = rec.total_tokens;
@@ -1780,16 +1787,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 continue;
             }
 
-            let tpot = if completion_tokens > 1 {
-                response_time.checked_sub(ttft).and_then(|gen_time| {
-                    if gen_time.is_zero() {
-                        None
-                    } else {
-                        Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
-                    }
-                })
-            } else {
-                None
+            let tpot = match ttft {
+                Some(ttft) if completion_tokens > 1 => {
+                    response_time.checked_sub(ttft).and_then(|gen_time| {
+                        if gen_time.is_zero() {
+                            None
+                        } else {
+                            Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
+                        }
+                    })
+                }
+                _ => None,
             };
             metrics.record_success(
                 &endpoint_name,
@@ -1904,7 +1912,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     // After metrics collection, printing, and logging, check if there were any errors
-    if !metrics.errors.is_empty() {
+    if args.common.fail_on_error && !metrics.errors.is_empty() {
         Err(anyhow::anyhow!("Test completed with errors")
             .context(format!("Total errors: {}", metrics.errors.len()))
             .context("Load test encountered failures")

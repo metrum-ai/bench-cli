@@ -46,6 +46,7 @@ fn cli_md_lists_shared_workload_flags_from_llm_help() {
         "--unique-prompts",
         "--request-rate",
         "--arrival",
+        "--fail-on-error",
     ] {
         assert!(llm.contains(flag), "binary --help missing {flag}");
         assert!(

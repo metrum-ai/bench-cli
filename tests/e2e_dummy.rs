@@ -472,3 +472,64 @@ fn llm_unique_prompts_include_run_id_and_seed() {
         assert_eq!(rec["run_id"].as_str(), Some(run_id));
     }
 }
+
+/// F-08: non-streaming LLM must not fabricate TTFT (null like VLM).
+#[test]
+fn llm_non_streaming_reports_null_ttft() {
+    let Some(dummy) = spawn_dummy(&["-latency", "50ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let prompts = tmp.path().join("prompts.jsonl");
+    {
+        let mut f = std::fs::File::create(&prompts).unwrap();
+        writeln!(f, r#"{{"prompt":"Hi"}}"#).unwrap();
+    }
+    let data_log = tmp.path().join("out.jsonl");
+    let status = Command::new(llm_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "nonstream",
+            "--num-requests",
+            "2",
+            "--concurrency",
+            "1",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "16",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .status()
+        .expect("run llm");
+    assert!(status.success(), "llm bench failed");
+
+    let records = request_records(&data_log);
+    assert_eq!(records.len(), 2);
+    for record in &records {
+        assert!(
+            record["ttft_s"].is_null(),
+            "non-streaming record reported ttft {:?}",
+            record["ttft_s"]
+        );
+        assert!(record["latency_s"].as_f64().expect("latency_s") >= 0.050);
+    }
+    let summary = common::summary_record(&data_log).expect("summary");
+    assert_eq!(summary["ttft_s"]["n"], 0);
+}

@@ -13,6 +13,8 @@ Each line is a complete JSON object and carries `schema_version`.
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
 - ISO `started_at`/`completed_at`
 - monotonic `latency_s`, optional `ttft_s`, `first_byte_s`, `first_reasoning_s`, and `itl_s`
+  (`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated
+  from E2E latency)
 - optional `scheduled_offset_s` and `queue_delay_s`
 - server usage counts plus optional `tokenized_*` counts and `usage_missing`
 - typed `error`, `partial`, and modality-specific numeric metrics
