@@ -11,6 +11,7 @@ pub mod load;
 pub mod modality;
 pub mod prompt_inputs;
 pub mod record;
+pub mod runner;
 pub mod sse;
 pub mod stats;
 pub mod strategic;

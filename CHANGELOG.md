@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- LLM runner: shared `runner.rs` timestamps send/completion inside the task, writes `request.v3` immediately, handles SIGINT/SIGTERM, and derives `window_seconds` from records (closed-loop ~7.9 req/s at c=4/n=16 on the dummy). Schema bump to `request.v3` / `summary.v3` (field-additive). E2e covers window, flush-during-launch, and SIGTERM JSONL prefix.
+
 ## v0.1.82 (2026-09-15)
 
 - Load scheduler: `FakeClock` for deterministic open-loop tests; `docs/CLI.md` regenerated from clap `--help` via `scripts/render_cli_help.sh`.

@@ -19,7 +19,6 @@ use std::fs::File;
 use std::{
     collections::HashMap,
     error::Error,
-    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -1522,8 +1521,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .build()?;
 
     let mut prompts = load_metrumbench_llm_prompts(&args.prompts)?;
-    let tokenizer =
-        metrumbench::tokenizer::LocalTokenizer::from_file(args.common.tokenizer.as_deref())?;
 
     // Shuffle prompts once for even distribution, then cycle through them deterministically
     let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
@@ -1540,16 +1537,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         metrumbench::jsonl::JsonlSink::create(&args.data_log)
             .map_err(|e| format!("Failed to open data log file '{}': {}", args.data_log, e))?,
     );
-    let stop_issuing = Arc::new(AtomicBool::new(false));
-    {
-        let stop_issuing = stop_issuing.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                warn!("Ctrl-C received; stopping new requests and writing a partial summary");
-                stop_issuing.store(true, Ordering::SeqCst);
-            }
-        });
-    }
+    let stop = metrumbench::runner::StopFlag::new();
+    metrumbench::runner::install_stop_handlers(stop.clone());
+    let arrival_kind = args.common.arrival_kind();
 
     let mut metrics = Metrics::new(args.scenario.clone());
     // Initialise semaphore with 1 permit if ramp-up is requested, otherwise with full capacity.
@@ -1584,9 +1574,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let start_time = Instant::now();
     let ramp_up_start = start_time;
+    let (record_tx, mut record_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
 
     'request_loop: for slot in slots {
-        if stop_issuing.load(Ordering::SeqCst) {
+        if stop.is_stopped() {
             info!("Stop flag set; not issuing further requests");
             break 'request_loop;
         }
@@ -1611,7 +1603,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let permit = semaphore.clone().acquire_owned().await?;
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
-        let queue_delay = start_time.elapsed().saturating_sub(slot.scheduled_delay);
+        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+            arrival_kind,
+            start_time.elapsed(),
+            slot.scheduled_delay,
+        );
         let client = client.clone();
         let prompt = metrumbench::args_common::CommonBenchArgs::unique_prompt(
             &prompts[i % prompts.len()],
@@ -1635,9 +1631,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let request_timeout = args.request_timeout;
         let mode = args.mode;
         let streaming = args.streaming;
-        let started_at = Utc::now();
         let seq = slot.seq;
+        let sink_task = sink.clone();
+        let record_tx = record_tx.clone();
+        let tokenizer_path = args.common.tokenizer.clone();
+        let scheduled_delay = slot.scheduled_delay;
+        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
         let handle = tokio::spawn(async move {
+            let started_at = Utc::now();
             let result = make_request(
                 &client,
                 &url,
@@ -1650,15 +1651,77 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .await;
             drop(permit);
             drop(endpoint_lease);
-            (
-                result,
-                endpoint_name,
-                seq,
-                phase,
-                started_at,
-                slot.scheduled_delay,
-                queue_delay,
-            )
+
+            let tokenizer = match metrumbench::tokenizer::LocalTokenizer::from_file(
+                tokenizer_path.as_deref(),
+            ) {
+                Ok(t) => t,
+                Err(_) => metrumbench::tokenizer::LocalTokenizer::from_file(None)
+                    .expect("disabled tokenizer"),
+            };
+
+            let record = match result {
+                Ok(sm) => {
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, sm.latency);
+                    let tokenized_prompt_tokens = tokenizer.count(&sm.prompt_text).ok().flatten();
+                    let tokenized_completion_tokens =
+                        tokenizer.count(&sm.completion_text).ok().flatten();
+                    let usage_missing = sm.completion_tokens == 0 && !sm.completion_text.is_empty();
+                    let mut rec = metrumbench::record::RequestRecord::success(
+                        seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        sm.latency,
+                        Some(sm.ttft),
+                        sm.first_reasoning,
+                        sm.itl,
+                        sm.prompt_tokens,
+                        sm.completion_tokens,
+                        sm.total_tokens,
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
+                    rec.tokenized_completion_tokens = tokenized_completion_tokens;
+                    rec.usage_missing = usage_missing;
+                    // Carry stream metrics fields via modality_metrics for console path.
+                    rec.modality_metrics
+                        .insert("prompt_words".into(), sm.prompt_words as f64);
+                    rec.modality_metrics
+                        .insert("completion_words".into(), sm.completion_words as f64);
+                    rec
+                }
+                Err(e) => {
+                    let latency = Utc::now()
+                        .signed_duration_since(started_at)
+                        .to_std()
+                        .unwrap_or(Duration::ZERO);
+                    let completed_at =
+                        metrumbench::runner::completed_at_from_start(started_at, latency);
+                    let mut rec = metrumbench::record::RequestRecord::failed(
+                        seq,
+                        phase,
+                        endpoint_name.clone(),
+                        started_at,
+                        completed_at,
+                        latency,
+                        metrumbench::jsonl::classify_error(e.as_ref()),
+                    );
+                    if record_schedule {
+                        rec = rec.with_schedule(scheduled_delay, queue_delay);
+                    }
+                    rec
+                }
+            };
+
+            if let Err(e) = sink_task.write(&record) {
+                warn!("Failed to write request JSONL: {e}");
+            }
+            let _ = record_tx.send(record);
         });
         handles.push(handle);
 
@@ -1668,183 +1731,114 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             info!("Launched {} requests...", i + 1);
         }
     }
+    drop(record_tx);
 
     info!("All requests launched. Waiting for completion...");
 
     let mut errors = 0;
     let mut metrics_started = false;
     let mut records: Vec<metrumbench::record::RequestRecord> = Vec::new();
-    let mut window_start: Option<Instant> = None;
-    let mut window_end: Option<Instant> = None;
-    for handle in handles {
-        let (result, endpoint_name, seq, phase, started_at, scheduled_delay, queue_delay) =
-            match handle.await {
-                Ok(tuple) => tuple,
-                Err(e) => {
-                    error!("=== TASK EXECUTION ERROR ===");
-                    error!("Async task failed to complete");
-                    log_detailed_error(&e, "Task Execution");
-                    error!("Task context:");
-                    error!("  Request number: {}", completed + errors + 1);
-                    error!("  Total requests: {}", args.num_requests);
-                    error!("  Concurrency: {}", args.concurrency);
-                    error!("  Model: {}", args.model);
-                    error!("  Mode: {}", args.mode);
-                    error!("  Streaming: {}", args.streaming);
-                    error!(
-                        "  URL: {}",
-                        args.url.as_deref().unwrap_or("(multiple endpoints)")
-                    );
-                    if e.is_panic() {
-                        error!("Task Error Type: PANIC - The task panicked");
-                    } else if e.is_cancelled() {
-                        error!("Task Error Type: CANCELLED - The task was cancelled");
+
+    while let Some(rec) = record_rx.recv().await {
+        let endpoint_name = rec.endpoint.clone();
+        let phase = rec.phase;
+        if rec.is_success() {
+            let response_time = Duration::from_secs_f64(rec.latency_s);
+            let ttft = Duration::from_secs_f64(rec.ttft_s.unwrap_or(0.0));
+            let prompt_tokens = rec.prompt_tokens;
+            let completion_tokens = rec.completion_tokens;
+            let total_tokens = rec.total_tokens;
+            let prompt_words = rec
+                .modality_metrics
+                .get("prompt_words")
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let completion_words = rec
+                .modality_metrics
+                .get("completion_words")
+                .copied()
+                .unwrap_or(0.0) as usize;
+
+            if let Some(ramp_up) = effective_ramp_up {
+                if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
+                    metrics_started = true;
+                    metrics.metrics_start_time = Some(Instant::now());
+                    info!("Ramp-up complete. Starting metrics collection...");
+                }
+                if !metrics_started {
+                    records.push(rec);
+                    continue;
+                }
+            }
+            if phase == metrumbench::record::Phase::Warmup {
+                records.push(rec);
+                continue;
+            }
+
+            let tpot = if completion_tokens > 1 {
+                response_time.checked_sub(ttft).and_then(|gen_time| {
+                    if gen_time.is_zero() {
+                        None
                     } else {
-                        error!("Task Error Type: OTHER - Unknown task error");
+                        Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
                     }
-                    error!("=== END TASK EXECUTION ERROR ===");
-                    metrics.record_error("unknown", e.to_string());
-                    errors += 1;
-                    continue;
-                }
+                })
+            } else {
+                None
             };
-        match result {
-            Ok(sm) => {
-                let response_time = sm.latency;
-                let ttft = sm.ttft;
-                let prompt_tokens = sm.prompt_tokens;
-                let completion_tokens = sm.completion_tokens;
-                let total_tokens = sm.total_tokens;
-                let prompt_words = sm.prompt_words;
-                let completion_words = sm.completion_words;
-                let finished = Instant::now();
-                let sent = finished.checked_sub(response_time).unwrap_or(finished);
-                if phase == metrumbench::record::Phase::Measure {
-                    window_start = Some(window_start.map_or(sent, |s| s.min(sent)));
-                    window_end = Some(window_end.map_or(finished, |e| e.max(finished)));
-                }
-                let tokenized_prompt_tokens = tokenizer.count(&sm.prompt_text)?;
-                let tokenized_completion_tokens = tokenizer.count(&sm.completion_text)?;
-                let usage_missing = completion_tokens == 0 && !sm.completion_text.is_empty();
+            metrics.record_success(
+                &endpoint_name,
+                response_time,
+                ttft,
+                tpot,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                prompt_words,
+                completion_words,
+            );
+            completed += 1;
 
-                let mut rec = metrumbench::record::RequestRecord::success(
-                    seq,
-                    phase,
-                    endpoint_name.clone(),
-                    started_at,
-                    response_time,
-                    Some(ttft),
-                    sm.first_reasoning,
-                    sm.itl,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                )
-                .with_schedule(scheduled_delay, queue_delay);
-                rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
-                rec.tokenized_completion_tokens = tokenized_completion_tokens;
-                rec.usage_missing = usage_missing;
-                if let Err(e) = sink.write(&rec) {
-                    warn!("Failed to write request JSONL: {e}");
-                }
-                records.push(rec);
+            debug!(
+                "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
+                response_time, ttft, total_tokens
+            );
 
-                // Handle ramp-up metrics collection logic
-                if let Some(ramp_up) = effective_ramp_up {
-                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
-                        metrics_started = true;
-                        metrics.metrics_start_time = Some(Instant::now());
-                        info!("Ramp-up complete. Starting metrics collection...");
-                    }
-                    if !metrics_started {
-                        continue;
-                    }
-                }
-                if phase == metrumbench::record::Phase::Warmup {
-                    continue;
-                }
-
-                let tpot = if completion_tokens > 1 {
-                    response_time.checked_sub(ttft).and_then(|gen_time| {
-                        if gen_time.is_zero() {
-                            None
-                        } else {
-                            Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
-                        }
-                    })
-                } else {
-                    None
-                };
-                metrics.record_success(
-                    &endpoint_name,
-                    response_time,
-                    ttft,
-                    tpot,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    prompt_words,
-                    completion_words,
+            let percentage = (completed * 100) / (args.num_requests as usize);
+            if percentage >= last_percentage + 10 {
+                info!(
+                    "{}% complete ({}/{} requests)",
+                    percentage, completed, args.num_requests
                 );
-                completed += 1;
-
-                debug!(
-                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
-                    response_time, ttft, total_tokens
-                );
-
-                let percentage = (completed * 100) / (args.num_requests as usize);
-                if percentage >= last_percentage + 10 {
-                    info!(
-                        "{}% complete ({}/{} requests)",
-                        percentage, completed, args.num_requests
-                    );
-                    last_percentage = (percentage / 10) * 10;
-                }
-
-                if completed % 100 == 0 {
-                    info!("Completed {} requests...", completed);
-                }
+                last_percentage = (percentage / 10) * 10;
             }
-            Err(e) => {
-                error!("=== REQUEST EXECUTION ERROR ===");
-                error!("Request failed during execution");
-                log_detailed_error(e.as_ref(), "Request Processing");
-                error!("Request context:");
-                error!("  Request number: {}", completed + errors + 1);
-                error!("  Total requests: {}", args.num_requests);
-                error!("  Concurrency: {}", args.concurrency);
-                error!("  Model: {}", args.model);
-                error!("  Mode: {}", args.mode);
-                error!("  Streaming: {}", args.streaming);
-                error!(
-                    "  URL: {}",
-                    args.url.as_deref().unwrap_or("(multiple endpoints)")
-                );
-                error!("  Max Tokens: {}", args.max_tokens);
-                error!("  Temperature: {}", args.temperature);
-                error!("  Request Timeout: {}s", args.request_timeout);
-                error!("  Connect Timeout: {}s", args.connect_timeout);
-                error!("=== END REQUEST EXECUTION ERROR ===");
-                let rec = metrumbench::record::RequestRecord::failed(
-                    seq,
-                    phase,
-                    endpoint_name.clone(),
-                    started_at,
-                    Duration::ZERO,
-                    metrumbench::jsonl::classify_error(e.as_ref()),
-                );
-                if let Err(write_err) = sink.write(&rec) {
-                    warn!("Failed to write request JSONL: {write_err}");
-                }
-                records.push(rec);
-                if (effective_ramp_up.is_none() || metrics_started)
-                    && phase != metrumbench::record::Phase::Warmup
-                {
-                    metrics.record_error(&endpoint_name, e.to_string());
-                }
-                errors += 1;
+
+            if completed % 100 == 0 {
+                info!("Completed {} requests...", completed);
             }
+            records.push(rec);
+        } else {
+            let err_msg = rec
+                .error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".into());
+            error!("Request failed: {err_msg}");
+            if (effective_ramp_up.is_none() || metrics_started)
+                && phase != metrumbench::record::Phase::Warmup
+            {
+                metrics.record_error(&endpoint_name, err_msg);
+            }
+            errors += 1;
+            records.push(rec);
+        }
+    }
+
+    // Ensure spawned tasks finished (channel already drained when all senders dropped).
+    for handle in handles {
+        if let Err(e) = handle.await {
+            error!("Task join error: {e}");
+            errors += 1;
         }
     }
 
@@ -1854,15 +1848,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     metrics.print_stats(&resolved_endpoints);
 
-    let window_seconds = match (window_start, window_end) {
-        (Some(s), Some(e)) => e.saturating_duration_since(s).as_secs_f64(),
-        _ => metrics.start_time.elapsed().as_secs_f64(),
+    let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
+    let window_seconds = if window_seconds > 0.0 {
+        window_seconds
+    } else {
+        metrics.start_time.elapsed().as_secs_f64()
     };
     let slos = args.common.parse_slos()?;
     let mut run_summary = metrumbench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
-        stop_issuing.load(Ordering::SeqCst),
+        stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
     );
