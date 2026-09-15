@@ -128,6 +128,14 @@ struct Args {
         help = "Language code for transcription (e.g. en, es, fr). Sent in the multipart request to avoid vLLM returning null language in verbose_json responses."
     )]
     language: String,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        help = "Text normalization applied to both sides of WER/CER"
+    )]
+    normalizer: metrumbench::asr::Normalizer,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -619,22 +627,20 @@ impl Metrics {
     }
 }
 
-fn word_error_rate(reference: &str, hypothesis: &str) -> f64 {
-    metrumbench::asr::word_error_rate(
-        reference,
-        hypothesis,
-        metrumbench::asr::Normalizer::WhisperEnglish,
-    )
-    .unwrap_or(1.0)
+fn word_error_rate(
+    reference: &str,
+    hypothesis: &str,
+    normalizer: metrumbench::asr::Normalizer,
+) -> f64 {
+    metrumbench::asr::word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
 }
 
-fn character_error_rate(reference: &str, hypothesis: &str) -> f64 {
-    metrumbench::asr::character_error_rate(
-        reference,
-        hypothesis,
-        metrumbench::asr::Normalizer::WhisperEnglish,
-    )
-    .unwrap_or(1.0)
+fn character_error_rate(
+    reference: &str,
+    hypothesis: &str,
+    normalizer: metrumbench::asr::Normalizer,
+) -> f64 {
+    metrumbench::asr::character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
 }
 
 #[derive(Clone)]
@@ -992,6 +998,7 @@ fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoint
             "language": args.language,
             "ground_truth": args.ground_truth,
             "response_format": format!("{}", args.response_format),
+            "normalizer": format!("{}", args.normalizer),
         },
         "metrics": {
             "response_times": {
@@ -1447,8 +1454,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .as_ref()
                     .map(|gt| {
                         (
-                            word_error_rate(gt, &transcription),
-                            character_error_rate(gt, &transcription),
+                            word_error_rate(gt, &transcription, args.normalizer),
+                            character_error_rate(gt, &transcription, args.normalizer),
                         )
                     })
                     .unzip();

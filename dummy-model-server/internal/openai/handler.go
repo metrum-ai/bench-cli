@@ -241,7 +241,7 @@ func (h *Handler) serveCompletionStream(w http.ResponseWriter, model string, max
 	final := map[string]any{
 		"id": id, "object": "text_completion.chunk", "model": model,
 		"choices": []map[string]any{{"index": 0, "text": "", "finish_reason": stop}},
-		"usage": usage{PromptTokens: promptTokens, CompletionTokens: maxTokens, TotalTokens: promptTokens + maxTokens},
+		"usage":   usage{PromptTokens: promptTokens, CompletionTokens: maxTokens, TotalTokens: promptTokens + maxTokens},
 	}
 	_ = sw.Data(final)
 	_ = sw.Done()

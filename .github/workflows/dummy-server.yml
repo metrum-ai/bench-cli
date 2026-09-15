@@ -25,6 +25,14 @@ jobs:
         with:
           go-version: "1.26.x"
           cache-dependency-path: dummy-model-server/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:"
+            echo "$unformatted"
+            exit 1
+          fi
       - name: go test
         run: go test ./...
       - name: go vet

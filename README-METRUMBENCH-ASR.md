@@ -11,8 +11,17 @@ endpoints. Its input is JSONL:
 ```
 
 Optional ground truth is JSONL with matching `id` and `transcript` fields.
-WER and CER normalize reference and hypothesis with the shared
-Whisper-English-compatible normalizer. The request record distinguishes
+WER and CER normalize reference and hypothesis with the same normalizer,
+chosen with `--normalizer`:
+
+| Value | Behavior |
+|-------|----------|
+| `whisper-english` (default) | Case, punctuation and bracketed fillers folded, then contractions expanded and small numerals digitized. Comparable to published Whisper-normalizer WER. |
+| `whisper-basic` | Case, punctuation and bracketed fillers only. |
+| `none` | Raw string comparison. |
+
+The selected value is echoed in the run record's `config.normalizer`; scores
+from different settings are not comparable. The request record distinguishes
 server-reported inference seconds from client-measured inference seconds and
 records `rtfx_client = audio_seconds / client_seconds`.
 
