@@ -89,6 +89,22 @@ does not create Shadeform instances):
 
 Results should go under gitignored `live-results/` (added by the hygiene PR).
 
+## End-of-work campaign (parallel retained instances)
+
+After local tests and release verification are green, launch **one GPU per
+lane in parallel**, keep them until backup and the case study exist, then
+teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
+
+```bash
+./scripts/live/campaign.sh plan
+./scripts/live/campaign.sh launch          # dry-run
+./scripts/live/campaign.sh launch --execute
+./scripts/live/campaign.sh sweep --execute
+./scripts/live/campaign.sh validate
+./scripts/live/campaign.sh backup --execute
+./scripts/live/campaign.sh teardown --execute
+```
+
 ## Teardown — always trap DELETE
 
 Shadeform bills while the VM exists. **Always** register a trap that deletes

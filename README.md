@@ -65,8 +65,10 @@ distributions.
 - SLO goodput uses repeatable `--slo ttft=`, `tpot=`, and `e2e=` thresholds.
 
 See [metric definitions](docs/METRICS.md), [output schema](docs/OUTPUT_SCHEMA.md),
+[CLI reference](docs/CLI.md) (clap `--help` dump),
 [reproduction procedure](docs/REPRODUCING.md), and
 [comparison notes](docs/COMPARISON.md).
+Run `metrum-ai-bench-<modality> --help` for the authoritative live flag list.
 
 ## Security and provenance
 
