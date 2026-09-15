@@ -1,0 +1,16 @@
+target/
+prompt-library.jsonl
+*.csv
+*.jsonl
+*.md5
+env.chetan
+create_release.env
+env.json
+env.*.json
+live-results/
+
+*.tar.gz
+*.log
+__pycache__/
+metrumbench-imagegen-artifacts/
+audio/

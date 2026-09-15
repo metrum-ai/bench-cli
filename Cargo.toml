@@ -1,0 +1,104 @@
+[package]
+name = "metrumbench"
+version = "0.1.80"
+edition = "2021"
+rust-version = "1.85"
+description = "Load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
+license = "Apache-2.0"
+authors = ["Chetan Gadgil", "Metrum AI, Inc."]
+repository = "https://github.com/metrum-ai/bench-cli"
+homepage = "https://github.com/metrum-ai/bench-cli"
+readme = "README.md"
+keywords = ["benchmark", "llm", "load-testing", "openai", "inference"]
+categories = ["command-line-utilities", "development-tools::profiling"]
+publish = true
+autobins = false
+exclude = [
+    ".github/**",
+    ".cursor/**",
+    "dummy-model-server/**",
+    "scripts/live/**",
+    "docs/OSS_READINESS_ASSESSMENT.md",
+]
+
+[features]
+default = []
+tokenizer = ["dep:tokenizers"]
+otlp = []
+
+# Primary binary names (preferred).
+[[bin]]
+name = "metrum-ai-bench-llm"
+path = "src/bin/metrum-ai-bench-llm.rs"
+
+[[bin]]
+name = "metrum-ai-bench-vlm"
+path = "src/bin/metrum-ai-bench-vlm.rs"
+
+[[bin]]
+name = "metrum-ai-bench-asr"
+path = "src/bin/metrum-ai-bench-asr.rs"
+
+[[bin]]
+name = "metrum-ai-bench-imagegen"
+path = "src/bin/metrum-ai-bench-imagegen.rs"
+
+[[bin]]
+name = "metrum-ai-bench"
+path = "src/bin/metrum-ai-bench.rs"
+
+[[bin]]
+name = "metrum-ai-bench-strategic"
+path = "src/bin/metrum-ai-bench-strategic.rs"
+
+# Deprecated shim binaries (thin re-exec wrappers).
+[[bin]]
+name = "metrumbench-llm"
+path = "src/bin/metrumbench-llm.rs"
+
+[[bin]]
+name = "metrumbench-vlm"
+path = "src/bin/metrumbench-vlm.rs"
+
+[[bin]]
+name = "metrumbench-asr"
+path = "src/bin/metrumbench-asr.rs"
+
+[[bin]]
+name = "metrumbench-imagegen"
+path = "src/bin/metrumbench-imagegen.rs"
+
+[[bin]]
+name = "metrumbench-mock-server"
+path = "src/bin/metrumbench-mock-server.rs"
+
+[dependencies]
+axum = "0.8.4"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+csv = "1.4.0"
+futures-util = "0.3.34"
+log = "0.4.34"
+rand = "0.9.5"
+reqwest = { version = "0.12.28", features = ["json", "stream", "blocking", "multipart", "rustls-tls"], default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
+sha2 = "0.10.9"
+simplelog = "0.12.2"
+tokio = { version = "1.53.1", features = ["full"] }
+ntp = "0.5.0"
+anyhow = "1.0.104"
+compile-time = "0.2.0"
+base64 = "0.22.1"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+jsonschema = { version = "0.56.0", default-features = false }
+lru = "0.14.0"
+uuid = { version = "1.26.1", features = ["v4"] }
+tempfile = "3.27.0"
+tokenizers = { version = "0.22.1", optional = true, default-features = false, features = ["onig"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

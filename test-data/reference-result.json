@@ -1,0 +1,21 @@
+{
+  "schema_version": "metrum-ai-bench.reference.v1",
+  "workload": {
+    "requests": 16,
+    "concurrency": 4,
+    "prompt": "Hi",
+    "completion_tokens_per_request": 20,
+    "server_latency_ms": 100,
+    "server_chunk_interval_ms": 20,
+    "seed": 7
+  },
+  "expected": {
+    "attempted": 16,
+    "successes": 16,
+    "errors": 0,
+    "ttft_mean_ms_range": [100, 200],
+    "latency_mean_ms_range": [420, 650],
+    "itl_mean_ms_range": [10, 40],
+    "percentile_method": "hyndman_fan_type7"
+  }
+}
