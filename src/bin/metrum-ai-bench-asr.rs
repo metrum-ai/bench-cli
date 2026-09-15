@@ -1057,8 +1057,6 @@ fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoint
             },
             "throughput": {
                 "total_audio_seconds": metrics.audio_durations.iter().sum::<f64>(),
-                "rtfx": metrics.audio_durations.iter().sum::<f64>()
-                    / metrics.start_time.elapsed().as_secs_f64().max(1e-9),
                 "total_characters": metrics.total_characters,
                 "total_words": metrics.total_words,
                 "audio_per_second": metrics.audio_durations.iter().sum::<f64>() / metrics.start_time.elapsed().as_secs_f64(),
@@ -1733,7 +1731,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
 
-    if !metrics.errors.is_empty() {
+    if args.common.fail_on_error && !metrics.errors.is_empty() {
         Err("Test completed with errors".into())
     } else {
         Ok(())

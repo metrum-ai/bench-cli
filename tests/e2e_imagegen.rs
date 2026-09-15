@@ -182,3 +182,76 @@ fn imagegen_warmup_requests_are_excluded_from_summary() {
         "warmup request must not be measured"
     );
 }
+
+/// F-22: accept either base URL (`/v1`) or full `/v1/images/generations`.
+#[test]
+fn imagegen_accepts_full_generations_url() {
+    let Some(dummy) = spawn_dummy(&["-latency", "50ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    run_imagegen(&fixture, &dummy.url("/v1/images/generations"), 2, &[]);
+
+    let records = imagegen_request_records(&fixture.data_log);
+    assert_eq!(records.len(), 2);
+    for record in &records {
+        assert_eq!(
+            record["status"], "success",
+            "full generations URL must work"
+        );
+    }
+}
+
+/// F-28: `--summary-json` is optional; results still land in the data log.
+#[test]
+fn imagegen_summary_json_is_optional() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    let output = Command::new(imagegen_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "e2e-imagegen-optional-summary",
+            "--model",
+            "dummy",
+            "--num-requests",
+            "2",
+            "--concurrency",
+            "1",
+            "--prompt",
+            "a small test image",
+            "--size",
+            "64x64",
+            "--data-log",
+            fixture.data_log.to_str().unwrap(),
+            "--artifact-dir",
+            fixture.artifact_dir.to_str().unwrap(),
+            "--error-log",
+            fixture.error_log.to_str().unwrap(),
+            "--debug-log",
+            fixture.debug_log.to_str().unwrap(),
+            "--no-save-images",
+        ])
+        .output()
+        .expect("run imagegen");
+    assert!(
+        output.status.success(),
+        "imagegen without --summary-json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !fixture.summary_json.exists(),
+        "summary.json must not be required or auto-created"
+    );
+    assert!(
+        summary_record(&fixture.data_log).is_some(),
+        "shared summary must still be written to the data log"
+    );
+}

@@ -631,6 +631,7 @@ async fn make_request(
         Vec<(u64, (u32, u32))>,
         Option<Duration>,
         Vec<Duration>,
+        String,
     ),
     Box<dyn Error + Send + Sync>,
 > {
@@ -689,6 +690,7 @@ async fn make_request(
         let mut total_tokens = 0;
         let mut done = false;
         let mut saw_finish = false;
+        let mut completion_text = String::new();
         while let Some(item) = stream.next().await {
             let bytes = item.map_err(|e| metrumbench::error::RequestError::from_reqwest(&e))?;
             for event in parser.feed(&bytes) {
@@ -731,6 +733,10 @@ async fn make_request(
                                     }
                                     previous_token_time = Some(now);
                                 }
+                                if let Some(content) = metrumbench::sse::choice_output_text(choice)
+                                {
+                                    completion_text.push_str(content);
+                                }
                             }
                         }
                     }
@@ -757,6 +763,7 @@ async fn make_request(
             image_stats,
             first_reasoning_time,
             itl,
+            completion_text,
         ));
     }
 
@@ -783,6 +790,14 @@ async fn make_request(
         .get("total_tokens")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    let completion_text = json_resp
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Non-streaming: TTFT is not measured (do not fabricate latency/tokens).
     Ok((
@@ -795,6 +810,7 @@ async fn make_request(
         image_stats,
         None,
         Vec::new(),
+        completion_text,
     ))
 }
 
@@ -1146,14 +1162,20 @@ fn build_request_body(
     server_side_download: bool,
     streaming: bool,
     ignore_eos: bool,
+    min_tokens: Option<u32>,
     extra_body_json: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> Result<Value, Box<dyn Error + Send + Sync>> {
+    let system =
+        system_prompt.unwrap_or("You are a helpful assistant capable of understanding images.");
     let mut messages = Vec::new();
 
-    messages.push(json!({
-        "role": "system",
-        "content": "You are a helpful assistant capable of understanding images."
-    }));
+    if !system.is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": system
+        }));
+    }
 
     let mut content = Vec::new();
 
@@ -1190,6 +1212,9 @@ fn build_request_body(
     });
     if ignore_eos {
         body["ignore_eos"] = json!(true);
+    }
+    if let Some(min_t) = min_tokens {
+        body["min_tokens"] = json!(min_t);
     }
     if streaming {
         body["stream_options"] = json!({"include_usage": true});
@@ -1593,7 +1618,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.server_side_download,
             args.streaming,
             args.common.ignore_eos,
+            args.common.min_tokens,
             args.common.extra_body_json.as_deref(),
+            args.common.system_prompt.as_deref(),
         ) {
             Ok(b) => b,
             Err(e) => {
@@ -1613,6 +1640,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
+        let tokenizer_path = args.common.tokenizer.clone();
+        let prompt_text = metrumbench::args_common::CommonBenchArgs::unique_prompt(
+            &selected_record.0,
+            i as u64,
+            args.common.unique_prompts,
+            args.common.seed,
+            &run_id,
+        );
         let handle = tokio::spawn(async move {
             let started_at = Utc::now();
             let result = make_request(
@@ -1628,6 +1663,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             drop(permit);
             drop(endpoint_lease);
 
+            let tokenizer = match metrumbench::tokenizer::LocalTokenizer::from_file(
+                tokenizer_path.as_deref(),
+            ) {
+                Ok(t) => t,
+                Err(_) => metrumbench::tokenizer::LocalTokenizer::from_file(None)
+                    .expect("disabled tokenizer"),
+            };
+
             let record = match result {
                 Ok((
                     response_time,
@@ -1639,9 +1682,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     image_stats,
                     first_reasoning,
                     itl,
+                    completion_text,
                 )) => {
                     let completed_at =
                         metrumbench::runner::completed_at_from_start(started_at, response_time);
+                    let tokenized_prompt_tokens = tokenizer.count(&prompt_text).ok().flatten();
+                    let tokenized_completion_tokens =
+                        tokenizer.count(&completion_text).ok().flatten();
+                    let usage_missing = completion_tokens == 0 && !completion_text.is_empty();
                     let mut rec = metrumbench::record::RequestRecord::success(
                         seq,
                         phase,
@@ -1660,6 +1708,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
+                    rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
+                    rec.tokenized_completion_tokens = tokenized_completion_tokens;
+                    rec.usage_missing = usage_missing;
                     // Payload size is what the server actually received, so it
                     // reflects --max-image-dimension and --reencode-jpeg.
                     rec.modality_metrics
@@ -1878,7 +1929,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         start_time.elapsed().as_secs_f64()
     };
     let slos = args.common.parse_slos()?;
-    let vlm_system = "You are a helpful assistant capable of understanding images.";
+    let vlm_system = args
+        .common
+        .effective_system_prompt("You are a helpful assistant capable of understanding images.");
     let image_detail_str = format!("{}", args.image_detail);
     let mut body_template = build_request_body(
         &args.model,
@@ -1890,7 +1943,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.server_side_download,
         args.streaming,
         args.common.ignore_eos,
+        args.common.min_tokens,
         args.common.extra_body_json.as_deref(),
+        args.common.system_prompt.as_deref(),
     )?;
     if let Some(messages) = body_template["messages"].as_array_mut() {
         if let Some(user) = messages.iter_mut().find(|m| m["role"] == "user") {
@@ -1915,7 +1970,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     .with_config(metrumbench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: (&args.common).into(),
-        effective_system_prompt: Some(vlm_system.to_string()),
+        effective_system_prompt: vlm_system,
         body_template,
         unique_prompt_nonce_template:
             metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
@@ -1932,7 +1987,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Err(format!("Failed to write to data log: {e}").into());
     }
 
-    if !metrics.errors.is_empty() {
+    if args.common.fail_on_error && !metrics.errors.is_empty() {
         Err("Test completed with errors".into())
     } else {
         Ok(())

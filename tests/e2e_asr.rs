@@ -194,3 +194,34 @@ fn asr_normalizer_flag_changes_scores_and_is_recorded() {
         "raw comparison should see case and punctuation, got WER {raw_wer}"
     );
 }
+
+/// F-21: legacy summary must not emit a second whole-run RTFx that conflicts
+/// with per-request measured-phase `rtfx_client`.
+#[test]
+fn asr_legacy_summary_omits_conflicting_rtfx() {
+    let Some(dummy) = spawn_dummy(&["-latency", "100ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture(DUMMY_TRANSCRIPT);
+    run_asr(&fixture, &dummy.url("/v1/audio/transcriptions"), &[]);
+
+    let text = std::fs::read_to_string(&fixture.data_log).expect("read data log");
+    let legacy = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|v| v.get("metrumbench_asr_version").is_some())
+        .expect("legacy ASR summary record");
+    assert!(
+        legacy.pointer("/metrics/throughput/rtfx").is_none(),
+        "legacy metrics.throughput.rtfx must be removed; use measured rtfx_client"
+    );
+
+    let records = request_records(&fixture.data_log);
+    assert!(!records.is_empty());
+    assert!(
+        modality_metric(&records[0], "rtfx_client").is_some()
+            || modality_metric(&records[0], "rtfx").is_some(),
+        "measured-phase RTFx must still be present on the request record"
+    );
+}

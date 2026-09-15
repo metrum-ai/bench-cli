@@ -71,6 +71,8 @@ Options:
           Additional PEM CA certificate for TLS (private gateways)
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
+      --fail-on-error
+          Exit non-zero if any measured request failed (default: exit 0 after writing results)
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -159,6 +161,8 @@ Options:
           Additional PEM CA certificate for TLS (private gateways)
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
+      --fail-on-error
+          Exit non-zero if any measured request failed (default: exit 0 after writing results)
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --max-tokens <MAX_TOKENS>
@@ -300,6 +304,9 @@ Options:
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
 
+      --fail-on-error
+          Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
       --debug-log <DEBUG_LOG>
           Path to the debug log file
           
@@ -373,7 +380,7 @@ Options:
 ## `metrum-ai-bench-imagegen`
 
 ```text
-Usage: metrum-ai-bench-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --data-log <DATA_LOG> --summary-json <SUMMARY_JSON>
+Usage: metrum-ai-bench-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --data-log <DATA_LOG>
 
 Options:
       --version-only
@@ -465,7 +472,7 @@ Options:
       --data-log <DATA_LOG>
           
       --summary-json <SUMMARY_JSON>
-          
+          Optional path to write the legacy imagegen summary JSON (also printed to stdout)
       --debug-log <DEBUG_LOG>
           [default: debug.log]
       --error-log <ERROR_LOG>
@@ -476,6 +483,8 @@ Options:
           
       --overwrite-artifacts
           
+      --fail-on-error
+          Exit non-zero if any measured request failed (default: exit 0 after writing results)
   -h, --help
           Print help
   -V, --version
