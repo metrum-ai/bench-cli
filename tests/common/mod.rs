@@ -136,12 +136,28 @@ pub fn summary_record(data_log: &std::path::Path) -> Option<Value> {
 }
 
 /// The legacy per-run record a binary appends to its `--data-log`, which is
-/// where the effective CLI configuration is echoed.
+/// where modality-specific CLI fields (e.g. ASR `normalizer`) are echoed.
+/// Prefers a non-summary object so it is not confused with `summary.v3.config`.
 pub fn run_config(data_log: &std::path::Path) -> Value {
     let text = std::fs::read_to_string(data_log).expect("read data log");
-    text.lines()
+    let records: Vec<Value> = text
+        .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .find_map(|v| v.get("config").cloned())
+        .collect();
+    records
+        .iter()
+        .find_map(|v| {
+            let is_summary = v
+                .get("schema_version")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.contains("summary.v"));
+            if is_summary {
+                None
+            } else {
+                v.get("config").cloned()
+            }
+        })
+        .or_else(|| records.iter().find_map(|v| v.get("config").cloned()))
         .expect("no run record with a config block")
 }
 

@@ -1194,6 +1194,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         num_requests, args.concurrency
     );
 
+    let run_id = unique_id::generate_uuid();
+
     let client = Client::builder()
         .timeout(Duration::from_secs(args.request_timeout))
         .connect_timeout(Duration::from_secs(args.connect_timeout))
@@ -1367,6 +1369,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let normalizer = args.normalizer;
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
+        let run_id_task = run_id.clone();
 
         // Track request start
         metrics.total_requests_sent += 1;
@@ -1494,7 +1497,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             cer.unwrap_or(0.0) * 100.0
                         );
                     }
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
                 Err(e) => {
                     error!("Request failed for sample {}: {}", sample_id, e);
@@ -1519,7 +1522,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
             };
 
@@ -1660,13 +1663,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         start_time.elapsed().as_secs_f64()
     };
     let slos = args.common.parse_slos()?;
+    let body_template = json!({
+        "multipart_fields": ["file", "model", "response_format", "language", "timestamp_granularities[]"],
+        "model": args.model,
+        "response_format": format!("{}", args.response_format),
+        "language": args.language,
+        "timestamp_granularities": ["word"],
+        "file": "<redacted audio bytes>"
+    });
     let mut shared_summary = metrumbench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
         stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
-    );
+    )
+    .with_config(metrumbench::summary::EffectiveRunConfig {
+        run_id: run_id.clone(),
+        common: (&args.common).into(),
+        effective_system_prompt: None,
+        body_template,
+        unique_prompt_nonce_template: None,
+    });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, args.model.clone());
     if let Err(e) = sink.write(&shared_summary) {

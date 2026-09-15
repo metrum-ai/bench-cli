@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Summary v3 effective config: stamp `config` (`run_id`, common args, effective system prompt, sanitized `body_template`, unique-prompt nonce template) on all four binaries; unique-prompt nonces are `[nonce-{run_id}-{seed}-{seq}]`. Add `usage_missing_count`, nullable `completion_tokens_per_second` with `completion_tokens_source` (`server_usage` / `tokenizer_fallback`), and `p90_unreliable` / `p95_unreliable` on distributions.
 - Modality runners (VLM, ASR, imagegen): roll out the shared `runner.rs` contract already used by LLM — in-task `started_at` / flush via `JsonlSink`, SIGINT+SIGTERM `StopFlag`, closed-loop schedule omission, and `window_seconds` from measured record span. VLM no longer drops warmup records (metrics skip by `phase` only).
 - LLM runner: shared `runner.rs` timestamps send/completion inside the task, writes `request.v3` immediately, handles SIGINT/SIGTERM, and derives `window_seconds` from records (closed-loop ~7.9 req/s at c=4/n=16 on the dummy). Schema bump to `request.v3` / `summary.v3` (field-additive). E2e covers window, flush-during-launch, and SIGTERM JSONL prefix.
 

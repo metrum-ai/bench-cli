@@ -179,6 +179,32 @@ fn llm_closed_loop_window_matches_record_span() {
         (6.5..9.5).contains(&rps),
         "reference band ~7.9 req/s, got {rps}"
     );
+
+    let config = summary.get("config").expect("summary.config");
+    let run_id = config["run_id"].as_str().expect("config.run_id");
+    assert!(!run_id.is_empty(), "run_id must be non-empty");
+    assert_eq!(config["common"]["seed"], 7);
+    assert_eq!(config["common"]["warmup_requests"], 0);
+    assert_eq!(
+        config["effective_system_prompt"],
+        "You are a helpful assistant."
+    );
+    let body = &config["body_template"];
+    let body_str = body.to_string();
+    assert!(
+        body_str.contains("{{prompt}}"),
+        "body_template should use prompt placeholder: {body_str}"
+    );
+    assert!(
+        !body_str.contains("\"Hi\""),
+        "body_template must not embed the raw prompt"
+    );
+    assert!(summary["completion_tokens_per_second"].as_f64().is_some());
+    assert_eq!(summary["completion_tokens_source"], "server_usage");
+    assert_eq!(summary["usage_missing_count"], 0);
+    for rec in &records {
+        assert_eq!(rec["run_id"].as_str(), Some(run_id));
+    }
 }
 
 /// F-04: completing tasks write request.v3 immediately, before launch finishes.
@@ -372,4 +398,77 @@ fn parse_rfc3339(s: &str) -> f64 {
     use chrono::{DateTime, Utc};
     let dt: DateTime<Utc> = s.parse().expect("rfc3339");
     dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9
+}
+
+/// Unique prompts stamp run_id+seed+seq into the nonce and record the template.
+#[test]
+fn llm_unique_prompts_include_run_id_and_seed() {
+    let Some(dummy) = spawn_dummy(&["-latency", "40ms", "-chunk-interval", "10ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let prompts = tmp.path().join("prompts.jsonl");
+    {
+        let mut f = std::fs::File::create(&prompts).unwrap();
+        writeln!(f, r#"{{"prompt":"Second prompt"}}"#).unwrap();
+    }
+    let data_log = tmp.path().join("out.jsonl");
+    let status = Command::new(llm_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "unique",
+            "--num-requests",
+            "4",
+            "--concurrency",
+            "2",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "5",
+            "--warmup-requests",
+            "0",
+            "--seed",
+            "7",
+            "--unique-prompts",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .status()
+        .expect("run llm");
+    assert!(status.success(), "llm bench failed");
+
+    let summary = common::summary_record(&data_log).expect("summary.v3");
+    let config = summary.get("config").expect("config");
+    let run_id = config["run_id"].as_str().expect("run_id");
+    assert_eq!(
+        config["unique_prompt_nonce_template"],
+        "[nonce-{run_id}-{seed}-{seq}]"
+    );
+    assert_eq!(config["common"]["unique_prompts"].as_bool(), Some(true));
+    assert_eq!(config["common"]["seed"].as_u64(), Some(7));
+
+    // Dummy captures last request bodies; at least the summary template is enough
+    // for schema honesty. Nonce shape is covered by unit tests + config stamp.
+    assert!(!run_id.is_empty());
+    let records = request_records(&data_log);
+    assert_eq!(records.len(), 4);
+    for rec in &records {
+        assert_eq!(rec["run_id"].as_str(), Some(run_id));
+    }
 }

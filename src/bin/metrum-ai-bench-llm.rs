@@ -1512,6 +1512,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.num_requests, args.concurrency
     );
 
+    let run_id = unique_id::generate_uuid();
+
     let client = Client::builder()
         .timeout(Duration::from_secs(args.request_timeout))
         .connect_timeout(Duration::from_secs(args.connect_timeout))
@@ -1613,6 +1615,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &prompts[i % prompts.len()],
             slot.seq,
             args.common.unique_prompts,
+            args.common.seed,
+            &run_id,
         );
 
         let request_body = build_request_body(
@@ -1637,6 +1641,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let tokenizer_path = args.common.tokenizer.clone();
         let scheduled_delay = slot.scheduled_delay;
         let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let run_id_task = run_id.clone();
         let handle = tokio::spawn(async move {
             let started_at = Utc::now();
             let result = make_request(
@@ -1693,7 +1698,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .insert("prompt_words".into(), sm.prompt_words as f64);
                     rec.modality_metrics
                         .insert("completion_words".into(), sm.completion_words as f64);
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
                 Err(e) => {
                     let latency = Utc::now()
@@ -1714,7 +1719,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
-                    rec
+                    rec.with_run_id(run_id_task)
                 }
             };
 
@@ -1855,13 +1860,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         metrics.start_time.elapsed().as_secs_f64()
     };
     let slos = args.common.parse_slos()?;
+    let body_template = build_request_body(
+        args.mode,
+        &args.model,
+        args.max_tokens,
+        args.temperature,
+        "{{prompt}}",
+        args.streaming,
+        args.common.ignore_eos,
+        args.common.min_tokens,
+        args.common.extra_body_json.as_deref(),
+        args.common.system_prompt.as_deref(),
+    )?;
+    let effective_system_prompt = args
+        .common
+        .effective_system_prompt("You are a helpful assistant.");
     let mut run_summary = metrumbench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
         stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
-    );
+    )
+    .with_config(metrumbench::summary::EffectiveRunConfig {
+        run_id: run_id.clone(),
+        common: (&args.common).into(),
+        effective_system_prompt,
+        body_template,
+        unique_prompt_nonce_template:
+            metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
+                args.common.unique_prompts,
+            ),
+    });
     run_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     if let Err(e) = sink.write(&run_summary) {
