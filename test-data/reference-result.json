@@ -16,6 +16,8 @@
     "ttft_mean_ms_range": [100, 200],
     "latency_mean_ms_range": [420, 650],
     "itl_mean_ms_range": [10, 40],
-    "percentile_method": "hyndman_fan_type7"
+    "requests_per_second_range": [7.0, 9.0],
+    "percentile_method": "hyndman_fan_type7",
+    "notes": "Closed-loop window is first measured send to last measured completion (~2.02 s → ~7.9 req/s). Do not expect ~15.8 req/s (collector-join bug)."
   }
 }

@@ -6,8 +6,9 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::time::Duration;
 
-pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench.request.v2";
-pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench.summary.v2";
+/// Field-additive schema bump (config, window bounds, first_byte_s land later).
+pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench.request.v3";
+pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench.summary.v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +75,7 @@ impl RequestRecord {
         phase: Phase,
         endpoint: String,
         started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
         latency: Duration,
         ttft: Option<Duration>,
         first_reasoning: Option<Duration>,
@@ -88,7 +90,7 @@ impl RequestRecord {
             phase,
             endpoint,
             started_at,
-            completed_at: Utc::now(),
+            completed_at,
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
@@ -112,6 +114,7 @@ impl RequestRecord {
         phase: Phase,
         endpoint: String,
         started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
         latency: Duration,
         error: RequestError,
     ) -> Self {
@@ -121,7 +124,7 @@ impl RequestRecord {
             phase,
             endpoint,
             started_at,
-            completed_at: Utc::now(),
+            completed_at,
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
@@ -170,12 +173,15 @@ mod tests {
 
     #[test]
     fn tpot_uses_n_minus_one() {
+        let started = Utc::now();
+        let latency = Duration::from_millis(500);
         let rec = RequestRecord::success(
             0,
             Phase::Measure,
             "ep".into(),
-            Utc::now(),
-            Duration::from_millis(500),
+            started,
+            started + chrono::Duration::from_std(latency).unwrap(),
+            latency,
             Some(Duration::from_millis(120)),
             None,
             vec![],
@@ -183,8 +189,8 @@ mod tests {
             20,
             30,
         );
-        let tpot = rec.tpot_s().unwrap();
-        // (0.5 - 0.12) / 19
-        assert!((tpot - (0.38 / 19.0)).abs() < 1e-9);
+        let tpot = rec.tpot_s().expect("tpot");
+        let expected = (0.500 - 0.120) / 19.0;
+        assert!((tpot - expected).abs() < 1e-9);
     }
 }

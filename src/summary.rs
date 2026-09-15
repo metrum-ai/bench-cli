@@ -250,7 +250,9 @@ fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSu
         .into_iter()
         .map(|(name, rows)| {
             let success: Vec<_> = rows.iter().copied().filter(|r| r.is_success()).collect();
-            let lat: Vec<_> = success.iter().map(|r| r.corrected_latency_s()).collect();
+            // Same estimator as the pooled block (service latency). Coordinated-omission
+            // correction lives only on coordinated_omission_latency_s.
+            let lat: Vec<_> = success.iter().map(|r| r.latency_s).collect();
             let ttft: Vec<_> = success.iter().filter_map(|r| r.ttft_s).collect();
             let tpot: Vec<_> = success.iter().filter_map(|r| r.tpot_s()).collect();
             let itl: Vec<_> = success
@@ -279,11 +281,29 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
     }
     let count = (window / bin_seconds).ceil().max(1.0) as usize;
     let mut bins = vec![0usize; count];
-    for record in records {
-        if let Some(offset) = record.scheduled_offset_s {
-            let index = (offset / bin_seconds).floor() as usize;
-            if let Some(bin) = bins.get_mut(index) {
-                *bin += 1;
+    let any_open_loop = records.iter().any(|r| r.scheduled_offset_s.is_some());
+    if any_open_loop {
+        for record in records {
+            if let Some(offset) = record.scheduled_offset_s {
+                let index = (offset / bin_seconds).floor() as usize;
+                if let Some(bin) = bins.get_mut(index) {
+                    *bin += 1;
+                }
+            }
+        }
+    } else {
+        // Closed loop: bin by actual send offset from the first measured send.
+        let min_send = records
+            .iter()
+            .map(|r| datetime_to_unix_secs(r.started_at))
+            .fold(f64::INFINITY, f64::min);
+        if min_send.is_finite() {
+            for record in records {
+                let offset = datetime_to_unix_secs(record.started_at) - min_send;
+                let index = (offset / bin_seconds).floor() as usize;
+                if let Some(bin) = bins.get_mut(index) {
+                    *bin += 1;
+                }
             }
         }
     }
@@ -295,6 +315,10 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
         .collect()
 }
 
+fn datetime_to_unix_secs(ts: chrono::DateTime<chrono::Utc>) -> f64 {
+    ts.timestamp() as f64 + f64::from(ts.timestamp_subsec_nanos()) / 1e9
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,13 +327,20 @@ mod tests {
     use chrono::Utc;
     use std::time::Duration;
 
+    fn with_times(started: chrono::DateTime<Utc>, latency: Duration) -> chrono::DateTime<Utc> {
+        started + chrono::Duration::from_std(latency).unwrap()
+    }
+
     fn ok(seq: u64, lat_ms: u64, ttft_ms: u64, tokens: u64, itl_ms: &[u64]) -> RequestRecord {
+        let started = Utc::now();
+        let latency = Duration::from_millis(lat_ms);
         RequestRecord::success(
             seq,
             Phase::Measure,
             "ep".into(),
-            Utc::now(),
-            Duration::from_millis(lat_ms),
+            started,
+            with_times(started, latency),
+            latency,
             Some(Duration::from_millis(ttft_ms)),
             None,
             itl_ms.iter().map(|m| Duration::from_millis(*m)).collect(),
@@ -322,12 +353,15 @@ mod tests {
     #[test]
     fn excludes_no_output_token_from_ttft() {
         let mut recs = vec![ok(0, 500, 120, 20, &[20; 19])];
+        let started = Utc::now();
+        let latency = Duration::from_millis(300);
         recs.push(RequestRecord::failed(
             1,
             Phase::Measure,
             "ep".into(),
-            Utc::now(),
-            Duration::from_millis(300),
+            started,
+            with_times(started, latency),
+            latency,
             RequestError::NoOutputToken,
         ));
         let s = RunSummary::from_records(&recs, 1.0, false);
@@ -341,12 +375,15 @@ mod tests {
         let recs: Vec<_> = (0..120)
             .map(|i| {
                 if i < 10 {
+                    let started = Utc::now();
+                    let latency = Duration::from_millis(10);
                     RequestRecord::failed(
                         i,
                         Phase::Measure,
                         "ep".into(),
-                        Utc::now(),
-                        Duration::from_millis(10),
+                        started,
+                        with_times(started, latency),
+                        latency,
                         RequestError::RateLimit,
                     )
                 } else {
