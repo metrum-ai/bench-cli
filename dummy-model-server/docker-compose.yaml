@@ -1,0 +1,53 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  llm:
+    build: .
+    command:
+      - "-port=8000"
+      - "-compat=openai"
+      - "-latency=100ms"
+      - "-chunk-interval=20ms"
+      - "-req-per-sec=50"
+      - "-tokens-per-sec=2000"
+      - "-log-requests"
+    ports:
+      - "8000:8000"
+    # Rate ceiling: 50 req/s, 2000 completion tokens/s
+
+  vlm:
+    build: .
+    command:
+      - "-port=8001"
+      - "-compat=vllm"
+      - "-latency=100ms"
+      - "-chunk-interval=20ms"
+      - "-req-per-sec=20"
+      - "-tokens-per-sec=500"
+      - "-reasoning"
+    ports:
+      - "8001:8001"
+    # Rate ceiling: 20 req/s, 500 tokens/s (vision-heavy)
+
+  asr:
+    build: .
+    command:
+      - "-port=8002"
+      - "-latency=50ms"
+      - "-req-per-sec=10"
+    ports:
+      - "8002:8002"
+    # Rate ceiling: 10 req/s
+
+  imagegen:
+    build: .
+    command:
+      - "-port=8003"
+      - "-latency=200ms"
+      - "-req-per-sec=5"
+      - "-image-size=64x64"
+      - "-seed=1"
+    ports:
+      - "8003:8003"
+    # Rate ceiling: 5 req/s

@@ -1,0 +1,13 @@
+metrumbench (bench-cli)
+Copyright (c) 2026 Metrum AI, Inc.
+
+This product includes software developed at Metrum AI, Inc.
+(https://github.com/metrum-ai/bench-cli).
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Third-party components are distributed under their own licenses; run
+`cargo about generate` or inspect Cargo.lock for the complete list. Components
+whose licenses require attribution notices:
+
+- webpki-roots (Mozilla root certificate store data), CDLA-Permissive-2.0
