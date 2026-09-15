@@ -54,10 +54,20 @@ fn go_available() -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// CI sets `METRUM_BENCH_REQUIRE_DUMMY=1` so a missing or unstartable server
+/// fails the suite instead of silently skipping every assertion.
+fn dummy_required() -> bool {
+    std::env::var("METRUM_BENCH_REQUIRE_DUMMY").is_ok_and(|v| v != "0" && !v.is_empty())
+}
+
 /// Start the dummy server on a free port with `extra_args` appended.
 /// Returns `None` when `go` is unavailable, so callers can skip.
 pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
     if !go_available() {
+        assert!(
+            !dummy_required(),
+            "METRUM_BENCH_REQUIRE_DUMMY is set but the go toolchain is missing"
+        );
         return None;
     }
     let port = free_port();
@@ -69,13 +79,19 @@ pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
     ];
     args.extend(extra_args.iter().map(|a| a.to_string()));
 
-    let child = Command::new("go")
+    let spawned = Command::new("go")
         .current_dir(dummy_dir())
         .args(&args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .spawn();
+    let child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            assert!(!dummy_required(), "could not start dummy-model-server: {e}");
+            return None;
+        }
+    };
     let mut dummy = Dummy { child, port };
 
     let url = format!("http://127.0.0.1:{port}/v1/models");
@@ -87,6 +103,10 @@ pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
         thread::sleep(Duration::from_millis(100));
     }
     let _ = dummy.child.kill();
+    assert!(
+        !dummy_required(),
+        "dummy-model-server did not become ready on port {port} within 60s"
+    );
     None
 }
 
