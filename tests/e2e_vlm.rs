@@ -46,7 +46,8 @@ fn fixture() -> Fixture {
     }
 }
 
-fn run_vlm(fixture: &Fixture, url: &str, extra: &[&str]) {
+fn run_vlm(fixture: &Fixture, url: &str, requests: u32, extra: &[&str]) {
+    let requests = requests.to_string();
     let mut args: Vec<String> = [
         "--url",
         url,
@@ -55,7 +56,7 @@ fn run_vlm(fixture: &Fixture, url: &str, extra: &[&str]) {
         "--scenario",
         "e2e-vlm",
         "--num-requests",
-        "2",
+        &requests,
         "--concurrency",
         "1",
         "--prompts",
@@ -97,6 +98,7 @@ fn vlm_streaming_measures_real_ttft_and_itl() {
     run_vlm(
         &fixture,
         &dummy.url("/v1/chat/completions"),
+        2,
         &["--streaming"],
     );
 
@@ -148,7 +150,7 @@ fn vlm_non_streaming_reports_no_ttft() {
         return;
     };
     let fixture = fixture();
-    run_vlm(&fixture, &dummy.url("/v1/chat/completions"), &[]);
+    run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 2, &[]);
 
     for record in request_records(&fixture.data_log) {
         assert!(
@@ -172,10 +174,10 @@ fn vlm_sends_original_bytes_unless_reencode_requested() {
 
     let original = fixture();
     let source_bytes = std::fs::metadata(&original.image).expect("stat png").len() as f64;
-    run_vlm(&original, &url, &[]);
+    run_vlm(&original, &url, 2, &[]);
 
     let reencoded = fixture();
-    run_vlm(&reencoded, &url, &["--reencode-jpeg"]);
+    run_vlm(&reencoded, &url, 2, &["--reencode-jpeg"]);
 
     let image_bytes = |data_log: &std::path::Path| -> f64 {
         let records = request_records(data_log);
@@ -208,5 +210,39 @@ fn vlm_sends_original_bytes_unless_reencode_requested() {
     assert_eq!(
         run_config(&reencoded.data_log)["reencode_jpeg"],
         serde_json::json!(true)
+    );
+}
+
+/// Warmup requests must still be written to the data log (tagged `warmup`),
+/// not dropped by a completion-order skip. Shared summary excludes them.
+#[test]
+fn vlm_warmup_requests_are_logged_not_dropped() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    run_vlm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        3,
+        &["--warmup-requests", "1"],
+    );
+
+    let records = request_records(&fixture.data_log);
+    assert_eq!(
+        records.len(),
+        3,
+        "warmup requests must still be logged as request records"
+    );
+    let warmup = records.iter().filter(|r| r["phase"] == "warmup").count();
+    assert_eq!(warmup, 1, "expected one warmup-phase record");
+    let measure = records.iter().filter(|r| r["phase"] == "measure").count();
+    assert_eq!(measure, 2, "expected two measure-phase records");
+
+    let summary = summary_record(&fixture.data_log).expect("shared summary");
+    assert_eq!(
+        summary["latency_s"]["n"], 2,
+        "warmup request must not be measured"
     );
 }

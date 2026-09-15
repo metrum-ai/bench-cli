@@ -7,7 +7,32 @@
 mod common;
 
 use common::{request_records, skip, spawn_dummy, summary_record};
+use serde_json::Value;
 use std::process::Command;
+
+/// Legacy imagegen.request.v1 rows (distinct from shared request.v3).
+fn imagegen_request_records(data_log: &std::path::Path) -> Vec<Value> {
+    let text = std::fs::read_to_string(data_log).expect("read data log");
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|v| {
+            v.get("schema_version")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.contains("imagegen.request"))
+        })
+        .collect()
+}
+
+fn shared_request_records(data_log: &std::path::Path) -> Vec<Value> {
+    request_records(data_log)
+        .into_iter()
+        .filter(|v| {
+            v.get("schema_version")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.starts_with("metrum-ai-bench.request."))
+        })
+        .collect()
+}
 
 fn imagegen_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-imagegen"))
@@ -92,8 +117,12 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
     let fixture = fixture();
     run_imagegen(&fixture, &dummy.url("/v1"), 3, &[]);
 
-    let records = request_records(&fixture.data_log);
-    assert_eq!(records.len(), 3, "expected one JSONL row per request");
+    let records = imagegen_request_records(&fixture.data_log);
+    assert_eq!(
+        records.len(),
+        3,
+        "expected one imagegen JSONL row per request"
+    );
     for record in &records {
         assert_eq!(record["status"], "success");
         assert_eq!(record["n_returned"], 1);
@@ -105,6 +134,13 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
             "latency {latency_ms}ms outside dummy-server bounds"
         );
     }
+
+    let shared = shared_request_records(&fixture.data_log);
+    assert_eq!(
+        shared.len(),
+        3,
+        "expected one shared RequestRecord per request"
+    );
 
     let summary = summary_record(&fixture.data_log).expect("shared summary in data log");
     assert_eq!(summary["latency_s"]["n"], 3);
@@ -133,10 +169,13 @@ fn imagegen_warmup_requests_are_excluded_from_summary() {
     run_imagegen(&fixture, &dummy.url("/v1"), 3, &["--warmup-requests", "1"]);
 
     assert_eq!(
-        request_records(&fixture.data_log).len(),
+        imagegen_request_records(&fixture.data_log).len(),
         3,
         "warmup requests must still be logged"
     );
+    let shared = shared_request_records(&fixture.data_log);
+    assert_eq!(shared.len(), 3, "shared RequestRecords must include warmup");
+    assert_eq!(shared.iter().filter(|r| r["phase"] == "warmup").count(), 1);
     let summary = summary_record(&fixture.data_log).expect("shared summary");
     assert_eq!(
         summary["latency_s"]["n"], 2,
