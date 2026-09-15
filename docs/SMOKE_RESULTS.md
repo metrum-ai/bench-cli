@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Smoke results — campaign `oss-20260915-hostnet`
+# Smoke results — campaign `oss-20260915-smoke-rerun`
 
 Consolidated multi-modality smoke after local gates. Raw JSONL stays under
 gitignored `live-results/`; this document is the public, releasable summary
@@ -9,10 +9,10 @@ gitignored `live-results/`; this document is the public, releasable summary
 
 | Field | Value |
 |-------|-------|
-| Campaign ID | `oss-20260915-hostnet` |
+| Campaign ID | `oss-20260915-smoke-rerun` |
 | Bench package | `metrum-ai-bench-*` **0.1.82** |
 | Date (UTC) | 2026-09-15 |
-| Validation | 15 result files, 583 measured request lines |
+| Validation | 12 result files, 490 measured request lines |
 | Modalities | llm, vlm, asr, imagegen |
 
 ## Systems under test
@@ -46,41 +46,38 @@ validates CLI wiring and schemas only.
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| c1-n64 | 56 | 0.244 | 0.245 | 0.051 | 0.052 |
-| c2-n64 | 56 | 0.257 | 0.258 | 0.067 | 0.067 |
+| c1-n64 | 56 | 0.244 | 0.247 | 0.051 | 0.055 |
+| c2-n64 | 56 | 0.257 | 0.258 | 0.067 | 0.068 |
 | c4-n64 | 56 | 0.253 | 0.254 | 0.066 | 0.067 |
-| c8-n64 | 56 | 0.251 | 0.258 | 0.066 | 0.072 |
+| c8-n64 | 56 | 0.252 | 0.253 | 0.066 | 0.067 |
 
 ### LLM — open-loop request rate
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| rate16-n64 | 56 | 0.253 | 0.258 | 0.067 | 0.071 |
-| rate4-n64 | 56 | 0.243 | 0.244 | 0.051 | 0.053 |
+| rate16-n64 | 56 | 0.257 | 0.267 | 0.070 | 0.080 |
+| rate4-n64 | 56 | 0.243 | 0.245 | 0.051 | 0.054 |
 | rate8-n64 | 56 | 0.258 | 0.263 | 0.068 | 0.073 |
 
 ### VLM — concurrency
 
 | Cell | n | latency p50 | latency p95 | TTFT p50 | TTFT p95 |
 | --- | --- | --- | --- | --- | --- |
-| c1-n32 | 24 | 0.258 | 0.424 | 0.053 | 0.054 |
-| c2-n32 | 24 | 0.292 | 0.358 | 0.067 | 0.068 |
-| c4-n32 | 24 | 0.276 | 0.350 | 0.066 | 0.067 |
+| c1-n32 | 24 | 0.285 | 0.345 | 0.053 | 0.057 |
+| c2-n32 | 24 | 0.284 | 0.356 | 0.067 | 0.068 |
+| c4-n32 | 24 | 0.292 | 0.385 | 0.066 | 0.068 |
 
 ### ASR — dummy-certified
 
 | Cell | n | latency p50 (s) | RTFx client p50 | WER p50 |
 | --- | --- | --- | --- | --- |
-| c1-n32 | 24 | 0.101 | 39.73 | 0.0 |
-| c2-n32 | 24 | 0.101 | 39.72 | 0.0 |
-| c4-n32 | 24 | 0.101 | 39.69 | 0.0 |
+| c1-n8 | 6 | 0.101 | 39.76 | 1.0 |
 
 ### Imagegen — dummy-certified
 
 | Cell | Successful images | Images/s | Latency p50 (ms) |
 | --- | --- | --- | --- |
-| c1-n16 | 12 | 7.370 | 101.419 |
-| c2-n16 | 12 | 14.745 | 101.415 |
+| c1-n8 | 6 | 7.372 | 101.255 |
 
 ## Reproducing
 
