@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.0-rc.1
+
+- Release candidate after public-readiness and measurement fixes (runner window/flush, summary.v3 config, transport parity, modality CLI, legacy removal).
+
+
 - Public readiness: full `cargo deny check` in CI; replace `ntp`/`lru` (std SNTP +
   hand-rolled VLM image LRU); drop compile-time wall-clock datetime for
   reproducible builds; MSRV 1.85 CI job; SHA-pinned Actions; govulncheck for
