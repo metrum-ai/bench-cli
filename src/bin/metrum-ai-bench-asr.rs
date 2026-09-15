@@ -5,8 +5,7 @@
 use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, warn};
-use metrumbench::compile_time_info;
-use metrumbench::endpoints::{resolve_endpoints, ResolvedEndpoints};
+use metrumbench::endpoints::resolve_endpoints;
 use metrumbench::prompt_inputs::read_utf8_from_path_or_url;
 use metrumbench::unique_id;
 use rand::SeedableRng;
@@ -154,474 +153,6 @@ impl std::fmt::Display for MetrumBenchASRResponseFormat {
             MetrumBenchASRResponseFormat::Srt => write!(f, "srt"),
             MetrumBenchASRResponseFormat::Vtt => write!(f, "vtt"),
         }
-    }
-}
-
-#[derive(Default)]
-struct EndpointMetrics {
-    response_times: Vec<Duration>,
-    inference_times: Vec<Duration>,
-    rtf_values: Vec<f64>,
-    wer_values: Vec<f64>,
-    cer_values: Vec<f64>,
-    audio_durations: Vec<f64>,
-    characters_per_second: Vec<f64>,
-    words_per_second: Vec<f64>,
-    errors: Vec<String>,
-    total_characters: usize,
-    total_words: usize,
-    total_requests_completed: usize,
-    total_requests_failed: usize,
-    total_bytes_sent: usize,
-    total_bytes_received: usize,
-}
-
-struct Metrics {
-    response_times: Vec<Duration>,
-    inference_times: Vec<Duration>,
-    rtf_values: Vec<f64>,
-    wer_values: Vec<f64>,
-    cer_values: Vec<f64>,
-    audio_durations: Vec<f64>,
-    characters_per_second: Vec<f64>,
-    words_per_second: Vec<f64>,
-    start_time: Instant,
-    errors: Vec<String>,
-    scenario: String,
-    version: String,
-    audio_formats: HashMap<String, usize>,
-    total_characters: usize,
-    total_words: usize,
-    total_requests_sent: usize,
-    total_requests_completed: usize,
-    total_requests_failed: usize,
-    total_bytes_sent: usize,
-    total_bytes_received: usize,
-    request_start_times: Vec<Instant>,
-    request_end_times: Vec<Instant>,
-    endpoint_metrics: HashMap<String, EndpointMetrics>,
-}
-
-impl Metrics {
-    fn new(scenario: String) -> Self {
-        Self {
-            response_times: Vec::new(),
-            inference_times: Vec::new(),
-            rtf_values: Vec::new(),
-            wer_values: Vec::new(),
-            cer_values: Vec::new(),
-            audio_durations: Vec::new(),
-            characters_per_second: Vec::new(),
-            words_per_second: Vec::new(),
-            start_time: Instant::now(),
-            errors: Vec::new(),
-            scenario,
-            version: VERSION.to_string(),
-            audio_formats: HashMap::new(),
-            total_characters: 0,
-            total_words: 0,
-            total_requests_sent: 0,
-            total_requests_completed: 0,
-            total_requests_failed: 0,
-            total_bytes_sent: 0,
-            total_bytes_received: 0,
-            request_start_times: Vec::new(),
-            request_end_times: Vec::new(),
-            endpoint_metrics: HashMap::new(),
-        }
-    }
-
-    fn record_success(
-        &mut self,
-        endpoint_name: &str,
-        response_time: Duration,
-        inference_time: Duration,
-        bytes_sent: usize,
-        bytes_received: usize,
-        word_count: usize,
-        char_count: usize,
-        words_per_second: f64,
-        chars_per_second: f64,
-        rtf: Option<f64>,
-        audio_duration: Option<f64>,
-        wer: Option<f64>,
-        cer: Option<f64>,
-    ) {
-        self.response_times.push(response_time);
-        self.inference_times.push(inference_time);
-        self.total_requests_completed += 1;
-        self.total_bytes_sent += bytes_sent;
-        self.total_bytes_received += bytes_received;
-        self.total_words += word_count;
-        self.total_characters += char_count;
-        self.words_per_second.push(words_per_second);
-        self.characters_per_second.push(chars_per_second);
-        if let Some(r) = rtf {
-            self.rtf_values.push(r);
-        }
-        if let Some(d) = audio_duration {
-            self.audio_durations.push(d);
-        }
-        if let Some(w) = wer {
-            self.wer_values.push(w);
-        }
-        if let Some(c) = cer {
-            self.cer_values.push(c);
-        }
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        ep.response_times.push(response_time);
-        ep.inference_times.push(inference_time);
-        ep.total_requests_completed += 1;
-        ep.total_bytes_sent += bytes_sent;
-        ep.total_bytes_received += bytes_received;
-        ep.total_characters += char_count;
-        ep.total_words += word_count;
-        ep.words_per_second.push(words_per_second);
-        ep.characters_per_second.push(chars_per_second);
-        if let Some(r) = rtf {
-            ep.rtf_values.push(r);
-        }
-        if let Some(d) = audio_duration {
-            ep.audio_durations.push(d);
-        }
-        if let Some(w) = wer {
-            ep.wer_values.push(w);
-        }
-        if let Some(c) = cer {
-            ep.cer_values.push(c);
-        }
-    }
-
-    fn record_error(&mut self, endpoint_name: &str, error: String) {
-        self.errors.push(error.clone());
-        self.total_requests_failed += 1;
-        let ep = self
-            .endpoint_metrics
-            .entry(endpoint_name.to_string())
-            .or_default();
-        ep.errors.push(error);
-        ep.total_requests_failed += 1;
-    }
-
-    fn calc_percentile(sorted_values: &[Duration], percentile: f64) -> Duration {
-        if sorted_values.is_empty() {
-            return Duration::default();
-        }
-        let index =
-            ((sorted_values.len() as f64 * percentile / 100.0).ceil() as usize).saturating_sub(1);
-        *sorted_values.get(index).unwrap_or(&Duration::default())
-    }
-
-    fn calc_percentile_f64(sorted_values: &[f64], percentile: f64) -> f64 {
-        if sorted_values.is_empty() {
-            return 0.0;
-        }
-        let index =
-            ((sorted_values.len() as f64 * percentile / 100.0).ceil() as usize).saturating_sub(1);
-        *sorted_values.get(index).unwrap_or(&0.0)
-    }
-
-    fn print_compact_block(
-        &self,
-        label: &str,
-        response_times: &[Duration],
-        inference_times: &[Duration],
-        errors: &[String],
-        total_chars: usize,
-        total_words: usize,
-        elapsed_secs: f64,
-    ) {
-        let requests = response_times.len() + errors.len();
-        if elapsed_secs <= 0.0 {
-            println!("\n=== {} ===\n  (no timing data)", label);
-            return;
-        }
-        println!("\n=== {} ===", label);
-        println!("  Requests:    {}", requests);
-        println!("  Errors:      {}", errors.len());
-        if !response_times.is_empty() {
-            let avg_rt = response_times.iter().sum::<Duration>() / response_times.len() as u32;
-            println!("  Avg RT:      {:.3}s", avg_rt.as_secs_f64());
-        }
-        if !inference_times.is_empty() {
-            let avg_inf = inference_times.iter().sum::<Duration>() / inference_times.len() as u32;
-            println!("  Avg inference: {:.3}s", avg_inf.as_secs_f64());
-        }
-        println!("  Chars/words: {} / {}", total_chars, total_words);
-        println!("  Req/sec:     {:.1}", requests as f64 / elapsed_secs);
-    }
-
-    fn print_stats(&self, resolved: &ResolvedEndpoints) {
-        let elapsed_secs = self.start_time.elapsed().as_secs_f64();
-        let names_with_weights = resolved.endpoint_names_for_display();
-        if names_with_weights.len() > 1 {
-            for (name, weight) in &names_with_weights {
-                if let Some(ep) = self.endpoint_metrics.get(name) {
-                    self.print_compact_block(
-                        &format!("Endpoint: {} (weight: {})", name, weight),
-                        &ep.response_times,
-                        &ep.inference_times,
-                        &ep.errors,
-                        ep.total_characters,
-                        ep.total_words,
-                        elapsed_secs,
-                    );
-                }
-            }
-            self.print_compact_block(
-                "AGGREGATE",
-                &self.response_times,
-                &self.inference_times,
-                &self.errors,
-                self.total_characters,
-                self.total_words,
-                elapsed_secs,
-            );
-            println!("\nScenario: {}", self.scenario);
-            println!("Version: {}", self.version);
-            return;
-        }
-        let calc_stats = |values: &[Duration]| {
-            if values.is_empty() {
-                return (
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                    Duration::default(),
-                );
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort();
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<Duration>() / len.max(1) as u32;
-            let p50 = Self::calc_percentile(&sorted, 50.0);
-            let p90 = Self::calc_percentile(&sorted, 90.0);
-            let p95 = Self::calc_percentile(&sorted, 95.0);
-            let p99 = Self::calc_percentile(&sorted, 99.0);
-            (
-                *sorted.first().unwrap_or(&Duration::default()),
-                *sorted.last().unwrap_or(&Duration::default()),
-                avg,
-                p50,
-                p90,
-                p95,
-                p99,
-            )
-        };
-
-        let calc_stats_f64 = |values: &[f64]| {
-            if values.is_empty() {
-                return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            }
-            let mut sorted = values.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let len = sorted.len();
-            let avg = sorted.iter().sum::<f64>() / len.max(1) as f64;
-            let p50 = Self::calc_percentile_f64(&sorted, 50.0);
-            let p90 = Self::calc_percentile_f64(&sorted, 90.0);
-            let p95 = Self::calc_percentile_f64(&sorted, 95.0);
-            let p99 = Self::calc_percentile_f64(&sorted, 99.0);
-            (
-                *sorted.first().unwrap_or(&0.0),
-                *sorted.last().unwrap_or(&0.0),
-                avg,
-                p50,
-                p90,
-                p95,
-                p99,
-            )
-        };
-
-        println!("\n=====================================");
-        println!("MetrumBench ASR Test Results");
-        println!("=====================================");
-        println!("Scenario: {}", self.scenario);
-        println!("Version: {}", self.version);
-        println!("Audio Files Processed: {}", self.response_times.len());
-
-        // Calculate total audio duration
-        let total_audio_duration: f64 = self.audio_durations.iter().sum();
-        println!("Total Audio Duration: {:.1} seconds", total_audio_duration);
-
-        // Print request metrics
-        println!("\nRequest Statistics:");
-        println!("Total Requests Sent: {}", self.total_requests_sent);
-        println!(
-            "Total Requests Completed: {}",
-            self.total_requests_completed
-        );
-        println!("Total Requests Failed: {}", self.total_requests_failed);
-        println!(
-            "Total Bytes Sent: {} MB",
-            self.total_bytes_sent as f64 / 1_048_576.0
-        );
-        println!(
-            "Total Bytes Received: {} MB",
-            self.total_bytes_received as f64 / 1_048_576.0
-        );
-        println!(
-            "Total Data Transferred: {} MB",
-            (self.total_bytes_sent + self.total_bytes_received) as f64 / 1_048_576.0
-        );
-
-        let elapsed = self.start_time.elapsed().as_secs_f64();
-        println!(
-            "Request Rate: {:.2} req/sec",
-            self.total_requests_completed as f64 / elapsed
-        );
-        println!(
-            "Data Transfer Rate: {:.2} MB/sec",
-            (self.total_bytes_sent + self.total_bytes_received) as f64 / 1_048_576.0 / elapsed
-        );
-
-        // Print response time stats only if we have successful responses
-        if !self.response_times.is_empty() {
-            let (rt_min, rt_max, rt_avg, rt_p50, rt_p90, rt_p95, rt_p99) =
-                calc_stats(&self.response_times);
-            println!("\nResponse Time Statistics:");
-            println!("Min: {:?}, Max: {:?}, Avg: {:?}", rt_min, rt_max, rt_avg);
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                rt_p50, rt_p90, rt_p95, rt_p99
-            );
-
-            let (inf_min, inf_max, inf_avg, inf_p50, inf_p90, inf_p95, inf_p99) =
-                calc_stats(&self.inference_times);
-            println!("\nInference Time Statistics:");
-            println!("Min: {:?}, Max: {:?}, Avg: {:?}", inf_min, inf_max, inf_avg);
-            println!(
-                "p50: {:?}, p90: {:?}, p95: {:?}, p99: {:?}",
-                inf_p50, inf_p90, inf_p95, inf_p99
-            );
-        } else {
-            println!("\nNo successful responses to calculate timing statistics.");
-        }
-
-        // Print RTF stats if available
-        if !self.rtf_values.is_empty() {
-            let (rtf_min, rtf_max, rtf_avg, rtf_p50, rtf_p90, rtf_p95, rtf_p99) =
-                calc_stats_f64(&self.rtf_values);
-            println!("\nReal-Time Factor (RTF) Statistics:");
-            println!(
-                "Min: {:.2}, Max: {:.2}, Avg: {:.2}",
-                rtf_min, rtf_max, rtf_avg
-            );
-            println!(
-                "p50: {:.2}, p90: {:.2}, p95: {:.2}, p99: {:.2}",
-                rtf_p50, rtf_p90, rtf_p95, rtf_p99
-            );
-        }
-
-        // Print WER stats if available
-        if !self.wer_values.is_empty() {
-            let (wer_min, wer_max, wer_avg, wer_p50, wer_p90, wer_p95, wer_p99) =
-                calc_stats_f64(&self.wer_values);
-            println!("\nWord Error Rate (WER) Statistics:");
-            println!(
-                "Min: {:.1}%, Max: {:.1}%, Avg: {:.1}%",
-                wer_min * 100.0,
-                wer_max * 100.0,
-                wer_avg * 100.0
-            );
-            println!(
-                "p50: {:.1}%, p90: {:.1}%, p95: {:.1}%, p99: {:.1}%",
-                wer_p50 * 100.0,
-                wer_p90 * 100.0,
-                wer_p95 * 100.0,
-                wer_p99 * 100.0
-            );
-        }
-
-        // Print CER stats if available
-        if !self.cer_values.is_empty() {
-            let (cer_min, cer_max, cer_avg, cer_p50, cer_p90, cer_p95, cer_p99) =
-                calc_stats_f64(&self.cer_values);
-            println!("\nCharacter Error Rate (CER) Statistics:");
-            println!(
-                "Min: {:.1}%, Max: {:.1}%, Avg: {:.1}%",
-                cer_min * 100.0,
-                cer_max * 100.0,
-                cer_avg * 100.0
-            );
-            println!(
-                "p50: {:.1}%, p90: {:.1}%, p95: {:.1}%, p99: {:.1}%",
-                cer_p50 * 100.0,
-                cer_p90 * 100.0,
-                cer_p95 * 100.0,
-                cer_p99 * 100.0
-            );
-        }
-
-        // Print throughput statistics
-        if !self.response_times.is_empty() {
-            println!("\nThroughput Statistics:");
-
-            // Audio processed per second
-            let audio_per_second = total_audio_duration / self.start_time.elapsed().as_secs_f64();
-            println!(
-                "Avg Audio Processed/Second: {:.2} sec/sec",
-                audio_per_second
-            );
-
-            // Characters per second
-            if !self.characters_per_second.is_empty() {
-                let avg_cps = self.characters_per_second.iter().sum::<f64>()
-                    / self.characters_per_second.len() as f64;
-                println!("Avg Characters/Second: {:.2} chars/sec", avg_cps);
-            }
-
-            // Words per second
-            if !self.words_per_second.is_empty() {
-                let avg_wps =
-                    self.words_per_second.iter().sum::<f64>() / self.words_per_second.len() as f64;
-                println!("Avg Words/Second: {:.2} words/sec", avg_wps);
-            }
-
-            // Requests per second
-            let rps = self.response_times.len() as f64 / self.start_time.elapsed().as_secs_f64();
-            println!("Avg Requests/Second: {:.2} RPS", rps);
-        }
-
-        // Add error statistics
-        println!("\nError Statistics:");
-        println!("Total Errors: {}", self.errors.len());
-        let error_rate = (self.errors.len() as f64
-            / (self.response_times.len() + self.errors.len()) as f64)
-            * 100.0;
-        println!("Error Rate: {:.2}%", error_rate);
-
-        let mut error_counts: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
-        for error in &self.errors {
-            *error_counts.entry(error.as_str()).or_insert(0) += 1;
-        }
-
-        if !error_counts.is_empty() {
-            println!("\nError Breakdown:");
-            for (error_type, count) in error_counts.iter() {
-                println!("  {} occurrences: {}", count, error_type);
-            }
-        }
-
-        // Audio format statistics
-        if !self.audio_formats.is_empty() {
-            println!("\nAudio Format Statistics:");
-            for (format, count) in self.audio_formats.iter() {
-                println!("  {}: {} files", format, count);
-            }
-        }
-
-        // Test duration
-        println!(
-            "\nTest Duration: {:.2} seconds",
-            self.start_time.elapsed().as_secs_f64()
-        );
     }
 }
 
@@ -934,167 +465,6 @@ fn load_ground_truth(path: &str) -> Result<HashMap<String, String>, Box<dyn Erro
     Ok(ground_truth)
 }
 
-fn create_log_record(args: &Args, metrics: &Metrics, resolved: &ResolvedEndpoints) -> Value {
-    let mut sorted_rt = metrics.response_times.clone();
-    sorted_rt.sort();
-    let mut sorted_inf = metrics.inference_times.clone();
-    sorted_inf.sort();
-    let mut sorted_rtf = metrics.rtf_values.clone();
-    sorted_rtf.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mut sorted_wer = metrics.wer_values.clone();
-    sorted_wer.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mut sorted_cer = metrics.cer_values.clone();
-    sorted_cer.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    let (config_url, config_endpoint, config_endpoints) = match resolved {
-        ResolvedEndpoints::Single { url, name, .. } => (url.clone(), Some(name.clone()), None),
-        ResolvedEndpoints::Multi {
-            endpoint_names_with_weights,
-            ..
-        } => {
-            let names: Vec<String> = endpoint_names_with_weights
-                .iter()
-                .map(|(n, _)| n.clone())
-                .collect();
-            (String::new(), None, Some(names))
-        }
-    };
-    let per_endpoint_json: serde_json::Map<String, Value> = metrics
-        .endpoint_metrics
-        .iter()
-        .map(|(name, ep)| {
-            let ep_requests = ep.response_times.len() + ep.errors.len();
-            let ep_elapsed = metrics.start_time.elapsed().as_secs_f64();
-            (
-                name.clone(),
-                json!({
-                    "requests": ep_requests,
-                    "errors": ep.errors.len(),
-                    "total_characters": ep.total_characters,
-                    "total_words": ep.total_words,
-                    "requests_per_second": if ep_elapsed > 0.0 { ep_requests as f64 / ep_elapsed } else { 0.0 }
-                }),
-            )
-        })
-        .collect();
-
-    json!({
-        "unique_id": unique_id::generate_uuid(),
-        "human_readable_id": unique_id::generate_human_readable_unique_id(3),
-        "timestamp": Utc::now().to_rfc3339(),
-        "metrumbench_asr_version": VERSION,
-        "compile_info": compile_time_info::get_compile_info(),
-        "config": {
-            "scenario": args.scenario.as_ref().unwrap(),
-            "url": config_url,
-            "endpoint": config_endpoint,
-            "endpoints": config_endpoints,
-            "model": args.model.as_ref().unwrap(),
-            "num_requests": args.num_requests.unwrap(),
-            "concurrency": args.concurrency,
-            "log_level": args.log_level,
-            "input_file": args.input.as_ref().unwrap(),
-            "data_log": args.data_log,
-            "debug_log": args.debug_log,
-            "error_log": args.error_log,
-            "request_timeout": args.request_timeout,
-            "connect_timeout": args.connect_timeout,
-            "pool_idle_timeout": args.pool_idle_timeout,
-            "tcp_keepalive": args.tcp_keepalive,
-            "stop_after_seconds": args.stop_after_seconds,
-            "language": args.language,
-            "ground_truth": args.ground_truth,
-            "response_format": format!("{}", args.response_format),
-            "normalizer": format!("{}", args.normalizer),
-        },
-        "metrics": {
-            "response_times": {
-                "min_ms": sorted_rt.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_rt.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": (sorted_rt.iter().sum::<Duration>() / sorted_rt.len().max(1) as u32).as_millis(),
-                "p50_ms": Metrics::calc_percentile(&sorted_rt, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_rt, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_rt, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_rt, 99.0).as_millis()
-            },
-            "inference_times": {
-                "min_ms": sorted_inf.first().unwrap_or(&Duration::default()).as_millis(),
-                "max_ms": sorted_inf.last().unwrap_or(&Duration::default()).as_millis(),
-                "avg_ms": (sorted_inf.iter().sum::<Duration>() / sorted_inf.len().max(1) as u32).as_millis(),
-                "p50_ms": Metrics::calc_percentile(&sorted_inf, 50.0).as_millis(),
-                "p90_ms": Metrics::calc_percentile(&sorted_inf, 90.0).as_millis(),
-                "p95_ms": Metrics::calc_percentile(&sorted_inf, 95.0).as_millis(),
-                "p99_ms": Metrics::calc_percentile(&sorted_inf, 99.0).as_millis()
-            },
-            "rtf": {
-                "min": metrics.rtf_values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                "max": metrics.rtf_values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                "avg": metrics.rtf_values.iter().sum::<f64>() / metrics.rtf_values.len().max(1) as f64,
-                "p50": Metrics::calc_percentile_f64(&sorted_rtf, 50.0),
-                "p90": Metrics::calc_percentile_f64(&sorted_rtf, 90.0),
-                "p95": Metrics::calc_percentile_f64(&sorted_rtf, 95.0),
-                "p99": Metrics::calc_percentile_f64(&sorted_rtf, 99.0)
-            },
-            "accuracy": {
-                "wer": {
-                    "min": metrics.wer_values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                    "max": metrics.wer_values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                    "avg": metrics.wer_values.iter().sum::<f64>() / metrics.wer_values.len().max(1) as f64,
-                    "p50": Metrics::calc_percentile_f64(&sorted_wer, 50.0),
-                    "p90": Metrics::calc_percentile_f64(&sorted_wer, 90.0),
-                    "p95": Metrics::calc_percentile_f64(&sorted_wer, 95.0),
-                    "p99": Metrics::calc_percentile_f64(&sorted_wer, 99.0)
-                },
-                "cer": {
-                    "min": metrics.cer_values.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                    "max": metrics.cer_values.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0),
-                    "avg": metrics.cer_values.iter().sum::<f64>() / metrics.cer_values.len().max(1) as f64,
-                    "p50": Metrics::calc_percentile_f64(&sorted_cer, 50.0),
-                    "p90": Metrics::calc_percentile_f64(&sorted_cer, 90.0),
-                    "p95": Metrics::calc_percentile_f64(&sorted_cer, 95.0),
-                    "p99": Metrics::calc_percentile_f64(&sorted_cer, 99.0)
-                }
-            },
-            "throughput": {
-                "total_audio_seconds": metrics.audio_durations.iter().sum::<f64>(),
-                "total_characters": metrics.total_characters,
-                "total_words": metrics.total_words,
-                "audio_per_second": metrics.audio_durations.iter().sum::<f64>() / metrics.start_time.elapsed().as_secs_f64(),
-                "characters_per_second": metrics.total_characters as f64 / metrics.start_time.elapsed().as_secs_f64(),
-                "words_per_second": metrics.total_words as f64 / metrics.start_time.elapsed().as_secs_f64(),
-                "requests_per_second": metrics.response_times.len() as f64 / metrics.start_time.elapsed().as_secs_f64()
-            },
-            "errors": {
-                "count": metrics.errors.len(),
-                "rate": (metrics.errors.len() as f64 / (metrics.response_times.len() + metrics.errors.len()) as f64) * 100.0
-            },
-            "timing": {
-                "total_time_seconds": metrics.start_time.elapsed().as_secs_f64(),
-                "successful_requests": metrics.response_times.len(),
-                "failed_requests": metrics.errors.len()
-            },
-            "request_metrics": {
-                "total_requests": {
-                    "sent": metrics.total_requests_sent,
-                    "completed": metrics.total_requests_completed,
-                    "failed": metrics.total_requests_failed
-                },
-                "bytes": {
-                    "sent": metrics.total_bytes_sent,
-                    "received": metrics.total_bytes_received,
-                    "total": metrics.total_bytes_sent + metrics.total_bytes_received
-                },
-                "request_rate": {
-                    "requests_per_second": metrics.total_requests_completed as f64 / metrics.start_time.elapsed().as_secs_f64(),
-                    "bytes_per_second": (metrics.total_bytes_sent + metrics.total_bytes_received) as f64 / metrics.start_time.elapsed().as_secs_f64()
-                }
-            },
-            "audio_formats": metrics.audio_formats,
-            "per_endpoint": per_endpoint_json
-        }
-    })
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Print banner
@@ -1224,15 +594,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Download audio files from URLs if needed; per-sample failures are recorded, not fatal
     info!("Preparing audio files...");
-    let mut metrics = Metrics::new(args.scenario.as_ref().unwrap().clone());
     for sample in &mut audio_samples {
         if sample.local_file_path.is_some() {
             let path = sample.local_file_path.as_ref().unwrap();
             if !std::path::Path::new(path).exists() {
-                metrics.record_error(
-                    "unknown",
-                    format!("Local file not found for sample {}: {}", sample.id, path),
-                );
                 sample.local_file_path = None;
                 continue;
             }
@@ -1251,16 +616,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     sample.local_file_path = Some(local_path);
                     info!("Downloaded audio file for sample {}", sample.id);
                 }
-                Err(e) => {
-                    metrics.record_error("unknown", format!("Sample {}: {}", sample.id, e));
+                Err(_e) => {
                     sample.local_file_path = None;
                 }
             }
         } else {
-            metrics.record_error(
-                "unknown",
-                format!("Sample {} has neither URL nor local path", sample.id),
-            );
             sample.local_file_path = None;
         }
     }
@@ -1353,12 +713,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         // Get the next audio sample (round-robin if fewer samples than requests)
         let sample = audio_samples[(i as usize) % audio_samples.len()].clone();
 
-        // Track audio format
-        *metrics
-            .audio_formats
-            .entry(sample.format.clone())
-            .or_insert(0) += 1;
-
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
         let endpoint_selector = endpoint_selector.clone();
@@ -1383,10 +737,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
-
-        // Track request start
-        metrics.total_requests_sent += 1;
-        metrics.request_start_times.push(Instant::now());
 
         let handle = tokio::spawn(async move {
             let started_at = Utc::now();
@@ -1565,7 +915,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut errors = 0;
     let mut records = Vec::new();
     while let Some(rec) = record_rx.recv().await {
-        let endpoint_name = rec.endpoint.clone();
+        let _endpoint_name = rec.endpoint.clone();
         let phase = rec.phase;
         if rec.is_success() {
             let response_time = Duration::from_secs_f64(rec.latency_s);
@@ -1574,7 +924,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .get("inference_time_s")
                 .copied()
                 .unwrap_or(0.0);
-            let inference_time_duration = Duration::from_secs_f64(inference_time);
+            let _inference_time_duration = Duration::from_secs_f64(inference_time);
             let word_count = rec
                 .modality_metrics
                 .get("word_count")
@@ -1585,52 +935,35 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .get("char_count")
                 .copied()
                 .unwrap_or(0.0) as usize;
-            let words_per_second = rec
+            let _words_per_second = rec
                 .modality_metrics
                 .get("words_per_second")
                 .copied()
                 .unwrap_or(0.0);
-            let chars_per_second = rec
+            let _chars_per_second = rec
                 .modality_metrics
                 .get("chars_per_second")
                 .copied()
                 .unwrap_or(0.0);
-            let bytes_sent = rec
+            let _bytes_sent = rec
                 .modality_metrics
                 .get("bytes_sent")
                 .copied()
                 .unwrap_or(0.0) as usize;
-            let bytes_received = rec
+            let _bytes_received = rec
                 .modality_metrics
                 .get("bytes_received")
                 .copied()
                 .unwrap_or(0.0) as usize;
-            let rtf = rec.modality_metrics.get("rtf").copied();
-            let audio_duration = rec.modality_metrics.get("audio_duration_s").copied();
-            let wer = rec.modality_metrics.get("wer").copied();
-            let cer = rec.modality_metrics.get("cer").copied();
+            let _rtf = rec.modality_metrics.get("rtf").copied();
+            let _audio_duration = rec.modality_metrics.get("audio_duration_s").copied();
+            let _wer = rec.modality_metrics.get("wer").copied();
+            let _cer = rec.modality_metrics.get("cer").copied();
 
             if phase == metrumbench::record::Phase::Warmup {
                 records.push(rec);
                 continue;
             }
-
-            metrics.record_success(
-                &endpoint_name,
-                response_time,
-                inference_time_duration,
-                bytes_sent,
-                bytes_received,
-                word_count,
-                char_count,
-                words_per_second,
-                chars_per_second,
-                rtf,
-                audio_duration,
-                wer,
-                cer,
-            );
-            metrics.request_end_times.push(Instant::now());
             completed += 1;
             debug!(
                 "Request completed - RT: {:?}, Words: {}, Chars: {}",
@@ -1655,9 +988,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "unknown".into());
             error!("Request failed: {err_msg}");
-            if phase != metrumbench::record::Phase::Warmup {
-                metrics.record_error(&endpoint_name, err_msg);
-            }
             errors += 1;
             records.push(rec);
         }
@@ -1674,7 +1004,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, num_requests, errors
     );
-    metrics.print_stats(&resolved_endpoints);
     let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
@@ -1703,17 +1032,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         effective_system_prompt: None,
         body_template,
         unique_prompt_nonce_template: None,
+        modality: [
+            (
+                "normalizer".into(),
+                serde_json::json!(format!("{}", args.normalizer)),
+            ),
+            (
+                "response_format".into(),
+                serde_json::json!(format!("{}", args.response_format)),
+            ),
+            ("language".into(), serde_json::json!(args.language)),
+        ]
+        .into_iter()
+        .collect(),
     });
     shared_summary.environment =
         metrumbench::environment::collect(ntp_offset_ms, args.model.clone());
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
-
-    let summary = create_log_record(&args, &metrics, &resolved_endpoints);
-    if let Err(e) = sink.write(&summary) {
-        return Err(format!("Failed to write to data log: {e}").into());
-    }
+    shared_summary.print_console();
 
     // Clean up temporary files
     info!("Cleaning up temporary audio files...");
@@ -1731,7 +1069,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
 
-    if args.common.fail_on_error && !metrics.errors.is_empty() {
+    let measure_errors = records
+        .iter()
+        .filter(|r| r.phase == metrumbench::record::Phase::Measure && !r.is_success())
+        .count();
+    if args.common.fail_on_error && measure_errors > 0 {
         Err("Test completed with errors".into())
     } else {
         Ok(())

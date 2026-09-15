@@ -80,6 +80,12 @@ struct Args {
     otlp_service_name: String,
     #[arg(long, default_value_t = 300)]
     timeout_seconds: u64,
+    #[arg(
+        long = "slo",
+        value_name = "METRIC=SECONDS",
+        help = "Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)"
+    )]
+    slos: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -222,6 +228,7 @@ async fn run_stage(
     inputs: &[Input],
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
+    client: &reqwest::Client,
 ) -> Result<(Vec<BenchRecord>, f64)> {
     let concurrency = match args.sweep_by {
         SweepBy::Concurrency => stage.ceil() as usize,
@@ -230,9 +237,6 @@ async fn run_stage(
     .max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let kind = args.kind;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout_seconds))
-        .build()?;
     let start = Instant::now();
     let stage_unix_ns = now_unix_ns();
     let mut handles = Vec::with_capacity(args.requests_per_stage as usize);
@@ -360,13 +364,46 @@ async fn main() -> Result<()> {
         None
     };
     let sequence = Arc::new(AtomicU64::new(0));
+    let slos = metrumbench::summary::SloConfig::parse(&args.slos)?;
+    let redacted_config = json!({
+        "url": args.url,
+        "model": args.model,
+        "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
+        "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
+        "requests_per_stage": args.requests_per_stage,
+        "max_in_flight": args.max_in_flight,
+        "timeout_seconds": args.timeout_seconds,
+        "slos": args.slos,
+        "prefix_control": format!("{:?}", args.prefix_control).to_ascii_lowercase(),
+        "json_schema": args.json_schema.is_some(),
+        "tools": args.tools.is_some(),
+        // Secrets intentionally omitted (api_key never stamped).
+    });
+    // Warm connection pool across stages (single shared client).
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(args.timeout_seconds))
+        .pool_max_idle_per_host(args.max_in_flight as usize)
+        .build()?;
     let started = Instant::now();
     let mut all_records = Vec::new();
     let mut points = Vec::new();
     for stage in stages {
-        let (records, seconds) =
-            run_stage(&args, stage, &inputs, validator.as_ref(), sequence.clone()).await?;
-        points.push(summarize_stage(stage, &records, seconds));
+        let (records, seconds) = run_stage(
+            &args,
+            stage,
+            &inputs,
+            validator.as_ref(),
+            sequence.clone(),
+            &client,
+        )
+        .await?;
+        points.push(summarize_stage(
+            stage,
+            &records,
+            seconds,
+            &slos,
+            Some(redacted_config.clone()),
+        ));
         all_records.extend(records);
     }
     stop_scraper.store(true, Ordering::Relaxed);

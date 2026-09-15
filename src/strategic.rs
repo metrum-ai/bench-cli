@@ -35,26 +35,56 @@ pub struct BenchRecord {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SweepPoint {
     pub load: f64,
+    pub n: usize,
+    pub errors: usize,
     pub throughput: f64,
+    /// Type-7 latency distribution over successful requests.
+    pub latency_s: crate::stats::DistSummary,
     pub p50_s: Option<f64>,
     pub p95_s: Option<f64>,
     pub p99_s: Option<f64>,
+    pub p99_unreliable: bool,
     pub error_rate: Option<f64>,
     pub validity_rate: Option<f64>,
+    /// Schema-valid successes that also meet optional `--slo` thresholds.
+    /// Without SLOs this equals validity-filtered throughput (often == throughput).
     pub goodput: f64,
+    /// True when no SLO thresholds were applied (goodput is validity-only).
+    pub goodput_equals_throughput: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slo_thresholds_s: Option<std::collections::BTreeMap<String, f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<Value>,
 }
 
-pub fn summarize_stage(load: f64, records: &[BenchRecord], seconds: f64) -> SweepPoint {
-    let latencies = crate::stats::sort_finite(
-        records
-            .iter()
-            .filter(|record| record.success)
-            .map(|record| record.latency_s),
-    );
-    let successes = latencies.len();
+fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) -> bool {
+    if let Some(limit) = slos.e2e_s {
+        if record.latency_s > limit {
+            return false;
+        }
+    }
+    // Strategic records do not carry TTFT/TPOT; those SLO keys are ignored here.
+    true
+}
+
+pub fn summarize_stage(
+    load: f64,
+    records: &[BenchRecord],
+    seconds: f64,
+    slos: &crate::summary::SloConfig,
+    config: Option<Value>,
+) -> SweepPoint {
+    let success_lats: Vec<f64> = records
+        .iter()
+        .filter(|record| record.success)
+        .map(|record| record.latency_s)
+        .collect();
+    let latency_s = crate::stats::DistSummary::from_values(&success_lats);
+    let successes = success_lats.len();
+    let errors = records.len().saturating_sub(successes);
     let valid = records
         .iter()
         .filter(|record| record.success && record.valid.unwrap_or(true))
@@ -63,20 +93,42 @@ pub fn summarize_stage(load: f64, records: &[BenchRecord], seconds: f64) -> Swee
         .iter()
         .filter(|record| record.valid.is_some())
         .count();
+    let good = records
+        .iter()
+        .filter(|record| {
+            record.success && record.valid.unwrap_or(true) && strategic_meets_slos(record, slos)
+        })
+        .count();
     let elapsed = seconds.max(f64::EPSILON);
+    let thresholds: std::collections::BTreeMap<String, f64> = [
+        ("ttft", slos.ttft_s),
+        ("tpot", slos.tpot_s),
+        ("e2e", slos.e2e_s),
+    ]
+    .into_iter()
+    .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
+    .collect();
+    let no_slos = thresholds.is_empty();
     SweepPoint {
         load,
+        n: records.len(),
+        errors,
         throughput: successes as f64 / elapsed,
-        p50_s: crate::stats::percentile_type7(&latencies, 50.0),
-        p95_s: crate::stats::percentile_type7(&latencies, 95.0),
-        p99_s: crate::stats::percentile_type7(&latencies, 99.0),
+        latency_s: latency_s.clone(),
+        p50_s: latency_s.p50,
+        p95_s: latency_s.p95,
+        p99_s: latency_s.p99,
+        p99_unreliable: latency_s.p99_unreliable,
         error_rate: if records.is_empty() {
             None
         } else {
-            Some((records.len() - successes) as f64 / records.len() as f64)
+            Some(errors as f64 / records.len() as f64)
         },
         validity_rate: (validity_count > 0).then_some(valid as f64 / successes.max(1) as f64),
-        goodput: valid as f64 / elapsed,
+        goodput: good as f64 / elapsed,
+        goodput_equals_throughput: no_slos,
+        slo_thresholds_s: (!no_slos).then_some(thresholds),
+        config,
     }
 }
 
@@ -372,16 +424,21 @@ pub fn export_html(
         .enumerate()
         .map(|(index, point)| {
             format!(
-                "<tr{}><td>{:.2}</td><td>{:.2}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>",
+                "<tr{}><td>{:.2}</td><td>{}</td><td>{:.2}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>",
                 if knee == Some(index) {
                     " class=knee"
                 } else {
                     ""
                 },
                 point.load,
+                point.n,
                 point.throughput,
                 point
                     .p95_s
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "—".to_string()),
+                point
+                    .p99_s
                     .map(|value| format!("{value:.3}"))
                     .unwrap_or_else(|| "—".to_string()),
                 point
@@ -401,7 +458,7 @@ pub fn export_html(
 <style>body{{font:14px system-ui;margin:2rem;max-width:900px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:.45rem;border-bottom:1px solid #ddd;text-align:right}}th:first-child,td:first-child{{text-align:left}}.knee{{background:#fee2e2}}svg{{border:1px solid #ddd;background:#fafafa}}</style></head>
 <body><h1>{}</h1><p>Latency-throughput curve; red marks the automatically detected knee.</p>
 <svg viewBox="0 0 {width} {height}" role="img" aria-label="p95 latency by throughput"><polyline points="{polyline}" fill="none" stroke="#2563eb" stroke-width="3"/>{knee_circle}</svg>
-<h2>Sweep</h2><table><thead><tr><th>Load</th><th>Throughput</th><th>p95 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
+<h2>Sweep</h2><table><thead><tr><th>Load</th><th>n</th><th>Throughput</th><th>p95 seconds</th><th>p99 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>Server correlation</h2><pre>{}</pre></body></html>"##,
         escape_html(title),
         escape_html(title),
@@ -436,7 +493,9 @@ pub fn export_mlperf(
         MlperfScenario::Server => "Server",
         MlperfScenario::Offline => "Offline",
     };
+    const DISCLAIMER: &str = "UNOFFICIAL: This is NOT an audited or submitted MLPerf result. Parser-oriented interoperability export only; do not treat as an official MLPerf LoadGen run.";
     let mut summary = File::create(directory.join("mlperf_log_summary.txt"))?;
+    writeln!(summary, "{DISCLAIMER}")?;
     writeln!(summary, "MLPerf Results Summary")?;
     writeln!(summary, "SUT name : MetrumBench")?;
     writeln!(summary, "Scenario : {scenario_name}")?;
@@ -466,12 +525,13 @@ pub fn export_mlperf(
         summary,
         "Result is : {}",
         if !records.is_empty() && completed == records.len() {
-            "VALID"
+            "VALID (unofficial; see disclaimer)"
         } else {
-            "INVALID"
+            "INVALID (unofficial; see disclaimer)"
         }
     )?;
     let mut detail = File::create(directory.join("mlperf_log_detail.txt"))?;
+    writeln!(detail, "{DISCLAIMER}")?;
     for record in records {
         writeln!(
             detail,
@@ -483,7 +543,12 @@ pub fn export_mlperf(
             record.success
         )?;
     }
-    File::create(directory.join("mlperf_log_accuracy.json"))?.write_all(b"[]\n")?;
+    let accuracy = serde_json::json!({
+        "disclaimer": DISCLAIMER,
+        "accuracy": []
+    });
+    File::create(directory.join("mlperf_log_accuracy.json"))?
+        .write_all(format!("{accuracy}\n").as_bytes())?;
     Ok(())
 }
 
@@ -578,15 +643,25 @@ mod tests {
     fn knee_finds_curve_bend() {
         let points: Vec<_> = [(1.0, 1.0), (2.0, 1.1), (3.0, 1.3), (3.2, 4.0)]
             .into_iter()
-            .map(|(throughput, latency)| SweepPoint {
-                load: throughput,
-                throughput,
-                p50_s: Some(latency),
-                p95_s: Some(latency),
-                p99_s: Some(latency),
-                error_rate: Some(0.0),
-                validity_rate: None,
-                goodput: throughput,
+            .map(|(throughput, latency)| {
+                let latency_s = crate::stats::DistSummary::from_values(&[latency]);
+                SweepPoint {
+                    load: throughput,
+                    n: 1,
+                    errors: 0,
+                    throughput,
+                    latency_s: latency_s.clone(),
+                    p50_s: Some(latency),
+                    p95_s: Some(latency),
+                    p99_s: Some(latency),
+                    p99_unreliable: latency_s.p99_unreliable,
+                    error_rate: Some(0.0),
+                    validity_rate: None,
+                    goodput: throughput,
+                    goodput_equals_throughput: true,
+                    slo_thresholds_s: None,
+                    config: None,
+                }
             })
             .collect();
         assert_eq!(detect_knee(&points), Some(2));
@@ -681,10 +756,15 @@ mod tests {
                 record(3, 4.0),
             ],
             1.0,
+            &crate::summary::SloConfig::default(),
+            None,
         );
+        assert_eq!(point.n, 4);
+        assert_eq!(point.errors, 0);
+        assert!(point.goodput_equals_throughput);
         assert!((point.p95_s.expect("p95") - 3.85).abs() < 1e-12);
 
-        let empty = summarize_stage(1.0, &[], 1.0);
+        let empty = summarize_stage(1.0, &[], 1.0, &crate::summary::SloConfig::default(), None);
         let value = serde_json::to_value(empty).expect("serialize sweep point");
         assert!(value["p50_s"].is_null());
         assert!(value["p95_s"].is_null());
@@ -718,9 +798,11 @@ mod tests {
             .expect("summary log");
         assert!(summary.contains("Scenario : Server"));
         assert!(summary.contains("90.00 percentile latency (ns) : 250000000"));
-        assert!(summary.contains("Result is : VALID"));
+        assert!(summary.contains("UNOFFICIAL"));
+        assert!(summary.contains("Result is : VALID (unofficial; see disclaimer)"));
         let detail = std::fs::read_to_string(directory.path().join("mlperf_log_detail.txt"))
             .expect("detail log");
+        assert!(detail.starts_with("UNOFFICIAL"));
         assert!(detail.contains("\"scheduled_time_ns\":100"));
         assert!(detail.contains("\"sent_time_ns\":120"));
     }

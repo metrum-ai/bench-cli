@@ -72,6 +72,8 @@ summary distributions. Ctrl-C stops issuance, drains started requests, and
 writes a partial summary. A hard kill may leave valid request lines without a
 summary; consumers must accept that recoverable prefix.
 
-Legacy summary objects are temporarily appended by the modality binaries for
-existing consumers. New consumers must select records by `schema_version`,
-not line position.
+Unversioned / legacy dual-summary objects are no longer written. Console output
+and JSONL both derive from `RunSummary` / `DistSummary` (Hyndman–Fan type 7).
+Historical `request.v2` / `summary.v2` lines from 0.1.82 remain readable for
+regression audit (`record::accepts_audit_schema`); new campaign validation
+rejects any JSONL line without `schema_version`.

@@ -195,10 +195,10 @@ fn asr_normalizer_flag_changes_scores_and_is_recorded() {
     );
 }
 
-/// F-21: legacy summary must not emit a second whole-run RTFx that conflicts
-/// with per-request measured-phase `rtfx_client`.
+/// F-21: data-log must not contain a legacy unversioned ASR summary; measured
+/// RTFx lives only on request records as `rtfx_client`.
 #[test]
-fn asr_legacy_summary_omits_conflicting_rtfx() {
+fn asr_data_log_has_no_legacy_summary() {
     let Some(dummy) = spawn_dummy(&["-latency", "100ms"]) else {
         skip("go dummy-model-server not available");
         return;
@@ -207,15 +207,22 @@ fn asr_legacy_summary_omits_conflicting_rtfx() {
     run_asr(&fixture, &dummy.url("/v1/audio/transcriptions"), &[]);
 
     let text = std::fs::read_to_string(&fixture.data_log).expect("read data log");
-    let legacy = text
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .find(|v| v.get("metrumbench_asr_version").is_some())
-        .expect("legacy ASR summary record");
-    assert!(
-        legacy.pointer("/metrics/throughput/rtfx").is_none(),
-        "legacy metrics.throughput.rtfx must be removed; use measured rtfx_client"
-    );
+    for (n, line) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let v: Value = serde_json::from_str(line).expect("jsonl line");
+        assert!(
+            v.get("schema_version").is_some(),
+            "line {} missing schema_version (legacy summaries removed)",
+            n + 1
+        );
+        assert!(
+            v.get("metrumbench_asr_version").is_none(),
+            "legacy ASR summary must not be written"
+        );
+        assert!(
+            v.pointer("/metrics/throughput/rtfx").is_none(),
+            "conflicting legacy throughput.rtfx must not appear"
+        );
+    }
 
     let records = request_records(&fixture.data_log);
     assert!(!records.is_empty());

@@ -472,7 +472,7 @@ Options:
       --data-log <DATA_LOG>
           
       --summary-json <SUMMARY_JSON>
-          Optional path to write the legacy imagegen summary JSON (also printed to stdout)
+          Optional path to write summary.v3 JSON (same schema as the data-log summary line)
       --debug-log <DEBUG_LOG>
           [default: debug.log]
       --error-log <ERROR_LOG>

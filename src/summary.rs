@@ -17,6 +17,9 @@ pub struct EffectiveRunConfig {
     pub body_template: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unique_prompt_nonce_template: Option<String>,
+    /// Modality-specific fields (e.g. ASR `normalizer`, VLM `reencode_jpeg`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub modality: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -239,6 +242,105 @@ impl RunSummary {
     pub fn with_config(mut self, config: EffectiveRunConfig) -> Self {
         self.config = Some(config);
         self
+    }
+
+    /// Print human-readable stats from this summary (Hyndman–Fan type 7).
+    pub fn print_console(&self) {
+        print_run_summary(self);
+    }
+}
+
+fn fmt_opt(value: Option<f64>, precision: usize) -> String {
+    match value {
+        Some(v) => format!("{v:.precision$}"),
+        None => "n/a".into(),
+    }
+}
+
+fn print_dist(label: &str, dist: &DistSummary) {
+    if dist.n == 0 {
+        println!("  {label}: n=0");
+        return;
+    }
+    let mut flags = Vec::new();
+    if dist.p90_unreliable {
+        flags.push("p90*");
+    }
+    if dist.p95_unreliable {
+        flags.push("p95*");
+    }
+    if dist.p99_unreliable {
+        flags.push("p99*");
+    }
+    let flag = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", flags.join(","))
+    };
+    println!(
+        "  {label}: n={} avg={}s p50={}s p90={}s p95={}s p99={}s{flag}",
+        dist.n,
+        fmt_opt(dist.avg, 3),
+        fmt_opt(dist.p50, 3),
+        fmt_opt(dist.p90, 3),
+        fmt_opt(dist.p95, 3),
+        fmt_opt(dist.p99, 3),
+    );
+}
+
+/// Render a [`RunSummary`] to stdout using DistSummary percentiles only.
+pub fn print_run_summary(summary: &RunSummary) {
+    println!("\n=== Run summary ({}) ===", summary.schema_version);
+    if summary.partial {
+        println!("  (partial — interrupted)");
+    }
+    println!(
+        "  Attempted: {}  Successes: {}  Errors: {}  Error rate: {:.3}",
+        summary.attempted, summary.successes, summary.errors, summary.error_rate
+    );
+    if !summary.errors_by_type.is_empty() {
+        println!("  Errors by type: {:?}", summary.errors_by_type);
+    }
+    println!(
+        "  Window: {:.3}s  Requests/sec: {:.3}",
+        summary.window_seconds, summary.requests_per_second
+    );
+    match summary.completion_tokens_per_second {
+        Some(rate) => println!(
+            "  Completion tokens/sec: {:.3} ({})",
+            rate,
+            summary.completion_tokens_source.unwrap_or("unknown")
+        ),
+        None => println!(
+            "  Completion tokens/sec: n/a (usage_missing_count={})",
+            summary.usage_missing_count
+        ),
+    }
+    print_dist("Latency", &summary.latency_s);
+    print_dist(
+        "CO-corrected latency",
+        &summary.coordinated_omission_latency_s,
+    );
+    print_dist("TTFT", &summary.ttft_s);
+    print_dist("TPOT", &summary.tpot_s);
+    print_dist("ITL", &summary.itl_s);
+    println!(
+        "  Goodput: {:.3} req/s ({}/{} attempted; thresholds={:?})",
+        summary.goodput.requests_per_second,
+        summary.goodput.count,
+        summary.attempted,
+        summary.goodput.thresholds_s
+    );
+    if summary.pooled_mixture {
+        for (name, ep) in &summary.per_endpoint {
+            println!(
+                "\n=== Endpoint: {name} (attempted={}, ok={}, err={}) ===",
+                ep.attempted, ep.successes, ep.errors
+            );
+            print_dist("Latency", &ep.latency_s);
+            print_dist("TTFT", &ep.ttft_s);
+            print_dist("TPOT", &ep.tpot_s);
+        }
     }
 }
 
@@ -555,6 +657,7 @@ mod tests {
                 effective_system_prompt: Some("You are a helpful assistant.".into()),
                 body_template: serde_json::json!({"prompt": "{{prompt}}"}),
                 unique_prompt_nonce_template: None,
+                modality: BTreeMap::new(),
             },
         );
         let cfg = summary.config.expect("config stamped");

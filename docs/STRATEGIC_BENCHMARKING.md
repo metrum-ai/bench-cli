@@ -30,16 +30,27 @@ Rate requests retain their intended schedule while waiting for an in-flight
 slot. CSV fields include scheduled and sent timestamps, queue delay,
 send-to-completion service latency, and scheduled-to-completion latency. Sweep
 percentiles use the repository-wide Hyndman-Fan type 7 estimator over the last
-value, so overload cannot hide behind coordinated omission.
+value, so overload cannot hide behind coordinated omission. Each sweep point
+carries `n`, `errors`, a full `latency_s` DistSummary (including reliability
+flags), redacted stage `config`, and `goodput`.
+
+Use repeatable `--slo e2e=…` so goodput counts only schema-valid successes that
+also meet the end-to-end latency threshold. Without `--slo`,
+`goodput_equals_throughput` is true and goodput is validity-filtered throughput
+(often identical to throughput when no validity checker is configured).
+`ttft=` / `tpot=` are accepted for CLI parity but ignored here because strategic
+records do not carry those timings.
+
+The HTTP client is shared across stages (warm connection pool).
 
 The CSV contains one row per request; HTML is self-contained (inline SVG and
 CSS). MLPerf LoadGen-style exports contain `mlperf_log_summary.txt`,
 `mlperf_log_detail.txt`, and `mlperf_log_accuracy.json` for Server or Offline
-scenarios. The summary uses standard scenario throughput and Server percentile
-field names. It reports `INVALID` when any sample fails. This export is
-parser-oriented interoperability and is not an audited or submitted MLPerf
-result; official submissions must execute the MLPerf LoadGen and compliance
-suite.
+scenarios. Every export file begins with an **UNOFFICIAL** disclaimer; the
+summary never prints a bare `Result is : VALID` without that disclaimer.
+This export is parser-oriented interoperability and is not an audited or
+submitted MLPerf result; official submissions must execute the MLPerf LoadGen
+and compliance suite.
 
 ## Multi-turn and structured output
 
@@ -56,7 +67,8 @@ Every successive turn is submitted with its preceding history.
 `--json-schema schema.json` requests strict JSON-schema output and counts
 syntactically valid objects containing every required property.
 `--tools tools.json` requests a tool call and checks the selected function name
-and JSON arguments. Valid responses determine `validity_rate` and `goodput`.
+and JSON arguments. Valid responses determine `validity_rate` and feed goodput
+(together with optional `--slo`).
 
 ## Embeddings and reranking
 

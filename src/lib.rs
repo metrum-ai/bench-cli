@@ -9,7 +9,6 @@ pub mod error;
 pub mod http_client;
 pub mod jsonl;
 pub mod load;
-pub mod modality;
 pub mod prompt_inputs;
 pub mod record;
 pub mod runner;
@@ -18,7 +17,6 @@ pub mod stats;
 pub mod strategic;
 pub mod summary;
 pub mod tokenizer;
-pub mod transport;
 
 pub mod banner {
     pub fn print_banner_metrumbench(version: &str, tool_name: &str) {

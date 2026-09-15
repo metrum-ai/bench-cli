@@ -48,6 +48,8 @@ Default cells (override with env vars):
 
 Every request record must include `schema_version`. Summaries must include
 `n`, type-7 percentiles, and `partial: false` except for documented interrupts.
+Campaign `validate` fails on any unversioned / legacy JSONL line; `request.v2`
+and `summary.v2` from 0.1.82 remain accepted for regression audit.
 
 ## Report (no private backup)
 
