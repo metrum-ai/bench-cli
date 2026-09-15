@@ -8,12 +8,15 @@ use metrumbench::summary::RunSummary;
 use std::time::Duration;
 
 fn record(seq: u64, phase: Phase, endpoint: &str, latency_ms: u64, ttft_ms: u64) -> RequestRecord {
+    let started = Utc::now();
+    let latency = Duration::from_millis(latency_ms);
     RequestRecord::success(
         seq,
         phase,
         endpoint.into(),
-        Utc::now(),
-        Duration::from_millis(latency_ms),
+        started,
+        started + chrono::Duration::from_std(latency).unwrap(),
+        latency,
         Some(Duration::from_millis(ttft_ms)),
         None,
         vec![Duration::from_millis(20); 19],
@@ -64,21 +67,26 @@ fn undefined_statistics_serialize_as_null_not_zero() {
 
 #[test]
 fn no_output_and_http_status_are_typed() {
+    let started = Utc::now();
+    let latency = Duration::from_millis(1);
+    let completed = started + chrono::Duration::from_std(latency).unwrap();
     let records = [
         RequestRecord::failed(
             0,
             Phase::Measure,
             "dummy".into(),
-            Utc::now(),
-            Duration::from_millis(1),
+            started,
+            completed,
+            latency,
             RequestError::NoOutputToken,
         ),
         RequestRecord::failed(
             1,
             Phase::Measure,
             "dummy".into(),
-            Utc::now(),
-            Duration::from_millis(1),
+            started,
+            completed,
+            latency,
             RequestError::HttpStatus { status: 503 },
         ),
     ];

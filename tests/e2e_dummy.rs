@@ -84,3 +84,292 @@ fn llm_streaming_dummy_timing() {
     };
     run_llm_against(&dummy.url("/v1/chat/completions"));
 }
+
+/// F-01 acceptance: window and rps come from in-task send/completion times, not
+/// the collector join loop. Dummy @ c=4 / n=16 ≈ 4 waves × ~0.5 s → ~7.9 req/s.
+#[test]
+fn llm_closed_loop_window_matches_record_span() {
+    let Some(dummy) = spawn_dummy(&["-latency", "100ms", "-chunk-interval", "20ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let prompts = tmp.path().join("prompts.jsonl");
+    {
+        let mut f = std::fs::File::create(&prompts).unwrap();
+        writeln!(f, r#"{{"prompt":"Hi"}}"#).unwrap();
+    }
+    let data_log = tmp.path().join("out.jsonl");
+    let status = Command::new(llm_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "window",
+            "--num-requests",
+            "16",
+            "--concurrency",
+            "4",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "20",
+            "--warmup-requests",
+            "0",
+            "--seed",
+            "7",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .status()
+        .expect("run llm");
+    assert!(status.success(), "llm bench failed");
+
+    let records = request_records(&data_log);
+    assert_eq!(records.len(), 16, "expected 16 request records");
+    let mut min_send = f64::INFINITY;
+    let mut max_end = f64::NEG_INFINITY;
+    for rec in &records {
+        let started = parse_rfc3339(rec["started_at"].as_str().expect("started_at"));
+        let latency = rec["latency_s"].as_f64().expect("latency_s");
+        min_send = min_send.min(started);
+        max_end = max_end.max(started + latency);
+        assert!(
+            rec.get("scheduled_offset_s").is_none_or(|v| v.is_null()),
+            "closed-loop must not fake schedule: {rec}"
+        );
+        let qd = rec
+            .get("queue_delay_s")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        assert!(
+            qd.abs() < 1e-9,
+            "closed-loop queue_delay_s must be 0, got {qd}: {rec}"
+        );
+    }
+    let expected_window = max_end - min_send;
+    let summary = common::summary_record(&data_log).expect("summary.v3");
+    let window = summary["window_seconds"].as_f64().expect("window_seconds");
+    let rps = summary["requests_per_second"]
+        .as_f64()
+        .expect("requests_per_second");
+    assert!(
+        (window - expected_window).abs() / expected_window < 0.05,
+        "window_seconds={window} expected≈{expected_window}"
+    );
+    let expected_rps = 16.0 / expected_window;
+    assert!(
+        (rps - expected_rps).abs() / expected_rps < 0.05,
+        "rps={rps} expected≈{expected_rps} (~7.9)"
+    );
+    assert!(
+        (6.5..9.5).contains(&rps),
+        "reference band ~7.9 req/s, got {rps}"
+    );
+}
+
+/// F-04: completing tasks write request.v3 immediately, before launch finishes.
+#[test]
+fn llm_flushes_request_records_during_launch() {
+    let Some(dummy) = spawn_dummy(&["-latency", "200ms", "-chunk-interval", "50ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let prompts = tmp.path().join("prompts.jsonl");
+    {
+        let mut f = std::fs::File::create(&prompts).unwrap();
+        writeln!(f, r#"{{"prompt":"Hi"}}"#).unwrap();
+    }
+    let data_log = tmp.path().join("out.jsonl");
+    let mut child = Command::new(llm_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "flush",
+            "--num-requests",
+            "32",
+            "--concurrency",
+            "2",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "8",
+            "--warmup-requests",
+            "0",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .spawn()
+        .expect("spawn llm");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut saw_request = false;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            panic!("llm exited before flush observation: {status}");
+        }
+        if data_log.exists() {
+            if let Ok(text) = std::fs::read_to_string(&data_log) {
+                if text.lines().any(|line| {
+                    serde_json::from_str::<serde_json::Value>(line)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("schema_version")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.contains("request.v"))
+                        })
+                        .unwrap_or(false)
+                }) {
+                    saw_request = true;
+                    break;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        saw_request,
+        "expected a request.v3 line while launch was still running"
+    );
+    // Still running ⇒ launch/drain not finished when the first record landed.
+    assert!(
+        child.try_wait().ok().flatten().is_none(),
+        "process should still be alive after first flush"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// SIGTERM stops issuance; JSONL prefix remains line-parseable (truncated tail ok).
+#[cfg(unix)]
+#[test]
+fn llm_sigterm_leaves_parseable_jsonl_prefix() {
+    let Some(dummy) = spawn_dummy(&["-latency", "300ms", "-chunk-interval", "40ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let prompts = tmp.path().join("prompts.jsonl");
+    {
+        let mut f = std::fs::File::create(&prompts).unwrap();
+        writeln!(f, r#"{{"prompt":"Hi"}}"#).unwrap();
+    }
+    let data_log = tmp.path().join("out.jsonl");
+    let mut child = Command::new(llm_bin())
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "sigterm",
+            "--num-requests",
+            "64",
+            "--concurrency",
+            "4",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "16",
+            "--warmup-requests",
+            "0",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .spawn()
+        .expect("spawn llm");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        if data_log.exists() {
+            if let Ok(text) = std::fs::read_to_string(&data_log) {
+                let n = text
+                    .lines()
+                    .filter(|line| {
+                        serde_json::from_str::<serde_json::Value>(line)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("schema_version")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.contains("request.v"))
+                            })
+                            .unwrap_or(false)
+                    })
+                    .count();
+                if n >= 2 {
+                    break;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    let _ = child.wait();
+
+    let text = std::fs::read_to_string(&data_log).expect("read data log");
+    let mut parsed = 0usize;
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(_) => parsed += 1,
+            Err(_) => {
+                // Truncated final line is allowed; everything before must parse.
+                break;
+            }
+        }
+    }
+    assert!(
+        parsed >= 1,
+        "expected at least one parseable JSONL line after SIGTERM, got {parsed}"
+    );
+}
+
+fn parse_rfc3339(s: &str) -> f64 {
+    use chrono::{DateTime, Utc};
+    let dt: DateTime<Utc> = s.parse().expect("rfc3339");
+    dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9
+}

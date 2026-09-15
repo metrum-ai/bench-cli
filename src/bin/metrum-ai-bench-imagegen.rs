@@ -445,6 +445,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
+                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
                     latency,
                     None,
                     None,
@@ -459,6 +460,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
+                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
                     latency,
                     outcome
                         .http_status

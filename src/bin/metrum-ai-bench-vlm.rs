@@ -1708,6 +1708,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     phase,
                     endpoint_name.clone(),
                     record_started_at,
+                    metrumbench::runner::completed_at_from_start(record_started_at, response_time),
                     response_time,
                     ttft,
                     first_reasoning,
@@ -1772,6 +1773,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     phase,
                     endpoint_name,
                     record_started_at,
+                    metrumbench::runner::completed_at_from_start(record_started_at, Duration::ZERO),
                     Duration::ZERO,
                     metrumbench::jsonl::classify_error(&*e),
                 )
