@@ -1,83 +1,20 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! End-to-end checks against dummy-model-server (Go). Skipped if `go` is missing.
+//! LLM end-to-end checks against dummy-model-server (Go). Skipped if `go` is missing.
 
-use serde_json::Value;
+mod common;
+
+use common::{request_records, skip, spawn_dummy};
 use std::io::Write;
-use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 fn llm_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-llm"))
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port()
-}
-
-fn dummy_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dummy-model-server")
-}
-
-struct Dummy(Child);
-
-impl Drop for Dummy {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn spawn_dummy(port: u16) -> Option<Dummy> {
-    let status = Command::new("go")
-        .arg("version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .ok()?;
-    if !status.success() {
-        return None;
-    }
-    let child = Command::new("go")
-        .current_dir(dummy_dir())
-        .args([
-            "run",
-            "./cmd/dummy-model-server",
-            "-port",
-            &port.to_string(),
-            "-latency",
-            "100ms",
-            "-chunk-interval",
-            "20ms",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let url = format!("http://127.0.0.1:{port}/v1/models");
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(30) {
-        if let Ok(resp) = reqwest::blocking::get(&url) {
-            if resp.status().is_success() {
-                return Some(Dummy(child));
-            }
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    let mut child = child;
-    let _ = child.kill();
-    None
-}
-
-fn run_llm_against(port: u16) {
+fn run_llm_against(url: &str) {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let prompts = tmp.path().join("prompts.jsonl");
     {
@@ -88,7 +25,7 @@ fn run_llm_against(port: u16) {
     let status = Command::new(llm_bin())
         .args([
             "--url",
-            &format!("http://127.0.0.1:{port}/v1/chat/completions"),
+            url,
             "--api-key",
             "dummy",
             "--scenario",
@@ -118,28 +55,18 @@ fn run_llm_against(port: u16) {
         .status()
         .expect("run llm");
     assert!(status.success(), "llm bench failed");
-    let text = std::fs::read_to_string(&data_log).expect("read log");
-    let mut ttft = None;
-    let mut latency = None;
-    let mut itl: Vec<f64> = Vec::new();
-    for line in text.lines() {
-        let v: Value = serde_json::from_str(line).expect("jsonl");
-        if v.get("schema_version")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s.contains("request.v2"))
-        {
-            ttft = v.get("ttft_s").and_then(|x| x.as_f64());
-            latency = v.get("latency_s").and_then(|x| x.as_f64());
-            if let Some(arr) = v.get("itl_s").and_then(|x| x.as_array()) {
-                itl = arr.iter().filter_map(|x| x.as_f64()).collect();
-            }
-        }
-    }
-    let ttft_ms = ttft.expect("ttft") * 1000.0;
-    let lat_ms = latency.expect("latency") * 1000.0;
+
+    let records = request_records(&data_log);
+    let record = records.last().expect("request record");
+    let ttft_ms = record["ttft_s"].as_f64().expect("ttft") * 1000.0;
+    let lat_ms = record["latency_s"].as_f64().expect("latency") * 1000.0;
     // Dummy: latency=100ms + first chunk 20ms => TTFT ~120ms; 20 tokens * 20ms + 100ms => ~500ms.
     assert!((100.0..200.0).contains(&ttft_ms), "ttft_ms={ttft_ms}");
     assert!((420.0..650.0).contains(&lat_ms), "latency_ms={lat_ms}");
+    let itl: Vec<f64> = record["itl_s"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(serde_json::Value::as_f64).collect())
+        .unwrap_or_default();
     if !itl.is_empty() {
         let mean = itl.iter().sum::<f64>() / itl.len() as f64;
         assert!(
@@ -151,10 +78,9 @@ fn run_llm_against(port: u16) {
 
 #[test]
 fn llm_streaming_dummy_timing() {
-    let port = free_port();
-    let Some(_dummy) = spawn_dummy(port) else {
-        eprintln!("skipping: go dummy-model-server not available");
+    let Some(dummy) = spawn_dummy(&["-latency", "100ms", "-chunk-interval", "20ms"]) else {
+        skip("go dummy-model-server not available");
         return;
     };
-    run_llm_against(port);
+    run_llm_against(&dummy.url("/v1/chat/completions"));
 }

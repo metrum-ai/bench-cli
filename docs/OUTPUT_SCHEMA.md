@@ -16,6 +16,14 @@ Each line is a complete JSON object and carries `schema_version`.
 - server usage counts plus optional `tokenized_*` counts and `usage_missing`
 - typed `error`, `partial`, and modality-specific numeric metrics
 
+`modality_metrics` holds flat numeric values keyed by modality:
+
+| Binary | Keys |
+|--------|------|
+| VLM | `image_count`, `image_bytes` (bytes actually sent per request) |
+| ASR | `rtfx_client`, `wer`, `cer`, `inference_seconds_{server,client}` |
+| Imagegen | `images_requested`, `images_returned` |
+
 Image-generation request records retain artifact hashes and response details
 under their modality schema because those fields are not token-oriented.
 

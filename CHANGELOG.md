@@ -1,4 +1,12 @@
-# RustyPhalanx Changelog
+# Changelog
+
+## v0.1.81 (2026-09-15)
+
+- ASR: `--normalizer {whisper-english,whisper-basic,none}` selects the text normalization applied to both sides of WER/CER, and the choice is recorded in `config.normalizer`. WER/CER are pinned by a hand-computed reference table.
+- VLM: source image bytes are sent unchanged unless `--max-image-dimension` forces a resize or the new `--reencode-jpeg` is requested; images are no longer decoded when neither applies. Per-request records carry `modality_metrics.image_bytes` and `image_count`.
+- Dummy-server end-to-end coverage for VLM (streaming TTFT/ITL, non-streaming without a fabricated TTFT, payload preservation), ASR (RTFx, normalizer selection), imagegen (monotonic latency, warmup exclusion, shared summary), and seeded open-loop determinism for constant and Poisson arrivals.
+- Adversarial stream coverage: SSE frames flushed mid-event, a missing `data: [DONE]` sentinel, role-only streams classified `no_output_token`, and reasoning deltas kept out of TTFT. Ctrl-C is covered end to end: records stay on disk and the summary is marked `partial`.
+- CI runs the dummy-server end-to-end tests instead of skipping them (`METRUM_BENCH_REQUIRE_DUMMY=1`), and gates `gofmt`.
 
 ## v0.1.80 (2026-09-14)
 

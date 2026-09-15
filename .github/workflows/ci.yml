@@ -27,6 +27,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # The dummy-server end-to-end tests skip themselves without a Go
+      # toolchain, so install one and require it below.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
         run: bash scripts/check_headers.sh
       - name: cargo fmt
@@ -35,6 +41,8 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: cargo test
         run: cargo test --all-targets --all-features
+        env:
+          METRUM_BENCH_REQUIRE_DUMMY: "1"
       - name: package dry run
         run: cargo package --allow-dirty
 

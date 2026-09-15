@@ -22,25 +22,25 @@ const (
 
 // Config holds CLI flags for the dummy model server.
 type Config struct {
-	Port            int
-	Model           string
-	Latency         time.Duration
-	TokensPerSec    float64
-	ReqPerSec       float64
-	MaxConcurrency  int
-	ChunkInterval   time.Duration
-	ErrorRate       float64
-	SplitSSE        bool
-	OmitDone        bool
-	RoleOnly        bool
-	Reasoning       bool
-	IncludeUsage    bool
-	Seed            int64
-	Compat          Compat
-	LogRequests     bool
-	ImageSize       string
-	MaxImages       int
-	AllowAnyModel   bool
+	Port           int
+	Model          string
+	Latency        time.Duration
+	TokensPerSec   float64
+	ReqPerSec      float64
+	MaxConcurrency int
+	ChunkInterval  time.Duration
+	ErrorRate      float64
+	SplitSSE       bool
+	OmitDone       bool
+	RoleOnly       bool
+	Reasoning      bool
+	IncludeUsage   bool
+	Seed           int64
+	Compat         Compat
+	LogRequests    bool
+	ImageSize      string
+	MaxImages      int
+	AllowAnyModel  bool
 }
 
 // ParseFlags defines and parses CLI flags.
