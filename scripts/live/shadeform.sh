@@ -173,11 +173,17 @@ cmd_pick() {
 build_docker_config() {
   local engine="$1"
   local modality="$2"
-  local model image args
-  if [[ "${modality}" == "vlm" ]]; then
-    model="${VLM_MODEL}"
-  else
-    model="${LLM_MODEL}"
+  local model="${3:-}"
+  local extra_args="${4:-}"
+  local image args
+  if [[ -z "${model}" ]]; then
+    if [[ "${modality}" == "vlm" ]]; then
+      model="${VLM_MODEL}"
+    elif [[ "${modality}" == "asr" ]]; then
+      model="${ASR_MODEL:-openai/whisper-large-v3}"
+    else
+      model="${LLM_MODEL}"
+    fi
   fi
   case "${engine}" in
     vllm)
@@ -192,6 +198,9 @@ build_docker_config() {
       die "unknown engine: ${engine} (expected vllm|sglang)"
       ;;
   esac
+  if [[ -n "${extra_args}" ]]; then
+    args="${args} ${extra_args}"
+  fi
   jq -n \
     --arg image "${image}" \
     --arg args "${args}" \
@@ -222,6 +231,8 @@ cmd_create() {
   local modality="llm"
   local name=""
   local cloud="" region="" typ=""
+  local model=""
+  local extra_args=""
   local execute=0
 
   while [[ $# -gt 0 ]]; do
@@ -232,6 +243,8 @@ cmd_create() {
       --cloud) cloud="$2"; shift 2 ;;
       --region) region="$2"; shift 2 ;;
       --type) typ="$2"; shift 2 ;;
+      --model) model="$2"; shift 2 ;;
+      --extra-args) extra_args="$2"; shift 2 ;;
       --execute) execute=1; shift ;;
       --dry-run) execute=0; shift ;;
       -h|--help) usage; return 0 ;;
@@ -240,8 +253,8 @@ cmd_create() {
   done
 
   case "${modality}" in
-    llm|vlm) ;;
-    *) die "modality must be llm or vlm" ;;
+    llm|vlm|asr) ;;
+    *) die "modality must be llm, vlm, or asr" ;;
   esac
 
   if [[ -z "${name}" ]]; then
@@ -256,8 +269,17 @@ cmd_create() {
     typ="${typ:-$(jq -r .shade_instance_type <<<"${pick_json}")}"
   fi
 
+  # Auto tensor-parallel for multi-GPU SKUs when caller did not set --extra-args.
+  if [[ -z "${extra_args}" && "${typ}" =~ [xX]2$ ]]; then
+    extra_args="--tensor-parallel-size 2"
+  elif [[ -z "${extra_args}" && "${typ}" =~ [xX]4$ ]]; then
+    extra_args="--tensor-parallel-size 4"
+  elif [[ -z "${extra_args}" && "${typ}" =~ [xX]8$ ]]; then
+    extra_args="--tensor-parallel-size 8"
+  fi
+
   local launch
-  launch="$(build_docker_config "${engine}" "${modality}")"
+  launch="$(build_docker_config "${engine}" "${modality}" "${model}" "${extra_args}")"
 
   local payload
   payload="$(jq -n \
