@@ -383,7 +383,11 @@ for summ in sorted(root.glob("imagegen/*/summary.json")):
 
 sut_path = root / "sut.json"
 sut = json.loads(sut_path.read_text()) if sut_path.exists() else {}
-bench_ver = "0.1.82"
+bench_ver = (
+    sut.get("bench_version")
+    or sut.get("bench_git_tag", "").lstrip("v")
+    or "1.0.0-rc.1"
+)
 now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 def table(headers, body_lines):
