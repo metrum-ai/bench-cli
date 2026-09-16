@@ -40,7 +40,7 @@ cargo build --release
 ```
 
 Rust 1.85 or later is required. Optional Homebrew formula is attached to each
-GitHub Release (`metrumbench.rb`); a tap publish runs when the release workflow
+GitHub Release (`metrum-ai-bench.rb`); a tap publish runs when the release workflow
 is configured with a Homebrew tap repository.
 
 ```bash
