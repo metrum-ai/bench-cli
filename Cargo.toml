@@ -22,6 +22,7 @@ exclude = [
     "docs/CAMPAIGN.md",
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",
+    "test-data/endpoints-4servers.yaml",
 ]
 
 [features]

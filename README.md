@@ -3,23 +3,55 @@
 
 # Metrum AI Bench
 
+[![CI](https://github.com/metrum-ai/bench-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/metrum-ai/bench-cli/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/metrum-ai/bench-cli)](https://github.com/metrum-ai/bench-cli/releases)
+
 Apache-2.0 licensed load and performance measurement for OpenAI-compatible
-LLM, VLM, ASR, and image-generation endpoints.
+LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0**
+([CHANGELOG](CHANGELOG.md)).
 
-## Build
+Large prompt corpora are published separately on Hugging Face; this repository
+ships only tiny fixtures ([test-data/README.md](test-data/README.md)).
 
-Rust 1.85 or later is required.
+## Install
+
+**GitHub Releases** (preferred for binaries): download the tarball for your
+target from [Releases](https://github.com/metrum-ai/bench-cli/releases), verify
+the `.sha256` and optional Sigstore bundle, then unpack.
+
+**From source:**
 
 ```bash
+git clone https://github.com/metrum-ai/bench-cli.git
+cd bench-cli
 cargo build --release
+```
+
+Rust 1.85 or later is required. Optional Homebrew formula is attached to each
+GitHub Release (`metrumbench.rb`); a tap publish runs when the release workflow
+is configured with a Homebrew tap repository.
+
+```bash
 cargo test --all-targets
 ```
 
-The preferred entry point is `metrum-ai-bench` with `llm`, `vlm`, `asr`,
-`imagegen`, and `selftest` subcommands. During the v1.x compatibility period the
-four modality binaries can also be invoked directly, and deprecated
-`metrumbench-*` shims remain (they print a v2.0 removal notice). Run a command
-with `--help` for its authoritative flags.
+## Tools
+
+| Entry | Measures | When to use |
+|-------|----------|-------------|
+| `llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
+| `vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
+| `asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
+| `imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `selftest` | Local sanity check of the install | After build or release unpack |
+| `strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity |
+
+The preferred entry point is `metrum-ai-bench` with those subcommands. During
+the v1.x compatibility period the four modality binaries can also be invoked
+directly; deprecated `metrumbench-*` shims remain (they print a v2.0 removal
+notice). Shared load flags live in clap common args; modality-specific flags
+are in [docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
 
 ```bash
 target/release/metrum-ai-bench selftest
@@ -41,35 +73,93 @@ detection, multi-turn sessions, validity rules, server-metrics correlation,
 and CSV, HTML, MLPerf, and optional OTLP exports. See
 [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md).
 
-Prompt files are JSONL with a `prompt` string. VLM rows additionally use
-`image_urls` (array) or `image_url` (string). ASR input rows contain `id`,
-`path` or `url`, `format`, and optional `duration`.
+## Input formats
+
+Prompt/input files are **JSONL only** (`.csv` is rejected with a migration
+hint). Examples:
+
+**LLM**
+
+```json
+{"prompt":"Write a haiku about latency."}
+{"prompt":"Summarize coordinated omission in one sentence."}
+```
+
+**VLM**
+
+```json
+{"prompt":"Describe the image.","image_urls":["https://example.com/a.png"]}
+{"prompt":"Count the objects.","image_url":"test-data/tiny.png"}
+```
+
+**ASR**
+
+```json
+{"id":"sample-1","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}
+{"id":"sample-2","url":"https://example.com/clip.wav","format":"wav","duration":1.5}
+```
+
+Optional ASR ground truth is JSONL with matching `id` and `transcript`.
+WER/CER use `--normalizer` (`whisper-english` default, `whisper-basic`, or
+`none`); the choice is recorded in `config.normalizer`. See
+[docs/ASR.md](docs/ASR.md) for more detail.
+
+**Imagegen** — pass `--prompt` once, or `--prompts` JSONL:
+
+```json
+{"id":"p0","prompt":"a red cube on a table"}
+{"prompt":"a blue sphere","negative_prompt":"blurry","size":"512x512"}
+```
+
+## Zero-API-key loop (dummy server)
+
+```bash
+go run ./dummy-model-server/cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms
+```
+
+Then run any modality against `http://127.0.0.1:18321` with `--api-key dummy`.
+See [docs/REPRODUCING.md](docs/REPRODUCING.md) for the checked-in LLM reference
+and `dummy-model-server/README.md` for flags covering VLM/ASR/imagegen.
+
+Compact VLM / ASR / imagegen examples (second shell, after the dummy is up):
+
+```bash
+printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
+target/release/metrum-ai-bench-vlm --url http://127.0.0.1:18321/v1/chat/completions \
+  --api-key dummy --scenario vlm --num-requests 4 --concurrency 2 \
+  --prompts /tmp/vlm.jsonl --model dummy --max-tokens 16 \
+  --data-log /tmp/vlm.jsonl.out --streaming
+
+printf '%s\n' '{"id":"a","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}' > /tmp/asr.jsonl
+target/release/metrum-ai-bench-asr --url http://127.0.0.1:18321/v1/audio/transcriptions \
+  --api-key dummy --scenario asr --num-requests 4 --concurrency 2 \
+  --input /tmp/asr.jsonl --model dummy --data-log /tmp/asr.jsonl.out
+
+target/release/metrum-ai-bench-imagegen --url http://127.0.0.1:18321/v1 \
+  --api-key dummy --scenario img --num-requests 2 --concurrency 1 \
+  --prompt "a square" --model dummy --size 64x64 --data-log /tmp/img.jsonl
+```
 
 Every completed request is flushed incrementally to JSONL. A graceful Ctrl-C
 stops issuance, drains already-started work, and emits a `partial: true`
 summary. Warmup records remain auditable but are excluded from measured
 distributions.
 
-## Methodology
+## Metrics (summary)
 
-- Closed-loop concurrency or seeded constant/Poisson open-loop arrivals.
-- Open-loop latency includes queue delay from scheduled arrival, preventing
-  coordinated omission from disappearing from headline latency.
-- Hyndman-Fan type 7 percentiles, sample count, sample standard deviation,
-  MAD, p99 reliability, throughput bins, and seeded bootstrap helpers.
-- TTFT is the first visible token; reasoning time is separate; ITL records
-  visible-token chunk intervals; TPOT divides decode duration by `N - 1`.
-- Per-endpoint distributions are first class and aggregate distributions are
-  marked as mixtures.
-- Optional local counts from `tokenizer.json`:
-  `cargo build --features tokenizer`.
-- SLO goodput uses repeatable `--slo ttft=`, `tpot=`, and `e2e=` thresholds.
+| Metric | Meaning |
+|--------|---------|
+| E2E latency | Send → body complete (`latency_s`) |
+| TTFT | First visible token (`ttft_s`); not first-byte headers |
+| First byte | Headers received (`first_byte_s`) |
+| Window rps | Measured successes / monotonic send→complete window |
+| Goodput | Successes meeting `--slo` thresholds / window |
+| RTFx (ASR) | Audio seconds / client request seconds |
 
-See [metric definitions](docs/METRICS.md), [output schema](docs/OUTPUT_SCHEMA.md),
-[CLI reference](docs/CLI.md) (clap `--help` dump),
-[reproduction procedure](docs/REPRODUCING.md), and
-[comparison notes](docs/COMPARISON.md).
-Run `metrum-ai-bench-<modality> --help` for the authoritative live flag list.
+Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
+[output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
+[reproduction](docs/REPRODUCING.md), and [comparison notes](docs/COMPARISON.md).
 
 ## Security and provenance
 
