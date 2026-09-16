@@ -254,25 +254,30 @@ cmd_launch() {
 
   cat >"${root}/sut.json" <<EOF
 {
-  "campaign_id": "${campaign_id}",
-  "bench_version": "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[0].version' || echo unknown)",
-  "bench_git_tag": "$(git -C "${REPO_ROOT}" describe --tags --exact-match HEAD 2>/dev/null || git -C "${REPO_ROOT}" rev-parse --short HEAD)",
-  "recorded_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "cloud": "massedcompute",
-  "matrix_source": "Test Matrix for Metrum Bench CLI / PERFORMANCE TESTS",
-  "engine": "${ENGINE}",
-  "vllm_image": "${VLLM_IMAGE}",
-  "gpu": {"name": "L40S", "count": 2, "driver": "not captured", "cuda": "not captured"},
-  "shade_instance_type": "L40Sx2 (llm/vlm), L40S (asr)",
-  "llm_model": "${first_llm}",
-  "vlm_model": "${first_vlm}",
-  "asr_model": "${ASR_MODEL}",
-  "imagegen_model": "${IMAGEGEN_MODEL}",
-  "isl_osl": {"isl_tokens": ${ISL_TOKENS}, "osl_tokens": ${MAX_TOKENS}},
-  "concurrency": {"llm": "${LLM_CONCS}", "vlm": "${VLM_CONCS}", "asr": "${ASR_CONCS}", "imagegen": "${IMAGEGEN_CONCS}"},
-  "hard_lifetime_hours": ${CAMPAIGN_MAX_HOURS},
-  "model_selection_reason": "Sheet models; first model loaded at launch; additional models swept by recreate if time permits",
-  "launch_flags": {"tensor_parallel_size": 2, "host_port": 80}
+  "provenance": "declared",
+  "name": "massedcompute L40Sx2 / L40S matrix",
+  "vendor": "NVIDIA",
+  "gpu": {"model": "L40S", "count": 2, "memory_gb": null},
+  "driver_version": "not captured",
+  "runtime": {"name": "vllm", "version": "${VLLM_IMAGE}", "config": "tensor_parallel_size=2"},
+  "model": {"id": "${first_llm}", "revision": null, "quantization": null},
+  "notes": "Matrix PERFORMANCE TESTS; see extra for campaign metadata",
+  "extra": {
+    "campaign_id": "${campaign_id}",
+    "bench_version": "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[0].version' || echo unknown)",
+    "bench_git_tag": "$(git -C "${REPO_ROOT}" describe --tags --exact-match HEAD 2>/dev/null || git -C "${REPO_ROOT}" rev-parse --short HEAD)",
+    "recorded_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "cloud": "massedcompute",
+    "matrix_source": "Test Matrix for Metrum Bench CLI / PERFORMANCE TESTS",
+    "engine": "${ENGINE}",
+    "shade_instance_type": "L40Sx2 (llm/vlm), L40S (asr)",
+    "vlm_model": "${first_vlm}",
+    "asr_model": "${ASR_MODEL}",
+    "imagegen_model": "${IMAGEGEN_MODEL}",
+    "isl_tokens": "${ISL_TOKENS}",
+    "osl_tokens": "${MAX_TOKENS}",
+    "hard_lifetime_hours": "${CAMPAIGN_MAX_HOURS}"
+  }
 }
 EOF
   echo "${root}/instances.json"
@@ -294,7 +299,7 @@ run_llm_cell() {
       --mode chat --streaming --prompts "${prompts}" --model "${model}" \
       --max-tokens "${MAX_TOKENS}" --unique-prompts \
       --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-      --error-log "${out}/error.log" --log-level warn
+      --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut
     echo
   } >"${out}/command.txt"
   set +e
@@ -303,7 +308,7 @@ run_llm_cell() {
     --mode chat --streaming --prompts "${prompts}" --model "${model}" \
     --max-tokens "${MAX_TOKENS}" --unique-prompts \
     --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-    --error-log "${out}/error.log" --log-level warn | tee "${out}/stdout.txt"
+    --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut | tee "${out}/stdout.txt"
   local rc=$?
   set -e
   echo "${rc}" >"${out}/exit_code.txt"
@@ -345,7 +350,7 @@ PY
       --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
       --streaming --prompts "${prompts}" --model "${model}" --max-tokens "${MAX_TOKENS}" \
       --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-      --error-log "${out}/error.log" --log-level warn
+      --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut
     echo
   } >"${out}/command.txt"
   set +e
@@ -353,7 +358,7 @@ PY
     --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
     --streaming --prompts "${prompts}" --model "${model}" --max-tokens "${MAX_TOKENS}" \
     --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-    --error-log "${out}/error.log" --log-level warn | tee "${out}/stdout.txt"
+    --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut | tee "${out}/stdout.txt"
   echo $? >"${out}/exit_code.txt"
   set -e
   sha256_tree "${out}"
@@ -385,7 +390,7 @@ run_asr_cell() {
       --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
       --input "${input_jsonl}" --model "${model}" \
       --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-      --error-log "${out}/error.log" --log-level warn
+      --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut
     echo
   } >"${out}/command.txt"
   set +e
@@ -393,7 +398,7 @@ run_asr_cell() {
     --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
     --input "${input_jsonl}" --model "${model}" \
     --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
-    --error-log "${out}/error.log" --log-level warn | tee "${out}/stdout.txt"
+    --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut | tee "${out}/stdout.txt"
   echo $? >"${out}/exit_code.txt"
   set -e
   sha256_tree "${out}"

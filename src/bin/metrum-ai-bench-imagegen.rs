@@ -232,6 +232,29 @@ struct Args {
         help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
     )]
     fail_on_error: bool,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut"
+    )]
+    sut: Option<std::path::PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REQUIRE_SUT",
+        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+    )]
+    require_sut: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
+        help = "Write environment.hostname as null"
+    )]
+    redact_hostname: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +363,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
     validate_args(&args)?;
     prepare_artifacts(&args)?;
+
+    let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
+        args.sut.as_deref(),
+        args.require_sut,
+        args.redact_hostname,
+    )?;
 
     let endpoints = resolve_endpoints(&args)?;
     let runtime = endpoints
@@ -580,6 +609,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             insecure: args.insecure,
             ca_cert: args.ca_cert.clone(),
             fail_on_error: args.fail_on_error,
+            sut: args.sut.as_ref().map(|p| p.display().to_string()),
+            require_sut: args.require_sut,
+            redact_hostname: args.redact_hostname || args.require_sut,
         },
         effective_system_prompt: None,
         body_template: json!({
@@ -606,8 +638,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .into_iter()
         .collect(),
     });
-    shared_summary.environment =
-        metrum_ai_bench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
+    shared_summary.environment = metrum_ai_bench::environment::collect(
+        ntp_offset_ms,
+        Some(args.model.clone()),
+        redact_hostname,
+    );
+    shared_summary = shared_summary.with_sut(sut_block);
     sink.write(&shared_summary)?;
     shared_summary.print_console();
     if let Some(path) = &args.summary_json {

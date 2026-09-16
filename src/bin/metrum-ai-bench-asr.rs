@@ -478,6 +478,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
+    let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+
     // Required: scenario, num_requests, input, model
     if args.scenario.is_none()
         || args.num_requests.is_none()
@@ -1052,7 +1054,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect(),
     });
     shared_summary.environment =
-        metrum_ai_bench::environment::collect(ntp_offset_ms, args.model.clone());
+        metrum_ai_bench::environment::collect(ntp_offset_ms, args.model.clone(), redact_hostname);
+    shared_summary = shared_summary.with_sut(sut_block);
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }

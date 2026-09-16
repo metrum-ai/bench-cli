@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+provenance: declared
+name: "example-host / GPU x1"
+vendor: Example OEM
+gpu:
+  model: L40S
+  count: 1
+  memory_gb: 48
+cpu: Example CPU
+memory_gb: 256
+driver_version: "NVIDIA 580.xx"
+runtime:
+  name: vllm
+  version: latest
+  config: TP=1
+model:
+  id: example/model
+host_os: Ubuntu 22.04
+notes: Example only — replace with your declared inventory.

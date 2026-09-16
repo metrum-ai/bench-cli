@@ -73,6 +73,12 @@ Options:
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --sut <PATH>
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+      --require-sut
+          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+      --redact-hostname
+          Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -163,6 +169,12 @@ Options:
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --sut <PATH>
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+      --require-sut
+          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+      --redact-hostname
+          Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --max-tokens <MAX_TOKENS>
@@ -306,6 +318,19 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --sut <PATH>
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+
+      --require-sut
+          Refuse to run without a valid --sut block; implies --redact-hostname
+          
+          [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --redact-hostname
+          Write environment.hostname as null
+          
+          [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
 
       --debug-log <DEBUG_LOG>
           Path to the debug log file
@@ -485,6 +510,12 @@ Options:
           
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --sut <PATH>
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+      --require-sut
+          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+      --redact-hostname
+          Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
   -h, --help
           Print help
   -V, --version

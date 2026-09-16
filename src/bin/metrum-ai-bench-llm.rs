@@ -533,6 +533,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
+    let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);
 
     // Validate ramp-up period if specified and greater than zero.
@@ -992,8 +994,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ),
         modality: Default::default(),
     });
-    run_summary.environment =
-        metrum_ai_bench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
+    run_summary.environment = metrum_ai_bench::environment::collect(
+        ntp_offset_ms,
+        Some(args.model.clone()),
+        redact_hostname,
+    );
+    run_summary = run_summary.with_sut(sut_block);
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
