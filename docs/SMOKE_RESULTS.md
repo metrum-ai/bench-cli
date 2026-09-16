@@ -3,13 +3,15 @@
 
 # Smoke results — campaign `matrix-20260915-195537`
 
+> **Coverage:** the published smoke matrix is currently **NVIDIA-only** (L40S, RTX PRO 6000 via Shadeform / Massed Compute). AMD Instinct coverage is in progress and will be added under the same manifest standard. No comparative vendor results are published here.
+
 Shadeform smoke against the **Test Matrix for Metrum Bench CLI** (PERFORMANCE TESTS).
 Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 | Field | Value |
 |-------|-------|
 | Campaign ID | `matrix-20260915-195537` |
-| Bench package | `metrum-ai-bench-*` **1.0.0** |
+| Bench package | `metrum-ai-bench-*` **1.0.0-rc.1** (campaign `matrix-20260915`; see also RTX PRO 6000 campaign `v1rc1-20260915-190838` in CHANGELOG) |
 | Date (UTC) | 2026-09-15 |
 | Engine | `vllm` / `vllm/vllm-openai:latest` |
 | Validation | 15 result files |

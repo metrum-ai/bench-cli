@@ -1,6 +1,28 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+> **Disposition — 2026-09-17.** This is the internal production-fidelity review of 0.1.82 (verdict at that time: **NO-GO** for public use), retained as a record.
+> **Superseded by** [`SCORECARD_1.0.0.md`](./SCORECARD_1.0.0.md) / [`QUALITY_ASSESSMENT_1.0.0.md`](./QUALITY_ASSESSMENT_1.0.0.md): current verdict **GO** at `v1.0.0-rc.4`.
+>
+> | Finding | Status | Closed in |
+> |---|---|---|
+> | N-02 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-03 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-04 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-05 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-06 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-07 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | N-09 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | F-05 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
+> | F-09 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
+> | F-14 | Closed | `d03bfa1` / #50 (disclaimer); residual `059f195` / #62 — 1.0.0-rc.1 / rc.2 |
+> | F-16 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
+> | F-25 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
+> | F-26 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
+>
+> Findings still open at rc.5: **Finding 5** (SUT block: `--sut` / `--require-sut`) and **Finding 6** (hostname: `--redact-hostname`) — pending rust#2.
+
+
 # Metrum AI Bench: production-fidelity quality assessment
 
 | Field | Value |
@@ -508,7 +530,7 @@ Other checks:
 
 ## 7. Differentiated value
 
-Each subsection is a capability none of GenAI-Perf, vLLM `benchmark_serving.py`,
+Each subsection is a capability none of GenAI-Perf (retired; see AIPerf), vLLM `benchmark_serving.py`,
 guidellm, LLMPerf, MLPerf LoadGen, or InferenceX offers in this form, judged
 by what a persona can learn or catch.
 
@@ -522,7 +544,7 @@ by what a persona can learn or catch.
 ### 7.2 Reasoning time separated from visible TTFT (Persona B)
 
 - **Decision:** whether a reasoning model's slow first visible token is prefill or thinking.
-- **Correct?** Yes: `first_reasoning_s = 0.0513`, `ttft_s = 0.0615` against a dummy emitting reasoning 10 ms before content; reasoning-only streams are `no_output_token` (A.5 `s3c`, `s3c2`). GenAI-Perf counts the first delta of any kind.
+- **Correct?** Yes: `first_reasoning_s = 0.0513`, `ttft_s = 0.0615` against a dummy emitting reasoning 10 ms before content; reasoning-only streams are `no_output_token` (A.5 `s3c`, `s3c2`). GenAI-Perf (retired; see AIPerf) counts the first delta of any kind.
 - **Demonstrated?** `tests/e2e_adversarial.rs::reasoning_deltas_are_separated_from_ttft`.
 - **To be trustworthy:** keep `first_reasoning_s` on failed records too (it is dropped on `no_output_token`).
 
@@ -542,7 +564,7 @@ by what a persona can learn or catch.
 ### 7.5 Byte-identical image payload with recorded size (Persona B)
 
 - **Decision:** whether a VLM comparison is confounded by client-side re-encoding.
-- **Correct?** Yes: 70 bytes in, 70 bytes at the proxy, `image_bytes = 70`, `image/png`, `detail: low` (A.13). GenAI-Perf and vLLM's bench re-encode or synthesize images.
+- **Correct?** Yes: 70 bytes in, 70 bytes at the proxy, `image_bytes = 70`, `image/png`, `detail: low` (A.13). GenAI-Perf (retired; see AIPerf) and vLLM's bench re-encode or synthesize images.
 - **To be trustworthy:** record `detail` and the resize/re-encode flags in the v2 summary (they are only in the legacy config) and report preprocessing time.
 
 ### 7.6 Knee detection on a measured throughput/latency curve (Persona A)
@@ -586,7 +608,7 @@ by what a persona can learn or catch.
 Gaps versus reference tools, with the persona decision that depends on each.
 Rows marked "none" carry zero weight.
 
-| Capability | GenAI-Perf | vLLM bench | guidellm | LLMPerf | MLPerf LoadGen | Metrum AI Bench at 858bb757 | Dependent decision |
+| Capability | GenAI-Perf (retired; see AIPerf) | vLLM bench | guidellm | LLMPerf | MLPerf LoadGen | Metrum AI Bench at 858bb757 | Dependent decision |
 |---|---|---|---|---|---|---|---|
 | Open-loop Poisson arrivals | yes | yes | yes | no | yes (Server) | yes, seeded | A: capacity under realistic arrivals |
 | Per-request queue delay recorded | no | no | partial | no | yes (scheduled vs issued) | yes (open loop) | A: attribute latency to client cap |

@@ -17,11 +17,16 @@ steps. You will receive an acknowledgement within five business days.
 
 ## Scope
 
-Metrum AI Bench is a load-generation client. It sends the prompts, images and audio
-you supply to the endpoints you specify, with the API keys you provide. Keys
-are passed on the command line or in an endpoints file; treat those files and
-your shell history accordingly. The debug log at `--log-level debug` may
+Metrum AI Bench is a load-generation client. It sends the prompts, images and
+audio you supply to the endpoints you specify, with the API keys you provide.
+Keys are passed on the command line or in an endpoints file; treat those files
+and your shell history accordingly. The debug log at `--log-level debug` may
 contain request payloads; do not share it without review.
+
+Run summaries may include `environment.hostname`. Prefer `--redact-hostname`
+(and publication flows that use `--require-sut`) before sharing results.
+Published-result rules and SUT/manifest expectations are in
+[docs/RESULTS_PUBLICATION_POLICY.md](docs/RESULTS_PUBLICATION_POLICY.md).
 
 First-party Rust sources under `src/` contain no `unsafe` blocks.
 
