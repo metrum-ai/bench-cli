@@ -23,5 +23,7 @@ are passed on the command line or in an endpoints file; treat those files and
 your shell history accordingly. The debug log at `--log-level debug` may
 contain request payloads; do not share it without review.
 
+First-party Rust sources under `src/` contain no `unsafe` blocks.
+
 Findings about the correctness of published metrics are not security issues;
 open a regular issue for those.
