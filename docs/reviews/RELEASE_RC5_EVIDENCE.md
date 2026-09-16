@@ -22,7 +22,7 @@ Local gate on `main` at `1.0.0-rc.5` (post-merge of #78–#84):
 | boundary strings (license key / upgrade / sales) | pass |
 | `cargo llvm-cov --lib … --fail-under-lines 80` | pass |
 | determinism with/without `--sut` (seed 42) | pass (distributions match; `sut`/`hostname` differ) |
-| `metrumbench-llm` shim notice names `metrum-ai-bench-llm` | pass |
+| deprecated modality shim notice names `metrum-ai-bench-llm` | pass |
 
 Tag: annotated `v1.0.0-rc.5` (no signing key configured).
 
