@@ -17,7 +17,7 @@ steps. You will receive an acknowledgement within five business days.
 
 ## Scope
 
-metrumbench is a load-generation client. It sends the prompts, images and audio
+Metrum AI Bench is a load-generation client. It sends the prompts, images and audio
 you supply to the endpoints you specify, with the API keys you provide. Keys
 are passed on the command line or in an endpoints file; treat those files and
 your shell history accordingly. The debug log at `--log-level debug` may

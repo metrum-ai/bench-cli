@@ -5,9 +5,9 @@
 use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, warn};
-use metrumbench::endpoints::resolve_endpoints;
-use metrumbench::prompt_inputs::read_utf8_from_path_or_url;
-use metrumbench::unique_id;
+use metrum_ai_bench::endpoints::resolve_endpoints;
+use metrum_ai_bench::prompt_inputs::read_utf8_from_path_or_url;
+use metrum_ai_bench::unique_id;
 use rand::SeedableRng;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -73,7 +73,7 @@ struct Args {
     data_log: String,
 
     #[command(flatten)]
-    common: metrumbench::args_common::CommonBenchArgs,
+    common: metrum_ai_bench::args_common::CommonBenchArgs,
 
     #[arg(long, default_value = "debug.log", help = "Path to the debug log file")]
     debug_log: String,
@@ -117,7 +117,7 @@ struct Args {
         value_enum,
         help = "Response format: verbose_json, json, text, srt, vtt"
     )]
-    response_format: MetrumBenchASRResponseFormat,
+    response_format: MetrumAiBenchASRResponseFormat,
 
     #[arg(
         long,
@@ -132,11 +132,11 @@ struct Args {
         default_value_t,
         help = "Text normalization applied to both sides of WER/CER"
     )]
-    normalizer: metrumbench::asr::Normalizer,
+    normalizer: metrum_ai_bench::asr::Normalizer,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum MetrumBenchASRResponseFormat {
+enum MetrumAiBenchASRResponseFormat {
     VerboseJson,
     Json,
     Text,
@@ -144,14 +144,14 @@ enum MetrumBenchASRResponseFormat {
     Vtt,
 }
 
-impl std::fmt::Display for MetrumBenchASRResponseFormat {
+impl std::fmt::Display for MetrumAiBenchASRResponseFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MetrumBenchASRResponseFormat::VerboseJson => write!(f, "verbose_json"),
-            MetrumBenchASRResponseFormat::Json => write!(f, "json"),
-            MetrumBenchASRResponseFormat::Text => write!(f, "text"),
-            MetrumBenchASRResponseFormat::Srt => write!(f, "srt"),
-            MetrumBenchASRResponseFormat::Vtt => write!(f, "vtt"),
+            MetrumAiBenchASRResponseFormat::VerboseJson => write!(f, "verbose_json"),
+            MetrumAiBenchASRResponseFormat::Json => write!(f, "json"),
+            MetrumAiBenchASRResponseFormat::Text => write!(f, "text"),
+            MetrumAiBenchASRResponseFormat::Srt => write!(f, "srt"),
+            MetrumAiBenchASRResponseFormat::Vtt => write!(f, "vtt"),
         }
     }
 }
@@ -159,17 +159,17 @@ impl std::fmt::Display for MetrumBenchASRResponseFormat {
 fn word_error_rate(
     reference: &str,
     hypothesis: &str,
-    normalizer: metrumbench::asr::Normalizer,
+    normalizer: metrum_ai_bench::asr::Normalizer,
 ) -> f64 {
-    metrumbench::asr::word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
+    metrum_ai_bench::asr::word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
 }
 
 fn character_error_rate(
     reference: &str,
     hypothesis: &str,
-    normalizer: metrumbench::asr::Normalizer,
+    normalizer: metrum_ai_bench::asr::Normalizer,
 ) -> f64 {
-    metrumbench::asr::character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
+    metrum_ai_bench::asr::character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
 }
 
 #[derive(Clone)]
@@ -246,7 +246,7 @@ async fn make_request(
         .await
     {
         Ok(resp) => resp,
-        Err(e) => return Err(metrumbench::error::RequestError::from_reqwest(&e).into()),
+        Err(e) => return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into()),
     };
     let first_byte = start_time.elapsed();
 
@@ -260,7 +260,7 @@ async fn make_request(
             "Request failed with status: {} - Body: {}",
             status, error_body
         );
-        return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
+        return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
     }
 
     // Get the response text and track bytes received
@@ -468,7 +468,7 @@ fn load_ground_truth(path: &str) -> Result<HashMap<String, String>, Box<dyn Erro
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Print banner
-    metrumbench::banner::print_banner_metrumbench(VERSION, "metrum-ai-bench-asr");
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-asr");
 
     let args = Args::parse();
 
@@ -499,7 +499,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         e
     })?;
     let ntp_offset_ms = if args.ntp_check {
-        let offset = metrumbench::timecheck::check_ntp_offset();
+        let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
             println!("NTP clock offset: {}ms", offset_ms);
         }
@@ -573,8 +573,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client =
-        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
+    let client = metrum_ai_bench::http_client::build_http_client(
+        metrum_ai_bench::http_client::HttpClientOptions {
             request_timeout: Some(Duration::from_secs(args.request_timeout)),
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -582,7 +582,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.common.insecure,
-        })?;
+        },
+    )?;
 
     // Load audio samples from input JSONL file
     let mut audio_samples = load_audio_samples(args.input.as_ref().unwrap())?;
@@ -654,12 +655,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let semaphore = Arc::new(Semaphore::new(
         args.common.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
-    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+    let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
     ));
-    let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
-    let stop = metrumbench::runner::StopFlag::new();
-    metrumbench::runner::install_stop_handlers(stop.clone());
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    let stop = metrum_ai_bench::runner::StopFlag::new();
+    metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
     let mut completed = 0;
@@ -674,9 +675,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let start_time = Instant::now();
     let (record_tx, mut record_rx) =
-        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
+        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
-    let slots = metrumbench::load::schedule(
+    let slots = metrum_ai_bench::load::schedule(
         arrival_kind,
         u64::from(num_requests),
         args.common.request_rate.unwrap_or(0.0),
@@ -703,7 +704,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         let permit = semaphore.clone().acquire_owned().await?;
         let client = client.clone();
-        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+        let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
             arrival_kind,
             start_time.elapsed(),
             slot.scheduled_delay,
@@ -730,9 +731,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
         let sample_duration = sample.duration;
         let sample_id = sample.id.clone();
-        let phase = metrumbench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
+        let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
         let scheduled_delay = slot.scheduled_delay;
-        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let record_schedule = metrum_ai_bench::runner::should_record_schedule(arrival_kind);
         let normalizer = args.normalizer;
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
@@ -768,7 +769,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     bytes_received,
                 )) => {
                     let completed_at =
-                        metrumbench::runner::completed_at_from_start(started_at, response_time);
+                        metrum_ai_bench::runner::completed_at_from_start(started_at, response_time);
                     let word_count = transcription.split_whitespace().count();
                     let char_count = transcription.chars().count();
                     let words_per_second = if inference_time > 0.0 {
@@ -786,7 +787,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .map(|duration| (inference_time / duration, duration))
                         .unzip();
                     let rtfx = sample_duration
-                        .and_then(|d| metrumbench::asr::rtfx(d, response_time.as_secs_f64()));
+                        .and_then(|d| metrum_ai_bench::asr::rtfx(d, response_time.as_secs_f64()));
                     let (wer, cer) = ground_truth_sample
                         .as_ref()
                         .map(|gt| {
@@ -796,7 +797,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             )
                         })
                         .unzip();
-                    let mut rec = metrumbench::record::RequestRecord::success(
+                    let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         slot.seq,
                         phase,
                         endpoint_name.clone(),
@@ -875,12 +876,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     }
                     let latency = send_instant.elapsed();
                     let completed_at =
-                        metrumbench::runner::completed_at_from_start(started_at, latency);
-                    let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
-                    if matches!(request_error, metrumbench::error::RequestError::Connect) {
+                        metrum_ai_bench::runner::completed_at_from_start(started_at, latency);
+                    let request_error =
+                        metrum_ai_bench::error::RequestError::from_error(e.as_ref());
+                    if matches!(request_error, metrum_ai_bench::error::RequestError::Connect) {
                         endpoint_selector.note_connect_failure(&endpoint_name);
                     }
-                    let mut rec = metrumbench::record::RequestRecord::failed(
+                    let mut rec = metrum_ai_bench::record::RequestRecord::failed(
                         slot.seq,
                         phase,
                         endpoint_name.clone(),
@@ -962,7 +964,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let _wer = rec.modality_metrics.get("wer").copied();
             let _cer = rec.modality_metrics.get("cer").copied();
 
-            if phase == metrumbench::record::Phase::Warmup {
+            if phase == metrum_ai_bench::record::Phase::Warmup {
                 records.push(rec);
                 continue;
             }
@@ -1006,7 +1008,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, num_requests, errors
     );
-    let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
+    let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
     } else {
@@ -1021,14 +1023,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "timestamp_granularities": ["word"],
         "file": "<redacted audio bytes>"
     });
-    let mut shared_summary = metrumbench::summary::RunSummary::from_records_with_options(
+    let mut shared_summary = metrum_ai_bench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
         stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
     )
-    .with_config(metrumbench::summary::EffectiveRunConfig {
+    .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: (&args.common).into(),
         effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
@@ -1050,7 +1052,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect(),
     });
     shared_summary.environment =
-        metrumbench::environment::collect(ntp_offset_ms, args.model.clone());
+        metrum_ai_bench::environment::collect(ntp_offset_ms, args.model.clone());
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
@@ -1074,7 +1076,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let measure_errors = records
         .iter()
-        .filter(|r| r.phase == metrumbench::record::Phase::Measure && !r.is_success())
+        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && !r.is_success())
         .count();
     if args.common.fail_on_error && measure_errors > 0 {
         Err("Test completed with errors".into())

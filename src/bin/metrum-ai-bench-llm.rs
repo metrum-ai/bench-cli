@@ -6,9 +6,9 @@ use chrono::Utc;
 use clap::Parser;
 use futures_util::StreamExt;
 use log::{debug, error, info, trace, warn};
-use metrumbench::endpoints::resolve_endpoints;
-use metrumbench::prompt_inputs::load_metrumbench_llm_prompts;
-use metrumbench::unique_id;
+use metrum_ai_bench::endpoints::resolve_endpoints;
+use metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts;
+use metrum_ai_bench::unique_id;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use reqwest::{Client, Response};
@@ -29,16 +29,16 @@ fn effective_ramp_up_seconds(ramp_up_seconds: Option<u64>) -> Option<u64> {
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum MetrumBenchLLMMode {
+enum MetrumAiBenchLLMMode {
     Chat,
     Completion,
 }
 
-impl std::fmt::Display for MetrumBenchLLMMode {
+impl std::fmt::Display for MetrumAiBenchLLMMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MetrumBenchLLMMode::Chat => write!(f, "chat"),
-            MetrumBenchLLMMode::Completion => write!(f, "completion"),
+            MetrumAiBenchLLMMode::Chat => write!(f, "chat"),
+            MetrumAiBenchLLMMode::Completion => write!(f, "completion"),
         }
     }
 }
@@ -84,7 +84,7 @@ struct Args {
     prompts: String,
 
     #[arg(long, value_enum, help = "Mode of operation: 'chat' or 'completion'")]
-    mode: MetrumBenchLLMMode,
+    mode: MetrumAiBenchLLMMode,
 
     #[arg(long, help = "Enable streaming mode")]
     streaming: bool,
@@ -103,7 +103,7 @@ struct Args {
     data_log: String,
 
     #[command(flatten)]
-    common: metrumbench::args_common::CommonBenchArgs,
+    common: metrum_ai_bench::args_common::CommonBenchArgs,
 
     #[arg(long, help = "Maximum number of tokens")]
     max_tokens: u32,
@@ -175,7 +175,7 @@ async fn make_request(
     client: &Client,
     url: &str,
     payload: Value,
-    mode: MetrumBenchLLMMode,
+    mode: MetrumAiBenchLLMMode,
     streaming: bool,
     request_timeout: u64,
     api_key: &str,
@@ -184,12 +184,12 @@ async fn make_request(
 
     // Get prompt text for word counting (chat: messages[].content, completion: prompt)
     let prompt = match mode {
-        MetrumBenchLLMMode::Chat => payload["messages"]
+        MetrumAiBenchLLMMode::Chat => payload["messages"]
             .as_array()
             .and_then(|msgs| msgs.last())
             .and_then(|msg| msg["content"].as_str())
             .unwrap_or(""),
-        MetrumBenchLLMMode::Completion => payload["prompt"].as_str().unwrap_or(""),
+        MetrumAiBenchLLMMode::Completion => payload["prompt"].as_str().unwrap_or(""),
     };
     let prompt_word_count = count_words(prompt);
 
@@ -227,7 +227,7 @@ async fn make_request(
                 error!("  Timeout: {}s", request_timeout);
                 error!("  API Key Length: {} chars", api_key.len());
                 error!("  Streaming Mode: {}", streaming);
-                return Err(metrumbench::error::RequestError::from_reqwest(&e).into());
+                return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into());
             }
         };
         let first_byte = start_time.elapsed();
@@ -252,12 +252,12 @@ async fn make_request(
                 serde_json::to_string_pretty(&payload).unwrap_or_default()
             );
             error!("  Headers: {:?}", headers);
-            return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
+            return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
         }
 
         trace!("Request started streaming");
         let mut stream = response.bytes_stream();
-        let mut parser = metrumbench::sse::SseParser::new();
+        let mut parser = metrum_ai_bench::sse::SseParser::new();
         let mut first_token_time = None;
         let mut first_reasoning_time = None;
         let mut last_token_at: Option<Instant> = None;
@@ -270,15 +270,15 @@ async fn make_request(
         let mut completion_text = String::new();
 
         while let Some(item) = stream.next().await {
-            let bytes = item.map_err(|e| metrumbench::error::RequestError::from_reqwest(&e))?;
+            let bytes = item.map_err(|e| metrum_ai_bench::error::RequestError::from_reqwest(&e))?;
             for event in parser.feed(&bytes) {
                 match event {
-                    metrumbench::sse::SseEvent::Done => {
+                    metrum_ai_bench::sse::SseEvent::Done => {
                         done = true;
                     }
-                    metrumbench::sse::SseEvent::Json(parsed) => {
+                    metrum_ai_bench::sse::SseEvent::Json(parsed) => {
                         if let Some(error) = parsed.get("error") {
-                            return Err(metrumbench::error::RequestError::ApiError {
+                            return Err(metrum_ai_bench::error::RequestError::ApiError {
                                 message: error.to_string(),
                             }
                             .into());
@@ -299,15 +299,15 @@ async fn make_request(
                         }
                         if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
                             for choice in choices {
-                                if metrumbench::sse::choice_finish_reason(choice).is_some() {
+                                if metrum_ai_bench::sse::choice_finish_reason(choice).is_some() {
                                     saw_finish = true;
                                 }
                                 if first_reasoning_time.is_none()
-                                    && metrumbench::sse::choice_has_reasoning_token(choice)
+                                    && metrum_ai_bench::sse::choice_has_reasoning_token(choice)
                                 {
                                     first_reasoning_time = Some(start_time.elapsed());
                                 }
-                                if metrumbench::sse::choice_has_output_token(choice) {
+                                if metrum_ai_bench::sse::choice_has_output_token(choice) {
                                     let now = Instant::now();
                                     if first_token_time.is_none() {
                                         first_token_time = Some(start_time.elapsed());
@@ -316,14 +316,15 @@ async fn make_request(
                                     }
                                     last_token_at = Some(now);
                                 }
-                                if let Some(content) = metrumbench::sse::choice_output_text(choice)
+                                if let Some(content) =
+                                    metrum_ai_bench::sse::choice_output_text(choice)
                                 {
                                     completion_text.push_str(content);
                                 }
                             }
                         }
                     }
-                    metrumbench::sse::SseEvent::Raw(_) => {}
+                    metrum_ai_bench::sse::SseEvent::Raw(_) => {}
                 }
             }
             if done {
@@ -332,10 +333,10 @@ async fn make_request(
         }
 
         if !done && !saw_finish {
-            return Err(metrumbench::error::RequestError::StreamTruncated.into());
+            return Err(metrum_ai_bench::error::RequestError::StreamTruncated.into());
         }
         let Some(ttft) = first_token_time else {
-            return Err(metrumbench::error::RequestError::NoOutputToken.into());
+            return Err(metrum_ai_bench::error::RequestError::NoOutputToken.into());
         };
         trace!("Request completed successfully");
         let completion_word_count = count_words(&completion_text);
@@ -365,7 +366,7 @@ async fn make_request(
             .await
         {
             Ok(resp) => resp,
-            Err(e) => return Err(metrumbench::error::RequestError::from_reqwest(&e).into()),
+            Err(e) => return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into()),
         };
         let first_byte = start_time.elapsed();
 
@@ -373,7 +374,7 @@ async fn make_request(
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|_| String::new());
             error!("HTTP {}: {}", status, error_body.trim());
-            return Err(metrumbench::error::RequestError::from_status(status.as_u16()).into());
+            return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
         }
         // Clock stops after the full body is consumed (not at headers).
         let json_resp: Value = response.json().await?;
@@ -391,14 +392,14 @@ async fn make_request(
 
         // Extract completion text: chat uses choices[0].message.content, completion uses choices[0].text
         let completion_text = match mode {
-            MetrumBenchLLMMode::Chat => json_resp
+            MetrumAiBenchLLMMode::Chat => json_resp
                 .get("choices")
                 .and_then(|c| c.get(0))
                 .and_then(|c| c.get("message"))
                 .and_then(|m| m.get("content"))
                 .and_then(|v| v.as_str())
                 .unwrap_or(""),
-            MetrumBenchLLMMode::Completion => json_resp
+            MetrumAiBenchLLMMode::Completion => json_resp
                 .get("choices")
                 .and_then(|c| c.get(0))
                 .and_then(|c| c.get("text"))
@@ -459,7 +460,7 @@ fn error_message_indicates_oom(message: &str) -> bool {
 }
 
 fn build_request_body(
-    mode: MetrumBenchLLMMode,
+    mode: MetrumAiBenchLLMMode,
     model: &str,
     max_tokens: u32,
     temperature: f32,
@@ -472,7 +473,7 @@ fn build_request_body(
 ) -> Result<Value, Box<dyn Error + Send + Sync>> {
     let system = system_prompt.unwrap_or("You are a helpful assistant.");
     let mut base_payload = match mode {
-        MetrumBenchLLMMode::Chat => {
+        MetrumAiBenchLLMMode::Chat => {
             let mut messages = Vec::new();
             if !system.is_empty() {
                 messages.push(json!({"role": "system", "content": system}));
@@ -486,7 +487,7 @@ fn build_request_body(
                 "messages": messages
             })
         }
-        MetrumBenchLLMMode::Completion => json!({
+        MetrumAiBenchLLMMode::Completion => json!({
             "model": model,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -521,7 +522,7 @@ fn build_request_body(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Print banner
-    metrumbench::banner::print_banner_metrumbench(VERSION, "metrum-ai-bench-llm");
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-llm");
     println!("metrum-ai-bench-llm version {}", VERSION);
 
     let args = Args::parse();
@@ -558,7 +559,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.endpoints_file.as_deref(),
     )?;
     let ntp_offset_ms = if args.ntp_check {
-        let offset = metrumbench::timecheck::check_ntp_offset();
+        let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
             println!("NTP clock offset: {}ms", offset_ms);
         }
@@ -614,8 +615,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let run_id = unique_id::generate_uuid();
 
-    let client =
-        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
+    let client = metrum_ai_bench::http_client::build_http_client(
+        metrum_ai_bench::http_client::HttpClientOptions {
             request_timeout: Some(Duration::from_secs(args.request_timeout)),
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -623,15 +624,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.common.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.common.insecure,
-        })?;
+        },
+    )?;
 
-    let mut prompts = load_metrumbench_llm_prompts(&args.prompts)?;
+    let mut prompts = load_metrum_ai_bench_llm_prompts(&args.prompts)?;
 
     // Shuffle prompts once for even distribution, then cycle through them deterministically
     let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
     prompts.shuffle(&mut shuffle_rng);
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
-    let slots = metrumbench::load::schedule(
+    let slots = metrum_ai_bench::load::schedule(
         args.common.arrival_kind(),
         args.num_requests as u64,
         args.common.request_rate.unwrap_or(0.0),
@@ -639,11 +641,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
 
     let sink = Arc::new(
-        metrumbench::jsonl::JsonlSink::create(&args.data_log)
+        metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)
             .map_err(|e| format!("Failed to open data log file '{}': {}", args.data_log, e))?,
     );
-    let stop = metrumbench::runner::StopFlag::new();
-    metrumbench::runner::install_stop_handlers(stop.clone());
+    let stop = metrum_ai_bench::runner::StopFlag::new();
+    metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
 
     // Initialise semaphore with 1 permit if ramp-up is requested, otherwise with full capacity.
@@ -670,7 +672,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    let endpoint_selector = Arc::new(metrumbench::endpoints::EndpointSelector::new(
+    let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
     ));
 
@@ -681,7 +683,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let start_time = Instant::now();
     let ramp_up_start = start_time;
     let (record_tx, mut record_rx) =
-        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
+        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
 
     'request_loop: for slot in slots {
         if stop.is_stopped() {
@@ -704,19 +706,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
 
         let i = slot.seq as usize;
-        let phase = metrumbench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
+        let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
 
         let permit = semaphore.clone().acquire_owned().await?;
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
-        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+        let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
             arrival_kind,
             start_time.elapsed(),
             slot.scheduled_delay,
         );
         let client = client.clone();
         let endpoint_selector = endpoint_selector.clone();
-        let prompt = metrumbench::args_common::CommonBenchArgs::unique_prompt(
+        let prompt = metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt(
             &prompts[i % prompts.len()],
             slot.seq,
             args.common.unique_prompts,
@@ -745,7 +747,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let record_tx = record_tx.clone();
         let tokenizer_path = args.common.tokenizer.clone();
         let scheduled_delay = slot.scheduled_delay;
-        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let record_schedule = metrum_ai_bench::runner::should_record_schedule(arrival_kind);
         let run_id_task = run_id.clone();
         let run_start = start_time;
         let handle = tokio::spawn(async move {
@@ -765,23 +767,23 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             drop(permit);
             drop(endpoint_lease);
 
-            let tokenizer = match metrumbench::tokenizer::LocalTokenizer::from_file(
+            let tokenizer = match metrum_ai_bench::tokenizer::LocalTokenizer::from_file(
                 tokenizer_path.as_deref(),
             ) {
                 Ok(t) => t,
-                Err(_) => metrumbench::tokenizer::LocalTokenizer::from_file(None)
+                Err(_) => metrum_ai_bench::tokenizer::LocalTokenizer::from_file(None)
                     .expect("disabled tokenizer"),
             };
 
             let record = match result {
                 Ok(sm) => {
                     let completed_at =
-                        metrumbench::runner::completed_at_from_start(started_at, sm.latency);
+                        metrum_ai_bench::runner::completed_at_from_start(started_at, sm.latency);
                     let tokenized_prompt_tokens = tokenizer.count(&sm.prompt_text).ok().flatten();
                     let tokenized_completion_tokens =
                         tokenizer.count(&sm.completion_text).ok().flatten();
                     let usage_missing = sm.completion_tokens == 0 && !sm.completion_text.is_empty();
-                    let mut rec = metrumbench::record::RequestRecord::success(
+                    let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         seq,
                         phase,
                         endpoint_name.clone(),
@@ -813,12 +815,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 Err(e) => {
                     let latency = send_instant.elapsed();
                     let completed_at =
-                        metrumbench::runner::completed_at_from_start(started_at, latency);
-                    let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
-                    if matches!(request_error, metrumbench::error::RequestError::Connect) {
+                        metrum_ai_bench::runner::completed_at_from_start(started_at, latency);
+                    let request_error =
+                        metrum_ai_bench::error::RequestError::from_error(e.as_ref());
+                    if matches!(request_error, metrum_ai_bench::error::RequestError::Connect) {
                         endpoint_selector.note_connect_failure(&endpoint_name);
                     }
-                    let mut rec = metrumbench::record::RequestRecord::failed(
+                    let mut rec = metrum_ai_bench::record::RequestRecord::failed(
                         seq,
                         phase,
                         endpoint_name.clone(),
@@ -854,7 +857,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let mut errors = 0;
     let mut metrics_started = false;
-    let mut records: Vec<metrumbench::record::RequestRecord> = Vec::new();
+    let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
 
     while let Some(rec) = record_rx.recv().await {
         let _endpoint_name = rec.endpoint.clone();
@@ -886,7 +889,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     continue;
                 }
             }
-            if phase == metrumbench::record::Phase::Warmup {
+            if phase == metrum_ai_bench::record::Phase::Warmup {
                 records.push(rec);
                 continue;
             }
@@ -947,7 +950,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, args.num_requests, errors
     );
-    let window_seconds = metrumbench::runner::window_seconds_from_records(&records);
+    let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
     } else {
@@ -970,27 +973,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let effective_system_prompt = args
         .common
         .effective_system_prompt("You are a helpful assistant.");
-    let mut run_summary = metrumbench::summary::RunSummary::from_records_with_options(
+    let mut run_summary = metrum_ai_bench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
         stop.is_stopped(),
         &slos,
         args.common.throughput_bin_seconds,
     )
-    .with_config(metrumbench::summary::EffectiveRunConfig {
+    .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: (&args.common).into(),
         effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt,
         body_template,
         unique_prompt_nonce_template:
-            metrumbench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
+            metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
                 args.common.unique_prompts,
             ),
         modality: Default::default(),
     });
     run_summary.environment =
-        metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
+        metrum_ai_bench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
@@ -998,7 +1001,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let measure_errors = records
         .iter()
-        .filter(|r| r.phase == metrumbench::record::Phase::Measure && !r.is_success())
+        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && !r.is_success())
         .count();
     if args.common.fail_on_error && measure_errors > 0 {
         Err(anyhow::anyhow!("Test completed with errors")

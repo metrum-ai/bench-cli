@@ -4,7 +4,7 @@
 //! Shared JSONL prompt input loaders for metrum-ai-bench-llm and metrum-ai-bench-vlm.
 //! One JSON object per line; fail fast with file/line errors.
 //! Rejects .csv with a migration hint.
-//! MetrumBenchLLM supports local paths and HTTP(S) URLs for the prompts source.
+//! Metrum AI Bench LLM supports local paths and HTTP(S) URLs for the prompts source.
 //! `read_utf8_from_path_or_url` is shared with metrum-ai-bench-asr JSONL manifests and optional ground-truth files.
 
 use std::error::Error;
@@ -71,7 +71,7 @@ pub fn read_utf8_from_path_or_url(source: &str) -> Result<String, Box<dyn Error 
 
 /// Parse JSONL content (one JSON object per line with "prompt" field) into a list of prompt strings.
 /// `path` is used only for error messages (file path or URL).
-fn parse_metrumbench_llm_jsonl_content(
+fn parse_metrum_ai_bench_llm_jsonl_content(
     content: &str,
     path: &str,
 ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
@@ -119,12 +119,12 @@ fn parse_metrumbench_llm_jsonl_content(
 /// Path may be a local file path or an http:// / https:// URL; content must be JSONL.
 /// Minimum contract: one object per line with "prompt" (string).
 /// Preserves embedded newlines in prompt text. Fails fast with file/line or URL/status errors.
-pub fn load_metrumbench_llm_prompts(
+pub fn load_metrum_ai_bench_llm_prompts(
     path: &str,
 ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     reject_csv(path)?;
     let content = read_utf8_from_path_or_url(path)?;
-    parse_metrumbench_llm_jsonl_content(&content, path)
+    parse_metrum_ai_bench_llm_jsonl_content(&content, path)
 }
 
 /// Normalize an image reference for metrum-ai-bench-vlm: strip file:// to a path; leave http(s) and plain paths as-is.
@@ -144,7 +144,7 @@ pub fn normalize_image_ref(s: &str) -> String {
 /// Image entries support HTTP(S) URLs, file:// URIs, and plain local paths; file:// is normalized to a path.
 pub type VlmInputRecord = (String, Vec<String>);
 
-pub fn load_metrumbench_vlm_records(
+pub fn load_metrum_ai_bench_vlm_records(
     path: &str,
 ) -> Result<Vec<VlmInputRecord>, Box<dyn Error + Send + Sync>> {
     reject_csv(path)?;
@@ -230,29 +230,29 @@ mod tests {
     use std::net::TcpListener;
 
     #[test]
-    fn test_reject_csv_metrumbench_llm() {
-        let err = load_metrumbench_llm_prompts("/tmp/prompts.csv").unwrap_err();
+    fn test_reject_csv_metrum_ai_bench_llm() {
+        let err = load_metrum_ai_bench_llm_prompts("/tmp/prompts.csv").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("JSONL"), "{}", msg);
         assert!(msg.contains(".csv"), "{}", msg);
     }
 
     #[test]
-    fn test_reject_csv_metrumbench_vlm() {
-        let err = load_metrumbench_vlm_records("/tmp/prompts.csv").unwrap_err();
+    fn test_reject_csv_metrum_ai_bench_vlm() {
+        let err = load_metrum_ai_bench_vlm_records("/tmp/prompts.csv").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("JSONL"), "{}", msg);
     }
 
     #[test]
-    fn test_load_metrumbench_llm_prompts_valid() {
-        let tmp = std::env::temp_dir().join("metrumbench_llm_prompts_test.jsonl");
+    fn test_load_metrum_ai_bench_llm_prompts_valid() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_prompts_test.jsonl");
         let content = r#"{"prompt":"Hello"}
 {"prompt":"World with, comma"}
 {"prompt":"Quote \"inside\""}
 {"prompt":"New\nline"}"#;
         std::fs::write(&tmp, content).unwrap();
-        let prompts = load_metrumbench_llm_prompts(tmp.to_str().unwrap()).unwrap();
+        let prompts = load_metrum_ai_bench_llm_prompts(tmp.to_str().unwrap()).unwrap();
         assert_eq!(prompts.len(), 4);
         assert_eq!(prompts[0], "Hello");
         assert_eq!(prompts[1], "World with, comma");
@@ -262,19 +262,19 @@ mod tests {
     }
 
     #[test]
-    fn test_load_metrumbench_llm_prompts_missing_prompt() {
-        let tmp = std::env::temp_dir().join("metrumbench_llm_missing.jsonl");
+    fn test_load_metrum_ai_bench_llm_prompts_missing_prompt() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_missing.jsonl");
         std::fs::write(&tmp, r#"{"other":"field"}"#).unwrap();
-        let err = load_metrumbench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
+        let err = load_metrum_ai_bench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("prompt"));
         let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
-    fn test_load_metrumbench_llm_prompts_malformed_json() {
-        let tmp = std::env::temp_dir().join("metrumbench_llm_bad.jsonl");
+    fn test_load_metrum_ai_bench_llm_prompts_malformed_json() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_bad.jsonl");
         std::fs::write(&tmp, r#"not json"#).unwrap();
-        let err = load_metrumbench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
+        let err = load_metrum_ai_bench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("line 1"));
         let _ = std::fs::remove_file(&tmp);
     }
@@ -294,13 +294,13 @@ mod tests {
     }
 
     #[test]
-    fn test_load_metrumbench_vlm_records_valid() {
-        let tmp = std::env::temp_dir().join("metrumbench_vlm_test.jsonl");
+    fn test_load_metrum_ai_bench_vlm_records_valid() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_test.jsonl");
         let content = r#"{"prompt":"What is this?","image_urls":["https://example.com/a.jpg"]}
 {"prompt":"Describe","image_url":"file:///path/to/local.jpg"}
 {"prompt":"Multi","image_urls":["https://a.com/1.jpg","https://b.com/2.jpg"]}"#;
         std::fs::write(&tmp, content).unwrap();
-        let records = load_metrumbench_vlm_records(tmp.to_str().unwrap()).unwrap();
+        let records = load_metrum_ai_bench_vlm_records(tmp.to_str().unwrap()).unwrap();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].0, "What is this?");
         assert_eq!(records[0].1, vec!["https://example.com/a.jpg"]);
@@ -310,17 +310,17 @@ mod tests {
     }
 
     #[test]
-    fn test_load_metrumbench_vlm_records_missing_image_urls() {
-        let tmp = std::env::temp_dir().join("metrumbench_vlm_no_urls.jsonl");
+    fn test_load_metrum_ai_bench_vlm_records_missing_image_urls() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_no_urls.jsonl");
         std::fs::write(&tmp, r#"{"prompt":"No images"}"#).unwrap();
-        let err = load_metrumbench_vlm_records(tmp.to_str().unwrap()).unwrap_err();
+        let err = load_metrum_ai_bench_vlm_records(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("image_urls"));
         let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
     fn test_reject_csv_url() {
-        let err = load_metrumbench_llm_prompts("https://example.com/prompts.csv").unwrap_err();
+        let err = load_metrum_ai_bench_llm_prompts("https://example.com/prompts.csv").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("JSONL"), "{}", msg);
         assert!(msg.contains(".csv"), "{}", msg);
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_read_utf8_from_path_or_url_file() {
-        let tmp = std::env::temp_dir().join("metrumbench_read_utf8_file_test.txt");
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_read_utf8_file_test.txt");
         std::fs::write(&tmp, "hello utf8").unwrap();
         let s = read_utf8_from_path_or_url(tmp.to_str().unwrap()).unwrap();
         assert_eq!(s, "hello utf8");
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_metrumbench_llm_prompts_url_inside_tokio_runtime() {
+    fn test_load_metrum_ai_bench_llm_prompts_url_inside_tokio_runtime() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
@@ -387,7 +387,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let url = format!("http://{}/prompts.jsonl", addr);
         let prompts = runtime
-            .block_on(async { load_metrumbench_llm_prompts(&url) })
+            .block_on(async { load_metrum_ai_bench_llm_prompts(&url) })
             .unwrap();
 
         server.join().unwrap();

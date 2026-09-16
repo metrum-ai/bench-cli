@@ -497,7 +497,7 @@ pub fn export_mlperf(
     let mut summary = File::create(directory.join("mlperf_log_summary.txt"))?;
     writeln!(summary, "{DISCLAIMER}")?;
     writeln!(summary, "MLPerf Results Summary")?;
-    writeln!(summary, "SUT name : MetrumBench")?;
+    writeln!(summary, "SUT name : Metrum AI Bench")?;
     writeln!(summary, "Scenario : {scenario_name}")?;
     writeln!(summary, "Mode : PerformanceOnly")?;
     match scenario {
@@ -535,7 +535,7 @@ pub fn export_mlperf(
     for record in records {
         writeln!(
             detail,
-            ":::MLLOG {{\"key\":\"sample\",\"value\":{{\"id\":{},\"scheduled_time_ns\":{},\"sent_time_ns\":{},\"latency_ns\":{:.0},\"success\":{}}},\"metadata\":{{\"file\":\"metrumbench\",\"lineno\":0}}}}",
+            ":::MLLOG {{\"key\":\"sample\",\"value\":{{\"id\":{},\"scheduled_time_ns\":{},\"sent_time_ns\":{},\"latency_ns\":{:.0},\"success\":{}}},\"metadata\":{{\"file\":\"metrum-ai-bench\",\"lineno\":0}}}}",
             record.seq,
             record.scheduled_unix_ns,
             record.sent_unix_ns,
@@ -584,7 +584,7 @@ pub async fn export_otlp(
         .collect();
     let body = json!({"resourceSpans":[{
         "resource":{"attributes":[{"key":"service.name","value":{"stringValue":service_name}}]},
-        "scopeSpans":[{"scope":{"name":"metrumbench"},"spans":spans}]
+        "scopeSpans":[{"scope":{"name":"metrum-ai-bench"},"spans":spans}]
     }]});
     let url = format!("{}/v1/traces", endpoint.trim_end_matches('/'));
     let mut request = client.post(url).json(&body);
@@ -617,7 +617,7 @@ pub async fn export_otlp(
     }
     let metric_body = json!({"resourceMetrics":[{
         "resource":{"attributes":[{"key":"service.name","value":{"stringValue":service_name}}]},
-        "scopeMetrics":[{"scope":{"name":"metrumbench"},"metrics":metrics}]
+        "scopeMetrics":[{"scope":{"name":"metrum-ai-bench"},"metrics":metrics}]
     }]});
     let metrics_url = format!("{}/v1/metrics", endpoint.trim_end_matches('/'));
     let mut request = client.post(metrics_url).json(&metric_body);

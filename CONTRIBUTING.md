@@ -1,6 +1,6 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. Licensed under the Apache License, Version 2.0. -->
 
-# Contributing to metrumbench
+# Contributing to Metrum AI Bench
 
 Thank you for your interest in contributing. This document explains how to
 build, test and submit changes.

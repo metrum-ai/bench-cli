@@ -22,7 +22,7 @@ fn strategic_sweep_exports_all_formats() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
     let address = listener.local_addr().expect("local address");
     drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrumbench-mock-server"))
+    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-mock-server"))
         .args(["--listen", &address.to_string(), "--latency-ms", "10"])
         .stdout(Stdio::null())
         .spawn()
@@ -96,7 +96,7 @@ fn strategic_sweep_exports_all_formats() {
             .count(),
         10
     );
-    let records: Vec<metrumbench::strategic::BenchRecord> = csv::Reader::from_path(&csv)
+    let records: Vec<metrum_ai_bench::strategic::BenchRecord> = csv::Reader::from_path(&csv)
         .expect("CSV reader")
         .deserialize()
         .collect::<Result<_, _>>()
