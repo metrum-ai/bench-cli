@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          root="metrumbench-v${version}-${{ matrix.target }}"
+          root="metrum-ai-bench-v${version}-${{ matrix.target }}"
           mkdir -p "${root}/bin"
           mapfile -t bins < <(cargo metadata --no-deps --format-version 1 | python3 -c '
           import json, sys
@@ -101,7 +101,7 @@ jobs:
             if [[ -x "${path}" ]]; then cp "${path}" "${root}/bin/"; fi
           done
           test -x "${root}/bin/metrum-ai-bench"
-          test -x "${root}/bin/metrumbench-mock-server"
+          test -x "${root}/bin/metrum-ai-bench-mock-server"
           cp LICENSE README.md "${root}/"
           tar -czf "${root}.tar.gz" "${root}"
           if command -v shasum >/dev/null 2>&1; then
@@ -113,14 +113,14 @@ jobs:
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json
-          mv metrumbench.cdx.json "metrumbench-${{ matrix.target }}.cdx.json"
+          mv metrum-ai-bench.cdx.json "metrum-ai-bench-${{ matrix.target }}.cdx.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.target }}
           path: |
-            metrumbench-v*-${{ matrix.target }}.tar.gz
-            metrumbench-v*-${{ matrix.target }}.tar.gz.sha256
-            metrumbench-${{ matrix.target }}.cdx.json
+            metrum-ai-bench-v*-${{ matrix.target }}.tar.gz
+            metrum-ai-bench-v*-${{ matrix.target }}.tar.gz.sha256
+            metrum-ai-bench-${{ matrix.target }}.cdx.json
 
   artifact-sign:
     needs: artifacts
@@ -142,7 +142,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(ls metrumbench-v*-${{ matrix.target }}.tar.gz)"
+          archive="$(ls metrum-ai-bench-v*-${{ matrix.target }}.tar.gz)"
           cosign sign-blob --yes \
             --bundle "${archive}.sigstore.json" "${archive}"
       # Artifact attestations require a public repo or a billing plan that
@@ -150,13 +150,13 @@ jobs:
       - uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
         continue-on-error: true
         with:
-          subject-path: metrumbench-v*-${{ matrix.target }}.tar.gz
+          subject-path: metrum-ai-bench-v*-${{ matrix.target }}.tar.gz
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-signed-${{ matrix.target }}
           path: |
-            metrumbench-v*-${{ matrix.target }}.tar.gz*
-            metrumbench-${{ matrix.target }}.cdx.json
+            metrum-ai-bench-v*-${{ matrix.target }}.tar.gz*
+            metrum-ai-bench-${{ matrix.target }}.cdx.json
 
   smoke-linux:
     needs: artifacts
@@ -177,7 +177,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(ls metrumbench-v*-${{ matrix.target }}.tar.gz)"
+          archive="$(ls metrum-ai-bench-v*-${{ matrix.target }}.tar.gz)"
           if command -v shasum >/dev/null 2>&1; then
             shasum -a 256 -c "${archive}.sha256"
           else
@@ -187,7 +187,7 @@ jobs:
           root="${archive%.tar.gz}"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
-          "${root}/bin/metrumbench-mock-server" --help | grep -qi mock
+          "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock
 
   smoke-macos:
     needs: artifacts
@@ -208,13 +208,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(ls metrumbench-v*-${{ matrix.target }}.tar.gz)"
+          archive="$(ls metrum-ai-bench-v*-${{ matrix.target }}.tar.gz)"
           shasum -a 256 -c "${archive}.sha256"
           tar -xzf "${archive}"
           root="${archive%.tar.gz}"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
-          "${root}/bin/metrumbench-mock-server" --help | grep -qi mock
+          "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock
 
   github-release:
     if: >-
@@ -233,11 +233,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/render_homebrew_formula.sh "${RELEASE_TAG}" . metrumbench.rb
+          bash scripts/render_homebrew_formula.sh "${RELEASE_TAG}" . metrum-ai-bench.rb
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: homebrew-formula
-          path: metrumbench.rb
+          path: metrum-ai-bench.rb
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -249,7 +249,7 @@ jobs:
             *.sha256
             *.sigstore.json
             *.cdx.json
-            metrumbench.rb
+            metrum-ai-bench.rb
 
   crates-io:
     if: github.event_name == 'push' || inputs.publish_crate == true
@@ -294,11 +294,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p homebrew-tap/Formula
-          cp metrumbench.rb homebrew-tap/Formula/metrumbench.rb
+          cp metrum-ai-bench.rb homebrew-tap/Formula/metrum-ai-bench.rb
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/metrumbench.rb
+          git add Formula/metrum-ai-bench.rb
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "metrumbench ${RELEASE_TAG#v}"
+          git commit -m "metrum-ai-bench ${RELEASE_TAG#v}"
           git push origin "HEAD:${TAP_BRANCH}"

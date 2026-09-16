@@ -53,7 +53,7 @@ fn sibling_binary(name: &str) -> std::io::Result<std::path::PathBuf> {
 }
 
 fn environment() -> serde_json::Value {
-    metrumbench::environment::collect(None, None)
+    metrum_ai_bench::environment::collect(None, None)
 }
 
 fn extract_runs(args: &mut Vec<OsString>) -> Result<u32, String> {
@@ -109,7 +109,7 @@ fn append_cross_run(path: &str, seed: u64, expected_runs: usize) -> anyhow::Resu
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
         .filter(|value: &serde_json::Value| {
-            value["schema_version"] == metrumbench::record::SCHEMA_VERSION_SUMMARY
+            value["schema_version"] == metrum_ai_bench::record::SCHEMA_VERSION_SUMMARY
         })
         .rev()
         .take(expected_runs)
@@ -125,10 +125,10 @@ fn append_cross_run(path: &str, seed: u64, expected_runs: usize) -> anyhow::Resu
     let aggregate = serde_json::json!({
         "schema_version": "metrum-ai-bench.cross-run.v1",
         "runs": summaries.len(),
-        "requests_per_second": metrumbench::stats::DistSummary::from_values(&request_rates),
-        "requests_per_second_ci95": metrumbench::stats::bootstrap_mean_ci(&request_rates, 0.95, 10_000, seed),
-        "completion_tokens_per_second": metrumbench::stats::DistSummary::from_values(&token_rates),
-        "completion_tokens_per_second_ci95": metrumbench::stats::bootstrap_mean_ci(&token_rates, 0.95, 10_000, seed.wrapping_add(1)),
+        "requests_per_second": metrum_ai_bench::stats::DistSummary::from_values(&request_rates),
+        "requests_per_second_ci95": metrum_ai_bench::stats::bootstrap_mean_ci(&request_rates, 0.95, 10_000, seed),
+        "completion_tokens_per_second": metrum_ai_bench::stats::DistSummary::from_values(&token_rates),
+        "completion_tokens_per_second_ci95": metrum_ai_bench::stats::bootstrap_mean_ci(&token_rates, 0.95, 10_000, seed.wrapping_add(1)),
     });
     let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
     serde_json::to_writer(&mut file, &aggregate)?;

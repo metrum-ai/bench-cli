@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use chrono::Utc;
-use metrumbench::error::RequestError;
-use metrumbench::record::{Phase, RequestRecord};
-use metrumbench::summary::RunSummary;
+use metrum_ai_bench::error::RequestError;
+use metrum_ai_bench::record::{Phase, RequestRecord};
+use metrum_ai_bench::summary::RunSummary;
 use std::time::Duration;
 
 fn record(seq: u64, phase: Phase, endpoint: &str, latency_ms: u64, ttft_ms: u64) -> RequestRecord {

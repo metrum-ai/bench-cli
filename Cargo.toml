@@ -1,5 +1,5 @@
 [package]
-name = "metrumbench"
+name = "metrum-ai-bench"
 version = "1.0.0-rc.4"
 edition = "2021"
 rust-version = "1.85"
@@ -73,8 +73,8 @@ name = "metrumbench-imagegen"
 path = "src/bin/metrumbench-imagegen.rs"
 
 [[bin]]
-name = "metrumbench-mock-server"
-path = "src/bin/metrumbench-mock-server.rs"
+name = "metrum-ai-bench-mock-server"
+path = "src/bin/metrum-ai-bench-mock-server.rs"
 
 [dependencies]
 axum = "0.8.4"

@@ -7,7 +7,7 @@ use std::process::Command;
 
 fn main() {
     // Always emit the v2.0 removal notice (including --help).
-    eprintln!("notice: `metrumbench-imagegen` shim will be removed in metrumbench v2.0");
+    eprintln!("notice: `metrumbench-imagegen` shim will be removed in v2.0");
     eprintln!(
         "warning: `metrumbench-imagegen` is deprecated and will be removed in v2.0; use `metrum-ai-bench-imagegen` instead"
     );

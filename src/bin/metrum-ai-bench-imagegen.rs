@@ -330,7 +330,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
     let ntp_offset_ms = if args.ntp_check {
-        let offset = metrumbench::timecheck::check_ntp_offset();
+        let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
             println!("NTP clock offset: {}ms", offset_ms);
         }
@@ -348,8 +348,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect::<HashMap<_, _>>();
     let runtime = Arc::new(runtime);
 
-    let client =
-        metrumbench::http_client::build_http_client(metrumbench::http_client::HttpClientOptions {
+    let client = metrum_ai_bench::http_client::build_http_client(
+        metrum_ai_bench::http_client::HttpClientOptions {
             request_timeout: None,
             connect_timeout: Duration::from_secs(args.connect_timeout),
             pool_max_idle_per_host: args.concurrency as usize,
@@ -357,7 +357,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tcp_keepalive: Duration::from_secs(args.tcp_keepalive),
             ca_cert: args.ca_cert.as_deref().map(std::path::Path::new),
             insecure: args.insecure,
-        })?;
+        },
+    )?;
 
     if args.endpoint_health_check {
         health_check_endpoints(&client, &endpoints, &args.health_path, args.request_timeout)
@@ -365,7 +366,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let prompts = Arc::new(load_prompts(&args)?);
-    let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
             .create(true)
@@ -379,22 +380,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.max_concurrency.unwrap_or(args.concurrency) as usize,
     ));
     let run_start = Instant::now();
-    let run_id = metrumbench::unique_id::generate_uuid();
-    let stop = metrumbench::runner::StopFlag::new();
-    metrumbench::runner::install_stop_handlers(stop.clone());
+    let run_id = metrum_ai_bench::unique_id::generate_uuid();
+    let stop = metrum_ai_bench::runner::StopFlag::new();
+    metrum_ai_bench::runner::install_stop_handlers(stop.clone());
 
     let mut handles = Vec::new();
     use rand::SeedableRng;
     let mut arrival_rng =
         rand::rngs::StdRng::seed_from_u64(args.seed.unwrap_or_default() as u64 ^ 0x9e37_79b9);
     let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
-        (None, _) => metrumbench::load::ArrivalKind::ClosedLoop,
-        (Some(_), "poisson") => metrumbench::load::ArrivalKind::Poisson,
-        (Some(_), _) => metrumbench::load::ArrivalKind::Constant,
+        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
+        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
+        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
     };
     let (record_tx, mut record_rx) =
-        tokio::sync::mpsc::unbounded_channel::<metrumbench::record::RequestRecord>();
-    let slots = metrumbench::load::schedule(
+        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+    let slots = metrum_ai_bench::load::schedule(
         arrival_kind,
         u64::from(args.num_requests),
         args.request_rate.unwrap_or(0.0),
@@ -410,14 +411,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         let request_index = slot.seq as usize;
         let permit = sem.clone().acquire_owned().await?;
-        let queue_delay = metrumbench::runner::queue_delay_for_slot(
+        let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
             arrival_kind,
             run_start.elapsed(),
             slot.scheduled_delay,
         );
-        let record_schedule = metrumbench::runner::should_record_schedule(arrival_kind);
+        let record_schedule = metrum_ai_bench::runner::should_record_schedule(arrival_kind);
         let scheduled_delay = slot.scheduled_delay;
-        let phase = metrumbench::record::Phase::for_seq(slot.seq, args.warmup_requests);
+        let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.warmup_requests);
         let args = args.clone();
         let endpoints = endpoints.clone();
         let runtime = runtime.clone();
@@ -457,12 +458,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let latency = Duration::from_secs_f64(outcome.latency_ms / 1000.0);
             let mut record = if outcome.status == "success" {
-                let mut rec = metrumbench::record::RequestRecord::success(
+                let mut rec = metrum_ai_bench::record::RequestRecord::success(
                     slot.seq,
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
-                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
+                    metrum_ai_bench::runner::completed_at_from_start(outcome.started_at, latency),
                     latency,
                     None,
                     None,
@@ -477,26 +478,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 rec
             } else {
                 let request_error = match outcome.error_type.as_deref() {
-                    Some("timeout") => metrumbench::error::RequestError::Timeout,
+                    Some("timeout") => metrum_ai_bench::error::RequestError::Timeout,
                     Some("connect") | Some("connection_error") => {
-                        metrumbench::error::RequestError::Connect
+                        metrum_ai_bench::error::RequestError::Connect
                     }
                     _ => outcome
                         .http_status
-                        .map(metrumbench::error::RequestError::from_status)
-                        .unwrap_or_else(|| metrumbench::error::RequestError::Other {
+                        .map(metrum_ai_bench::error::RequestError::from_status)
+                        .unwrap_or_else(|| metrum_ai_bench::error::RequestError::Other {
                             message: outcome
                                 .error_message
                                 .clone()
                                 .unwrap_or_else(|| outcome.status.clone()),
                         }),
                 };
-                metrumbench::record::RequestRecord::failed(
+                metrum_ai_bench::record::RequestRecord::failed(
                     slot.seq,
                     phase,
                     outcome.endpoint_name.clone(),
                     outcome.started_at,
-                    metrumbench::runner::completed_at_from_start(outcome.started_at, latency),
+                    metrum_ai_bench::runner::completed_at_from_start(outcome.started_at, latency),
                     latency,
                     request_error,
                 )
@@ -542,21 +543,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let metrics = metrics.lock().await;
-    let window_seconds = metrumbench::runner::window_seconds_from_records(&shared_records);
+    let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
     } else {
         run_start.elapsed().as_secs_f64()
     };
-    let mut shared_summary = metrumbench::summary::RunSummary::from_records(
+    let mut shared_summary = metrum_ai_bench::summary::RunSummary::from_records(
         &shared_records,
         window_seconds,
         stop.is_stopped(),
     )
-    .with_config(metrumbench::summary::EffectiveRunConfig {
+    .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         effective_max_concurrency: args.max_concurrency.unwrap_or(args.concurrency),
-        common: metrumbench::args_common::EffectiveCommonArgs {
+        common: metrum_ai_bench::args_common::EffectiveCommonArgs {
             seed: args.seed.unwrap_or(0) as u64,
             warmup_requests: args.warmup_requests,
             request_rate: args.request_rate,
@@ -564,9 +565,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             max_concurrency: args.max_concurrency,
             load_balancer: match args.load_balancer {
                 LoadBalancer::LeastInflight => {
-                    metrumbench::args_common::LoadBalancer::LeastInflight
+                    metrum_ai_bench::args_common::LoadBalancer::LeastInflight
                 }
-                _ => metrumbench::args_common::LoadBalancer::RoundRobin,
+                _ => metrum_ai_bench::args_common::LoadBalancer::RoundRobin,
             },
             ignore_eos: false,
             min_tokens: None,
@@ -606,7 +607,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .collect(),
     });
     shared_summary.environment =
-        metrumbench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
+        metrum_ai_bench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
     sink.write(&shared_summary)?;
     shared_summary.print_console();
     if let Some(path) = &args.summary_json {
@@ -1088,10 +1089,10 @@ async fn make_image_request(
         .send()
         .await
         .map_err(|e| {
-            let typed = metrumbench::error::RequestError::from_reqwest(&e);
+            let typed = metrum_ai_bench::error::RequestError::from_reqwest(&e);
             let err_type = match typed {
-                metrumbench::error::RequestError::Timeout => "timeout",
-                metrumbench::error::RequestError::Connect => "connect",
+                metrum_ai_bench::error::RequestError::Timeout => "timeout",
+                metrum_ai_bench::error::RequestError::Connect => "connect",
                 _ => "request_error",
             };
             (
@@ -1103,10 +1104,10 @@ async fn make_image_request(
     let first_byte = send_start.elapsed();
     let status = resp.status().as_u16();
     let bytes = resp.bytes().await.map_err(|e| {
-        let typed = metrumbench::error::RequestError::from_reqwest(&e);
+        let typed = metrum_ai_bench::error::RequestError::from_reqwest(&e);
         let err_type = match typed {
-            metrumbench::error::RequestError::Connect => "connect",
-            metrumbench::error::RequestError::Timeout => "timeout",
+            metrum_ai_bench::error::RequestError::Connect => "connect",
+            metrum_ai_bench::error::RequestError::Timeout => "timeout",
             _ => "connection_error",
         };
         (err_type.to_string(), Some(status), e.to_string())

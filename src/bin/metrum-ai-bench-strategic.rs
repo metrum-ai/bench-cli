@@ -5,7 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
-use metrumbench::strategic::{
+use metrum_ai_bench::strategic::{
     controlled_messages, detect_knee, export_csv, export_html, export_mlperf, load_sessions,
     now_unix_ns, scrape_metrics, summarize_stage, BenchRecord, MlperfScenario, PrefixControl,
     ServerMetrics, Validity,
@@ -66,9 +66,9 @@ struct Args {
     metrics_url: Option<String>,
     #[arg(long, default_value_t = 250)]
     metrics_interval_ms: u64,
-    #[arg(long, default_value = "metrumbench-report.html")]
+    #[arg(long, default_value = "metrum-ai-bench-report.html")]
     html: PathBuf,
-    #[arg(long, default_value = "metrumbench-requests.csv")]
+    #[arg(long, default_value = "metrum-ai-bench-requests.csv")]
     csv: PathBuf,
     #[arg(long)]
     mlperf_dir: Option<PathBuf>,
@@ -76,7 +76,7 @@ struct Args {
     mlperf_scenario: MlperfScenario,
     #[arg(long)]
     otlp_endpoint: Option<String>,
-    #[arg(long, default_value = "metrumbench")]
+    #[arg(long, default_value = "metrum-ai-bench")]
     otlp_service_name: String,
     #[arg(long, default_value_t = 300)]
     timeout_seconds: u64,
@@ -364,7 +364,7 @@ async fn main() -> Result<()> {
         None
     };
     let sequence = Arc::new(AtomicU64::new(0));
-    let slos = metrumbench::summary::SloConfig::parse(&args.slos)?;
+    let slos = metrum_ai_bench::summary::SloConfig::parse(&args.slos)?;
     let redacted_config = json!({
         "url": args.url,
         "model": args.model,
@@ -416,7 +416,7 @@ async fn main() -> Result<()> {
     export_csv(&args.csv, &all_records)?;
     export_html(
         &args.html,
-        "MetrumBench strategic sweep",
+        "Metrum AI Bench strategic sweep",
         &points,
         knee,
         &server,
@@ -436,7 +436,7 @@ async fn main() -> Result<()> {
                     .collect()
             })
             .unwrap_or_default();
-        metrumbench::strategic::export_otlp(
+        metrum_ai_bench::strategic::export_otlp(
             &reqwest::Client::new(),
             endpoint,
             &args.otlp_service_name,
