@@ -125,7 +125,7 @@ jobs:
         run: >-
           cargo llvm-cov --lib --all-features --fail-under-lines 80
           --ignore-filename-regex
-          'src/(args_common|endpoints|error|jsonl|lib|prompt_inputs)\.rs'
+          'src/(args_common|endpoints|error|jsonl|lib|prompt_inputs|prompt_library)\.rs'
 
   deny:
     name: cargo deny check (all)

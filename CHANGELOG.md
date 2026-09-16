@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- `metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`): select a
+  reproducible ISL/OSL mix from
+  [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+  by mean or median within absolute tolerances; preferred `--count` may vary
+  within `--count-slack` and source rows may repeat. Writes JSONL for
+  `metrum-ai-bench-llm` plus a selection report with recommended
+  `--num-requests` / `--max-tokens`. Docs: `docs/PROMPT_LIBRARY.md`.
+
 ## 1.0.0-rc.5 (2026-09-17)
 
 Release candidate: naming alignment, publication SUT block, policy drafts, and CI gates.

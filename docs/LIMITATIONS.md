@@ -80,3 +80,15 @@ and never emits bare `Result is : VALID`. It is not a submission. See
 Interrupted runs can write `partial: true`. Consumers must not treat a partial
 summary as a complete campaign cell without checking that flag and sample
 counts.
+
+## Prompt-library mixes vs llm scheduling
+
+`metrum-ai-bench-prompts` can solve for ISL/OSL mean or median within
+tolerances, including by repeating rows or leaving the preferred `--count`.
+`metrum-ai-bench-llm` still shuffles `--prompts` and cycles with modulo
+indexing under a **global** `--max-tokens`. The selected mix is preserved only
+when `--num-requests` equals the extractor's `selected_count` and
+`--warmup-requests` is `0`. Warmup or a mismatched request count changes the
+measured mix. Repeats in the JSONL are solver output for length statistics,
+not a claim about prompt diversity or answer quality. See
+[PROMPT_LIBRARY.md](PROMPT_LIBRARY.md).
