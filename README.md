@@ -15,11 +15,13 @@ Metrum AI Bench measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
 and attests.
 
-Large prompt corpora are published separately on Hugging Face as
-`metrum-ai/bench-prompts`
-<!-- TODO(launch): HF dataset URL -->
-; this repository ships only tiny fixtures
-([test-data/README.md](test-data/README.md)). Draft card:
+Large prompt corpora for LLM workload mixes are published on Hugging Face as
+[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library).
+Use `metrum-ai-bench-prompts` to select a mix by ISL/OSL mean or median within
+CLI tolerances, then feed the resulting JSONL to `metrum-ai-bench-llm` (see
+[docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md)). This repository ships only
+tiny fixtures ([test-data/README.md](test-data/README.md)). Draft card for
+other modality fixtures:
 [docs/datasets/DATASET_CARD.draft.md](docs/datasets/DATASET_CARD.draft.md).
 
 ## Install
@@ -55,6 +57,7 @@ cargo test --all-targets
 | `vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
 | `asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
 | `imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
 | `selftest` | Local sanity check of the install | After build or release unpack |
 | `strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity |
 
@@ -63,6 +66,48 @@ the v1.x compatibility period the four modality binaries can also be invoked
 directly; deprecated `metrumbench-*` shims remain (they print a v2.0 removal
 notice). Shared load flags live in clap common args; modality-specific flags
 are in [docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
+
+### Prompt-library mix → dummy-server e2e
+
+Success is ISL/OSL **within tolerance**, not an exact `--count`. After extract,
+use `report.selected_count` and `report.recommended_max_tokens`. Keep
+`--warmup-requests 0` so llm does not drop measured mix slots. llm still uses
+one global `--max-tokens` (per-request caps are out of scope). Details:
+[docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md).
+
+```bash
+cargo build --release --bin metrum-ai-bench-prompts --bin metrum-ai-bench-llm
+go run ./dummy-model-server/cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms
+
+# Median targets (sample config; pin a commit SHA)
+target/release/metrum-ai-bench-prompts \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --count 64 --seed 42 \
+  --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
+  --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32 \
+  --output /tmp/mix.jsonl --report /tmp/mix-report.json
+
+target/release/metrum-ai-bench-llm \
+  --url http://127.0.0.1:18321/v1/chat/completions --api-key dummy \
+  --scenario prompt-library-median \
+  --num-requests "$(jq .selected_count /tmp/mix-report.json)" \
+  --concurrency 4 --warmup-requests 0 --prompts /tmp/mix.jsonl \
+  --mode chat --streaming --model dummy \
+  --max-tokens "$(jq .recommended_max_tokens /tmp/mix-report.json)" \
+  --seed 42 --data-log /tmp/mix-run.jsonl
+```
+
+Mean-target extract (same llm/dummy pattern afterward):
+
+```bash
+target/release/metrum-ai-bench-prompts \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --count 32 --seed 7 \
+  --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \
+  --osl-target 128 --osl-unit tokens --osl-stat mean --osl-tolerance 16 \
+  --output /tmp/mix-mean.jsonl --report /tmp/mix-mean-report.json
+```
 
 ```bash
 target/release/metrum-ai-bench selftest
@@ -190,8 +235,9 @@ distributions.
 
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
-[reproduction](docs/REPRODUCING.md), [comparison notes](docs/COMPARISON.md),
-and [known limitations](docs/LIMITATIONS.md).
+[prompt library](docs/PROMPT_LIBRARY.md), [reproduction](docs/REPRODUCING.md),
+[comparison notes](docs/COMPARISON.md), and
+[known limitations](docs/LIMITATIONS.md).
 
 ## Security and provenance
 

@@ -43,6 +43,11 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
     },
+    /// Select an ISL/OSL mix from metrum-ai/prompt-library.
+    Prompts {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
+    },
     /// Print client environment and verify local runtime capabilities.
     Selftest,
 }
@@ -177,6 +182,7 @@ fn main() -> ExitCode {
         Commands::Vlm { args } => ("metrum-ai-bench-vlm", args),
         Commands::Asr { args } => ("metrum-ai-bench-asr", args),
         Commands::Imagegen { args } => ("metrum-ai-bench-imagegen", args),
+        Commands::Prompts { args } => ("metrum-ai-bench-prompts", args),
         Commands::Selftest => unreachable!(),
     };
     match dispatch(binary, args) {

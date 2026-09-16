@@ -24,6 +24,10 @@ fn metrum_ai_bench_asr_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-asr"))
 }
 
+fn metrum_ai_bench_prompts_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-prompts"))
+}
+
 #[test]
 fn version_only_works_without_skip_env_vars() {
     let mut scrubbed = HashMap::new();
@@ -332,5 +336,135 @@ fn metrum_ai_bench_asr_rejects_invalid_response_format() {
     assert!(
         !out.status.success(),
         "metrum-ai-bench-asr must reject invalid --response-format"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_prompts_version_only() {
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args(["--version-only"])
+        .output()
+        .expect("run metrum-ai-bench-prompts --version-only");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("metrum-ai-bench-prompts version"));
+}
+
+#[test]
+fn metrum_ai_bench_prompts_selects_from_local_jsonl() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("lib.jsonl");
+    let output = dir.path().join("mix.jsonl");
+    let report = dir.path().join("report.json");
+    let mut body = String::new();
+    for i in 0..8 {
+        body.push_str(&format!(
+            "{{\"prompt\":\"row {i}\",\"target_output_length\":20,\"reasoning\":false,\"target_input_tokens\":64,\"target_output_tokens\":128,\"source_ordinal\":{i}}}\n"
+        ));
+    }
+    std::fs::write(&input, body).expect("write fixture");
+
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args([
+            "--local-jsonl",
+            input.to_str().unwrap(),
+            "--count",
+            "4",
+            "--count-slack",
+            "0",
+            "--seed",
+            "7",
+            "--isl-target",
+            "64",
+            "--isl-unit",
+            "tokens",
+            "--isl-stat",
+            "mean",
+            "--isl-tolerance",
+            "0",
+            "--osl-target",
+            "128",
+            "--osl-unit",
+            "tokens",
+            "--osl-stat",
+            "mean",
+            "--osl-tolerance",
+            "0",
+            "--max-repeats",
+            "1",
+            "--output",
+            output.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run metrum-ai-bench-prompts");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(report_json["selected_count"], 4);
+    assert_eq!(report_json["recommended_num_requests"], 4);
+    assert_eq!(report_json["recommended_max_tokens"], 128);
+    let mix = std::fs::read_to_string(&output).unwrap();
+    assert_eq!(mix.lines().count(), 4);
+    assert!(mix.contains("Please aim for approximately 20 words"));
+}
+
+#[test]
+fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("lib.jsonl");
+    let output = dir.path().join("mix.jsonl");
+    let report = dir.path().join("report.json");
+    std::fs::write(
+        &input,
+        r#"{"prompt":"only","target_output_length":20,"reasoning":false,"target_input_tokens":32,"target_output_tokens":32,"source_ordinal":0}
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args([
+            "--local-jsonl",
+            input.to_str().unwrap(),
+            "--count",
+            "4",
+            "--count-slack",
+            "0",
+            "--no-repeats",
+            "--seed",
+            "1",
+            "--isl-target",
+            "1024",
+            "--isl-tolerance",
+            "0",
+            "--osl-target",
+            "1024",
+            "--osl-tolerance",
+            "0",
+            "--output",
+            output.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run metrum-ai-bench-prompts");
+    assert!(!out.status.success());
+    assert!(!output.exists(), "must not write JSONL on failure");
+    assert!(!report.exists(), "must not write report on failure");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no mix within ISL/OSL") || stderr.contains("kind:"),
+        "stderr:\n{stderr}"
     );
 }
