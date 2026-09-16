@@ -20,7 +20,7 @@
 > | F-25 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
 > | F-26 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
 >
-> Findings still open at rc.5: **Finding 5** (SUT block: `--sut` / `--require-sut`) and **Finding 6** (hostname: `--redact-hostname`) — pending rust#2.
+> Findings still open at rc.5: none (Findings 5–6 closed in #82).
 
 
 # Metrum AI Bench: production-fidelity quality assessment
