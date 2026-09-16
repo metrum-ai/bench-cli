@@ -1,0 +1,4 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Fake fixture — not a real AWS account.
+aws_account_example: the account id is 123456789012 for ci fixtures only

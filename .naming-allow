@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Product-naming allowlist (shim paths only). Format: path-glob<TAB>regex
+# See docs/NAMING.md. Do not widen beyond shims and documented removal notices.
+Cargo.toml	name = "metrumbench|path = "src/bin/metrumbench
+src/bin/metrumbench*	.
+README.md	metrumbench-\*|deprecated `metrumbench|shim will be removed|removed in v2\.0
+docs/**	metrumbench-\*|shim will be removed|removed in v2\.0|deprecated shim
+.gitignore	metrumbench-imagegen-artifacts
+scripts/live/**	metrumbench

@@ -2,7 +2,7 @@
 
 # dummy-model-server
 
-OpenAI / vLLM / SGLang–compatible HTTP stub for hermetic **metrumbench** tests across LLM, VLM, ASR, and image-generation modalities. Copyright (c) 2026 Metrum AI, Inc. Licensed under Apache-2.0.
+OpenAI / vLLM / SGLang–compatible HTTP stub for hermetic **metrum-ai-bench** tests across LLM, VLM, ASR, and image-generation modalities. Copyright (c) 2026 Metrum AI, Inc. Licensed under Apache-2.0.
 
 ## Build & run
 
