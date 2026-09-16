@@ -7,7 +7,7 @@ use std::process::Command;
 
 fn main() {
     // Always emit the v2.0 removal notice (including --help).
-    eprintln!("notice: `metrumbench-llm` shim will be removed in metrumbench v2.0");
+    eprintln!("notice: `metrumbench-llm` shim will be removed in v2.0");
     eprintln!("warning: `metrumbench-llm` is deprecated and will be removed in v2.0; use `metrum-ai-bench-llm` instead");
     let mut sibling = std::env::current_exe().unwrap_or_else(|e| {
         eprintln!("failed to resolve current executable: {e}");

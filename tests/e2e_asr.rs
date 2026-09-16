@@ -215,7 +215,7 @@ fn asr_data_log_has_no_legacy_summary() {
             n + 1
         );
         assert!(
-            v.get("metrumbench_asr_version").is_none(),
+            v.get("metrum_ai_bench_asr_version").is_none(),
             "legacy ASR summary must not be written"
         );
         assert!(

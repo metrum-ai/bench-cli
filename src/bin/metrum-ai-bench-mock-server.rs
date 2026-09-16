@@ -61,7 +61,7 @@ async fn infer(
     let model = request
         .get("model")
         .and_then(Value::as_str)
-        .unwrap_or("metrumbench-mock");
+        .unwrap_or("metrum-ai-bench-mock");
     if request.get("input").is_some() {
         return Ok(Json(json!({
             "object":"list",
@@ -93,7 +93,7 @@ async fn infer(
             .unwrap_or(&Value::Null);
         json!({"role":"assistant","content":mock_schema_value(schema).to_string()})
     } else {
-        json!({"role":"assistant","content":"Hello from metrumbench."})
+        json!({"role":"assistant","content":"Hello from metrum-ai-bench."})
     };
     Ok(Json(json!({
         "id":format!("chatcmpl-{sequence}"),"object":"chat.completion","model":model,
@@ -149,7 +149,7 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
 async fn models() -> Json<Value> {
     Json(json!({
         "object":"list",
-        "data":[{"id":"metrumbench-mock","object":"model","owned_by":"metrum-ai"}]
+        "data":[{"id":"metrum-ai-bench-mock","object":"model","owned_by":"metrum-ai"}]
     }))
 }
 
@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
         .route("/v1/rerank", post(infer))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
-    println!("metrumbench-mock-server listening on {}", args.listen);
+    println!("metrum-ai-bench-mock-server listening on {}", args.listen);
     axum::serve(listener, app).await?;
     Ok(())
 }

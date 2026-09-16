@@ -20,7 +20,7 @@ fi
 
 checksum() {
   local target="$1"
-  local file="${artifact_directory}/metrumbench-v${version}-${target}.tar.gz.sha256"
+  local file="${artifact_directory}/metrum-ai-bench-v${version}-${target}.tar.gz.sha256"
   [[ -f "${file}" ]] || {
     echo "missing checksum: ${file}" >&2
     exit 1
@@ -39,7 +39,7 @@ sed \
   -e "0,/RELEASE_WORKFLOW_UPDATES_THIS_VALUE/s//${x64_mac}/" \
   -e "0,/RELEASE_WORKFLOW_UPDATES_THIS_VALUE/s//${arm_linux}/" \
   -e "0,/RELEASE_WORKFLOW_UPDATES_THIS_VALUE/s//${x64_linux}/" \
-  packaging/homebrew/metrumbench.rb > "${output_formula}"
+  packaging/homebrew/metrum-ai-bench.rb > "${output_formula}"
 
 if grep -q RELEASE_WORKFLOW_UPDATES_THIS_VALUE "${output_formula}"; then
   echo "formula still contains checksum placeholders" >&2

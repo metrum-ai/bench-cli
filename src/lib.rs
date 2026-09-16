@@ -19,7 +19,7 @@ pub mod summary;
 pub mod tokenizer;
 
 pub mod banner {
-    pub fn print_banner_metrumbench(version: &str, tool_name: &str) {
+    pub fn print_banner(version: &str, tool_name: &str) {
         println!(
             r#"
                                                                                                         
