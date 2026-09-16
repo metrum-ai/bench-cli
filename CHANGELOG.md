@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.0.0-rc.3 (2026-09-16)
+
+Release candidate: cross-platform release binaries via cargo-zigbuild.
+
+- Release pipeline: tagged builds use a pinned `ghcr.io/rust-cross/cargo-zigbuild`
+  image on Linux instead of native macOS / ARM Ubuntu compile runners. Targets
+  remain `x86_64`/`aarch64` `*-unknown-linux-gnu` (dynamically linked glibc,
+  2.17 floor) and `*-apple-darwin`. Not musl; TLS remains rustls.
+- Binary identity differs from rc.2 (Zig linker / glibc floor / Darwin SDK in
+  the zigbuild image). Compile-free smoke jobs unpack each archive and run
+  `metrum-ai-bench --help` / `selftest` on matching Linux and macOS runners
+  before GitHub Release, crates.io, and Homebrew publish.
+
 ## 1.0.0-rc.2 (2026-09-16)
 
 Release candidate after the 1.0.0 measurement residuals and OSS-readiness docs.
