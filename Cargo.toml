@@ -92,7 +92,7 @@ sha2 = "0.10.9"
 simplelog = "0.12.2"
 tokio = { version = "1.53.1", features = ["full"] }
 anyhow = "1.0.104"
-base64 = "0.22.1"
+base64 = "0.23.1"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 jsonschema = { version = "0.56.0", default-features = false }
 uuid = { version = "1.26.1", features = ["v4"] }
