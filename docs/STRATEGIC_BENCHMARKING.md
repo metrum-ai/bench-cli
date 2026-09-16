@@ -107,12 +107,14 @@ cargo install metrumbench --bin metrumbench-mock-server
 
 ## Distribution
 
-The crate is publishable with `cargo publish`. Tagged releases build Linux and
-macOS archives, generate CycloneDX SBOMs, checksums and keyless Sigstore
-signatures, and create the GitHub Release. The crates.io upload runs only when
-the `CRATES_IO_TOKEN` secret is set, and the generated formula is committed to
-a tap only when `HOMEBREW_TAP_REPOSITORY` and `HOMEBREW_TAP_TOKEN` are
-configured; both are skipped with a warning otherwise, so the release itself
-still succeeds. Manual dispatch requires a version-matching release tag and has
-separate publication switches. `packaging/homebrew/metrumbench.rb` is the
-formula template; release automation fills all platform checksums.
+The crate is publishable with `cargo publish`. Tagged releases cross-build Linux
+gnu (glibc, not musl) and macOS Darwin archives with a pinned
+`cargo-zigbuild` container on Linux, generate CycloneDX SBOMs, checksums and
+keyless Sigstore signatures, smoke-test each archive on a matching native
+runner, then create the GitHub Release. The crates.io upload runs only when the
+`CRATES_IO_TOKEN` secret is set, and the generated formula is committed to a tap
+only when `HOMEBREW_TAP_REPOSITORY` and `HOMEBREW_TAP_TOKEN` are configured;
+both are skipped with a warning otherwise, so the release itself still succeeds.
+Manual dispatch requires a version-matching release tag and has separate
+publication switches. `packaging/homebrew/metrumbench.rb` is the formula
+template; release automation fills all platform checksums.
