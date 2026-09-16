@@ -11,8 +11,16 @@ Apache-2.0 licensed load and performance measurement for OpenAI-compatible
 LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0-rc.4**
 ([CHANGELOG](CHANGELOG.md)).
 
-Large prompt corpora are published separately on Hugging Face; this repository
-ships only tiny fixtures ([test-data/README.md](test-data/README.md)).
+Metrum AI Bench measures one environment and produces a result with a
+manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
+and attests.
+
+Large prompt corpora are published separately on Hugging Face as
+`metrum-ai/bench-prompts`
+<!-- TODO(launch): HF dataset URL -->
+; this repository ships only tiny fixtures
+([test-data/README.md](test-data/README.md)). Draft card:
+[docs/datasets/DATASET_CARD.draft.md](docs/datasets/DATASET_CARD.draft.md).
 
 ## Install
 
@@ -32,7 +40,7 @@ cargo build --release
 ```
 
 Rust 1.85 or later is required. Optional Homebrew formula is attached to each
-GitHub Release (`metrumbench.rb`); a tap publish runs when the release workflow
+GitHub Release (`metrum-ai-bench.rb`); a tap publish runs when the release workflow
 is configured with a Homebrew tap repository.
 
 ```bash
@@ -71,10 +79,27 @@ Pass `--runs N` among the forwarded modality arguments to the unified entry
 point to execute sequential independent runs and append a seeded bootstrap
 cross-run aggregate to `--data-log`.
 
-The `metrum-ai-bench-strategic` runner adds concurrency/rate sweeps, knee
-detection, multi-turn sessions, validity rules, server-metrics correlation,
-and CSV, HTML, MLPerf, and optional OTLP exports. See
+The `metrum-ai-bench-strategic` runner adds concurrency/rate sweeps
+(`--sweep`), knee detection, multi-turn sessions, validity rules,
+server-metrics correlation, and CSV, HTML (`--html`), MLPerf-shaped
+(`--mlperf-dir`), and optional OTLP exports. See
 [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md).
+
+### Publishing a result
+
+A published number that names Metrum AI Bench must carry an unmodified run
+summary with a SUT block. Produce a compliant run with:
+
+```bash
+metrum-ai-bench llm -- \
+  ... \
+  --sut sut.json --require-sut
+```
+
+A claim that omits the manifest (including the SUT block) is **not** a
+Metrum AI Bench result under the publication policy, even if the software was
+used. See [docs/RESULTS_PUBLICATION_POLICY.md](docs/RESULTS_PUBLICATION_POLICY.md)
+and [TRADEMARKS.md](TRADEMARKS.md).
 
 ## Input formats
 
@@ -125,6 +150,9 @@ Then run any modality against `http://127.0.0.1:18321` with `--api-key dummy`.
 See [docs/REPRODUCING.md](docs/REPRODUCING.md) for the checked-in LLM reference
 and `dummy-model-server/README.md` for flags covering VLM/ASR/imagegen.
 
+For deterministic strategic fixtures, the Rust mock server binary is
+`metrum-ai-bench-mock-server` (see [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md)).
+
 Compact VLM / ASR / imagegen examples (second shell, after the dummy is up):
 
 ```bash
@@ -162,7 +190,8 @@ distributions.
 
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
-[reproduction](docs/REPRODUCING.md), and [comparison notes](docs/COMPARISON.md).
+[reproduction](docs/REPRODUCING.md), [comparison notes](docs/COMPARISON.md),
+and [known limitations](docs/LIMITATIONS.md).
 
 ## Security and provenance
 
@@ -171,6 +200,21 @@ scanning runs in CI. Test fixture provenance is documented in
 `test-data/README.md`; dependencies and notices are in
 `THIRD_PARTY_LICENSES` and `NOTICE`.
 
+Run summaries may record client `environment.hostname`. Use
+`--redact-hostname` when publishing or sharing logs so the hostname field is
+null; `--require-sut` implies redaction for publication-oriented runs. See
+[docs/OUTPUT_SCHEMA.md](docs/OUTPUT_SCHEMA.md) for the summary / environment
+shape.
+
+## Known limitations
+
+Scope and honesty constraints (client-side only, SUT declaration, NVIDIA-only
+smoke matrix, unofficial MLPerf export, and more):
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+Metrum AI and Metrum AI Bench are trademarks of Metrum AI, Inc. See
+[TRADEMARKS.md](TRADEMARKS.md).
