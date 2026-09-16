@@ -34,8 +34,14 @@ size_categories:
 
 Prompt and media corpora for driving Metrum AI Bench modality runners
 (LLM / VLM / ASR / imagegen) against OpenAI-compatible endpoints. This
-repository's git tree ships only tiny fixtures under `test-data/`; large
-corpora are intended for a separate Hugging Face dataset.
+repository's git tree ships only tiny fixtures under `test-data/`.
+
+For **LLM workload-length mixes** (ISL/OSL targets), use the published
+Apache-2.0 dataset
+[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+with `metrum-ai-bench-prompts` ([PROMPT_LIBRARY.md](../PROMPT_LIBRARY.md)).
+This draft card remains for other modality fixtures that may be published
+separately; it does **not** claim this git tree hosts the prompt-library corpus.
 
 ## License
 

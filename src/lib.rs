@@ -10,6 +10,7 @@ pub mod http_client;
 pub mod jsonl;
 pub mod load;
 pub mod prompt_inputs;
+pub mod prompt_library;
 pub mod record;
 pub mod runner;
 pub mod sse;

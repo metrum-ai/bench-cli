@@ -52,6 +52,10 @@ name = "metrum-ai-bench"
 path = "src/bin/metrum-ai-bench.rs"
 
 [[bin]]
+name = "metrum-ai-bench-prompts"
+path = "src/bin/metrum-ai-bench-prompts.rs"
+
+[[bin]]
 name = "metrum-ai-bench-strategic"
 path = "src/bin/metrum-ai-bench-strategic.rs"
 
@@ -97,6 +101,7 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 jsonschema = { version = "0.56.0", default-features = false }
 uuid = { version = "1.26.1", features = ["v4"] }
 tempfile = "3.27.0"
+parquet = { version = "56.2.0", default-features = false, features = ["zstd", "snap", "arrow"] }
 tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 
 [profile.release]

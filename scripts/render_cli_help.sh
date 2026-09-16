@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Regenerate docs/CLI.md from clap --help for the four modality binaries.
+# Regenerate docs/CLI.md from clap --help for modality and prompts binaries.
 # Requires built debug binaries under target/debug/.
 
 set -euo pipefail
@@ -13,7 +13,7 @@ BIN_DIR="${ROOT}/target/debug"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-for bin in metrum-ai-bench-llm metrum-ai-bench-vlm metrum-ai-bench-asr metrum-ai-bench-imagegen; do
+for bin in metrum-ai-bench-llm metrum-ai-bench-vlm metrum-ai-bench-asr metrum-ai-bench-imagegen metrum-ai-bench-prompts; do
   [[ -x "${BIN_DIR}/${bin}" ]] || die "missing ${BIN_DIR}/${bin}; run: cargo build --bins"
 done
 
@@ -27,7 +27,7 @@ done
   echo '`scripts/render_cli_help.sh` after flag changes. Live `--help` is'
   echo 'authoritative if this file drifts.'
   echo
-  for name in llm vlm asr imagegen; do
+  for name in llm vlm asr imagegen prompts; do
     echo "## \`metrum-ai-bench-${name}\`"
     echo
     echo '```text'

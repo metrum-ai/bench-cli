@@ -522,3 +522,71 @@ Options:
           Print version
 ```
 
+## `metrum-ai-bench-prompts`
+
+```text
+Usage: metrum-ai-bench-prompts [OPTIONS]
+
+Options:
+      --version-only
+          Print version information and exit
+      --dataset <DATASET>
+          [default: metrum-ai/prompt-library]
+      --revision <REVISION>
+          Pinned dataset revision (40-char commit SHA unless --allow-moving-revision)
+      --config <CONFIG>
+          Dataset config: sample|full [default: sample]
+      --split <SPLIT>
+          [default: train]
+      --allow-moving-revision
+          Allow floating revisions such as main (resolves to a commit)
+      --cache-dir <CACHE_DIR>
+          Cache directory for Hub downloads
+      --offline
+          Do not download; use files already in the cache
+      --local-parquet <LOCAL_PARQUET>
+          Load rows from local parquet shards (repeatable); skips Hub
+      --local-jsonl <LOCAL_JSONL>
+          Load rows from a local JSONL file with full metadata; skips Hub
+      --count <COUNT>
+          Preferred mix size (soft target; actual size may differ within --count-slack)
+      --count-slack <COUNT_SLACK>
+          Max absolute deviation from --count (default: max(count, 32))
+      --seed <SEED>
+          RNG seed for selection [default: 0]
+      --isl-target <ISL_TARGET>
+          ISL target (same units as --isl-unit)
+      --isl-unit <ISL_UNIT>
+          [default: tokens] [possible values: words, tokens]
+      --isl-stat <ISL_STAT>
+          [default: median] [possible values: mean, median]
+      --isl-tolerance <ISL_TOLERANCE>
+          Absolute ISL tolerance [default: 0]
+      --osl-target <OSL_TARGET>
+          OSL target (same units as --osl-unit)
+      --osl-unit <OSL_UNIT>
+          [default: tokens] [possible values: words, tokens]
+      --osl-stat <OSL_STAT>
+          [default: median] [possible values: mean, median]
+      --osl-tolerance <OSL_TOLERANCE>
+          Absolute OSL tolerance [default: 0]
+      --isl-token-basis <ISL_TOKEN_BASIS>
+          [default: supplied-target] [possible values: supplied-target]
+      --reasoning <REASONING>
+          [default: any] [possible values: any, true, false]
+      --max-repeats <MAX_REPEATS>
+          Max copies of one source row [default: 8]
+      --no-repeats
+          Disable repeats (equivalent to --max-repeats 1)
+      --osl-tokens-per-word <OSL_TOKENS_PER_WORD>
+          Tokens-per-word factor for recommending --max-tokens when --osl-unit words
+      --select-work-limit <SELECT_WORK_LIMIT>
+          Selector work / iteration budget [default: 50000]
+      --output <OUTPUT>
+          Write selected prompts as JSONL for metrum-ai-bench-llm
+      --report <REPORT>
+          Write selection report JSON
+  -h, --help
+          Print help
+```
+
