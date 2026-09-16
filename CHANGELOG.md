@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.0.0-rc.4 (2026-09-16)
+
+Release candidate after retracting the mistagged GA and Dependabot maintenance.
+
+- Release hygiene: deleted mistagged non-prerelease `v1.0.0` (tag + GitHub
+  Release) so `1.0.0` remains available for eventual GA; marked existing
+  `1.0.0-rc.*` releases as prerelease; release workflow now sets `prerelease`
+  automatically for `-rc.` / `-alpha.` / `-beta.` tags.
+- Dependencies: `base64` 0.23.1, `sha2` 0.11.0, optional `tokenizers` 0.23.2;
+  GitHub Actions bumps for checkout, setup-go, rust-cache, upload-artifact, and
+  softprops/action-gh-release.
+
 ## 1.0.0-rc.3 (2026-09-16)
 
 Release candidate: cross-platform release binaries via cargo-zigbuild.
