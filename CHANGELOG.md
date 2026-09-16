@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 1.0.0-rc.5 (2026-09-17)
+
+Release candidate: naming alignment, publication SUT block, policy drafts, and CI gates.
+
+### Added
+- `--sut <PATH>` embeds an operator-declared system-under-test block (JSON/YAML) into the summary as `sut`, labelled `provenance: "declared"`. Absent → `"sut": null` plus a stderr notice.
+- `--require-sut` (env `METRUM_AI_BENCH_REQUIRE_SUT=1`) refuses to run without a valid SUT block; implies `--redact-hostname`. Use for any run intended for publication.
+- `--redact-hostname` (env `METRUM_AI_BENCH_REDACT_HOSTNAME=1`) writes `environment.hostname: null`.
+- `examples/sut.example.{json,yaml}`.
+- TRADEMARKS.md, docs/RESULTS_PUBLICATION_POLICY.md, docs/CLAIMS_LEDGER.md, docs/NAMING.md (drafts pending counsel review).
+- docs/LIMITATIONS.md; docs/datasets/DATASET_CARD.draft.md (not published).
+- docs/RELEASING.md (publish variables and cosign notes).
+
+### Changed
+- Crate renamed `metrumbench` → `metrum-ai-bench` to match the `metrum-ai-bench` binary. Not yet published to crates.io; no migration needed.
+- Mock server binary renamed `metrumbench-mock-server` → `metrum-ai-bench-mock-server`.
+- MLPerf interoperability export: SUT name field `"MetrumBench"` → `"Metrum AI Bench"` (label only; no metric or schema change).
+- Tarball prefix and Homebrew formula follow the crate name.
+- Summary schema v3: optional `sut` field added; `environment.hostname` is now nullable. Additive; readers must treat both as optional.
+- `scripts/live/campaign.sh` / `matrix_smoke.sh` pass `--sut sut.json`.
+- docs/COMPARISON.md rewritten against current code and the September 2026 landscape (AIPerf replaces retired GenAI-Perf; InferenceX and vLLM/SGLang bench_serving added; MLPerf export described as the unofficial interoperability export it is).
+- docs/reviews/QUALITY_ASSESSMENT_REPORT.md carries a disposition header; current verdict lives in SCORECARD_1.0.0.md.
+- docs/SMOKE_RESULTS.md states the matrix is NVIDIA-only with Instinct in progress.
+- README: publishing-a-result section, security and provenance, known limitations, trademark notice.
+- CI enforces the product-naming rule (docs/NAMING.md) via scripts/check_headers.sh; DCO sign-off enforced on PRs.
+- crates.io and Homebrew publish now require explicit repository variables (`CRATES_IO_PUBLISH`, `HOMEBREW_PUBLISH`) and never run for `-rc.` tags.
+- Build-provenance attestation is required when the repository is public.
+- Added CodeQL (Rust), cargo-geiger, cargo-outdated/udeps weekly jobs; gitleaks custom rules for account IDs, cleartext passwords, SSH public keys, internal hostnames.
+
 ## 1.0.0-rc.4 (2026-09-16)
 
 Release candidate after retracting the mistagged GA and Dependabot maintenance.

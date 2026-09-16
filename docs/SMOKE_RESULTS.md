@@ -33,6 +33,8 @@ Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 ### Launch flags
 
+> Publication runs should pass `--sut sut.json --require-sut` (rc.5+). Hostname redaction is implied.
+
 - **llm/vlm (gemma then Qwen recreate)**: `--model <id> --host 0.0.0.0 --port 8000 --tensor-parallel-size 2` on `L40Sx2`
 - **asr**: `--model openai/whisper-large-v3 --host 0.0.0.0 --port 8000` on `L40S`
 
