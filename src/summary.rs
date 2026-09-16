@@ -4,6 +4,7 @@
 use crate::args_common::EffectiveCommonArgs;
 use crate::record::{Phase, RequestRecord, SCHEMA_VERSION_SUMMARY};
 use crate::stats::{bootstrap_mean_ci, ConfidenceInterval, DistSummary};
+use crate::sut::Sut;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -49,6 +50,8 @@ pub struct RunSummary {
     pub pooled_mixture: bool,
     pub per_endpoint: BTreeMap<String, EndpointSummary>,
     pub environment: serde_json::Value,
+    /// Operator-declared system under test. Always present; `null` when absent.
+    pub sut: Option<Sut>,
     pub partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<EffectiveRunConfig>,
@@ -235,7 +238,8 @@ impl RunSummary {
             },
             pooled_mixture: per_endpoint.len() > 1,
             per_endpoint,
-            environment: crate::environment::collect(None, None),
+            environment: crate::environment::collect(None, None, false),
+            sut: None,
             partial,
             config: None,
         }
@@ -244,6 +248,12 @@ impl RunSummary {
     /// Stamp effective run configuration after summary construction.
     pub fn with_config(mut self, config: EffectiveRunConfig) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    /// Embed an operator-declared SUT block (`None` serializes as JSON `null`).
+    pub fn with_sut(mut self, sut: Option<Sut>) -> Self {
+        self.sut = sut;
         self
     }
 
@@ -562,6 +572,9 @@ mod tests {
             insecure: false,
             ca_cert: None,
             fail_on_error: false,
+            sut: None,
+            require_sut: false,
+            redact_hostname: false,
         }
     }
 

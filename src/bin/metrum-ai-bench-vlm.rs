@@ -738,6 +738,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
+    let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+
     // Resolve endpoints (single url+api_key or multi from file)
     let resolved_endpoints = resolve_endpoints(
         args.url.as_deref(),
@@ -1545,8 +1547,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .into_iter()
         .collect(),
     });
-    shared_summary.environment =
-        metrum_ai_bench::environment::collect(ntp_offset_ms, Some(args.model.clone()));
+    shared_summary.environment = metrum_ai_bench::environment::collect(
+        ntp_offset_ms,
+        Some(args.model.clone()),
+        redact_hostname,
+    );
+    shared_summary = shared_summary.with_sut(sut_block);
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }

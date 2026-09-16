@@ -16,6 +16,7 @@ pub mod sse;
 pub mod stats;
 pub mod strategic;
 pub mod summary;
+pub mod sut;
 pub mod tokenizer;
 
 pub mod banner {

@@ -47,6 +47,8 @@ full `per_endpoint` distributions, environment metadata, and `partial`.
 
 Additional v3 fields:
 
+- `sut` — optional operator-declared system-under-test block (rc.5). Always present in JSON; `null` when `--sut` was not provided. Fields are labelled `provenance: "declared"` (not observed). See `--sut`, `--require-sut`, and `--redact-hostname`.
+- `environment.hostname` — may be `null` when `--redact-hostname` (or `--require-sut`, which implies redaction) is set (rc.5). Readers must treat `sut` and `hostname` as optional.
 - `config` — effective run configuration:
   - `run_id` — UUID generated once per run
   - `effective_max_concurrency` — outstanding-request cap in force
@@ -82,3 +84,12 @@ and JSONL both derive from `RunSummary` / `DistSummary` (Hyndman–Fan type 7).
 Historical `request.v2` / `summary.v2` lines from 0.1.82 remain readable for
 regression audit (`record::accepts_audit_schema`); new campaign validation
 rejects any JSONL line without `schema_version`.
+
+## Security and provenance
+
+`environment` is client-observed (OS, architecture, optional hostname). The
+`sut` block is **declared by the operator**, not measured by the client —
+`provenance` is always `"declared"`. For publication runs use
+`--sut <file> --require-sut` (implies `--redact-hostname`). See
+[RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md) and
+[TRADEMARKS.md](../TRADEMARKS.md).

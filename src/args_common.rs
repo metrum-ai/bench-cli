@@ -117,6 +117,29 @@ pub struct CommonBenchArgs {
         help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
     )]
     pub fail_on_error: bool,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut"
+    )]
+    pub sut: Option<std::path::PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REQUIRE_SUT",
+        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+    )]
+    pub require_sut: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
+        help = "Write environment.hostname as null"
+    )]
+    pub redact_hostname: bool,
 }
 
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
@@ -140,6 +163,10 @@ pub struct EffectiveCommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_cert: Option<String>,
     pub fail_on_error: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sut: Option<String>,
+    pub require_sut: bool,
+    pub redact_hostname: bool,
 }
 
 impl From<&CommonBenchArgs> for EffectiveCommonArgs {
@@ -162,11 +189,19 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             insecure: common.insecure,
             ca_cert: common.ca_cert.clone(),
             fail_on_error: common.fail_on_error,
+            sut: common.sut.as_ref().map(|p| p.display().to_string()),
+            require_sut: common.require_sut,
+            redact_hostname: common.redact_hostname || common.require_sut,
         }
     }
 }
 
 impl CommonBenchArgs {
+    /// Resolve `--sut` / `--require-sut` / `--redact-hostname` before any request.
+    pub fn resolve_sut(&self) -> anyhow::Result<(Option<crate::sut::Sut>, bool)> {
+        crate::sut::resolve_sut_flags(self.sut.as_deref(), self.require_sut, self.redact_hostname)
+    }
+
     /// Prefix prompt with a run-scoped nonce when `--unique-prompts` is set.
     ///
     /// Format: `[nonce-{run_id}-{seed}-{seq}] {prompt}`
@@ -251,6 +286,9 @@ mod tests {
             ca_cert: None,
             insecure: false,
             fail_on_error: false,
+            sut: None,
+            require_sut: false,
+            redact_hostname: false,
         };
         assert_eq!(
             args.effective_system_prompt("default"),
