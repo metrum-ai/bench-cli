@@ -59,7 +59,7 @@ that a parity-checklist review would reach.
    report it honestly, and separately whether it can run the controlled case
    when the operator asks. Do not treat the controlled case as the default
    truth.
-3. **Comparison tools are context, not the standard.** GenAI-Perf, vLLM
+3. **Comparison tools are context, not the standard.** GenAI-Perf (retired; see AIPerf), vLLM
    `benchmark_serving.py`, guidellm, LLMPerf, MLPerf LoadGen, and InferenceX
    are references for what a metric name conventionally means. A missing
    feature relative to them is a finding only when one of the three personas
@@ -100,7 +100,7 @@ Read all of:
   `environment.rs`, `error.rs`, `jsonl.rs`, `endpoints.rs`,
   `prompt_inputs.rs`, `args_common.rs`, `modality.rs`, `lib.rs`).
 - `src/bin/*.rs` (six primary binaries, four deprecated shims,
-  `metrumbench-mock-server.rs`).
+  `metrum-ai-bench-mock-server.rs`).
 - `tests/**`, `dummy-model-server/**` (Go), `scripts/**`, `packaging/**`,
   `.github/workflows/*.yml`, `Cargo.toml`, `Cargo.lock`, `deny.toml`,
   `.gitleaks.toml`, `rust-toolchain.toml`, `Makefile`, `test-data/**`.
