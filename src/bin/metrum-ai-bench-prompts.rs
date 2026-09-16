@@ -40,7 +40,10 @@ struct Args {
     #[arg(long, default_value = "train")]
     split: String,
 
-    #[arg(long, help = "Allow floating revisions such as main (resolves to a commit)")]
+    #[arg(
+        long,
+        help = "Allow floating revisions such as main (resolves to a commit)"
+    )]
     allow_moving_revision: bool,
 
     #[arg(long, help = "Cache directory for Hub downloads")]
@@ -55,7 +58,10 @@ struct Args {
     )]
     local_parquet: Vec<PathBuf>,
 
-    #[arg(long, help = "Load rows from a local JSONL file with full metadata; skips Hub")]
+    #[arg(
+        long,
+        help = "Load rows from a local JSONL file with full metadata; skips Hub"
+    )]
     local_jsonl: Option<PathBuf>,
 
     #[arg(
@@ -209,50 +215,49 @@ fn run(args: Args) -> anyhow::Result<()> {
         args.max_repeats as usize
     };
 
-    let (rows, revision, config_label, split_label, dataset_label) =
-        if let Some(jsonl) = args.local_jsonl.as_ref() {
-            let rows = load_jsonl(jsonl)?;
-            (
-                rows,
-                "local-jsonl".to_string(),
-                "local".to_string(),
-                "local".to_string(),
-                jsonl.display().to_string(),
-            )
-        } else if !args.local_parquet.is_empty() {
-            let mut paths = args.local_parquet.clone();
-            paths.sort();
-            let rows = load_parquet_files(&paths, 0)?;
-            (
-                rows,
-                "local-parquet".to_string(),
-                "local".to_string(),
-                "local".to_string(),
-                "local-parquet".to_string(),
-            )
-        } else {
-            let revision_arg = args.revision.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "--revision is required unless --local-jsonl/--local-parquet is set"
-                )
-            })?;
-            let sha = resolve_revision(&args.dataset, revision_arg, args.allow_moving_revision)?;
-            let cache = args.cache_dir.unwrap_or_else(default_cache_dir);
-            let spec = DatasetRef {
-                repo: args.dataset.clone(),
-                revision: sha.clone(),
-                config: args.config.clone(),
-                split: args.split.clone(),
-            };
-            let (rows, sha) = load_hub_dataset(&spec, &cache, args.offline)?;
-            (
-                rows,
-                sha,
-                args.config.clone(),
-                args.split.clone(),
-                args.dataset.clone(),
-            )
+    let (rows, revision, config_label, split_label, dataset_label) = if let Some(jsonl) =
+        args.local_jsonl.as_ref()
+    {
+        let rows = load_jsonl(jsonl)?;
+        (
+            rows,
+            "local-jsonl".to_string(),
+            "local".to_string(),
+            "local".to_string(),
+            jsonl.display().to_string(),
+        )
+    } else if !args.local_parquet.is_empty() {
+        let mut paths = args.local_parquet.clone();
+        paths.sort();
+        let rows = load_parquet_files(&paths, 0)?;
+        (
+            rows,
+            "local-parquet".to_string(),
+            "local".to_string(),
+            "local".to_string(),
+            "local-parquet".to_string(),
+        )
+    } else {
+        let revision_arg = args.revision.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("--revision is required unless --local-jsonl/--local-parquet is set")
+        })?;
+        let sha = resolve_revision(&args.dataset, revision_arg, args.allow_moving_revision)?;
+        let cache = args.cache_dir.unwrap_or_else(default_cache_dir);
+        let spec = DatasetRef {
+            repo: args.dataset.clone(),
+            revision: sha.clone(),
+            config: args.config.clone(),
+            split: args.split.clone(),
         };
+        let (rows, sha) = load_hub_dataset(&spec, &cache, args.offline)?;
+        (
+            rows,
+            sha,
+            args.config.clone(),
+            args.split.clone(),
+            args.dataset.clone(),
+        )
+    };
 
     if rows.is_empty() {
         anyhow::bail!("dataset contained zero rows");

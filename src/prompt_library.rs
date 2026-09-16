@@ -230,8 +230,8 @@ fn evaluate(
     let osl_achieved = apply_stat(&osl, req.osl_stat)?;
     let isl_gap = isl_achieved - req.isl_target;
     let osl_gap = osl_achieved - req.osl_target;
-    let excess = (isl_gap.abs() - req.isl_tolerance).max(0.0)
-        + (osl_gap.abs() - req.osl_tolerance).max(0.0);
+    let excess =
+        (isl_gap.abs() - req.isl_tolerance).max(0.0) + (osl_gap.abs() - req.osl_tolerance).max(0.0);
     let score = Score {
         excess,
         count_dev: mix.len().abs_diff(req.count),
@@ -257,7 +257,9 @@ fn filter_candidates(rows: &[LibraryRow], req: &SelectRequest) -> Vec<Cand> {
 
 fn seed_mix(cands: &[Cand], req: &SelectRequest, rng: &mut StdRng) -> Vec<usize> {
     let n = cands.len();
-    let target_len = req.count.clamp(1, req.count.saturating_add(req.count_slack));
+    let target_len = req
+        .count
+        .clamp(1, req.count.saturating_add(req.count_slack));
     let mut mix = Vec::with_capacity(target_len);
     let mut used = vec![0usize; n];
     let mut unused: Vec<usize> = (0..n).collect();
@@ -449,7 +451,7 @@ pub fn recommended_max_tokens(mix: &SelectedMix, req: &SelectRequest) -> Result<
             let r = req.osl_tokens_per_word.ok_or_else(|| {
                 anyhow!("--osl-tokens-per-word is required when --osl-unit words")
             })?;
-            if !(r > 0.0) || !r.is_finite() {
+            if !(r.is_finite() && r > 0.0) {
                 bail!("--osl-tokens-per-word must be a positive finite number");
             }
             let max = mix
@@ -836,10 +838,7 @@ pub fn load_hub_dataset(
             .as_array()
             .ok_or_else(|| anyhow!("unexpected tree listing from {tree_url}"))?;
         for file in files {
-            let path = file
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
+            let path = file.get("path").and_then(Value::as_str).unwrap_or_default();
             if !path.ends_with(".parquet") {
                 continue;
             }
