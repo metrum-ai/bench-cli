@@ -19,9 +19,13 @@ pub struct Environment {
     pub server_model: Option<String>,
 }
 
-pub fn collect(ntp_offset_ms: Option<i64>, server_model: Option<String>) -> serde_json::Value {
+pub fn collect(
+    ntp_offset_ms: Option<i64>,
+    server_model: Option<String>,
+    redact_hostname: bool,
+) -> serde_json::Value {
     serde_json::to_value(Environment {
-        hostname: hostname(),
+        hostname: if redact_hostname { None } else { hostname() },
         os: std::env::consts::OS,
         architecture: std::env::consts::ARCH,
         cpu_cores: std::thread::available_parallelism()
@@ -53,10 +57,16 @@ mod tests {
 
     #[test]
     fn environment_has_reproducibility_fields() {
-        let value = collect(Some(3), Some("dummy".into()));
+        let value = collect(Some(3), Some("dummy".into()), false);
         assert_eq!(value["ntp_offset_ms"], 3);
         assert_eq!(value["server_model"], "dummy");
         assert!(value["cpu_cores"].as_u64().is_some_and(|n| n > 0));
         assert_eq!(value["tls_backend"], "rustls");
+    }
+
+    #[test]
+    fn redact_hostname_writes_null() {
+        let value = collect(None, None, true);
+        assert!(value["hostname"].is_null());
     }
 }

@@ -384,7 +384,7 @@ for summ in sorted(root.glob("imagegen/*/summary.json")):
 sut_path = root / "sut.json"
 sut = json.loads(sut_path.read_text()) if sut_path.exists() else {}
 bench_ver = (
-    sut.get("bench_version")
+    sut.get("extra", {}).get("bench_version") or sut.get("bench_version")
     or sut.get("bench_git_tag", "").lstrip("v")
     or "1.0.0-rc.1"
 )
@@ -559,6 +559,7 @@ run_llm_cell() {
       --mode chat --streaming --prompts "${prompts}" --model "${LLM_MODEL}" \
       --max-tokens 128 --data-log "${out}/results.jsonl" \
       --debug-log "${out}/debug.log" --error-log "${out}/error.log" --log-level warn \
+      --sut "${root}/sut.json" --require-sut \
       "$@"
     echo
   } >"${out}/command.txt"
@@ -568,6 +569,7 @@ run_llm_cell() {
     --mode chat --streaming --prompts "${prompts}" --model "${LLM_MODEL}" \
     --max-tokens 128 --data-log "${out}/results.jsonl" \
     --debug-log "${out}/debug.log" --error-log "${out}/error.log" --log-level warn \
+      --sut "${root}/sut.json" --require-sut \
     "$@" | tee "${out}/stdout.txt"
   sha256_tree "${out}"
 }

@@ -53,7 +53,7 @@ fn sibling_binary(name: &str) -> std::io::Result<std::path::PathBuf> {
 }
 
 fn environment() -> serde_json::Value {
-    metrum_ai_bench::environment::collect(None, None)
+    metrum_ai_bench::environment::collect(None, None, false)
 }
 
 fn extract_runs(args: &mut Vec<OsString>) -> Result<u32, String> {
