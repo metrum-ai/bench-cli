@@ -1,6 +1,6 @@
 [package]
 name = "metrumbench"
-version = "1.0.0"
+version = "1.0.0-rc.3"
 edition = "2021"
 rust-version = "1.85"
 description = "Load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
@@ -92,12 +92,12 @@ sha2 = "0.11.0"
 simplelog = "0.12.2"
 tokio = { version = "1.53.1", features = ["full"] }
 anyhow = "1.0.104"
-base64 = "0.22.1"
+base64 = "0.23.1"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 jsonschema = { version = "0.56.0", default-features = false }
 uuid = { version = "1.26.1", features = ["v4"] }
 tempfile = "3.27.0"
-tokenizers = { version = "0.22.1", optional = true, default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 
 [profile.release]
 lto = "thin"
