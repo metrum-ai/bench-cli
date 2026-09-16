@@ -10,19 +10,6 @@ use common::{request_records, skip, spawn_dummy, summary_record};
 use serde_json::Value;
 use std::process::Command;
 
-/// Legacy imagegen.request.v1 rows (distinct from shared request.v3).
-fn imagegen_request_records(data_log: &std::path::Path) -> Vec<Value> {
-    let text = std::fs::read_to_string(data_log).expect("read data log");
-    text.lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|v| {
-            v.get("schema_version")
-                .and_then(Value::as_str)
-                .is_some_and(|s| s.contains("imagegen.request"))
-        })
-        .collect()
-}
-
 fn shared_request_records(data_log: &std::path::Path) -> Vec<Value> {
     request_records(data_log)
         .into_iter()
@@ -106,8 +93,7 @@ fn run_imagegen(fixture: &Fixture, base_url: &str, requests: u32, extra: &[&str]
 }
 
 /// Headline latency comes from a monotonic clock and tracks the server's
-/// configured delay; the per-request JSONL and the shared summary both land
-/// in the data log.
+/// configured delay; only shared request.v3 lines land in the data log (N-04).
 #[test]
 fn imagegen_latency_is_monotonic_and_summary_is_shared() {
     let Some(dummy) = spawn_dummy(&["-latency", "150ms"]) else {
@@ -117,23 +103,11 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
     let fixture = fixture();
     run_imagegen(&fixture, &dummy.url("/v1"), 3, &[]);
 
-    let records = imagegen_request_records(&fixture.data_log);
-    assert_eq!(
-        records.len(),
-        3,
-        "expected one imagegen JSONL row per request"
+    let text = std::fs::read_to_string(&fixture.data_log).expect("read data log");
+    assert!(
+        !text.contains("imagegen.request.v1"),
+        "imagegen must not write dual v1 request lines"
     );
-    for record in &records {
-        assert_eq!(record["status"], "success");
-        assert_eq!(record["n_returned"], 1);
-        let latency_ms = record["latency_ms"].as_f64().expect("latency_ms");
-        // Monotonic timing of a 150ms server delay: a wall-clock difference of
-        // RFC3339 timestamps would quantize or, under NTP steps, go backwards.
-        assert!(
-            (150.0..2000.0).contains(&latency_ms),
-            "latency {latency_ms}ms outside dummy-server bounds"
-        );
-    }
 
     let shared = shared_request_records(&fixture.data_log);
     assert_eq!(
@@ -141,12 +115,31 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
         3,
         "expected one shared RequestRecord per request"
     );
+    for record in &shared {
+        assert!(record.get("error").is_none() || record["error"].is_null());
+        let latency_s = record["latency_s"].as_f64().expect("latency_s");
+        assert!(
+            (0.150..2.0).contains(&latency_s),
+            "latency {latency_s}s outside dummy-server bounds"
+        );
+        assert!(
+            record["modality_labels"]["artifact_0_sha256"]
+                .as_str()
+                .is_some_and(|s| s.len() == 64),
+            "artifact sha256 must be stamped on request.v3"
+        );
+        assert!(record["send_offset_s"].as_f64().is_some());
+    }
 
     let summary = summary_record(&fixture.data_log).expect("shared summary in data log");
     assert_eq!(summary["latency_s"]["n"], 3);
     assert!(
         summary["latency_s"]["p50"].as_f64().expect("p50") >= 0.150,
         "shared summary percentiles disagree with the request records"
+    );
+    assert_eq!(
+        summary["config"]["effective_max_concurrency"], 1,
+        "effective_max_concurrency must be stamped"
     );
 
     let standalone: serde_json::Value = serde_json::from_str(
@@ -175,11 +168,6 @@ fn imagegen_warmup_requests_are_excluded_from_summary() {
     let fixture = fixture();
     run_imagegen(&fixture, &dummy.url("/v1"), 3, &["--warmup-requests", "1"]);
 
-    assert_eq!(
-        imagegen_request_records(&fixture.data_log).len(),
-        3,
-        "warmup requests must still be logged"
-    );
     let shared = shared_request_records(&fixture.data_log);
     assert_eq!(shared.len(), 3, "shared RequestRecords must include warmup");
     assert_eq!(shared.iter().filter(|r| r["phase"] == "warmup").count(), 1);
@@ -200,11 +188,11 @@ fn imagegen_accepts_full_generations_url() {
     let fixture = fixture();
     run_imagegen(&fixture, &dummy.url("/v1/images/generations"), 2, &[]);
 
-    let records = imagegen_request_records(&fixture.data_log);
-    assert_eq!(records.len(), 2);
-    for record in &records {
-        assert_eq!(
-            record["status"], "success",
+    let shared = shared_request_records(&fixture.data_log);
+    assert_eq!(shared.len(), 2);
+    for record in &shared {
+        assert!(
+            record.get("error").is_none() || record["error"].is_null(),
             "full generations URL must work"
         );
     }
@@ -225,7 +213,7 @@ fn imagegen_summary_json_is_optional() {
             "--api-key",
             "dummy",
             "--scenario",
-            "e2e-imagegen-optional-summary",
+            "e2e-imagegen",
             "--model",
             "dummy",
             "--num-requests",
@@ -254,11 +242,7 @@ fn imagegen_summary_json_is_optional() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        !fixture.summary_json.exists(),
-        "summary.json must not be required or auto-created"
-    );
-    assert!(
         summary_record(&fixture.data_log).is_some(),
-        "shared summary must still be written to the data log"
+        "summary.v3 must still be in the data log"
     );
 }

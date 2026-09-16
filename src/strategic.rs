@@ -523,11 +523,11 @@ pub fn export_mlperf(
     writeln!(summary, "duration (s) : {duration_s:.6}")?;
     writeln!(
         summary,
-        "Result is : {}",
+        "Result validity : {}",
         if !records.is_empty() && completed == records.len() {
-            "VALID (unofficial; see disclaimer)"
+            "UNOFFICIAL_OK (see disclaimer; not an official MLPerf VALID)"
         } else {
-            "INVALID (unofficial; see disclaimer)"
+            "UNOFFICIAL_INVALID (see disclaimer)"
         }
     )?;
     let mut detail = File::create(directory.join("mlperf_log_detail.txt"))?;
@@ -799,7 +799,11 @@ mod tests {
         assert!(summary.contains("Scenario : Server"));
         assert!(summary.contains("90.00 percentile latency (ns) : 250000000"));
         assert!(summary.contains("UNOFFICIAL"));
-        assert!(summary.contains("Result is : VALID (unofficial; see disclaimer)"));
+        assert!(summary.contains("Result validity : UNOFFICIAL_OK"));
+        assert!(
+            !summary.contains("Result is : VALID"),
+            "must not emit the official LoadGen VALID substring"
+        );
         let detail = std::fs::read_to_string(directory.path().join("mlperf_log_detail.txt"))
             .expect("detail log");
         assert!(detail.starts_with("UNOFFICIAL"));

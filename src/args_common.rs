@@ -100,7 +100,7 @@ pub struct CommonBenchArgs {
     #[arg(
         long,
         value_name = "PATH",
-        help = "Additional PEM CA certificate for TLS (private gateways)"
+        help = "Additional PEM CA certificate for TLS (must be a CA with basic constraints, not a self-signed leaf; use --insecure for self-signed leaves)"
     )]
     pub ca_cert: Option<String>,
 

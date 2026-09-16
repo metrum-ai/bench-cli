@@ -114,7 +114,9 @@ fn strategic_sweep_exports_all_formats() {
     let mlperf_summary =
         fs::read_to_string(mlperf.join("mlperf_log_summary.txt")).expect("mlperf summary");
     assert!(mlperf_summary.starts_with("UNOFFICIAL"));
-    assert!(mlperf_summary.contains("unofficial; see disclaimer"));
+    assert!(mlperf_summary.contains("UNOFFICIAL"));
+    assert!(mlperf_summary.contains("Result validity : UNOFFICIAL_OK"));
+    assert!(!mlperf_summary.contains("Result is : VALID"));
     assert!(summary["points"]
         .as_array()
         .expect("points")

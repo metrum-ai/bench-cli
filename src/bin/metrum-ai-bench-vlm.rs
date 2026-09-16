@@ -25,6 +25,45 @@ use tokio::sync::Semaphore;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Write a failed request.v3 for preprocess / body-build skips so attempted
+/// counts and `--fail-on-error` stay honest (N-03).
+fn emit_preprocess_failure(
+    sink: &std::sync::Arc<metrumbench::jsonl::JsonlSink>,
+    record_tx: &tokio::sync::mpsc::UnboundedSender<metrumbench::record::RequestRecord>,
+    seq: u64,
+    warmup_requests: u32,
+    endpoint: &str,
+    run_start: Instant,
+    run_id: &str,
+    arrival_kind: metrumbench::load::ArrivalKind,
+    scheduled_delay: Duration,
+    queue_delay: Duration,
+    message: String,
+) {
+    let send_offset = run_start.elapsed();
+    let started_at = Utc::now();
+    let latency = Duration::ZERO;
+    let phase = metrumbench::record::Phase::for_seq(seq, warmup_requests);
+    let mut rec = metrumbench::record::RequestRecord::failed(
+        seq,
+        phase,
+        endpoint.to_string(),
+        started_at,
+        metrumbench::runner::completed_at_from_start(started_at, latency),
+        latency,
+        metrumbench::error::RequestError::Other { message },
+    )
+    .with_send_offset(send_offset)
+    .with_run_id(run_id);
+    if metrumbench::runner::should_record_schedule(arrival_kind) {
+        rec = rec.with_schedule(scheduled_delay, queue_delay);
+    }
+    if let Err(e) = sink.write(&rec) {
+        warn!("Failed to write preprocess-failure JSONL: {e}");
+    }
+    let _ = record_tx.send(rec);
+}
+
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum MetrumBenchVLMImageDetail {
     Low,
@@ -263,6 +302,12 @@ async fn make_request(
                 match event {
                     metrumbench::sse::SseEvent::Done => done = true,
                     metrumbench::sse::SseEvent::Json(parsed) => {
+                        if let Some(error) = parsed.get("error") {
+                            return Err(metrumbench::error::RequestError::ApiError {
+                                message: error.to_string(),
+                            }
+                            .into());
+                        }
                         if let Some(usage) = parsed.get("usage") {
                             prompt_tokens = usage
                                 .get("prompt_tokens")
@@ -910,6 +955,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "server_side_download requires http(s) URLs; local paths and file:// are not sent (endpoint={})",
                     endpoint_name
                 );
+                emit_preprocess_failure(
+                    &sink,
+                    &record_tx,
+                    slot.seq,
+                    args.common.warmup_requests,
+                    &endpoint_name,
+                    start_time,
+                    &run_id,
+                    arrival_kind,
+                    slot.scheduled_delay,
+                    queue_delay,
+                    "server_side_download requires http(s) image URLs".into(),
+                );
                 drop(permit);
                 continue 'request_loop;
             }
@@ -940,7 +998,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .await
                     {
                         Ok(image_data) => selected_images.push(image_data),
-                        Err(_e) => {
+                        Err(e) => {
+                            emit_preprocess_failure(
+                                &sink,
+                                &record_tx,
+                                slot.seq,
+                                args.common.warmup_requests,
+                                &endpoint_name,
+                                start_time,
+                                &run_id,
+                                arrival_kind,
+                                slot.scheduled_delay,
+                                queue_delay,
+                                format!("image load failed: {e}"),
+                            );
                             drop(permit);
                             continue 'request_loop;
                         }
@@ -970,7 +1041,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         .await
                     {
                         Ok(image_data) => selected_images.push(image_data),
-                        Err(_e) => {
+                        Err(e) => {
+                            emit_preprocess_failure(
+                                &sink,
+                                &record_tx,
+                                slot.seq,
+                                args.common.warmup_requests,
+                                &endpoint_name,
+                                start_time,
+                                &run_id,
+                                arrival_kind,
+                                slot.scheduled_delay,
+                                queue_delay,
+                                format!("image load failed: {e}"),
+                            );
                             drop(permit);
                             continue 'request_loop;
                         }
@@ -1001,7 +1085,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             .await
                         {
                             Ok(image_data) => selected_images.push(image_data),
-                            Err(_e) => {
+                            Err(e) => {
+                                emit_preprocess_failure(
+                                    &sink,
+                                    &record_tx,
+                                    slot.seq,
+                                    args.common.warmup_requests,
+                                    &endpoint_name,
+                                    start_time,
+                                    &run_id,
+                                    arrival_kind,
+                                    slot.scheduled_delay,
+                                    queue_delay,
+                                    format!("image load failed: {e}"),
+                                );
                                 drop(permit);
                                 continue 'request_loop;
                             }
@@ -1031,7 +1128,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .await
                 {
                     Ok(image_data) => selected_images.push(image_data),
-                    Err(_e) => {
+                    Err(e) => {
+                        emit_preprocess_failure(
+                            &sink,
+                            &record_tx,
+                            slot.seq,
+                            args.common.warmup_requests,
+                            &endpoint_name,
+                            start_time,
+                            &run_id,
+                            arrival_kind,
+                            slot.scheduled_delay,
+                            queue_delay,
+                            format!("image load failed: {e}"),
+                        );
                         drop(permit);
                         continue 'request_loop;
                     }
@@ -1060,7 +1170,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.common.system_prompt.as_deref(),
         ) {
             Ok(b) => b,
-            Err(_e) => {
+            Err(e) => {
+                emit_preprocess_failure(
+                    &sink,
+                    &record_tx,
+                    slot.seq,
+                    args.common.warmup_requests,
+                    &endpoint_name,
+                    start_time,
+                    &run_id,
+                    arrival_kind,
+                    slot.scheduled_delay,
+                    queue_delay,
+                    format!("request body build failed: {e}"),
+                );
                 drop(permit);
                 continue 'request_loop;
             }
@@ -1084,8 +1207,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.common.seed,
             &run_id,
         );
+        let run_start = start_time;
         let handle = tokio::spawn(async move {
+            let send_offset = run_start.elapsed();
             let started_at = Utc::now();
+            let send_instant = Instant::now();
             let result = make_request(
                 &client_loop,
                 &url,
@@ -1140,7 +1266,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         completion_tokens,
                         total_tokens,
                     )
-                    .with_first_byte(first_byte);
+                    .with_first_byte(first_byte)
+                    .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1187,10 +1314,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             error!("Error reading body: {}", req_err);
                         }
                     }
-                    let latency = Utc::now()
-                        .signed_duration_since(started_at)
-                        .to_std()
-                        .unwrap_or(Duration::ZERO);
+                    let latency = send_instant.elapsed();
                     let completed_at =
                         metrumbench::runner::completed_at_from_start(started_at, latency);
                     let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
@@ -1205,7 +1329,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         completed_at,
                         latency,
                         request_error,
-                    );
+                    )
+                    .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1389,6 +1514,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     .with_config(metrumbench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: (&args.common).into(),
+        effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt: vlm_system,
         body_template,
         unique_prompt_nonce_template:

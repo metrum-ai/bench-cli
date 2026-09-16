@@ -68,7 +68,7 @@ Options:
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
       --ca-cert <PATH>
-          Additional PEM CA certificate for TLS (private gateways)
+          Additional PEM CA certificate for TLS (must be a CA with basic constraints, not a self-signed leaf; use --insecure for self-signed leaves)
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
@@ -158,7 +158,7 @@ Options:
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
       --ca-cert <PATH>
-          Additional PEM CA certificate for TLS (private gateways)
+          Additional PEM CA certificate for TLS (must be a CA with basic constraints, not a self-signed leaf; use --insecure for self-signed leaves)
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
@@ -299,7 +299,7 @@ Options:
           [default: 10]
 
       --ca-cert <PATH>
-          Additional PEM CA certificate for TLS (private gateways)
+          Additional PEM CA certificate for TLS (must be a CA with basic constraints, not a self-signed leaf; use --insecure for self-signed leaves)
 
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)

@@ -36,6 +36,9 @@ impl RequestError {
             Self::Connect
         } else if let Some(status) = err.status() {
             Self::from_status(status.as_u16())
+        } else if is_connection_reset(err) {
+            // TCP RST / broken pipe after the request was sent (N-05).
+            Self::Connect
         } else {
             Self::Other {
                 message: err.to_string(),
@@ -93,6 +96,30 @@ impl fmt::Display for RequestError {
 }
 
 impl std::error::Error for RequestError {}
+
+/// True when the error chain looks like a TCP reset / broken pipe after send.
+fn is_connection_reset(err: &reqwest::Error) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = current {
+        if let Some(io) = e.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionAborted => return true,
+                _ => {}
+            }
+        }
+        let msg = e.to_string().to_ascii_lowercase();
+        if msg.contains("connection reset")
+            || msg.contains("broken pipe")
+            || msg.contains("connection aborted")
+        {
+            return true;
+        }
+        current = e.source();
+    }
+    false
+}
 
 #[cfg(test)]
 mod tests {

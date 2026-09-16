@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 pub struct EffectiveRunConfig {
     pub run_id: String,
     pub common: EffectiveCommonArgs,
+    /// Cap actually used for outstanding requests (`max_concurrency` or
+    /// closed-loop `--concurrency` when the former is unset) (F-09).
+    pub effective_max_concurrency: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_system_prompt: Option<String>,
     pub body_template: serde_json::Value,
@@ -311,10 +314,18 @@ pub fn print_run_summary(summary: &RunSummary) {
             rate,
             summary.completion_tokens_source.unwrap_or("unknown")
         ),
-        None => println!(
-            "  Completion tokens/sec: n/a (usage_missing_count={})",
-            summary.usage_missing_count
-        ),
+        None => {
+            // Prefer modality metrics over a misleading n/a token line for ASR/imagegen.
+            // Callers that only have token work still see the usage_missing note.
+            if summary.ttft_s.n == 0 && summary.usage_missing_count == 0 {
+                // Non-token modality: omit completion-token line (N-07).
+            } else {
+                println!(
+                    "  Completion tokens/sec: n/a (usage_missing_count={})",
+                    summary.usage_missing_count
+                );
+            }
+        }
     }
     print_dist("Latency", &summary.latency_s);
     print_dist(
@@ -372,10 +383,15 @@ fn token_throughput_accounting(
         None
     } else if used_tokenizer_fallback {
         Some("tokenizer_fallback")
-    } else {
+    } else if completion_tokens > 0 || usage_missing_count > 0 {
         Some("server_usage")
+    } else {
+        // Non-token modalities (ASR/imagegen) report 0 completion tokens without
+        // a usage gap; do not claim server_usage token throughput (N-07).
+        None
     };
-    (usage_missing_count, completion_tokens, source, true)
+    let ctps_valid = source.is_some();
+    (usage_missing_count, completion_tokens, source, ctps_valid)
 }
 
 impl CrossRunSummary {
@@ -465,14 +481,14 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
             }
         }
     } else {
-        // Closed loop: bin by actual send offset from the first measured send.
+        // Closed loop: bin by monotonic send offset from the first measured send.
         let min_send = records
             .iter()
-            .map(|r| datetime_to_unix_secs(r.started_at))
+            .map(|r| crate::runner::send_offset_seconds(r))
             .fold(f64::INFINITY, f64::min);
         if min_send.is_finite() {
             for record in records {
-                let offset = datetime_to_unix_secs(record.started_at) - min_send;
+                let offset = crate::runner::send_offset_seconds(record) - min_send;
                 let index = (offset / bin_seconds).floor() as usize;
                 if let Some(bin) = bins.get_mut(index) {
                     *bin += 1;
@@ -481,15 +497,18 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
         }
     }
     if bins.iter().all(|count| *count == 0) {
-        return vec![records.len() as f64 / window];
+        return vec![records.len() as f64 / window.max(f64::EPSILON)];
     }
+    // Normalize each bin by its actual width: trailing (and sole short-window)
+    // bins use the remainder of `window`, not the full `bin_seconds` (N-06).
     bins.into_iter()
-        .map(|count| count as f64 / bin_seconds)
+        .enumerate()
+        .map(|(index, count)| {
+            let start = index as f64 * bin_seconds;
+            let width = (window - start).clamp(f64::EPSILON, bin_seconds);
+            count as f64 / width
+        })
         .collect()
-}
-
-fn datetime_to_unix_secs(ts: chrono::DateTime<chrono::Utc>) -> f64 {
-    ts.timestamp() as f64 + f64::from(ts.timestamp_subsec_nanos()) / 1e9
 }
 
 #[cfg(test)]
@@ -654,6 +673,7 @@ mod tests {
             EffectiveRunConfig {
                 run_id: "run-1".into(),
                 common: sample_common(),
+                effective_max_concurrency: 8,
                 effective_system_prompt: Some("You are a helpful assistant.".into()),
                 body_template: serde_json::json!({"prompt": "{{prompt}}"}),
                 unique_prompt_nonce_template: None,
@@ -663,5 +683,58 @@ mod tests {
         let cfg = summary.config.expect("config stamped");
         assert_eq!(cfg.run_id, "run-1");
         assert_eq!(cfg.common.seed, 7);
+    }
+
+    #[test]
+    fn trailing_partial_bin_uses_actual_width() {
+        // Window 12.15 s, bin 10 s: first bin full width, trailing 2.15 s.
+        // 247 requests in first 10 s + 52 in the last 2.15 s.
+        let t0 = Utc::now();
+        let mut records = Vec::new();
+        for i in 0..247 {
+            let offset = (i as f64) * (10.0 / 247.0);
+            records.push(ok(i, 100, 20, 8, &[]).with_send_offset(Duration::from_secs_f64(offset)));
+            records.last_mut().unwrap().started_at = t0;
+        }
+        for i in 0..52 {
+            let offset = 10.0 + (i as f64) * (2.15 / 52.0);
+            records.push(
+                ok(247 + i, 100, 20, 8, &[]).with_send_offset(Duration::from_secs_f64(offset)),
+            );
+            records.last_mut().unwrap().started_at = t0;
+        }
+        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 12.15, 10.0);
+        assert_eq!(bins.len(), 2);
+        assert!(
+            (bins[0] - 24.7).abs() < 0.5,
+            "full bin rps={}, expected ~24.7",
+            bins[0]
+        );
+        assert!(
+            (bins[1] - (52.0 / 2.15)).abs() < 1.0,
+            "trailing bin rps={}, expected ~{}",
+            bins[1],
+            52.0 / 2.15
+        );
+    }
+
+    #[test]
+    fn short_window_bin_uses_window_not_full_bin_seconds() {
+        let t0 = Utc::now();
+        let records: Vec<_> = (0..10)
+            .map(|i| {
+                let mut r = ok(i, 50, 10, 4, &[]).with_send_offset(Duration::from_millis(i * 20));
+                r.started_at = t0;
+                r
+            })
+            .collect();
+        // Window 0.2 s with bin_seconds 1.0 must not report 10.0 / 1.0 = 10 rps.
+        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 0.2, 1.0);
+        assert_eq!(bins.len(), 1);
+        assert!(
+            (bins[0] - 50.0).abs() < 1e-6,
+            "short-window rps={}, expected 50",
+            bins[0]
+        );
     }
 }
