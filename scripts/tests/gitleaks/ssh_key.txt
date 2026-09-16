@@ -1,0 +1,4 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Fake fixture — truncated / non-functional SSH public key material.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKeyMaterialForGitleaksTestOnly fixture@example.com

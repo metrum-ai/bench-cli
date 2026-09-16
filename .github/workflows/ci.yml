@@ -38,6 +38,18 @@ jobs:
           cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
         run: bash scripts/check_headers.sh
+      - name: naming rule negative test
+        run: bash scripts/tests/check_naming_test.sh
+      - name: zero unsafe in src/
+        run: |
+          set -euo pipefail
+          hits="$(grep -rn --include='*.rs' -E '\bunsafe\b' src/ | grep -vE ':[0-9]+:[[:space:]]*//' || true)"
+          if [[ -n "$hits" ]]; then
+            echo "$hits" >&2
+            echo "unsafe found in src/; first-party code must remain safe Rust" >&2
+            exit 1
+          fi
+          echo "unsafe check: ok"
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -48,6 +60,20 @@ jobs:
           METRUM_BENCH_REQUIRE_DUMMY: "1"
       - name: package dry run
         run: cargo package --allow-dirty
+
+  dco:
+    name: dco
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: DCO sign-off
+        run: >-
+          bash scripts/check_dco.sh
+          ${{ github.event.pull_request.base.sha }}
+          ${{ github.event.pull_request.head.sha }}
 
   msrv:
     name: MSRV 1.85
@@ -78,7 +104,11 @@ jobs:
       - name: gitleaks
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          gitleaks git --redact --verbose
+          gitleaks git --redact --verbose --config .gitleaks.toml
+      - name: gitleaks custom-rule fixtures
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          bash scripts/tests/gitleaks/run.sh
 
   coverage:
     name: core line coverage (80%)
@@ -106,3 +136,55 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
+
+  weekly-hygiene:
+    name: weekly dep hygiene (report-only)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: cargo-geiger report
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cargo install cargo-geiger --locked
+          cargo geiger --all-features > cargo-geiger-report.txt 2>&1 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cargo-geiger-report
+          path: cargo-geiger-report.txt
+          if-no-files-found: warn
+      - name: cargo-outdated report
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cargo install cargo-outdated --locked
+          cargo outdated --workspace --format json > cargo-outdated.json || true
+          cargo outdated --workspace > cargo-outdated.txt || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cargo-outdated-report
+          path: |
+            cargo-outdated.json
+            cargo-outdated.txt
+          if-no-files-found: warn
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # nightly (udeps)
+        with:
+          toolchain: nightly
+      - name: cargo-udeps report
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cargo +nightly install cargo-udeps --locked
+          cargo +nightly udeps --all-targets --all-features \
+            > cargo-udeps-report.txt 2>&1 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cargo-udeps-report
+          path: cargo-udeps-report.txt
+          if-no-files-found: warn

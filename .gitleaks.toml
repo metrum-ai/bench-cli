@@ -1,6 +1,38 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
+# Fake fixtures for gitleaks custom-rule regression tests. Values are not real.
 title = "metrum-ai-bench gitleaks configuration"
 
 [extend]
 useDefault = true
+
+[[rules]]
+id = "aws-account-id-near-account"
+description = "12-digit AWS account ID adjacent to account wording"
+regex = '''(?i)account[^0-9]{0,40}\b\d{12}\b|\b\d{12}\b[^0-9]{0,40}account'''
+keywords = ["account"]
+
+[[rules]]
+id = "cleartext-password-assignment"
+description = "Cleartext password assignment"
+regex = '''(?i)password\s*[:=]\s*\S+'''
+keywords = ["password"]
+
+[[rules]]
+id = "ssh-public-key-material"
+description = "SSH public key material (rsa/ed25519)"
+regex = '''ssh-(rsa|ed25519)\s+AAAA[0-9A-Za-z+/=]+'''
+keywords = ["ssh-rsa", "ssh-ed25519"]
+
+[[rules]]
+id = "internal-hostname-suffix"
+description = "Internal hostname matching the org suffix pattern"
+# Suffix only (from historical leak class); do not embed host labels here.
+regex = '''(?i)\b[a-z0-9][a-z0-9.-]*\.metrum\.ai\b'''
+keywords = ["metrum.ai"]
+
+[allowlist]
+description = "gitleaks rule fixture directory"
+paths = [
+  '''scripts/tests/gitleaks/''',
+]

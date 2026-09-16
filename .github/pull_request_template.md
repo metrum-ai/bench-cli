@@ -11,3 +11,5 @@
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `METRUM_BENCH_REQUIRE_DUMMY=1 cargo test --all-targets --all-features`
 - [ ] `cargo deny check` (when dependency or deny.toml changes)
+- [ ] Commits are signed off (`git commit -s`, DCO)
+- [ ] Metric/schema change? Old and new definition stated, metrics doc updated, golden test pinned, schema version bumped
