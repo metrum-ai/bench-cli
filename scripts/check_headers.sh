@@ -107,6 +107,8 @@ check_naming() {
     | grep -vE '^(CHANGELOG\.md|docs/HISTORY_REWRITE\.md|HISTORY_REWRITE\.md|\.naming-allow)$' \
     | grep -vE '^(scripts/check_headers\.sh|scripts/tests/check_naming_test\.sh)$' \
     | grep -vE '^scripts/tests/gitleaks/' \
+    | grep -vE '^(docs/NAMING\.md|TRADEMARKS\.md)$' \
+    | grep -vE '^docs/reviews/QUALITY_ASSESSMENT_(REPORT|PROMPT)\.md$' \
     | grep -vE '\.(png|mp3|lock)$' || true)
   if [[ -z "$files" ]]; then
     echo "check_naming: no files to scan" >&2

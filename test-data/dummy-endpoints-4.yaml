@@ -1,4 +1,4 @@
-# 4 dummy model server instances for multi-endpoint metrumbench-llm test
+# 4 dummy model server instances for multi-endpoint metrum-ai-bench-llm test
 - url: http://localhost:10001/v1/chat/completions
   api_key: dummy
   name: localhost-10001
