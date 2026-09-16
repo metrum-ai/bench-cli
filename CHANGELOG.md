@@ -33,7 +33,10 @@ Release candidate after the 1.0.0 measurement residuals and OSS-readiness docs.
   sentence; tighter `Cargo.toml` exclude; smoke matrix and true `ttft_s` in
   `SMOKE_RESULTS` (N-01).
 
-## 1.0.0 (2026-09-15)
+## 1.0.0-rc.1 (2026-09-15)
+
+Feature baseline for the 1.0 line. A mistagged non-prerelease `v1.0.0` pointing
+at this same line was deleted; `1.0.0` is reserved for the eventual GA.
 
 Breaking / schema notes:
 - New campaigns reject unversioned or legacy (non-`request.v*` / `summary.v*`) JSONL lines.
