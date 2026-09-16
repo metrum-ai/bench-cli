@@ -737,9 +737,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
+        let run_start = start_time;
 
         let handle = tokio::spawn(async move {
+            let send_offset = run_start.elapsed();
             let started_at = Utc::now();
+            let send_instant = Instant::now();
             let result = make_request(
                 &client,
                 &url,
@@ -807,7 +810,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         0,
                         0,
                     )
-                    .with_first_byte(first_byte);
+                    .with_first_byte(first_byte)
+                    .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -869,10 +873,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if let Some(source) = std::error::Error::source(&*e) {
                         error!("Caused by: {}", source);
                     }
-                    let latency = Utc::now()
-                        .signed_duration_since(started_at)
-                        .to_std()
-                        .unwrap_or(Duration::ZERO);
+                    let latency = send_instant.elapsed();
                     let completed_at =
                         metrumbench::runner::completed_at_from_start(started_at, latency);
                     let request_error = metrumbench::error::RequestError::from_error(e.as_ref());
@@ -887,7 +888,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         completed_at,
                         latency,
                         request_error,
-                    );
+                    )
+                    .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1029,6 +1031,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     .with_config(metrumbench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: (&args.common).into(),
+        effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt: None,
         body_template,
         unique_prompt_nonce_template: None,

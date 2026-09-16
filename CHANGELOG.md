@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Measurement residuals (N-02–N-07, N-09, F-09, F-14): stamp monotonic
+  `send_offset_s` and derive the window and closed-loop bins from it; normalize
+  trailing/short throughput bins by actual width; VLM maps in-stream `error`
+  events and writes failed records on preprocess/body-build skips; stamp
+  `effective_max_concurrency`; classify TCP reset as `connect` and use Instant
+  for failure latency; drop `imagegen.request.v1` (artifact SHA-256 on
+  `request.v3` `modality_labels`); omit zero token throughput for non-token
+  modalities; MLPerf export no longer contains `Result is : VALID`; clarify
+  `--ca-cert` must be a CA certificate.
+
 ## 1.0.0 (2026-09-15)
 
 Breaking / schema notes:

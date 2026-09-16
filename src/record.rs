@@ -54,6 +54,11 @@ pub struct RequestRecord {
     pub endpoint: String,
     pub started_at: DateTime<Utc>,
     pub completed_at: DateTime<Utc>,
+    /// Monotonic seconds from the run epoch (`Instant`) until actual send.
+    /// Preferred over wall-clock `started_at` for window and closed-loop bins
+    /// so an NTP step cannot inflate throughput (N-02).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_offset_s: Option<f64>,
     /// Seconds from the workload epoch at which this request was intended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_offset_s: Option<f64>,
@@ -86,6 +91,9 @@ pub struct RequestRecord {
     pub usage_missing: bool,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub modality_metrics: std::collections::BTreeMap<String, f64>,
+    /// String modality fields (e.g. imagegen artifact SHA-256 hex digests).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub modality_labels: std::collections::BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<RequestError>,
     pub partial: bool,
@@ -115,6 +123,7 @@ impl RequestRecord {
             endpoint,
             started_at,
             completed_at,
+            send_offset_s: None,
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
@@ -129,6 +138,7 @@ impl RequestRecord {
             tokenized_completion_tokens: None,
             usage_missing: false,
             modality_metrics: std::collections::BTreeMap::new(),
+            modality_labels: std::collections::BTreeMap::new(),
             error: None,
             partial: false,
         }
@@ -151,6 +161,7 @@ impl RequestRecord {
             endpoint,
             started_at,
             completed_at,
+            send_offset_s: None,
             scheduled_offset_s: None,
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
@@ -165,6 +176,7 @@ impl RequestRecord {
             tokenized_completion_tokens: None,
             usage_missing: false,
             modality_metrics: std::collections::BTreeMap::new(),
+            modality_labels: std::collections::BTreeMap::new(),
             error: Some(error),
             partial: false,
         }
@@ -172,6 +184,11 @@ impl RequestRecord {
 
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
+        self
+    }
+
+    pub fn with_send_offset(mut self, send_offset: Duration) -> Self {
+        self.send_offset_s = Some(send_offset.as_secs_f64());
         self
     }
 
