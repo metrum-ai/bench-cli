@@ -95,7 +95,10 @@ jobs:
           archive="$(ls metrumbench-v*-${{ matrix.target }}.tar.gz)"
           cosign sign-blob --yes \
             --bundle "${archive}.sigstore.json" "${archive}"
+      # Artifact attestations require a public repo or a billing plan that
+      # enables the feature; do not fail the release when unavailable.
       - uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        continue-on-error: true
         with:
           subject-path: metrumbench-v*-${{ matrix.target }}.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
