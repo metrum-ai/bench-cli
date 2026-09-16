@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-rc.2 (2026-09-16)
+
+Release candidate after the 1.0.0 measurement residuals and OSS-readiness docs.
+
 - Measurement residuals (N-02–N-07, N-09, F-09, F-14): stamp monotonic
   `send_offset_s` and derive the window and closed-loop bins from it; normalize
   trailing/short throughput bins by actual width; VLM maps in-stream `error`
@@ -11,6 +15,10 @@
   `request.v3` `modality_labels`); omit zero token throughput for non-token
   modalities; MLPerf export no longer contains `Result is : VALID`; clarify
   `--ca-cert` must be a CA certificate.
+- Docs / packaging (OSS readiness): public README install and examples; move ASR
+  notes under `docs/`; Dependabot + weekly `cargo deny`; SECURITY no-unsafe
+  sentence; tighter `Cargo.toml` exclude; smoke matrix and true `ttft_s` in
+  `SMOKE_RESULTS` (N-01).
 
 ## 1.0.0 (2026-09-15)
 
