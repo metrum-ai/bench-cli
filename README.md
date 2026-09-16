@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/metrum-ai/bench-cli)](https://github.com/metrum-ai/bench-cli/releases)
 
 Apache-2.0 licensed load and performance measurement for OpenAI-compatible
-LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0**
+LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0-rc.3**
 ([CHANGELOG](CHANGELOG.md)).
 
 Large prompt corpora are published separately on Hugging Face; this repository
@@ -18,7 +18,10 @@ ships only tiny fixtures ([test-data/README.md](test-data/README.md)).
 
 **GitHub Releases** (preferred for binaries): download the tarball for your
 target from [Releases](https://github.com/metrum-ai/bench-cli/releases), verify
-the `.sha256` and optional Sigstore bundle, then unpack.
+the `.sha256` and optional Sigstore bundle, then unpack. Release archives are
+cross-built with [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)
+on Linux for `x86_64`/`aarch64` **glibc** (`*-unknown-linux-gnu`, glibc 2.17
+floor) and macOS Darwin — not musl. TLS is rustls (no OpenSSL link).
 
 **From source:**
 

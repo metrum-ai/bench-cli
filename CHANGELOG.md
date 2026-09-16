@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.0.0-rc.3 (2026-09-16)
+
+Release candidate: cross-platform release binaries via cargo-zigbuild.
+
+- Release pipeline: tagged builds use a pinned `ghcr.io/rust-cross/cargo-zigbuild`
+  image on Linux instead of native macOS / ARM Ubuntu compile runners. Targets
+  remain `x86_64`/`aarch64` `*-unknown-linux-gnu` (dynamically linked glibc,
+  2.17 floor) and `*-apple-darwin`. Not musl; TLS remains rustls.
+- Binary identity differs from rc.2 (Zig linker / glibc floor / Darwin SDK in
+  the zigbuild image). Compile-free smoke jobs unpack each archive and run
+  `metrum-ai-bench --help` / `selftest` on matching Linux and macOS runners
+  before GitHub Release, crates.io, and Homebrew publish.
+
+## 1.0.0-rc.2 (2026-09-16)
+
+Release candidate after the 1.0.0 measurement residuals and OSS-readiness docs.
+
 - Measurement residuals (N-02–N-07, N-09, F-09, F-14): stamp monotonic
   `send_offset_s` and derive the window and closed-loop bins from it; normalize
   trailing/short throughput bins by actual width; VLM maps in-stream `error`
@@ -11,8 +28,15 @@
   `request.v3` `modality_labels`); omit zero token throughput for non-token
   modalities; MLPerf export no longer contains `Result is : VALID`; clarify
   `--ca-cert` must be a CA certificate.
+- Docs / packaging (OSS readiness): public README install and examples; move ASR
+  notes under `docs/`; Dependabot + weekly `cargo deny`; SECURITY no-unsafe
+  sentence; tighter `Cargo.toml` exclude; smoke matrix and true `ttft_s` in
+  `SMOKE_RESULTS` (N-01).
 
-## 1.0.0 (2026-09-15)
+## 1.0.0-rc.1 (2026-09-15)
+
+Feature baseline for the 1.0 line. A mistagged non-prerelease `v1.0.0` pointing
+at this same line was deleted; `1.0.0` is reserved for the eventual GA.
 
 Breaking / schema notes:
 - New campaigns reject unversioned or legacy (non-`request.v*` / `summary.v*`) JSONL lines.
