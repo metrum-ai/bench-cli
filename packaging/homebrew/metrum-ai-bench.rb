@@ -4,7 +4,7 @@
 class MetrumAiBench < Formula
   desc "OpenAI-compatible inference load testing and benchmarking tools"
   homepage "https://github.com/metrum-ai/bench-cli"
-  version "1.0.0-rc.4"
+  version "1.0.0-rc.5"
   license "Apache-2.0"
 
   on_macos do
