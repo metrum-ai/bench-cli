@@ -23,8 +23,18 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at
   least two completion tokens.
 - **Request throughput**: measured successes divided by the explicit window.
+  The window is first measured send → last measured successful completion,
+  derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
+  `latency_s`. Wall-clock `started_at` is metadata only and must not be used
+  to recompute the window (an NTP step would otherwise inflate it).
   The window excludes warmup and includes drain for requests issued during
   measurement.
+- **Throughput bins**: fixed-width bins over send offsets (open-loop:
+  `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
+  its **actual** width so a trailing partial bin is not under-normalized.
+- **Effective max concurrency**: stamped on `summary.v3.config` as
+  `effective_max_concurrency` — `--max-concurrency` when set, otherwise the
+  closed-loop `--concurrency` value that caps outstanding work.
 - **Token throughput**: successful server-usage tokens divided by that same
   window. Optional local tokenizer counts are separate fields.
 - **Error rate**: measured failures divided by measured attempts.

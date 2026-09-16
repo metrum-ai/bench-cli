@@ -284,6 +284,7 @@ struct AttemptRecord {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct RequestOutcome {
     request_id: String,
     prompt_id: String,
@@ -364,12 +365,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let prompts = Arc::new(load_prompts(&args)?);
-    let data_log = Arc::new(Mutex::new(
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&args.data_log)?,
-    ));
     let sink = Arc::new(metrumbench::jsonl::JsonlSink::create(&args.data_log)?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
@@ -428,13 +423,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let runtime = runtime.clone();
         let client = client.clone();
         let prompts = prompts.clone();
-        let data_log = data_log.clone();
         let sink_task = sink.clone();
         let error_log = error_log.clone();
         let metrics = metrics.clone();
         let rr = rr.clone();
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
+        let send_offset = run_start.elapsed();
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let outcome = run_logical_request(
@@ -447,9 +442,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &rr,
             )
             .await;
-            if let Err(e) = write_data_record(&data_log, &args, &outcome).await {
-                let _ = write_error(&error_log, &format!("data_log_write_error: {}", e)).await;
-            }
             if outcome.status != "success" {
                 let _ = write_error(
                     &error_log,
@@ -509,6 +501,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     request_error,
                 )
             };
+            record = record.with_send_offset(send_offset);
             if record_schedule {
                 record = record.with_schedule(scheduled_delay, queue_delay);
             }
@@ -518,6 +511,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             record
                 .modality_metrics
                 .insert("images_returned".into(), f64::from(outcome.n_returned));
+            record
+                .modality_metrics
+                .insert("response_bytes".into(), outcome.response_bytes as f64);
+            for (idx, artifact) in outcome.image_artifacts.iter().enumerate() {
+                record
+                    .modality_metrics
+                    .insert(format!("artifact_{idx}_bytes"), artifact.bytes as f64);
+                record
+                    .modality_labels
+                    .insert(format!("artifact_{idx}_sha256"), artifact.sha256.clone());
+            }
             record = record.with_run_id(run_id_task);
             if let Err(e) = sink_task.write(&record) {
                 let _ =
@@ -551,6 +555,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrumbench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
+        effective_max_concurrency: args.max_concurrency.unwrap_or(args.concurrency),
         common: metrumbench::args_common::EffectiveCommonArgs {
             seed: args.seed.unwrap_or(0) as u64,
             warmup_requests: args.warmup_requests,
@@ -1144,7 +1149,7 @@ async fn make_image_request(
             )
         })?;
     let mut artifacts = Vec::new();
-    if args.response_format == ResponseFormat::B64Json && !args.no_save_images {
+    if args.response_format == ResponseFormat::B64Json {
         for (idx, item) in data.iter().enumerate() {
             let b64 = item
                 .get("b64_json")
@@ -1165,11 +1170,17 @@ async fn make_image_request(
             let sha = hex_sha256(&image_bytes);
             let path =
                 Path::new(&args.artifact_dir).join(format!("{:06}-{}.png", request_index + 1, idx));
-            fs::write(&path, &image_bytes)
-                .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
+            if !args.no_save_images {
+                fs::write(&path, &image_bytes)
+                    .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
+            }
             artifacts.push(ImageArtifact {
                 index: idx,
-                path: path.to_string_lossy().to_string(),
+                path: if args.no_save_images {
+                    String::new()
+                } else {
+                    path.to_string_lossy().to_string()
+                },
                 sha256: sha,
                 bytes: image_bytes.len(),
                 mime_type: "image/png".to_string(),
@@ -1206,42 +1217,6 @@ fn load_extra_body(
         return Ok(Some(obj.clone()));
     }
     Ok(None)
-}
-
-async fn write_data_record(
-    data_log: &Arc<Mutex<File>>,
-    args: &Args,
-    outcome: &RequestOutcome,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let record = json!({
-        "schema_version": "metrum-ai-bench-imagegen.request.v1",
-        "tool": "metrum-ai-bench-imagegen",
-        "scenario": args.scenario,
-        "request_id": outcome.request_id,
-        "prompt_id": outcome.prompt_id,
-        "prompt_sha256": outcome.prompt_sha256,
-        "model": args.model,
-        "endpoint_name": outcome.endpoint_name,
-        "endpoint_url": outcome.endpoint_url,
-        "started_at": outcome.started_at.to_rfc3339(),
-        "completed_at": outcome.completed_at.to_rfc3339(),
-        "latency_ms": outcome.latency_ms,
-        "status": outcome.status,
-        "http_status": outcome.http_status,
-        "n_requested": outcome.n_requested,
-        "n_returned": outcome.n_returned,
-        "size": outcome.size,
-        "response_format": outcome.response_format,
-        "seed": outcome.seed,
-        "image_artifacts": outcome.image_artifacts,
-        "response_bytes": outcome.response_bytes,
-        "attempts": outcome.attempts,
-        "error_type": outcome.error_type,
-        "error_message": outcome.error_message,
-    });
-    let mut file = data_log.lock().await;
-    writeln!(file, "{}", serde_json::to_string(&record)?)?;
-    Ok(())
 }
 
 async fn write_error(

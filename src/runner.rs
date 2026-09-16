@@ -4,7 +4,7 @@
 //! Shared load-runner helpers: stop signals, measured windows, schedule semantics.
 //!
 //! Modality binaries still own request construction; this module owns the
-//! bookkeeping that must not drift (F-01, F-02, F-04, F-18, F-19).
+//! bookkeeping that must not drift (F-01, F-02, F-04, F-18, F-19, N-02).
 
 use crate::load::ArrivalKind;
 use crate::record::{Phase, RequestRecord};
@@ -96,8 +96,17 @@ pub fn should_record_schedule(kind: ArrivalKind) -> bool {
     !matches!(kind, ArrivalKind::ClosedLoop)
 }
 
-/// Measured window: first measured send → last measured successful completion,
-/// derived only from per-request `started_at` + `latency_s` (not join-loop time).
+/// Monotonic send offset from the run epoch when present; otherwise wall
+/// `started_at` (legacy records / unit fixtures without `send_offset_s`).
+pub fn send_offset_seconds(record: &RequestRecord) -> f64 {
+    record
+        .send_offset_s
+        .unwrap_or_else(|| datetime_to_unix_secs(record.started_at))
+}
+
+/// Measured window: first measured send → last measured successful completion.
+/// Prefer monotonic `send_offset_s` so wall-clock steps cannot inflate the
+/// window (N-02). Falls back to `started_at` for records that lack the field.
 pub fn window_seconds_from_records(records: &[RequestRecord]) -> f64 {
     let measured: Vec<&RequestRecord> = records
         .iter()
@@ -109,7 +118,7 @@ pub fn window_seconds_from_records(records: &[RequestRecord]) -> f64 {
     let mut min_send = f64::INFINITY;
     let mut max_end = f64::NEG_INFINITY;
     for r in &measured {
-        let send = datetime_to_unix_secs(r.started_at);
+        let send = send_offset_seconds(r);
         min_send = min_send.min(send);
         if r.is_success() {
             max_end = max_end.max(send + r.latency_s);
@@ -164,6 +173,22 @@ mod tests {
         ];
         let w = window_seconds_from_records(&records);
         assert!((w - 2.0).abs() < 1e-6, "window={w}");
+    }
+
+    #[test]
+    fn window_prefers_send_offset_over_wall_clock_step() {
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut early = sample(0, t0, 500).with_send_offset(Duration::from_millis(0));
+        let mut late = sample(1, t0 + chrono::Duration::hours(1), 500)
+            .with_send_offset(Duration::from_millis(500));
+        // Wall clock jumped +1h between sends; monotonic offsets stay small.
+        early.started_at = t0;
+        late.started_at = t0 + chrono::Duration::hours(1);
+        let w = window_seconds_from_records(&[early, late]);
+        assert!(
+            (w - 1.0).abs() < 1e-6,
+            "window should ignore wall step, got {w}"
+        );
     }
 
     #[test]

@@ -12,12 +12,15 @@ Each line is a complete JSON object and carries `schema_version`.
 - optional `run_id` (same UUID as `summary.config.run_id` when stamped)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
 - ISO `started_at`/`completed_at`
+- optional monotonic `send_offset_s` (seconds from the run-epoch `Instant` to
+  actual send; preferred for window and closed-loop bins)
 - monotonic `latency_s`, optional `ttft_s`, `first_byte_s`, `first_reasoning_s`, and `itl_s`
   (`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated
   from E2E latency)
 - optional `scheduled_offset_s` and `queue_delay_s`
 - server usage counts plus optional `tokenized_*` counts and `usage_missing`
-- typed `error`, `partial`, and modality-specific numeric metrics
+- typed `error`, `partial`, modality-specific numeric metrics, and optional
+  string `modality_labels` (e.g. imagegen `artifact_0_sha256`)
 
 `modality_metrics` holds flat numeric values keyed by modality:
 
@@ -25,10 +28,10 @@ Each line is a complete JSON object and carries `schema_version`.
 |--------|------|
 | VLM | `image_count`, `image_bytes` (bytes actually sent per request) |
 | ASR | `rtfx_client`, `wer`, `cer`, `inference_seconds_{server,client}` |
-| Imagegen | `images_requested`, `images_returned` |
+| Imagegen | `images_requested`, `images_returned`, `response_bytes`, `artifact_N_bytes` |
 
-Image-generation request records retain artifact hashes and response details
-under their modality schema because those fields are not token-oriented.
+Imagegen artifact SHA-256 digests live in `modality_labels.artifact_N_sha256`
+on `request.v3` (no parallel `imagegen.request.v1` lines).
 
 `first_byte_s` is the monotonic elapsed time from send start until response
 headers are received (after a successful `.send()`). It is distinct from
@@ -46,6 +49,8 @@ Additional v3 fields:
 
 - `config` — effective run configuration:
   - `run_id` — UUID generated once per run
+  - `effective_max_concurrency` — outstanding-request cap in force
+    (`--max-concurrency`, or `--concurrency` when unset)
   - `common` — every `CommonBenchArgs` field (`seed`, `warmup_requests`,
     `request_rate`, `arrival`, `max_concurrency`, `load_balancer`, `ignore_eos`,
     `min_tokens`, `extra_body_json`, `system_prompt`, `unique_prompts`,
