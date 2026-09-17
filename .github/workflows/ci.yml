@@ -104,7 +104,9 @@ jobs:
       - name: gitleaks
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          gitleaks git --redact --verbose --config .gitleaks.toml
+          # HEAD only: default --all also scans other remote PR branches
+          # fetched via fetch-depth: 0 and fails CI on unrelated work.
+          gitleaks git --redact --verbose --config .gitleaks.toml --log-opts="HEAD"
       - name: gitleaks custom-rule fixtures
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
