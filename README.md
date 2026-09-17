@@ -200,7 +200,10 @@ Success is ISL/OSL **within tolerance**, not an exact `--count`. After extract,
 use `report.selected_count` and `report.recommended_max_tokens`. Keep
 `--warmup-requests 0` so llm does not drop measured mix slots. llm still uses
 one global `--max-tokens` (per-request caps are out of scope). Details:
-[docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md).
+[docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md). Other Metrum AI prompt sets
+published on Hugging Face under the `metrum-ai` organization can be used the
+same way; record the dataset name, revision, and row count in the SUT block or
+run notes.
 
 ```bash
 cargo build --release --bin metrum-ai-bench-prompts --bin metrum-ai-bench-llm

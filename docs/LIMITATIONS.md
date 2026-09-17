@@ -15,7 +15,7 @@ except when you optionally scrape a metrics URL from the strategic runner.
 
 ## SUT is declared, not verified
 
-`--sut` / `--require-sut` (when present) embed an operator-supplied system-under-test
+`--sut` / `--require-sut` embed an operator-supplied system-under-test
 block into the run summary for publication. They do **not** probe the remote
 host, confirm GPU SKU, driver, or engine version, or prove that the declared
 SUT matches the endpoint you hit. A mismatched or empty declaration is a
@@ -68,8 +68,10 @@ client.
 
 ## Published smoke matrix is NVIDIA-only
 
-See [SMOKE_RESULTS.md](SMOKE_RESULTS.md). AMD Instinct coverage is in progress.
-No comparative vendor results are published there.
+See [SMOKE_RESULTS.md](SMOKE_RESULTS.md). The published smoke coverage in that
+file is NVIDIA hardware only; AMD Instinct coverage is in progress. That is a
+coverage statement, not a vendor ranking. No comparative vendor results are
+published there.
 
 ## MLPerf export is unofficial
 

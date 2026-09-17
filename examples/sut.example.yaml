@@ -17,4 +17,4 @@ runtime:
 model:
   id: example/model
 host_os: Ubuntu 22.04
-notes: Example only — replace with your declared inventory.
+notes: Example only: replace with your declared inventory.

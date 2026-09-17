@@ -25,6 +25,10 @@ is required to land both axes.
 Pinned revision used in README examples:
 `0666f62e581b482838ae2e17b333ee36ff3d01b0`.
 
+Other Metrum AI prompt sets published on Hugging Face under the `metrum-ai`
+organization can be used the same way; record the dataset name, revision, and
+row count in the SUT block or run notes.
+
 ### Fields used for selection
 
 | Field | Role |
@@ -114,6 +118,6 @@ the failure is a proven empty candidate set vs search/tolerance miss.
 
 ## See also
 
-- [LIMITATIONS.md](LIMITATIONS.md) — mix fidelity and global token-cap caveats
-- [CLI.md](CLI.md) — regenerated `--help` text
+- [LIMITATIONS.md](LIMITATIONS.md): mix fidelity and global token-cap caveats
+- [CLI.md](CLI.md): regenerated `--help` text
 - Dataset card pointer: [datasets/DATASET_CARD.draft.md](datasets/DATASET_CARD.draft.md)
