@@ -1,0 +1,417 @@
+/* Copyright (c) 2026 Metrum AI, Inc. */
+/* SPDX-License-Identifier: Apache-2.0 */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Poppins:wght@300;400;500;600;700&display=swap');
+
+:root {
+  color-scheme: light;
+  --metrum-black: #fff;
+  --metrum-bg: #f7f8fb;
+  --metrum-bg-elevated: #eef1f6;
+  --metrum-card: #fff;
+  --metrum-border: #d8dee8;
+  --metrum-border-subtle: #e8ecf2;
+  --metrum-border-hover: #b8c2d2;
+  --metrum-text: #111827;
+  --metrum-text-secondary: #4b5563;
+  --metrum-text-muted: #6b7280;
+  --metrum-card-bg: #ffffffd9;
+  --metrum-card-border: #d8dee8;
+  --metrum-hover-bg: #11182708;
+  --metrum-code-border: #d8dee8;
+  --metrum-noise-opacity: 0.018;
+  --metrum-red: #ff3132;
+  --metrum-rose: #fe005f;
+  --metrum-magenta: #ee0089;
+  --metrum-orchid: #cc28af;
+  --metrum-violet: #9948cb;
+  --metrum-indigo: #465cda;
+  --metrum-gradient-brand: linear-gradient(135deg, #ff3132 0%, #fe005f 20%, #ee0089 40%, #cc28af 60%, #9948cb 80%, #465cda 100%);
+  --metrum-gradient-horizontal: linear-gradient(90deg, #ff3132 0%, #fe005f 20%, #ee0089 40%, #cc28af 60%, #9948cb 80%, #465cda 100%);
+  --metrum-glow: 0 0 60px #cc28af66;
+
+  --ifm-background-color: var(--metrum-black);
+  --ifm-background-surface-color: var(--metrum-bg);
+  --ifm-font-family-base: 'Poppins', system-ui, sans-serif;
+  --ifm-font-family-monospace: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --ifm-heading-font-family: 'Geist', system-ui, sans-serif;
+  --ifm-color-primary: #cc28af;
+  --ifm-color-primary-dark: #b7249e;
+  --ifm-color-primary-darker: #ad2295;
+  --ifm-color-primary-darkest: #8f1c7b;
+  --ifm-color-primary-light: #d840bf;
+  --ifm-color-primary-lighter: #dc4dc5;
+  --ifm-color-primary-lightest: #e576d2;
+  --ifm-color-content: var(--metrum-text);
+  --ifm-color-content-secondary: var(--metrum-text-secondary);
+  --ifm-navbar-background-color: rgba(10, 10, 10, 0.92);
+  --ifm-navbar-link-color: var(--metrum-text-secondary);
+  --ifm-navbar-link-hover-color: var(--metrum-text);
+  --ifm-footer-background-color: var(--metrum-bg-elevated);
+  --ifm-footer-color: var(--metrum-text-secondary);
+  --ifm-footer-link-color: var(--metrum-text-secondary);
+  --ifm-footer-title-color: var(--metrum-text);
+  --ifm-code-background: #eef1f6;
+  --ifm-code-color: #111827;
+  --ifm-pre-background: var(--metrum-bg-elevated);
+  --ifm-table-border-color: var(--metrum-border);
+  --ifm-toc-border-color: var(--metrum-border);
+  --ifm-menu-color: var(--metrum-text-secondary);
+  --ifm-menu-color-active: var(--metrum-text);
+  --ifm-menu-color-background-active: #9948cb14;
+  --ifm-link-color: #7c3bad;
+  --ifm-link-hover-color: #9948cb;
+  --ifm-breadcrumb-color-active: var(--metrum-text);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --metrum-black: #000;
+  --metrum-bg: #0a0a0a;
+  --metrum-bg-elevated: #141414;
+  --metrum-card: #0a0a0a;
+  --metrum-border: #262626;
+  --metrum-border-subtle: #1a1a1a;
+  --metrum-border-hover: #404040;
+  --metrum-text: #fff;
+  --metrum-text-secondary: #a3a3a3;
+  --metrum-text-muted: #737373;
+  --metrum-card-bg: #0a0a0a4d;
+  --metrum-card-border: #ffffff14;
+  --metrum-hover-bg: #ffffff05;
+  --metrum-code-border: #ffffff14;
+  --metrum-noise-opacity: 0.032;
+  --ifm-background-color: var(--metrum-black);
+  --ifm-background-surface-color: var(--metrum-bg);
+  --ifm-color-content: var(--metrum-text);
+  --ifm-color-content-secondary: var(--metrum-text-secondary);
+  --ifm-navbar-background-color: rgba(10, 10, 10, 0.92);
+  --ifm-footer-background-color: var(--metrum-black);
+  --ifm-code-background: #1a1a1a;
+  --ifm-code-color: #e5e5e5;
+  --ifm-pre-background: #0a0a0a;
+  --ifm-table-border-color: #333;
+  --ifm-link-color: #b76ad9;
+  --ifm-link-hover-color: #cc28af;
+}
+
+[data-theme='light'] {
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.92);
+}
+
+html {
+  background: var(--metrum-black);
+}
+
+body {
+  background: var(--metrum-black);
+  color: var(--metrum-text);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  overflow-x: hidden;
+}
+
+body::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  opacity: var(--metrum-noise-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--metrum-text);
+  font-family: 'Geist', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+a {
+  text-underline-offset: 2px;
+}
+
+.navbar {
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--metrum-border-subtle);
+  box-shadow: none;
+}
+
+.navbar__brand {
+  min-width: 0;
+}
+
+/* The navbar text title is gone: the logo artwork carries the product name, so the two
+   together printed it twice. That makes the logo the only brand element in the navbar, and
+   24px was sized for a mark sitting next to a text label.
+
+   32px, because the artwork is a stacked lockup: a tall METRUM band over a subline about a
+   quarter its height. At 24px the subline lands near 4px and reads as a smudge. 32px is the
+   largest height that still fits Docusaurus's 60px navbar with its default padding, and it
+   is the difference between the subline being small and being illegible. */
+.navbar__logo {
+  height: 32px;
+  margin-right: 0.75rem;
+}
+
+.navbar__logo img {
+  height: 32px;
+  width: auto;
+}
+
+.navbar__title {
+  color: var(--metrum-text);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.navbar__item {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.navbar__link--active,
+.menu__link--active {
+  color: var(--metrum-text);
+}
+
+.main-wrapper {
+  background: transparent;
+}
+
+.theme-doc-sidebar-container,
+.table-of-contents {
+  border-color: var(--metrum-border);
+}
+
+.theme-doc-sidebar-menu {
+  padding-top: 1rem;
+}
+
+.menu__link {
+  border-radius: 0;
+}
+
+.menu__link:hover {
+  background: var(--metrum-hover-bg);
+  color: var(--metrum-text);
+}
+
+.theme-doc-markdown {
+  color: var(--metrum-text-secondary);
+}
+
+.theme-doc-markdown h1 {
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 1.25rem;
+}
+
+.theme-doc-markdown h1:first-child {
+  background: var(--metrum-gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.theme-doc-markdown h2 {
+  border-top: 1px solid var(--metrum-border);
+  margin-top: 3rem;
+  padding-top: 2rem;
+}
+
+.theme-doc-markdown p,
+.theme-doc-markdown li {
+  color: var(--metrum-text-secondary);
+  line-height: 1.75;
+}
+
+.theme-doc-markdown strong {
+  color: var(--metrum-text);
+}
+
+.card,
+.openapi-tabs__schema-container,
+.theme-api-markdown {
+  background: var(--metrum-card-bg);
+  border: 1px solid var(--metrum-card-border);
+  border-radius: 8px;
+}
+
+pre,
+.prism-code {
+  background: var(--metrum-bg) !important;
+  border: 1px solid var(--metrum-border);
+  border-radius: 8px;
+}
+
+code {
+  border: 1px solid var(--metrum-code-border);
+  border-radius: 4px;
+}
+
+table {
+  border-color: var(--metrum-border);
+}
+
+th {
+  background: var(--metrum-bg-elevated);
+  color: var(--metrum-text);
+}
+
+td {
+  background: var(--metrum-bg);
+  color: var(--metrum-text-secondary);
+}
+
+.pagination-nav__link {
+  background: var(--metrum-card-bg);
+  border-color: var(--metrum-card-border);
+  border-radius: 8px;
+}
+
+.pagination-nav__link:hover {
+  border-color: #9948cb66;
+}
+
+.footer {
+  border-top: 1px solid var(--metrum-border);
+  padding: 0.65rem 0;
+}
+
+.footer .container {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.footer__title {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  margin: 0 0.75rem 0 0;
+  text-transform: uppercase;
+}
+
+.footer__links {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.footer__col {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  margin: 0;
+}
+
+.footer__item {
+  line-height: 1.3;
+  margin: 0 0.75rem 0 0;
+}
+
+.footer__items {
+  display: flex;
+  margin: 0;
+}
+
+.footer__link-item {
+  font-size: 0.78rem;
+}
+
+.footer__bottom {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.footer__copyright {
+  color: var(--metrum-text-muted);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 996px) {
+  .footer .container {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .footer__links,
+  .footer__col,
+  .footer__items {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+.button,
+button {
+  border-radius: 0;
+}
+
+.callout {
+  background: var(--metrum-card-bg);
+  border: 1px solid var(--metrum-card-border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+
+.callout--info {
+  border-left-color: var(--metrum-orchid);
+}
+
+.callout--warning {
+  border-left-color: #f99c00;
+}
+
+.callout--success {
+  border-left-color: #00bb7f;
+}
+
+.callout--danger {
+  border-left-color: var(--metrum-red);
+}
+
+.callout__title {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.zoom-img img {
+  border: 1px solid var(--metrum-card-border);
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.zoom-img figcaption {
+  color: var(--metrum-text-muted);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  text-align: center;
+}
+/* Version selector injected by src/theme/Root.tsx. */
+.metrum-docs-version-select select {
+  background: var(--ifm-navbar-background-color);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 4px;
+  color: var(--ifm-navbar-link-color);
+  font: inherit;
+  min-height: 32px;
+  padding: 4px 28px 4px 8px;
+}
