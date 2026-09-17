@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/metrum-ai/bench-cli)](https://github.com/metrum-ai/bench-cli/releases)
 
 Apache-2.0 licensed load and performance measurement for OpenAI-compatible
-LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0-rc.5**
+LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0-rc.6**
 ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench measures one environment and produces a result with a

@@ -123,7 +123,7 @@ pub fn bootstrap_mean_ci(
     resamples: usize,
     seed: u64,
 ) -> ConfidenceInterval {
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     let finite = sort_finite(values.iter().copied());
     if finite.is_empty() || resamples == 0 {
         return ConfidenceInterval {
