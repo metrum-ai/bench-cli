@@ -61,7 +61,10 @@ pub struct CommonBenchArgs {
     #[arg(long, help = "min_tokens (vLLM / compatible servers)")]
     pub min_tokens: Option<u32>,
 
-    #[arg(long, help = "Extra JSON object merged into the request body")]
+    #[arg(
+        long,
+        help = "Extra JSON object merged into the request body, e.g. '{\"reasoning_effort\":\"medium\"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md."
+    )]
     pub extra_body_json: Option<String>,
 
     #[arg(
@@ -140,6 +143,13 @@ pub struct CommonBenchArgs {
         help = "Write environment.hostname as null"
     )]
     pub redact_hostname: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1."
+    )]
+    pub quiet: bool,
 }
 
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
@@ -289,6 +299,7 @@ mod tests {
             sut: None,
             require_sut: false,
             redact_hostname: false,
+            quiet: false,
         };
         assert_eq!(
             args.effective_system_prompt("default"),

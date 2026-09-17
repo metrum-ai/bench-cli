@@ -3,9 +3,28 @@
 
 # CLI reference
 
-Generated from `metrum-ai-bench-* --help`. Re-run
+Generated from `metrum-ai-bench*` `--help`. Re-run
 `scripts/render_cli_help.sh` after flag changes. Live `--help` is
 authoritative if this file drifts.
+
+## `metrum-ai-bench`
+
+```text
+Usage: metrum-ai-bench <COMMAND>
+
+Commands:
+  llm       Text chat/completions benchmark
+  vlm       Vision-language chat benchmark
+  asr       Audio transcription benchmark
+  imagegen  Image generation benchmark
+  prompts   Select an ISL/OSL mix from metrum-ai/prompt-library
+  selftest  Print client environment and verify local runtime capabilities
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
 
 ## `metrum-ai-bench-llm`
 
@@ -20,7 +39,7 @@ Options:
       --scenario <SCENARIO>
           Descriptor for the scenario being run
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple)
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML, curl-style). Mutually exclusive with --url/--api-key
       --num-requests <NUM_REQUESTS>
@@ -56,7 +75,7 @@ Options:
       --min-tokens <MIN_TOKENS>
           min_tokens (vLLM / compatible servers)
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
       --unique-prompts
@@ -79,6 +98,8 @@ Options:
           Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -96,7 +117,7 @@ Options:
       --tcp-keepalive <TCP_KEEPALIVE>
           TCP keepalive in seconds [default: 60]
       --api-key <API_KEY>
-          API key for authentication (use --endpoints-file for multiple)
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --stop-after-seconds <STOP_AFTER_SECONDS>
           Stop sending new requests after N seconds
       --ramp-up-seconds <RAMP_UP_SECONDS>
@@ -120,7 +141,7 @@ Options:
       --scenario <SCENARIO>
           Descriptor for the scenario being run
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple)
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML). Mutually exclusive with --url/--api-key
       --num-requests <NUM_REQUESTS>
@@ -152,7 +173,7 @@ Options:
       --min-tokens <MIN_TOKENS>
           min_tokens (vLLM / compatible servers)
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
       --unique-prompts
@@ -175,6 +196,8 @@ Options:
           Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --max-tokens <MAX_TOKENS>
@@ -194,7 +217,7 @@ Options:
       --tcp-keepalive <TCP_KEEPALIVE>
           TCP keepalive in seconds [default: 60]
       --api-key <API_KEY>
-          API key for authentication (use --endpoints-file for multiple)
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --stop-after-seconds <STOP_AFTER_SECONDS>
           Stop sending new requests after N seconds
       --ramp-up-seconds <RAMP_UP_SECONDS>
@@ -233,7 +256,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the audio transcription API endpoint
+          URL of the audio transcription API endpoint. Required with --api-key.
 
       --num-requests <NUM_REQUESTS>
           Number of requests to send (must be >= 1 when set)
@@ -291,7 +314,7 @@ Options:
           min_tokens (vLLM / compatible servers)
 
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
@@ -332,6 +355,9 @@ Options:
           
           [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
 
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
+
       --debug-log <DEBUG_LOG>
           Path to the debug log file
           
@@ -363,7 +389,7 @@ Options:
           [default: 60]
 
       --api-key <API_KEY>
-          API key for authentication
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to YAML file with endpoints (url, api_key, name?, weight?); mutually exclusive with --url/--api-key
@@ -410,14 +436,16 @@ Usage: metrum-ai-bench-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> 
 Options:
       --version-only
           Print version information and exit
+      --quiet
+          Suppress ASCII banner art if printed (one-line identity). Also set NO_BANNER=1.
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
       --scenario <SCENARIO>
           
       --url <URL>
-          OpenAI-compatible base URL, usually ending in /v1
+          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key.
       --api-key <API_KEY>
-          API key for --url
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --endpoint <ENDPOINT>
           Repeatable endpoint URL for multi-endpoint mode
       --endpoints-file <ENDPOINTS_FILE>
@@ -477,9 +505,9 @@ Options:
       --true-cfg-scale <TRUE_CFG_SCALE>
           
       --extra-body-json <EXTRA_BODY_JSON>
-          
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --extra-body-file <EXTRA_BODY_FILE>
-          
+          Path to a JSON object file merged into the request body (alternative to --extra-body-json). Recorded via the merged body template.
       --request-timeout <REQUEST_TIMEOUT>
           [default: 300]
       --connect-timeout <CONNECT_TIMEOUT>
@@ -530,6 +558,8 @@ Usage: metrum-ai-bench-prompts [OPTIONS]
 Options:
       --version-only
           Print version information and exit
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --dataset <DATASET>
           [default: metrum-ai/prompt-library]
       --revision <REVISION>
@@ -588,5 +618,76 @@ Options:
           Write selection report JSON
   -h, --help
           Print help
+```
+
+## `metrum-ai-bench-strategic`
+
+```text
+Usage: metrum-ai-bench-strategic [OPTIONS] --url <URL> --model <MODEL>
+
+Options:
+      --url <URL>
+          
+      --api-key <API_KEY>
+          [env: OPENAI_API_KEY=] [default: ""]
+      --model <MODEL>
+          
+      --kind <KIND>
+          [default: chat] [possible values: chat, embeddings, rerank]
+      --requests-per-stage <REQUESTS_PER_STAGE>
+          [default: 100]
+      --sweep <SWEEP>
+          [default: 1,2,4,8]
+      --sweep-by <SWEEP_BY>
+          [default: concurrency] [possible values: concurrency, rate]
+      --max-in-flight <MAX_IN_FLIGHT>
+          Maximum outstanding requests during a rate sweep [default: 256]
+      --prompt <PROMPT>
+          [default: Hello]
+      --sessions <SESSIONS>
+          
+      --prefix-control <PREFIX_CONTROL>
+          [default: shared] [possible values: shared, unique, none]
+      --shared-prefix <SHARED_PREFIX>
+          
+      --json-schema <JSON_SCHEMA>
+          
+      --tools <TOOLS>
+          
+      --metrics-url <METRICS_URL>
+          
+      --metrics-interval-ms <METRICS_INTERVAL_MS>
+          [default: 250]
+      --html <HTML>
+          [default: metrum-ai-bench-report.html]
+      --csv <CSV>
+          [default: metrum-ai-bench-requests.csv]
+      --mlperf-dir <MLPERF_DIR>
+          
+      --mlperf-scenario <MLPERF_SCENARIO>
+          [default: server] [possible values: server, offline]
+      --otlp-endpoint <OTLP_ENDPOINT>
+          
+      --otlp-service-name <OTLP_SERVICE_NAME>
+          [default: metrum-ai-bench]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 300]
+      --slo <METRIC=SECONDS>
+          Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)
+  -h, --help
+          Print help
+```
+
+## `metrum-ai-bench-mock-server`
+
+```text
+Usage: metrum-ai-bench-mock-server [OPTIONS]
+
+Options:
+      --listen <LISTEN>          [default: 127.0.0.1:8080]
+      --latency-ms <LATENCY_MS>  [default: 0]
+      --fail-every <FAIL_EVERY>  [default: 0]
+  -h, --help                     Print help
+  -V, --version                  Print version
 ```
 

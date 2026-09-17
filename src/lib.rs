@@ -21,9 +21,25 @@ pub mod sut;
 pub mod tokenizer;
 
 pub mod banner {
-    pub fn print_banner(version: &str, tool_name: &str) {
-        println!(
-            r#"
+    use std::io::IsTerminal;
+
+    /// True when the large ASCII art should print: TTY stdout, not `--quiet`,
+    /// and `NO_BANNER` is unset (or not `1`).
+    pub fn should_print_art(quiet: bool) -> bool {
+        if quiet {
+            return false;
+        }
+        if std::env::var_os("NO_BANNER").is_some_and(|v| v == "1") {
+            return false;
+        }
+        std::io::stdout().is_terminal()
+    }
+
+    /// Print identity. Large art on interactive TTY; one line otherwise.
+    pub fn print_banner(version: &str, tool_name: &str, quiet: bool) {
+        if should_print_art(quiet) {
+            println!(
+                r#"
                                                                                                         
         @@@    @@@   @@@@@@@    @@@@@@    @@@@@     @@   @@    @@@    @@@           @@@      @@       
         @@@@  @@@@                @@      @    @@   @@   @@    @@@@  @@@@           @ @@     @@       
@@ -32,11 +48,14 @@ pub mod banner {
         @@      @@   @@@@@@@      @@      @   @@@     @@@      @@      @@        @@     @@   @@       
                                                                                                         
         AI Performance Testing Tools: {} v{}
-        From Metrum AI, Inc. — https://github.com/metrum-ai/bench-cli
+        From Metrum AI, Inc.: https://github.com/metrum-ai/bench-cli
         Author: Chetan Gadgil
     "#,
-            tool_name, version
-        );
+                tool_name, version
+            );
+        } else {
+            println!("Metrum AI Bench {tool_name} {version}");
+        }
     }
 }
 
@@ -153,7 +172,13 @@ pub mod timecheck {
 
 #[cfg(test)]
 mod tests {
+    use super::banner;
     use super::unique_id;
+
+    #[test]
+    fn quiet_suppresses_ascii_art_decision() {
+        assert!(!banner::should_print_art(true));
+    }
 
     #[test]
     fn unique_id_generation_produces_expected_shape() {

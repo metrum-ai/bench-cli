@@ -9,15 +9,9 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   measure-phase requests only.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
-- **TTFT**: first visible output delta minus send. Role and reasoning-only
-  deltas do not count. Missing visible output is `no_output_token`. TTFT
-  includes connection setup, TLS, and queueing by design. Non-streaming
-  responses report `ttft_s: null` (undefined; never fabricated from E2E).
 - **First byte**: response headers received minus send (`first_byte_s`).
   Separates gateway/header delay from prefill. `connect_s` is not yet
   recorded (deferred post-v1).
-- **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
-  minus send, reported separately from TTFT.
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at
@@ -33,7 +27,7 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
 - **Effective max concurrency**: stamped on `summary.v3.config` as
-  `effective_max_concurrency` — `--max-concurrency` when set, otherwise the
+  `effective_max_concurrency`: `--max-concurrency` when set, otherwise the
   closed-loop `--concurrency` value that caps outstanding work.
 - **Token throughput**: successful server-usage tokens divided by that same
   window. Optional local tokenizer counts are separate fields.
@@ -58,6 +52,18 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   VLM honors `--system-prompt` (empty disables), `--min-tokens`, and
   `--tokenizer` like the LLM binary.
 
+## Thinking models: TTFT vs first reasoning
+
+- **TTFT**: first visible output delta minus send. Role and reasoning-only
+  deltas do not count. Missing visible output is `no_output_token`. TTFT
+  includes connection setup, TLS, and queueing by design. Non-streaming
+  responses report `ttft_s: null` (undefined; never fabricated from E2E).
+- **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
+  minus send, reported separately from TTFT.
+
+Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
+[REASONING_MODELS.md](REASONING_MODELS.md).
+
 Distributions report `n`, min, max, arithmetic mean, sample standard
 deviation, median absolute deviation, and Hyndman-Fan type 7 p50/p90/p95/p99.
 Undefined values serialize as null/absent, never measured zero. P99 is marked
@@ -75,4 +81,3 @@ full distributions are emitted independently per endpoint.
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
 values written as `summary.v3`. There is no separate nearest-rank console
 estimator.
-

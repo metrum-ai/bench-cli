@@ -97,7 +97,8 @@ struct Args {
 
     #[arg(
         long,
-        help = "URL of the AI model endpoint (use --endpoints-file for multiple)"
+        requires = "api_key",
+        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key."
     )]
     url: Option<String>,
 
@@ -168,7 +169,8 @@ struct Args {
 
     #[arg(
         long,
-        help = "API key for authentication (use --endpoints-file for multiple)"
+        requires = "url",
+        help = "API key sent as a Bearer token. Required with --url. Use any placeholder such as \"dummy\" for servers that do not check it. Use --endpoints-file for multiple endpoints."
     )]
     api_key: Option<String>,
 
@@ -727,9 +729,6 @@ fn build_request_body(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Print banner
-    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-vlm");
-
     let args = Args::parse();
 
     // Check for version-only flag first
@@ -737,6 +736,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("metrum-ai-bench-vlm version {}", VERSION);
         return Ok(());
     }
+
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-vlm", args.common.quiet);
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
 
