@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Metrum AI Bench CLI external docs
 
 Customer-facing documentation for Metrum AI Bench CLI. Docusaurus v3 site with
@@ -21,7 +23,7 @@ Use `DOCS_BASE_URL=/` so local routes are not prefixed. Production defaults to
 ## Production build
 
 ```bash
-DOCS_VERSION=v1.0.0-rc.6 npm run build
+npm run build
 ```
 
 This bakes `baseUrl` `/metrum-ai-bench-cli/` (override with `DOCS_BASE_URL` if
@@ -34,9 +36,9 @@ Versioning is env-driven (not Docusaurus `versioned_docs/`):
 
 | Variable | Default | Role |
 | --- | --- | --- |
-| `DOCS_VERSION` | `v1.0.0-rc.6` | Stamp shown in the navbar selector |
+| `DOCS_VERSION` | `v` + root `Cargo.toml` `version` | Stamp shown in the navbar selector |
 | `DOCS_BASE_URL` | `/metrum-ai-bench-cli/` | Site `baseUrl` for this build |
-| `DOCS_VERSIONS_URL` | `/metrum-ai-bench-cli/versions.json` | Manifest fetched by `src/theme/Root.tsx` |
+| `DOCS_VERSIONS_URL` | `{DOCS_BASE_URL}versions.json` | Manifest fetched by `src/theme/Root.tsx` |
 
 Publish each versioned tree under a distinct `DOCS_BASE_URL` (for example
 `/metrum-ai-bench-cli/v1.0.0-rc.6/`) and host a `versions.json` listing

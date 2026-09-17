@@ -79,7 +79,7 @@ API-key pair patterns described in `--help`).
 | `--slo` | Repeatable thresholds, e.g. `ttft=250ms`, `e2e=2s` |
 | `--streaming` | Stream responses (needed for TTFT) |
 | `--tokenizer` | Path to `tokenizer.json` (**requires** Cargo feature `tokenizer`; not in GitHub Release builds) |
-| `--log-level` | `error`, `warn`, `info`, `debug`, `trace` (default often `warn`) |
+| `--log-level` | `error`/`warn`/`info`/`debug`/`trace` on llm/vlm (default `warn`) and asr (default `info`); not on imagegen |
 | `--data-log` | JSONL output path |
 | `--runs` | Sequential independent runs + bootstrap aggregate (unified entry) |
 | `--sut` / `--require-sut` / `--redact-hostname` | Publication and privacy controls |

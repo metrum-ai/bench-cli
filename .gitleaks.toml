@@ -32,7 +32,7 @@ regex = '''(?i)\b[a-z0-9][a-z0-9.-]*\.metrum\.ai\b'''
 keywords = ["metrum.ai"]
 
 [allowlist]
-description = "Fixture dir + pre-#44 history that still contains the removed leak class (tree is clean; Phase 3/GitHub purge for tags); public docs hostname"
+description = "Fixture dir + pre-#44 history that still contains the removed leak class (tree is clean; Phase 3/GitHub purge for tags)"
 paths = [
   '''scripts/tests/gitleaks/''',
 ]
@@ -42,7 +42,10 @@ commits = [
   "bffdb7f79d0a38c94c42a23ba4d9f81d85a3155e",
   "da80829d17502688b50d08e5ea1145e6c7082531"
 ]
+
 # Public customer docs site (not an internal host).
+[[allowlists]]
+description = "Allow public docs.metrum.ai hostname in customer-facing docs URLs"
 regexes = [
   '''(?i)\bdocs\.metrum\.ai\b''',
 ]

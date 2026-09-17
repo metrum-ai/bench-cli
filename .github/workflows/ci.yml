@@ -188,3 +188,24 @@ jobs:
           name: cargo-udeps-report
           path: cargo-udeps-report.txt
           if-no-files-found: warn
+
+  external-docs:
+    name: external-docs build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: external-docs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: external-docs/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: npm run build
+        run: npm run build
+        env:
+          # Match production path so absolute links resolve under baseUrl.
+          DOCS_BASE_URL: /metrum-ai-bench-cli/

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Metrum AI, Inc.
+// SPDX-License-Identifier: Apache-2.0
 import React, {useEffect, type ReactNode} from 'react';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 
@@ -12,6 +14,11 @@ type VersionsManifest = {
   latest?: string;
   versions?: VersionEntry[];
 };
+
+/** Reject open redirects: only same-origin relative paths (leading `/`, not `//`). */
+function safePath(path: string): string | null {
+  return path.startsWith('/') && !path.startsWith('//') ? path : null;
+}
 
 function normalizeBase(path: string): string {
   return path.endsWith('/') ? path : `${path}/`;
@@ -40,7 +47,7 @@ function installVersionSelector(customFields: Record<string, unknown>) {
   const docsVersion = String(customFields.docsVersion || 'dev');
   const docsBaseUrl = normalizeBase(String(customFields.docsBaseUrl || '/'));
   const versionsUrl = String(
-    customFields.docsVersionsUrl || '/metrum-ai-bench-cli/versions.json'
+    customFields.docsVersionsUrl || `${docsBaseUrl}versions.json`
   );
 
   fetch(versionsUrl, {cache: 'no-store'})
@@ -69,16 +76,29 @@ function installVersionSelector(customFields: Record<string, unknown>) {
       select.setAttribute('aria-label', 'Documentation version');
       for (const entry of options) {
         const option = document.createElement('option');
-        option.value = entry.path || `/metrum-ai-bench-cli/${entry.version}/`;
+        const fallbackPath = `${docsBaseUrl}${entry.version}/`;
+        const candidate = entry.path || fallbackPath;
+        const path = safePath(candidate);
+        if (!path) {
+          continue;
+        }
+        option.value = path;
         option.textContent = entry.label || entry.version;
         if (entry.version === docsVersion && entry.label !== 'latest') {
           option.selected = true;
         }
         select.appendChild(option);
       }
+      if (select.options.length < 1) {
+        return;
+      }
       select.addEventListener('change', () => {
+        const target = safePath(select.value);
+        if (!target) {
+          return;
+        }
         window.location.href = targetForVersion(
-          select.value,
+          target,
           currentBases,
           window.location
         );

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Metrum AI, Inc.
+// SPDX-License-Identifier: Apache-2.0
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 const sidebars: SidebarsConfig = {

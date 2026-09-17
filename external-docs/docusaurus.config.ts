@@ -1,10 +1,30 @@
+// Copyright (c) 2026 Metrum AI, Inc.
+// SPDX-License-Identifier: Apache-2.0
+import fs from 'fs';
+import path from 'path';
 import type {Config} from '@docusaurus/types';
 import type {Options as PresetOptions} from '@docusaurus/preset-classic';
 
-const docsVersion = process.env.DOCS_VERSION || 'v1.0.0-rc.6';
-const docsBaseUrl = process.env.DOCS_BASE_URL || '/metrum-ai-bench-cli/';
+/** Default docs stamp from root Cargo.toml `version` (override with DOCS_VERSION). */
+function cargoPackageVersion(): string {
+  const cargoToml = fs.readFileSync(
+    path.join(__dirname, '..', 'Cargo.toml'),
+    'utf8'
+  );
+  const match = cargoToml.match(/^version\s*=\s*"([^"]+)"/m);
+  return match ? `v${match[1]}` : 'dev';
+}
+
+function normalizeBaseUrl(base: string): string {
+  return base.endsWith('/') ? base : `${base}/`;
+}
+
+const docsVersion = process.env.DOCS_VERSION || cargoPackageVersion();
+const docsBaseUrl = normalizeBaseUrl(
+  process.env.DOCS_BASE_URL || '/metrum-ai-bench-cli/'
+);
 const docsVersionsUrl =
-  process.env.DOCS_VERSIONS_URL || '/metrum-ai-bench-cli/versions.json';
+  process.env.DOCS_VERSIONS_URL || `${docsBaseUrl}versions.json`;
 
 const config: Config = {
   title: 'Metrum AI Bench CLI Docs',
