@@ -1316,7 +1316,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "metrum-ai-bench"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -1329,7 +1329,7 @@ dependencies = [
  "jsonschema",
  "log",
  "parquet",
- "rand 0.9.5",
+ "rand 0.10.2",
  "reqwest",
  "serde",
  "serde_json",

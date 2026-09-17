@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-rc.6 (2026-09-17)
+
+Release candidate: `rand` 0.10.2 (soundness) and prompt-library mix extractor.
+
 ### Added
 - `metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`): select a
   reproducible ISL/OSL mix from
@@ -10,6 +14,10 @@
   within `--count-slack` and source rows may repeat. Writes JSONL for
   `metrum-ai-bench-llm` plus a selection report with recommended
   `--num-requests` / `--max-tokens`. Docs: `docs/PROMPT_LIBRARY.md`.
+
+### Changed
+- Direct dependency `rand` 0.9.5 → 0.10.2 (soundness fixes in 0.10.1/0.10.2;
+  `Rng` → `RngExt` call sites). Transitive `tokenizers` still uses `rand` 0.9.x.
 
 ## 1.0.0-rc.5 (2026-09-17)
 
