@@ -63,6 +63,13 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
+        help = "Suppress ASCII banner art if printed (one-line identity). Also set NO_BANNER=1."
+    )]
+    quiet: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
         help = "Opt-in NTP clock check; records offset when available (does not hard-fail)"
     )]
     ntp_check: bool,
@@ -70,10 +77,18 @@ struct Args {
     #[arg(long)]
     scenario: String,
 
-    #[arg(long, help = "OpenAI-compatible base URL, usually ending in /v1")]
+    #[arg(
+        long,
+        requires = "api_key",
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+    )]
     url: Option<String>,
 
-    #[arg(long, help = "API key for --url")]
+    #[arg(
+        long,
+        requires = "url",
+        help = "API key sent as a Bearer token. Required with --url. Use any placeholder such as \"dummy\" for servers that do not check it. Use --endpoints-file for multiple endpoints."
+    )]
     api_key: Option<String>,
 
     #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
@@ -167,10 +182,16 @@ struct Args {
     #[arg(long)]
     true_cfg_scale: Option<f64>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Extra JSON object merged into the request body, e.g. '{\"reasoning_effort\":\"medium\"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md."
+    )]
     extra_body_json: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Path to a JSON object file merged into the request body (alternative to --extra-body-json). Recorded via the merged body template."
+    )]
     extra_body_file: Option<String>,
 
     #[arg(long, default_value = "300")]
@@ -349,9 +370,10 @@ struct Metrics {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = Args::parse();
     if args.version_only {
-        println!("metrum-ai-bench-imagegen {}", VERSION);
+        println!("metrum-ai-bench-imagegen version {}", VERSION);
         return Ok(());
     }
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-imagegen", args.quiet);
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
@@ -679,9 +701,6 @@ fn validate_args(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     if !args.endpoint.is_empty() && args.endpoints_file.is_some() {
         return Err(anyhow::anyhow!("cannot combine --endpoint and --endpoints-file").into());
-    }
-    if args.url.is_some() && args.api_key.is_none() {
-        return Err(anyhow::anyhow!("--api-key is required with --url").into());
     }
     if parse_size(&args.size).is_none() {
         return Err(anyhow::anyhow!("--size must be formatted as WxH").into());

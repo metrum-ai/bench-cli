@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Added
+- `docs/REASONING_MODELS.md`: operator guide for thinking models (TTFT vs
+  first reasoning, `--extra-body-json` / `reasoning_effort`, `--max-tokens`
+  probe procedure). Linked from README, METRICS, LIMITATIONS, and CLAUDE.md.
+- README Quickstart (60 seconds): publishable dummy-server LLM run with
+  `--sut` / `--require-sut` and `test-data/llm-hi.jsonl`.
+- CLAUDE.md agent notes for running benchmarks and listing every non-deprecated
+  binary.
+- `--quiet` and `NO_BANNER=1`: suppress ASCII banner art; one-line identity
+  remains. Documented in README Install and regenerated `docs/CLI.md`.
+
+### Changed
+- `--url` and `--api-key` are mutually required at clap parse time on llm,
+  vlm, asr, and imagegen (endpoints-file path unchanged). Help text states
+  Bearer-token semantics and the `dummy` placeholder.
+- `--extra-body-json` help points at reasoning_effort examples and the run
+  manifest; imagegen `--extra-body-file` help filled; `scripts/render_cli_help.sh`
+  covers unified, strategic, and mock-server.
+- Banner prints only on interactive TTY after argument parse; non-TTY / quiet
+  sessions get `Metrum AI Bench <tool> <version>`.
+- README reordered for agent scanning: Quickstart, Tools entry points,
+  Reasoning models, Publishing (with SUT example), Prompt library, Dummy
+  server. Dummy-server `go run` commands use `(cd dummy-model-server && …)`
+  because the Go module lives in that subdirectory.
+- `docs/METRICS.md`: TTFT vs first reasoning under its own heading.
+- `docs/LIMITATIONS.md`: NVIDIA smoke matrix wording is coverage-only; SUT
+  flags described as shipped.
+
+### Planned
+- SUT block should carry first-class dataset provenance fields (`dataset`,
+  `dataset_revision`, `dataset_rows`) rather than only free-form `extra` /
+  notes.
+
 ## 1.0.0-rc.6 (2026-09-17)
 
 Release candidate: `rand` 0.10.2 (soundness) and prompt-library mix extractor.
@@ -125,7 +158,7 @@ Breaking / schema notes:
 - Transport parity (F-06, F-12, F-13, F-23): typed `RequestError` mapping at the failure site via `from_reqwest` / `from_status` (timeout/connect/5xx no longer depend on Display substrings); optional `first_byte_s` on `request.v3`; shared `--ca-cert` / `--insecure` (stamped into `config.common`, never secrets); least-inflight temporary ejection after connect failure; SSE blank-line framing with multiline `data:` joined by `\n`.
 - Deferred stretch: `connect_s` (connection-established Instant) remains post-v1 / feature-flagged; TTFT continues to include connect by design.
 - Summary v3 effective config: stamp `config` (`run_id`, common args, effective system prompt, sanitized `body_template`, unique-prompt nonce template) on all four binaries; unique-prompt nonces are `[nonce-{run_id}-{seed}-{seq}]`. Add `usage_missing_count`, nullable `completion_tokens_per_second` with `completion_tokens_source` (`server_usage` / `tokenizer_fallback`), and `p90_unreliable` / `p95_unreliable` on distributions.
-- Modality runners (VLM, ASR, imagegen): roll out the shared `runner.rs` contract already used by LLM — in-task `started_at` / flush via `JsonlSink`, SIGINT+SIGTERM `StopFlag`, closed-loop schedule omission, and `window_seconds` from measured record span. VLM no longer drops warmup records (metrics skip by `phase` only).
+- Modality runners (VLM, ASR, imagegen): roll out the shared `runner.rs` contract already used by LLM: in-task `started_at` / flush via `JsonlSink`, SIGINT+SIGTERM `StopFlag`, closed-loop schedule omission, and `window_seconds` from measured record span. VLM no longer drops warmup records (metrics skip by `phase` only).
 - LLM runner: shared `runner.rs` timestamps send/completion inside the task, writes `request.v3` immediately, handles SIGINT/SIGTERM, and derives `window_seconds` from records (closed-loop ~7.9 req/s at c=4/n=16 on the dummy). Schema bump to `request.v3` / `summary.v3` (field-additive). E2e covers window, flush-during-launch, and SIGTERM JSONL prefix.
 
 ## v0.1.82 (2026-09-15)

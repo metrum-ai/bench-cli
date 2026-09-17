@@ -25,6 +25,13 @@ struct Args {
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
 
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1."
+    )]
+    quiet: bool,
+
     #[arg(long, default_value = DEFAULT_DATASET)]
     dataset: String,
 
@@ -159,14 +166,13 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-prompts");
-    println!("metrum-ai-bench-prompts version {VERSION}");
-
     let args = Args::parse();
     if args.version_only {
         println!("metrum-ai-bench-prompts version {VERSION}");
         return ExitCode::SUCCESS;
     }
+
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-prompts", args.quiet);
 
     if let Err(error) = run(args) {
         eprintln!("error: {error:#}");

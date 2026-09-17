@@ -3,12 +3,12 @@
 
 # Reproducing the checked-in reference
 
-Requirements: Rust 1.85+, Go 1.22+, and an otherwise idle local machine.
+Requirements: Rust 1.85+, Go 1.26.6+, and an otherwise idle local machine.
 
 ```bash
 cargo build --release
-go run ./dummy-model-server/cmd/dummy-model-server \
-  -port 18321 -latency 100ms -chunk-interval 20ms
+(cd dummy-model-server && go run ./cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms) &
 ```
 
 In a second shell:

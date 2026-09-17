@@ -28,6 +28,203 @@ fn metrum_ai_bench_prompts_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-prompts"))
 }
 
+fn metrum_ai_bench_imagegen_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-imagegen"))
+}
+
+fn combined_output(out: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    )
+}
+
+#[test]
+fn metrum_ai_bench_llm_requires_api_key_with_url() {
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .output()
+        .expect("run metrum-ai-bench-llm");
+    assert!(
+        !out.status.success(),
+        "metrum-ai-bench-llm --url without --api-key must fail at parse time"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--api-key"),
+        "parse error must name --api-key:\n{text}"
+    );
+    assert!(
+        text.contains("--url"),
+        "parse error must name --url:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_vlm_requires_api_key_with_url() {
+    let out = Command::new(metrum_ai_bench_vlm_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .output()
+        .expect("run metrum-ai-bench-vlm");
+    assert!(
+        !out.status.success(),
+        "metrum-ai-bench-vlm --url without --api-key must fail at parse time"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--api-key"),
+        "parse error must name --api-key:\n{text}"
+    );
+    assert!(
+        text.contains("--url"),
+        "parse error must name --url:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_asr_requires_api_key_with_url() {
+    let out = Command::new(metrum_ai_bench_asr_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .output()
+        .expect("run metrum-ai-bench-asr");
+    assert!(
+        !out.status.success(),
+        "metrum-ai-bench-asr --url without --api-key must fail at parse time"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--api-key"),
+        "parse error must name --api-key:\n{text}"
+    );
+    assert!(
+        text.contains("--url"),
+        "parse error must name --url:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_imagegen_requires_api_key_with_url() {
+    let out = Command::new(metrum_ai_bench_imagegen_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .output()
+        .expect("run metrum-ai-bench-imagegen");
+    assert!(
+        !out.status.success(),
+        "metrum-ai-bench-imagegen --url without --api-key must fail at parse time"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--api-key"),
+        "parse error must name --api-key:\n{text}"
+    );
+    assert!(
+        text.contains("--url"),
+        "parse error must name --url:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_endpoints_file_does_not_require_url_or_api_key() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let endpoints = dir.path().join("endpoints.yaml");
+    std::fs::write(
+        &endpoints,
+        "endpoints:\n  - url: http://127.0.0.1:9/v1\n    api_key: dummy\n",
+    )
+    .unwrap();
+    let prompts = dir.path().join("prompts.jsonl");
+    std::fs::write(&prompts, "{\"prompt\":\"Hi\"}\n").unwrap();
+    let data_log = dir.path().join("out.jsonl");
+
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--endpoints-file",
+            endpoints.to_str().unwrap(),
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--stop-after-seconds",
+            "1",
+        ])
+        .output()
+        .expect("run metrum-ai-bench-llm with endpoints-file");
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("required arguments were not provided"),
+        "endpoints-file path must parse without --url/--api-key:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_quiet_prints_one_line_identity() {
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--quiet",
+            "--url",
+            "http://127.0.0.1:9/v1",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "missing-prompts.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            "out.jsonl",
+            "--max-tokens",
+            "8",
+        ])
+        .env_remove("NO_BANNER")
+        .output()
+        .expect("run metrum-ai-bench-llm --quiet");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("@@@"),
+        "quiet must suppress ASCII art:\n{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.starts_with("Metrum AI Bench metrum-ai-bench-llm ")),
+        "quiet must print one-line identity:\n{stdout}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_no_banner_env_suppresses_art() {
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .env("NO_BANNER", "1")
+        .output()
+        .expect("run with NO_BANNER");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("@@@"),
+        "NO_BANNER=1 must suppress ASCII art before parse failure:\n{stdout}"
+    );
+}
+
 #[test]
 fn version_only_works_without_skip_env_vars() {
     let mut scrubbed = HashMap::new();

@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Regenerate docs/CLI.md from clap --help for modality and prompts binaries.
+# Regenerate docs/CLI.md from clap --help for shipped public CLI binaries.
 # Requires built debug binaries under target/debug/.
 
 set -euo pipefail
@@ -13,9 +13,28 @@ BIN_DIR="${ROOT}/target/debug"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-for bin in metrum-ai-bench-llm metrum-ai-bench-vlm metrum-ai-bench-asr metrum-ai-bench-imagegen metrum-ai-bench-prompts; do
+BINS=(
+  metrum-ai-bench
+  metrum-ai-bench-llm
+  metrum-ai-bench-vlm
+  metrum-ai-bench-asr
+  metrum-ai-bench-imagegen
+  metrum-ai-bench-prompts
+  metrum-ai-bench-strategic
+  metrum-ai-bench-mock-server
+)
+
+for bin in "${BINS[@]}"; do
   [[ -x "${BIN_DIR}/${bin}" ]] || die "missing ${BIN_DIR}/${bin}; run: cargo build --bins"
 done
+
+render_help() {
+  local bin="$1"
+  # Skip ASCII banner / preamble; clap usage starts at "Usage:"
+  # Unset API key env vars so clap does not embed live secrets into docs/CLI.md.
+  env -u OPENAI_API_KEY -u METRUM_AI_BENCH_API_KEY \
+    "${BIN_DIR}/${bin}" --help 2>/dev/null | sed -n '/^Usage:/,$p'
+}
 
 {
   echo '<!-- Copyright (c) 2026 Metrum AI, Inc. -->'
@@ -23,17 +42,15 @@ done
   echo
   echo '# CLI reference'
   echo
-  echo 'Generated from `metrum-ai-bench-* --help`. Re-run'
+  echo 'Generated from `metrum-ai-bench*` `--help`. Re-run'
   echo '`scripts/render_cli_help.sh` after flag changes. Live `--help` is'
   echo 'authoritative if this file drifts.'
   echo
-  for name in llm vlm asr imagegen prompts; do
-    echo "## \`metrum-ai-bench-${name}\`"
+  for bin in "${BINS[@]}"; do
+    echo "## \`${bin}\`"
     echo
     echo '```text'
-    # Skip the ASCII banner; clap usage starts at "Usage:"
-    "${BIN_DIR}/metrum-ai-bench-${name}" --help 2>/dev/null \
-      | sed -n '/^Usage:/,$p'
+    render_help "${bin}"
     echo '```'
     echo
   done
