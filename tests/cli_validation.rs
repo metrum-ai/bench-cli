@@ -170,6 +170,62 @@ fn metrum_ai_bench_llm_endpoints_file_does_not_require_url_or_api_key() {
 }
 
 #[test]
+fn metrum_ai_bench_llm_quiet_prints_one_line_identity() {
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--quiet",
+            "--url",
+            "http://127.0.0.1:9/v1",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "missing-prompts.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            "out.jsonl",
+            "--max-tokens",
+            "8",
+        ])
+        .env_remove("NO_BANNER")
+        .output()
+        .expect("run metrum-ai-bench-llm --quiet");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("@@@"),
+        "quiet must suppress ASCII art:\n{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.starts_with("Metrum AI Bench metrum-ai-bench-llm ")),
+        "quiet must print one-line identity:\n{stdout}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_no_banner_env_suppresses_art() {
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(["--url", "http://127.0.0.1:9/v1"])
+        .env("NO_BANNER", "1")
+        .output()
+        .expect("run with NO_BANNER");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("@@@"),
+        "NO_BANNER=1 must suppress ASCII art before parse failure:\n{stdout}"
+    );
+}
+
+#[test]
 fn version_only_works_without_skip_env_vars() {
     let mut scrubbed = HashMap::new();
     for (key, value) in std::env::vars() {

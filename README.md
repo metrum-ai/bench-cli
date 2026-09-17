@@ -75,9 +75,11 @@ cargo build --release
 ```
 
 Rust 1.85 or later is required. The dummy server used in Quickstart and the
-examples requires Go; the benchmark binaries do not. Optional Homebrew formula
-is attached to each GitHub Release (`metrum-ai-bench.rb`); a tap publish runs
-when the release workflow is configured with a Homebrew tap repository.
+examples requires Go; the benchmark binaries do not. Pass `--quiet` or set
+`NO_BANNER=1` to suppress ASCII banner art (a one-line identity still prints).
+Optional Homebrew formula is attached to each GitHub Release
+(`metrum-ai-bench.rb`); a tap publish runs when the release workflow is
+configured with a Homebrew tap repository.
 
 ```bash
 cargo test --all-targets

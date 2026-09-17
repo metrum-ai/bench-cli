@@ -143,6 +143,13 @@ pub struct CommonBenchArgs {
         help = "Write environment.hostname as null"
     )]
     pub redact_hostname: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1."
+    )]
+    pub quiet: bool,
 }
 
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
@@ -292,6 +299,7 @@ mod tests {
             sut: None,
             require_sut: false,
             redact_hostname: false,
+            quiet: false,
         };
         assert_eq!(
             args.effective_system_prompt("default"),

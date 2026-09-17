@@ -98,6 +98,8 @@ Options:
           Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -194,6 +196,8 @@ Options:
           Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --max-tokens <MAX_TOKENS>
@@ -351,6 +355,9 @@ Options:
           
           [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
 
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
+
       --debug-log <DEBUG_LOG>
           Path to the debug log file
           
@@ -429,6 +436,8 @@ Usage: metrum-ai-bench-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> 
 Options:
       --version-only
           Print version information and exit
+      --quiet
+          Suppress ASCII banner art if printed (one-line identity). Also set NO_BANNER=1.
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
       --scenario <SCENARIO>
@@ -549,6 +558,8 @@ Usage: metrum-ai-bench-prompts [OPTIONS]
 Options:
       --version-only
           Print version information and exit
+      --quiet
+          Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --dataset <DATASET>
           [default: metrum-ai/prompt-library]
       --revision <REVISION>

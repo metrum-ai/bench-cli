@@ -729,9 +729,6 @@ fn build_request_body(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Print banner
-    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-vlm");
-
     let args = Args::parse();
 
     // Check for version-only flag first
@@ -739,6 +736,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("metrum-ai-bench-vlm version {}", VERSION);
         return Ok(());
     }
+
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-vlm", args.common.quiet);
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
 

@@ -63,6 +63,13 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
+        help = "Suppress ASCII banner art if printed (one-line identity). Also set NO_BANNER=1."
+    )]
+    quiet: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
         help = "Opt-in NTP clock check; records offset when available (does not hard-fail)"
     )]
     ntp_check: bool,
@@ -363,9 +370,10 @@ struct Metrics {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = Args::parse();
     if args.version_only {
-        println!("metrum-ai-bench-imagegen {}", VERSION);
+        println!("metrum-ai-bench-imagegen version {}", VERSION);
         return Ok(());
     }
+    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-imagegen", args.quiet);
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
