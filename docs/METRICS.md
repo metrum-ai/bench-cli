@@ -36,7 +36,9 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
   `effective_max_concurrency` — `--max-concurrency` when set, otherwise the
   closed-loop `--concurrency` value that caps outstanding work.
 - **Token throughput**: successful server-usage tokens divided by that same
-  window. Optional local tokenizer counts are separate fields.
+  window. Optional local tokenizer counts are separate fields and require a
+  build with Cargo feature `tokenizer` (not enabled in GitHub Release
+  archives).
 - **Error rate**: measured failures divided by measured attempts.
 - **Goodput**: measured successes satisfying every configured TTFT, TPOT, and
   E2E SLO divided by the window.
@@ -51,10 +53,10 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **Imagegen latency**: time until the response body bytes are fully read.
   Decode, hash, and artifact writes happen after the timer stops. Throughput
   denominators use the measured-phase window (warmup excluded).
-- **VLM image payload**: the source bytes are sent unchanged, so
-  `modality_metrics.image_bytes` matches the input file. Re-encoding happens
-  only when `--max-image-dimension` forces a resize or `--reencode-jpeg` is
-  requested; either way the payload size reflects what the server received.
+- **VLM image payload**: source bytes are sent unchanged unless
+  `--max-image-dimension` forces a resize or `--reencode-jpeg` is requested.
+  Either way, `modality_metrics.image_bytes` reflects the payload the server
+  received (not necessarily the original on-disk file size after re-encode).
   VLM honors `--system-prompt` (empty disables), `--min-tokens`, and
   `--tokenizer` like the LLM binary.
 

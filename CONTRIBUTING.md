@@ -22,12 +22,12 @@ build, test and submit changes.
 ## Building
 
 Requirements: a stable Rust toolchain (see rust-toolchain.toml) and, for the
-end-to-end tests, Go as pinned in `.github/workflows/ci.yml` (currently 1.26.6)
-to build the dummy model server.
+end-to-end tests and dummy server, Go **1.26.6+** as pinned in
+`.github/workflows/ci.yml` and `dummy-model-server/go.mod`.
 
 ```bash
 cargo build --release
-cargo test
+cargo test --all-targets --all-features
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```

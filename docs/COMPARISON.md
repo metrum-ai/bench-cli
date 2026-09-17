@@ -74,3 +74,11 @@ Planned for a **next release** (no dates):
 - Agent mode
 - Quality metrics beyond ASR WER/CER
 - Cost per accepted task
+
+## 7. Bench vs Bench Platform
+
+| | Metrum AI Bench (this product) | Metrum AI Bench Platform |
+|------|--------------------------------|---------------------------|
+| Role | Measure one environment; emit a result with a manifest | Remember, compare, govern, and attest |
+| License | Apache-2.0 client | Commercial |
+| Docs | This repository and the OSS docs site | Commercial product; not covered in the OSS docs — contact Metrum AI |

@@ -5,7 +5,18 @@
 
 `metrum-ai-bench-strategic` is the runner for concurrency/rate sweeps, chat
 sessions, structured output, embeddings, reranking, server correlation and
-portable exports. Existing modality-specific binaries remain supported.
+portable exports. It is a **separate binary** (not `metrum-ai-bench strategic`).
+Existing modality-specific binaries remain supported.
+
+## Which local server to use
+
+| Fixture | Binary | Typical use |
+|---------|--------|-------------|
+| Go dummy model server | `go run ./dummy-model-server/cmd/dummy-model-server` | LLM/VLM/ASR/imagegen compatibility (examples often use port **18321**) |
+| Rust mock server | `metrum-ai-bench-mock-server` | Deterministic strategic fixtures (health, Prometheus metrics, chat, embeddings, rerank, tools, JSON schema); examples often use **8080** |
+
+The Go dummy is the deeper modality compatibility stub; the Rust mock is the
+strategic/embeddings/rerank fixture.
 
 ## Sweep and server correlation
 
@@ -78,7 +89,8 @@ Jina/Cohere-style `/v1/rerank` endpoints.
 
 ## OpenTelemetry
 
-OTLP export is opt-in at build and runtime:
+OTLP export is opt-in at build and runtime. GitHub Release archives are built
+with `--features otlp`. From source:
 
 ```bash
 cargo build --release --features otlp

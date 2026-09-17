@@ -1,0 +1,112 @@
+---
+title: Release Notes
+description: What's new, what's changed, and release history for Metrum AI Bench.
+sidebar_label: Release Notes
+sidebar_position: 99
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Release Notes
+
+Customer-facing highlights for recent releases. Full engineering detail lives
+in the repository `CHANGELOG.md`.
+
+---
+
+## Metrum AI Bench 1.0.0-rc.6
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench |
+| **Version** | 1.0.0-rc.6 |
+| **Previous version** | 1.0.0-rc.5 |
+| **Release Date** | September 17, 2026 |
+
+Release candidate: prompt-library mix extractor and a `rand` soundness bump.
+
+### Prompt library extractor (New)
+
+- `metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`) selects a
+  reproducible ISL/OSL mix from
+  [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+  by mean or median within absolute tolerances.
+- Preferred `--count` may vary within `--count-slack`; source rows may repeat
+  when needed to land both axes.
+- Writes JSONL for `metrum-ai-bench-llm` plus a selection report with
+  recommended `--num-requests` / `--max-tokens`.
+
+### Dependencies (Changed)
+
+- Direct dependency `rand` 0.9.5 → 0.10.2 (soundness fixes). Transitive
+  `tokenizers` still uses `rand` 0.9.x.
+
+---
+
+## Metrum AI Bench 1.0.0-rc.5
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench |
+| **Version** | 1.0.0-rc.5 |
+| **Previous version** | 1.0.0-rc.4 |
+| **Release Date** | September 16, 2026 |
+
+Release candidate: naming alignment, publication SUT block, and policy drafts.
+
+### Publication and privacy (New)
+
+- `--sut <PATH>` embeds an operator-declared system-under-test block into the
+  summary as `sut` (`provenance: "declared"`).
+- `--require-sut` refuses to run without a valid SUT block; implies
+  `--redact-hostname`.
+- `--redact-hostname` writes `environment.hostname: null`.
+- Example templates under `examples/sut.example.{json,yaml}`.
+
+### Naming (Changed)
+
+- Crate and binaries aligned on `metrum-ai-bench` (mock server renamed
+  likewise). MLPerf export SUT name label updated to “Metrum AI Bench”.
+- Summary schema v3: optional `sut`; nullable `environment.hostname`.
+
+### Docs and policy (New)
+
+- Results publication policy, trademarks, naming, claims ledger, and known
+  limitations documents added in the repository (some drafts pending counsel
+  review).
+
+---
+
+## Metrum AI Bench 1.0.0-rc.4
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench |
+| **Version** | 1.0.0-rc.4 |
+| **Previous version** | 1.0.0-rc.3 |
+| **Release Date** | September 16, 2026 |
+
+Release hygiene after retracting a mistagged non-prerelease `v1.0.0`, plus
+dependency and Actions maintenance. `1.0.0` remains reserved for eventual GA.
+
+---
+
+## Metrum AI Bench 1.0.0-rc.3
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench |
+| **Version** | 1.0.0-rc.3 |
+| **Previous version** | 1.0.0-rc.2 |
+| **Release Date** | September 16, 2026 |
+
+Cross-platform release binaries via cargo-zigbuild for Linux glibc and macOS
+Darwin targets. Compile-free smoke jobs unpack each archive and run
+`metrum-ai-bench --help` / `selftest` before publish.
+
+---
+
+## Earlier 1.0 release candidates
+
+See the repository [CHANGELOG](https://github.com/metrum-ai/bench-cli/blob/main/CHANGELOG.md)
+for 1.0.0-rc.2 and prior entries, including measurement residual fixes and
+OSS-readiness documentation.

@@ -79,6 +79,9 @@ summary distributions. Ctrl-C stops issuance, drains started requests, and
 writes a partial summary. A hard kill may leave valid request lines without a
 summary; consumers must accept that recoverable prefix.
 
+When the unified entry point runs with `--runs N` (`N` > 1), a seeded bootstrap
+aggregate is appended with schema version `metrum-ai-bench.cross-run.v1`.
+
 Unversioned / legacy dual-summary objects are no longer written. Console output
 and JSONL both derive from `RunSummary` / `DistSummary` (Hyndman–Fan type 7).
 Historical `request.v2` / `summary.v2` lines from 0.1.82 remain readable for

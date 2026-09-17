@@ -3,7 +3,9 @@
 
 # CLI reference
 
-Generated from `metrum-ai-bench-* --help`. Re-run
+Generated from `metrum-ai-bench-{llm,vlm,asr,imagegen,prompts} --help` only.
+Does not include the unified `metrum-ai-bench` dispatcher, `selftest`,
+`metrum-ai-bench-strategic`, or `metrum-ai-bench-mock-server`. Re-run
 `scripts/render_cli_help.sh` after flag changes. Live `--help` is
 authoritative if this file drifts.
 

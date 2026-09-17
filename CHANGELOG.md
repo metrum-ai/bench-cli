@@ -19,7 +19,7 @@ Release candidate: `rand` 0.10.2 (soundness) and prompt-library mix extractor.
 - Direct dependency `rand` 0.9.5 → 0.10.2 (soundness fixes in 0.10.1/0.10.2;
   `Rng` → `RngExt` call sites). Transitive `tokenizers` still uses `rand` 0.9.x.
 
-## 1.0.0-rc.5 (2026-09-17)
+## 1.0.0-rc.5 (2026-09-16)
 
 Release candidate: naming alignment, publication SUT block, policy drafts, and CI gates.
 

@@ -1,0 +1,88 @@
+---
+title: Performance Methodology
+description: How Metrum AI Bench defines and measures every metric.
+sidebar_label: Performance Methodology
+sidebar_position: 1
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Performance Methodology
+
+This page defines how Metrum AI Bench measures client-observed performance.
+All intervals use `std::time::Instant`. ISO timestamps are metadata only.
+
+If a value is undefined, it serializes as null or absent — never as a measured
+zero.
+
+---
+
+## Latency
+
+| Metric | Definition |
+| --- | --- |
+| **E2E latency** | Response body completion minus actual send. Successful measure-phase requests only. Field: `latency_s`. |
+| **Coordinated-omission latency** | E2E latency plus delay between scheduled arrival and actual send. Headline open-loop latency. |
+| **TTFT** | First **visible** output delta minus send. Role and reasoning-only deltas do not count. Missing visible output is `no_output_token`. Includes connection setup, TLS, and queueing by design. Non-streaming responses report `ttft_s: null` (never fabricated from E2E). |
+| **First byte** | Response headers received minus send (`first_byte_s`). Separates gateway/header delay from prefill. `connect_s` is not yet recorded (deferred post-v1). |
+| **First reasoning** | First non-empty `reasoning_content` / `reasoning` delta minus send; reported separately from TTFT. |
+| **ITL** | Every successive visible-output chunk timestamp delta, pooled across measured successes. |
+| **TPOT** | `(e2e - ttft) / (completion_tokens - 1)`, defined only for at least two completion tokens. |
+
+---
+
+## Throughput and goodput
+
+| Metric | Definition |
+| --- | --- |
+| **Request throughput** | Measured successes divided by the explicit window: first measured send → last measured successful completion, from monotonic `send_offset_s` plus `latency_s`. Wall-clock `started_at` must not recompute the window (an NTP step would otherwise inflate it). Warmup excluded; drain for requests issued during measurement included. |
+| **Throughput bins** | Fixed-width bins over send offsets (open-loop: `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by its **actual** width so a trailing partial bin is not under-normalized. |
+| **Token throughput** | Successful server-usage tokens divided by the same window. Optional local tokenizer counts are separate fields and require Cargo feature `tokenizer` (not in GitHub Release builds). |
+| **Error rate** | Measured failures divided by measured attempts. |
+| **Goodput** | Measured successes satisfying every configured TTFT, TPOT, and E2E SLO, divided by the window. |
+
+**Effective max concurrency** is stamped on `summary.v3.config` as
+`effective_max_concurrency` — `--max-concurrency` when set, otherwise the
+closed-loop `--concurrency` value that caps outstanding work.
+
+---
+
+## Distributions
+
+Distributions report `n`, min, max, arithmetic mean, sample standard deviation,
+median absolute deviation, and Hyndman–Fan type 7 p50/p90/p95/p99.
+
+P99 is marked unreliable when fewer than **100** samples exist. Small-*n*
+p95/p90 also carry unreliability flags.
+
+Multi-endpoint aggregate distributions are labeled `pooled_mixture`; the same
+full distributions are emitted independently per endpoint.
+
+Cross-run aggregation uses sample dispersion and a seeded 10,000-resample
+percentile-bootstrap 95% confidence interval.
+
+---
+
+## ASR quality and RTFx
+
+| Metric | Definition |
+| --- | --- |
+| **WER / CER** | Edit distance after normalization, divided by the normalized reference word/character count. `--normalizer` selects `whisper-english` (default), `whisper-basic`, or `none`. |
+| **RTFx (client)** | Audio duration divided by client request duration (`modality_metrics.rtfx_client`). Sole RTFx definition. |
+
+---
+
+## Imagegen and VLM payload notes
+
+- **Imagegen latency**: time until response body bytes are fully read. Decode,
+  hash, and artifact writes happen after the timer stops.
+- **VLM image payload**: source bytes are sent unchanged unless resize /
+  re-encode flags apply (`--max-image-dimension`, `--reencode-jpeg`).
+  `modality_metrics.image_bytes` always matches what the server received.
+
+---
+
+## Console vs JSONL
+
+Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
+values written as `summary.v3`. There is no separate nearest-rank console
+estimator.

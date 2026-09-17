@@ -12,6 +12,7 @@
 - Test with output: `cargo test -- --nocapture`
 
 ## Dummy Server Commands
+- Requires Go **1.26.6+** (see `dummy-model-server/go.mod`)
 - Run: `cd dummy-model-server && go run ./cmd/dummy-model-server`
 - Test: `cd dummy-model-server && go test ./...`
 
@@ -27,5 +28,5 @@
 - **Testing**: Write unit tests for all public functions; use integration tests for tools
 
 ## Available Tools
-Core: `metrum-ai-bench` with `llm`, `vlm`, `asr`, and `imagegen` subcommands.
-Strategic: `metrum-ai-bench-strategic` for sweeps, validity checks, and exports.
+Core: `metrum-ai-bench` with `llm`, `vlm`, `asr`, `imagegen`, `prompts`, and `selftest` subcommands.
+Strategic: `metrum-ai-bench-strategic` (separate binary) for sweeps, validity checks, and exports.

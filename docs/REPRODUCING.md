@@ -3,7 +3,8 @@
 
 # Reproducing the checked-in reference
 
-Requirements: Rust 1.85+, Go 1.22+, and an otherwise idle local machine.
+Requirements: Rust 1.85+, Go 1.26.6+ (matches `dummy-model-server/go.mod` and
+CI), and an otherwise idle local machine.
 
 ```bash
 cargo build --release
@@ -26,8 +27,10 @@ target/release/metrum-ai-bench-llm \
 Compare the shared summary to `test-data/reference-result.json`. Scheduling
 and counts must match exactly. On an unloaded machine mean TTFT should be
 0.100–0.200 s, mean end-to-end latency 0.420–0.650 s, and mean ITL
-0.010–0.040 s. Wall-clock timestamps, UUIDs, hostname, and exact timings are
-expected to differ.
+0.010–0.040 s. Those bands surround the dummy timing model for
+`-latency 100ms -chunk-interval 20ms` with `max_tokens=20` (TTFT ≈ 120 ms,
+response time ≈ 500 ms; see `dummy-model-server/README.md`). Wall-clock
+timestamps, UUIDs, hostname, and exact timings are expected to differ.
 
 The command writes request records before the summary, so every aggregate can
 be independently recalculated. Record the server revision, model revision,

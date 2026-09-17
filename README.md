@@ -43,29 +43,34 @@ cargo build --release
 
 Rust 1.85 or later is required. Optional Homebrew formula is attached to each
 GitHub Release (`metrum-ai-bench.rb`); a tap publish runs when the release workflow
-is configured with a Homebrew tap repository.
+is configured with a Homebrew tap repository. Windows has no release archives.
+Release binaries are built with `--features otlp` (strategic OTLP export); the
+`tokenizer` feature is **not** enabled in those archives — build from source with
+`--features tokenizer` if you need `--tokenizer`.
 
 ```bash
-cargo test --all-targets
+cargo test --all-targets --all-features
 ```
 
 ## Tools
 
 | Entry | Measures | When to use |
 |-------|----------|-------------|
-| `llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
-| `vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
-| `asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
-| `imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
-| `prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
-| `selftest` | Local sanity check of the install | After build or release unpack |
-| `strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity |
+| `metrum-ai-bench llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
+| `metrum-ai-bench vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
+| `metrum-ai-bench asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
+| `metrum-ai-bench imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `metrum-ai-bench prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
+| `metrum-ai-bench selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary) |
 
-The preferred entry point is `metrum-ai-bench` with those subcommands. During
-the v1.x compatibility period the four modality binaries can also be invoked
-directly; deprecated `metrumbench-*` shims remain (they print a v2.0 removal
-notice). Shared load flags live in clap common args; modality-specific flags
-are in [docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
+The preferred entry point for modalities and helpers is `metrum-ai-bench` with
+those subcommands. Sweeps and exports use the separate
+`metrum-ai-bench-strategic` binary (not a unified subcommand). During the v1.x
+compatibility period the four modality binaries can also be invoked directly;
+deprecated `metrumbench-*` shims remain (they print a v2.0 removal notice).
+Shared load flags live in clap common args; modality-specific flags are in
+[docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
 
 ### Prompt-library mix → dummy-server e2e
 
@@ -186,6 +191,8 @@ WER/CER use `--normalizer` (`whisper-english` default, `whisper-basic`, or
 
 ## Zero-API-key loop (dummy server)
 
+Requires Go **1.26.6+** (matches `dummy-model-server/go.mod` and CI):
+
 ```bash
 go run ./dummy-model-server/cmd/dummy-model-server \
   -port 18321 -latency 100ms -chunk-interval 20ms
@@ -195,8 +202,9 @@ Then run any modality against `http://127.0.0.1:18321` with `--api-key dummy`.
 See [docs/REPRODUCING.md](docs/REPRODUCING.md) for the checked-in LLM reference
 and `dummy-model-server/README.md` for flags covering VLM/ASR/imagegen.
 
-For deterministic strategic fixtures, the Rust mock server binary is
-`metrum-ai-bench-mock-server` (see [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md)).
+For deterministic strategic fixtures (embeddings, rerank, Prometheus metrics),
+use the Rust mock server binary `metrum-ai-bench-mock-server` instead of the Go
+dummy (see [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md)).
 
 Compact VLM / ASR / imagegen examples (second shell, after the dummy is up):
 
