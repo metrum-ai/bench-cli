@@ -3,9 +3,28 @@
 
 # CLI reference
 
-Generated from `metrum-ai-bench-* --help`. Re-run
+Generated from `metrum-ai-bench*` `--help`. Re-run
 `scripts/render_cli_help.sh` after flag changes. Live `--help` is
 authoritative if this file drifts.
+
+## `metrum-ai-bench`
+
+```text
+Usage: metrum-ai-bench <COMMAND>
+
+Commands:
+  llm       Text chat/completions benchmark
+  vlm       Vision-language chat benchmark
+  asr       Audio transcription benchmark
+  imagegen  Image generation benchmark
+  prompts   Select an ISL/OSL mix from metrum-ai/prompt-library
+  selftest  Print client environment and verify local runtime capabilities
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
 
 ## `metrum-ai-bench-llm`
 
@@ -56,7 +75,7 @@ Options:
       --min-tokens <MIN_TOKENS>
           min_tokens (vLLM / compatible servers)
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
       --unique-prompts
@@ -152,7 +171,7 @@ Options:
       --min-tokens <MIN_TOKENS>
           min_tokens (vLLM / compatible servers)
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
       --unique-prompts
@@ -291,7 +310,7 @@ Options:
           min_tokens (vLLM / compatible servers)
 
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
           Override the default system prompt (empty string disables it)
@@ -477,9 +496,9 @@ Options:
       --true-cfg-scale <TRUE_CFG_SCALE>
           
       --extra-body-json <EXTRA_BODY_JSON>
-          
+          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --extra-body-file <EXTRA_BODY_FILE>
-          
+          Path to a JSON object file merged into the request body (alternative to --extra-body-json). Recorded via the merged body template.
       --request-timeout <REQUEST_TIMEOUT>
           [default: 300]
       --connect-timeout <CONNECT_TIMEOUT>
@@ -588,5 +607,76 @@ Options:
           Write selection report JSON
   -h, --help
           Print help
+```
+
+## `metrum-ai-bench-strategic`
+
+```text
+Usage: metrum-ai-bench-strategic [OPTIONS] --url <URL> --model <MODEL>
+
+Options:
+      --url <URL>
+          
+      --api-key <API_KEY>
+          [env: OPENAI_API_KEY=] [default: ""]
+      --model <MODEL>
+          
+      --kind <KIND>
+          [default: chat] [possible values: chat, embeddings, rerank]
+      --requests-per-stage <REQUESTS_PER_STAGE>
+          [default: 100]
+      --sweep <SWEEP>
+          [default: 1,2,4,8]
+      --sweep-by <SWEEP_BY>
+          [default: concurrency] [possible values: concurrency, rate]
+      --max-in-flight <MAX_IN_FLIGHT>
+          Maximum outstanding requests during a rate sweep [default: 256]
+      --prompt <PROMPT>
+          [default: Hello]
+      --sessions <SESSIONS>
+          
+      --prefix-control <PREFIX_CONTROL>
+          [default: shared] [possible values: shared, unique, none]
+      --shared-prefix <SHARED_PREFIX>
+          
+      --json-schema <JSON_SCHEMA>
+          
+      --tools <TOOLS>
+          
+      --metrics-url <METRICS_URL>
+          
+      --metrics-interval-ms <METRICS_INTERVAL_MS>
+          [default: 250]
+      --html <HTML>
+          [default: metrum-ai-bench-report.html]
+      --csv <CSV>
+          [default: metrum-ai-bench-requests.csv]
+      --mlperf-dir <MLPERF_DIR>
+          
+      --mlperf-scenario <MLPERF_SCENARIO>
+          [default: server] [possible values: server, offline]
+      --otlp-endpoint <OTLP_ENDPOINT>
+          
+      --otlp-service-name <OTLP_SERVICE_NAME>
+          [default: metrum-ai-bench]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 300]
+      --slo <METRIC=SECONDS>
+          Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)
+  -h, --help
+          Print help
+```
+
+## `metrum-ai-bench-mock-server`
+
+```text
+Usage: metrum-ai-bench-mock-server [OPTIONS]
+
+Options:
+      --listen <LISTEN>          [default: 127.0.0.1:8080]
+      --latency-ms <LATENCY_MS>  [default: 0]
+      --fail-every <FAIL_EVERY>  [default: 0]
+  -h, --help                     Print help
+  -V, --version                  Print version
 ```
 

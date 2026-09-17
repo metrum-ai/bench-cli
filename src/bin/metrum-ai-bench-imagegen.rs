@@ -175,10 +175,16 @@ struct Args {
     #[arg(long)]
     true_cfg_scale: Option<f64>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Extra JSON object merged into the request body, e.g. '{\"reasoning_effort\":\"medium\"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md."
+    )]
     extra_body_json: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Path to a JSON object file merged into the request body (alternative to --extra-body-json). Recorded via the merged body template."
+    )]
     extra_body_file: Option<String>,
 
     #[arg(long, default_value = "300")]
