@@ -2,9 +2,9 @@ import type {Config} from '@docusaurus/types';
 import type {Options as PresetOptions} from '@docusaurus/preset-classic';
 
 const docsVersion = process.env.DOCS_VERSION || 'v1.0.0-rc.6';
-const docsBaseUrl = process.env.DOCS_BASE_URL || '/';
+const docsBaseUrl = process.env.DOCS_BASE_URL || '/metrum-ai-bench-cli/';
 const docsVersionsUrl =
-  process.env.DOCS_VERSIONS_URL || '/metrum-ai-bench/versions.json';
+  process.env.DOCS_VERSIONS_URL || '/metrum-ai-bench-cli/versions.json';
 
 const config: Config = {
   title: 'Metrum AI Bench CLI Docs',
@@ -12,6 +12,7 @@ const config: Config = {
     'Load and performance measurement for OpenAI-compatible AI endpoints',
   favicon: 'img/favicon.ico',
 
+  // Published at https://docs.metrum.ai/metrum-ai-bench-cli/
   url: 'https://docs.metrum.ai',
   baseUrl: docsBaseUrl,
   trailingSlash: false,

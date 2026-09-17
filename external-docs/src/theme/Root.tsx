@@ -40,7 +40,7 @@ function installVersionSelector(customFields: Record<string, unknown>) {
   const docsVersion = String(customFields.docsVersion || 'dev');
   const docsBaseUrl = normalizeBase(String(customFields.docsBaseUrl || '/'));
   const versionsUrl = String(
-    customFields.docsVersionsUrl || '/metrum-ai-bench/versions.json'
+    customFields.docsVersionsUrl || '/metrum-ai-bench-cli/versions.json'
   );
 
   fetch(versionsUrl, {cache: 'no-store'})
@@ -69,7 +69,7 @@ function installVersionSelector(customFields: Record<string, unknown>) {
       select.setAttribute('aria-label', 'Documentation version');
       for (const entry of options) {
         const option = document.createElement('option');
-        option.value = entry.path || `/metrum-ai-bench/${entry.version}/`;
+        option.value = entry.path || `/metrum-ai-bench-cli/${entry.version}/`;
         option.textContent = entry.label || entry.version;
         if (entry.version === docsVersion && entry.label !== 'latest') {
           option.selected = true;
