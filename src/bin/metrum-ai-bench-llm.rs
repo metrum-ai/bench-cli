@@ -61,7 +61,8 @@ struct Args {
 
     #[arg(
         long,
-        help = "URL of the AI model endpoint (use --endpoints-file for multiple)"
+        requires = "api_key",
+        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key."
     )]
     url: Option<String>,
 
@@ -131,7 +132,8 @@ struct Args {
 
     #[arg(
         long,
-        help = "API key for authentication (use --endpoints-file for multiple)"
+        requires = "url",
+        help = "API key sent as a Bearer token. Required with --url. Use any placeholder such as \"dummy\" for servers that do not check it. Use --endpoints-file for multiple endpoints."
     )]
     api_key: Option<String>,
 

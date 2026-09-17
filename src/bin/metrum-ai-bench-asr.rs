@@ -40,7 +40,11 @@ struct Args {
     #[arg(long, help = "Descriptor for the scenario being run")]
     scenario: Option<String>,
 
-    #[arg(long, help = "URL of the audio transcription API endpoint")]
+    #[arg(
+        long,
+        requires = "api_key",
+        help = "URL of the audio transcription API endpoint. Required with --api-key."
+    )]
     url: Option<String>,
 
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..), help = "Number of requests to send (must be >= 1 when set)")]
@@ -93,7 +97,11 @@ struct Args {
     #[arg(long, default_value = "60", help = "TCP keepalive in seconds")]
     tcp_keepalive: u64,
 
-    #[arg(long, help = "API key for authentication")]
+    #[arg(
+        long,
+        requires = "url",
+        help = "API key sent as a Bearer token. Required with --url. Use any placeholder such as \"dummy\" for servers that do not check it. Use --endpoints-file for multiple endpoints."
+    )]
     api_key: Option<String>,
 
     #[arg(

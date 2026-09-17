@@ -20,7 +20,7 @@ Options:
       --scenario <SCENARIO>
           Descriptor for the scenario being run
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple)
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML, curl-style). Mutually exclusive with --url/--api-key
       --num-requests <NUM_REQUESTS>
@@ -96,7 +96,7 @@ Options:
       --tcp-keepalive <TCP_KEEPALIVE>
           TCP keepalive in seconds [default: 60]
       --api-key <API_KEY>
-          API key for authentication (use --endpoints-file for multiple)
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --stop-after-seconds <STOP_AFTER_SECONDS>
           Stop sending new requests after N seconds
       --ramp-up-seconds <RAMP_UP_SECONDS>
@@ -120,7 +120,7 @@ Options:
       --scenario <SCENARIO>
           Descriptor for the scenario being run
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple)
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML). Mutually exclusive with --url/--api-key
       --num-requests <NUM_REQUESTS>
@@ -194,7 +194,7 @@ Options:
       --tcp-keepalive <TCP_KEEPALIVE>
           TCP keepalive in seconds [default: 60]
       --api-key <API_KEY>
-          API key for authentication (use --endpoints-file for multiple)
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --stop-after-seconds <STOP_AFTER_SECONDS>
           Stop sending new requests after N seconds
       --ramp-up-seconds <RAMP_UP_SECONDS>
@@ -233,7 +233,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the audio transcription API endpoint
+          URL of the audio transcription API endpoint. Required with --api-key.
 
       --num-requests <NUM_REQUESTS>
           Number of requests to send (must be >= 1 when set)
@@ -363,7 +363,7 @@ Options:
           [default: 60]
 
       --api-key <API_KEY>
-          API key for authentication
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to YAML file with endpoints (url, api_key, name?, weight?); mutually exclusive with --url/--api-key
@@ -415,9 +415,9 @@ Options:
       --scenario <SCENARIO>
           
       --url <URL>
-          OpenAI-compatible base URL, usually ending in /v1
+          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key.
       --api-key <API_KEY>
-          API key for --url
+          API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
       --endpoint <ENDPOINT>
           Repeatable endpoint URL for multi-endpoint mode
       --endpoints-file <ENDPOINTS_FILE>

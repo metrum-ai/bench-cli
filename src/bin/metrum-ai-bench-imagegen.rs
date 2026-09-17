@@ -70,10 +70,18 @@ struct Args {
     #[arg(long)]
     scenario: String,
 
-    #[arg(long, help = "OpenAI-compatible base URL, usually ending in /v1")]
+    #[arg(
+        long,
+        requires = "api_key",
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+    )]
     url: Option<String>,
 
-    #[arg(long, help = "API key for --url")]
+    #[arg(
+        long,
+        requires = "url",
+        help = "API key sent as a Bearer token. Required with --url. Use any placeholder such as \"dummy\" for servers that do not check it. Use --endpoints-file for multiple endpoints."
+    )]
     api_key: Option<String>,
 
     #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
@@ -679,9 +687,6 @@ fn validate_args(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     if !args.endpoint.is_empty() && args.endpoints_file.is_some() {
         return Err(anyhow::anyhow!("cannot combine --endpoint and --endpoints-file").into());
-    }
-    if args.url.is_some() && args.api_key.is_none() {
-        return Err(anyhow::anyhow!("--api-key is required with --url").into());
     }
     if parse_size(&args.size).is_none() {
         return Err(anyhow::anyhow!("--size must be formatted as WxH").into());
