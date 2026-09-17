@@ -1,0 +1,167 @@
+---
+title: User Guide
+description: Concepts, run shapes, and day-to-day workflows for Metrum AI Bench CLI.
+sidebar_label: User Guide
+sidebar_position: 2
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# User Guide
+
+This guide walks through the workflows that make up day-to-day work with
+Metrum AI Bench CLI. Each section is task-oriented and links to the
+[Feature Reference](./feature-reference) for flag-level detail.
+
+If you have not run anything yet, do the [Quickstart](./quickstart) first.
+
+Sections:
+
+- [Building blocks](#building-blocks)
+- [Tools at a glance](#tools-at-a-glance)
+- [Closed-loop vs open-loop](#closed-loop-vs-open-loop)
+- [Common load controls](#common-load-controls)
+- [Reading results](#reading-results)
+- [Multi-run aggregates](#multi-run-aggregates)
+- [Publishing-oriented runs](#publishing-oriented-runs)
+- [When something fails](#when-something-fails)
+
+Modality-specific walkthroughs live in [Modalities](./modalities). Sweeps and
+exports live in [Strategic benchmarking](./strategic-benchmarking).
+
+---
+
+## Building blocks {#building-blocks}
+
+Bench is a **client**. It sends traffic to an OpenAI-compatible endpoint you
+already operate, measures what the client observes, and writes JSONL.
+
+| Concept | Plain-language meaning | Example |
+| --- | --- | --- |
+| **Modality** | Which binary / subcommand drives the load | `llm`, `vlm`, `asr`, `imagegen` |
+| **Scenario** | Operator-chosen label stamped on the run | `prompt-library-median` |
+| **Run** | One execution with one configuration | 100 requests at concurrency 8 |
+| **Phase** | Warmup, measure, or drain | Warmup excluded from measured distributions |
+| **Data log** | JSONL file of request records plus summary | `--data-log results.jsonl` |
+| **SUT** | Operator-declared system-under-test block | `--sut sut.json` |
+| **Goodput** | Successes that also meet configured SLOs | `--slo ttft=250ms --slo e2e=2s` |
+
+Read it as a sentence: choose a **modality**, label a **scenario**, execute a
+**run**, inspect the **data log**, and optionally attach a declared **SUT**
+before publication.
+
+---
+
+## Tools at a glance {#tools-at-a-glance}
+
+| Entry | Measures | When to use |
+| --- | --- | --- |
+| `metrum-ai-bench llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
+| `metrum-ai-bench vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
+| `metrum-ai-bench asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
+| `metrum-ai-bench imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `metrum-ai-bench prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
+| `metrum-ai-bench selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary) |
+
+The preferred entry point for modalities and helpers is `metrum-ai-bench` with
+those subcommands. Sweeps and exports use the separate
+`metrum-ai-bench-strategic` binary (not a unified subcommand).
+
+---
+
+## Closed-loop vs open-loop {#closed-loop-vs-open-loop}
+
+| Mode | How you select it | What it means |
+| --- | --- | --- |
+| **Closed-loop** | Omit `--request-rate` | Outstanding work is capped by `--concurrency` (and optional `--max-concurrency`) |
+| **Open-loop** | Set `--request-rate` (optional `--arrival poisson` or `constant`) | Requests are scheduled by rate; coordinated-omission latency is the headline open-loop field |
+
+Do not compare open-loop and closed-loop numbers as if they were the same
+experiment. See [Performance Methodology](./performance-methodology) and
+[Known limitations](./limitations).
+
+---
+
+## Common load controls {#common-load-controls}
+
+Shared across modality binaries (exact lists: [CLI Reference](./cli-reference)):
+
+| Control | Role |
+| --- | --- |
+| `--url` / `--endpoints-file` | Single endpoint or multi-endpoint pool |
+| `--num-requests` | Measured issuance count (must be â‰¥ 1) |
+| `--concurrency` | Closed-loop parallelism (â‰¥ 1) |
+| `--warmup-requests` | Issued before measure; excluded from measured distributions |
+| `--seed` | Deterministic scheduling / prompt cycling where applicable |
+| `--request-rate` / `--arrival` | Open-loop scheduling |
+| `--max-concurrency` | Cap on outstanding work |
+| `--slo` | Thresholds that define goodput (`ttft=`, `tpot=`, `e2e=`) |
+| `--data-log` | JSONL output path |
+| `--streaming` | Required for meaningful TTFT on LLM/VLM chat |
+
+Secrets never appear in stamped summary config. Do not commit API keys in
+endpoint files.
+
+---
+
+## Reading results {#reading-results}
+
+Each line in `--data-log` is a complete JSON object with `schema_version`.
+
+- **Request records** (`metrum-ai-bench.request.v3`) flush on completion with
+  latency, optional TTFT / first-byte / ITL, errors, and modality metrics.
+- **Summary** (`metrum-ai-bench.summary.v3`) carries counts, rates,
+  distributions, goodput, environment metadata, optional `sut`, and `partial`.
+
+Printed end-of-run statistics come from the same summary values written to
+JSONL. There is no separate console estimator.
+
+Multi-endpoint aggregates are labeled `pooled_mixture`. Use `per_endpoint`
+distributions for diagnosis; do not treat the pool as one homogeneous replica.
+
+Full field detail: [Output schema](./output-schema).
+
+---
+
+## Multi-run aggregates {#multi-run-aggregates}
+
+Pass `--runs N` among the forwarded modality arguments to the unified entry
+point to execute sequential independent runs and append a seeded bootstrap
+cross-run aggregate to `--data-log`. Cross-run aggregation uses sample
+dispersion and a seeded 10,000-resample percentile-bootstrap 95% confidence
+interval.
+
+---
+
+## Publishing-oriented runs {#publishing-oriented-runs}
+
+A published number that **names** Metrum AI Bench must carry an unmodified run
+summary with a SUT block:
+
+```bash
+metrum-ai-bench llm -- \
+  ... \
+  --sut sut.json --require-sut
+```
+
+`--require-sut` refuses to run without a valid SUT block and implies
+`--redact-hostname`. Example files ship as `examples/sut.example.json` and
+`examples/sut.example.yaml`.
+
+Policy summary: [Results publication](./results-publication). The SUT is
+**declared**, not probed — see [Known limitations](./limitations).
+
+---
+
+## When something fails {#when-something-fails}
+
+| Symptom | What to check |
+| --- | --- |
+| Immediate auth / HTTP errors | URL path, API key, TLS (`--insecure` / `--ca-cert` only when you intend them) |
+| `ttft_s` always null | Enable `--streaming`; non-streaming responses leave TTFT undefined |
+| Unexpected mix lengths after prompt library | Set `--num-requests` to the extractor `selected_count` and `--warmup-requests 0` |
+| Tail percentiles look extreme at small *n* | p99 is flagged unreliable below 100 samples |
+| Partial summary | Ctrl-C / interrupt set `partial: true`; do not treat as a complete campaign cell |
+
+For modality-specific input formats and flags, continue to
+[Modalities](./modalities).

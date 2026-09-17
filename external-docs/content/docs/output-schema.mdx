@@ -1,0 +1,114 @@
+---
+title: Output schema
+description: JSONL request and summary shapes for Metrum AI Bench CLI.
+sidebar_label: Output schema
+sidebar_position: 5
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Output schema
+
+Each line in `--data-log` is a complete JSON object and carries
+`schema_version`.
+
+The repository `docs/OUTPUT_SCHEMA.md` is the fuller engineering reference; if
+this page and that file ever disagree, prefer the repository file and live
+`--help` / emitted JSONL.
+
+---
+
+## Request v3
+
+`metrum-ai-bench.request.v3` records are flushed immediately on completion:
+
+- optional `run_id` (same UUID as `summary.config.run_id` when stamped)
+- `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
+- ISO `started_at` / `completed_at`
+- optional monotonic `send_offset_s` (seconds from the run-epoch `Instant` to
+  actual send; preferred for window and closed-loop bins)
+- monotonic `latency_s`, optional `ttft_s`, `first_byte_s`,
+  `first_reasoning_s`, and `itl_s`
+- optional `scheduled_offset_s` and `queue_delay_s`
+- server usage counts plus optional `tokenized_*` counts and `usage_missing`
+- typed `error`, `partial`, modality-specific numeric metrics, and optional
+  string `modality_labels`
+
+`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated
+from E2E latency.
+
+### `modality_metrics`
+
+| Binary | Keys |
+| --- | --- |
+| VLM | `image_count`, `image_bytes` |
+| ASR | `rtfx_client`, `wer`, `cer`, `inference_seconds_{server,client}` |
+| Imagegen | `images_requested`, `images_returned`, `response_bytes`, `artifact_N_bytes` |
+
+Imagegen artifact SHA-256 digests live in `modality_labels.artifact_N_sha256`
+on `request.v3`.
+
+---
+
+## Summary v3
+
+`metrum-ai-bench.summary.v3` is field-additive over v2. It contains measured
+attempted/success/error counts, rates, type-7 distributions,
+coordinated-omission-corrected latency, throughput-bin dispersion, SLO goodput,
+`pooled_mixture`, full `per_endpoint` distributions, environment metadata, and
+`partial`.
+
+Additional v3 fields:
+
+| Field | Notes |
+| --- | --- |
+| `sut` | Optional declared system-under-test block. Always present in JSON; `null` when `--sut` was not provided. Fields labelled `provenance: "declared"`. |
+| `environment.hostname` | May be `null` when redaction is enabled. |
+| `config.run_id` | UUID generated once per run |
+| `config.effective_max_concurrency` | Outstanding-request cap in force |
+| `config.common` | Effective `CommonBenchArgs` JSON object. Real field names include `seed`, `warmup_requests`, `request_rate`, `arrival`, `max_concurrency`, `slos`, `tokenizer`, and related keys — not prose shorthand. Secrets are never stamped. |
+| `config.effective_system_prompt` | System string actually sent (omitted/`null` when N/A) |
+| `config.body_template` | Sanitized request skeleton with a `{{prompt}}` placeholder |
+| `config.unique_prompt_nonce_template` | Present when `--unique-prompts` is on |
+| `usage_missing_count` | Measure-phase successes with `usage_missing` |
+| `completion_tokens_per_second` | `null` when usage is missing without tokenizer fallback |
+| `completion_tokens_source` | `"server_usage"` or `"tokenizer_fallback"` when the rate is present |
+
+Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
+`p99_unreliable` (unreliable when `n * (1 - p/100) < 1`).
+
+Readers must treat `sut` and `hostname` as optional.
+
+---
+
+## Security and provenance
+
+`environment` is client-observed (OS, architecture, optional hostname). The
+`sut` block is **declared by the operator**, not measured by the client —
+`provenance` is always `"declared"`. Do not present declared values as observed
+measurements. For publication runs use `--sut <file> --require-sut` (implies
+`--redact-hostname`). See [Results publication](./results-publication).
+
+---
+
+## Cross-run aggregate
+
+When the unified entry point runs with `--runs N` (`N` &gt; 1), a seeded
+bootstrap aggregate is appended with schema version
+`metrum-ai-bench.cross-run.v1`.
+
+---
+
+## Partial runs
+
+Interrupted runs can write `partial: true`. Consumers must not treat a partial
+summary as a complete campaign cell without checking that flag and sample
+counts. A hard kill may leave valid request lines without a summary; consumers
+must accept that recoverable prefix.
+
+---
+
+## Recalculation
+
+Request records are written before the summary so every aggregate can be
+independently recalculated from the JSONL. Warmup lines remain in the file for
+audit but are excluded from summary distributions.

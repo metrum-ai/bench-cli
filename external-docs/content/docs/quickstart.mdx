@@ -1,0 +1,197 @@
+---
+title: Quickstart
+description: Install Metrum AI Bench CLI and complete your first measured run against the dummy server.
+sidebar_label: Quickstart
+sidebar_position: 1
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Quickstart
+
+This guide takes you from an empty machine to a completed LLM measurement
+against the in-repo dummy model server. Follow each step in order. Once the
+toolchain is installed, the loop usually takes under ten minutes.
+
+## What you'll do
+
+1. Install a release binary or build from source
+2. Start the dummy OpenAI-compatible server
+3. Write a tiny JSONL prompt file
+4. Run `metrum-ai-bench-llm` (or the unified `metrum-ai-bench llm` entry)
+5. Inspect the JSONL data log and end-of-run summary
+
+If you already have a binary and only need a smoke check:
+
+```bash
+metrum-ai-bench selftest
+```
+
+## Before you start
+
+You'll need:
+
+- A Linux (`x86_64` or `aarch64` glibc) or macOS Darwin host for release
+  binaries, **or** Rust **1.85+** to build from source. Windows has no release
+  binaries (see [Platforms](./platforms)).
+- Go **1.26.6+** if you will run the dummy model server from this repository
+  (matches `dummy-model-server/go.mod` and CI).
+- Network access only if you download a GitHub Release or fetch the prompt
+  library later. The dummy-server loop needs no API key beyond the literal
+  value `dummy`.
+
+---
+
+## 1. Install
+
+### Option A: GitHub Release (preferred for binaries)
+
+1. Open [Releases](https://github.com/metrum-ai/bench-cli/releases) and download
+   the archive for your target.
+2. Verify the accompanying `.sha256` checksum (and optional Sigstore bundle when
+   present).
+3. Unpack the archive so `metrum-ai-bench` (and modality binaries) are on your
+   `PATH`.
+
+Release archives are cross-built with cargo-zigbuild for:
+
+| Target | Notes |
+| --- | --- |
+| Linux `*-unknown-linux-gnu` | glibc **2.17** floor; **not** musl |
+| macOS Darwin | `x86_64` / `aarch64` |
+
+TLS uses rustls (no OpenSSL link). An optional Homebrew formula
+(`metrum-ai-bench.rb`) is attached to each release when the publish workflow is
+configured with a tap repository.
+
+### Option B: Build from source
+
+```bash
+git clone https://github.com/metrum-ai/bench-cli.git
+cd bench-cli
+cargo build --release
+```
+
+Binaries land under `target/release/`. Run tests when you want a local gate:
+
+```bash
+cargo test --all-targets --all-features
+```
+
+Release archives include the `otlp` feature but not `tokenizer`. See
+[Platforms](./platforms) for the feature matrix.
+
+---
+
+## 2. Start the dummy server
+
+From the repository root (second terminal is fine):
+
+```bash
+go run ./dummy-model-server/cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms
+```
+
+Leave it running. The server speaks OpenAI-compatible paths used by the
+modality tools. Use `--api-key dummy` on the client.
+
+This is the **Go dummy model server** (modality compatibility). For strategic
+sweeps, embeddings, and rerank fixtures, use the separate Rust
+`metrum-ai-bench-mock-server` instead — see
+[Strategic benchmarking](./strategic-benchmarking).
+
+---
+
+## 3. Create a prompt file
+
+Prompt and input files are **JSONL only** (`.csv` is rejected).
+
+```bash
+printf '%s\n' '{"prompt":"Hi"}' > /tmp/metrum-prompts.jsonl
+```
+
+---
+
+## 4. Run the LLM client
+
+```bash
+metrum-ai-bench-llm \
+  --url http://127.0.0.1:18321/v1/chat/completions \
+  --api-key dummy \
+  --scenario reference \
+  --num-requests 16 \
+  --concurrency 4 \
+  --prompts /tmp/metrum-prompts.jsonl \
+  --mode chat \
+  --streaming \
+  --model dummy \
+  --max-tokens 20 \
+  --seed 7 \
+  --warmup-requests 0 \
+  --data-log /tmp/metrum-reference.jsonl \
+  --log-level error
+```
+
+Or through the unified entry point (forward modality flags after `--`):
+
+```bash
+metrum-ai-bench llm -- \
+  --url http://127.0.0.1:18321/v1/chat/completions \
+  --api-key dummy \
+  --scenario reference \
+  --num-requests 16 \
+  --concurrency 4 \
+  --prompts /tmp/metrum-prompts.jsonl \
+  --mode chat \
+  --streaming \
+  --model dummy \
+  --max-tokens 20 \
+  --seed 7 \
+  --warmup-requests 0 \
+  --data-log /tmp/metrum-reference.jsonl \
+  --log-level error
+```
+
+During the v1.x compatibility period the four modality binaries can also be
+invoked directly. Deprecated legacy shims remain and print a v2.0 removal
+notice.
+
+### What success looks like
+
+- Request records stream into `--data-log` as each request finishes.
+- A `summary.v3` object is appended when the run completes.
+- Console statistics match the same `RunSummary` / `DistSummary` values written
+  to JSONL.
+
+Against this dummy configuration on an unloaded machine, the checked-in
+reproduction guide expects roughly:
+
+| Metric | Expected band |
+| --- | --- |
+| Mean TTFT | 0.100–0.200 s |
+| Mean E2E latency | 0.420–0.650 s |
+| Mean ITL | 0.010–0.040 s |
+
+Those bands surround the dummy server's timing model for
+`-latency 100ms -chunk-interval 20ms` with `--max-tokens 20`: TTFT â‰ˆ **120 ms**
+(latency + first chunk) and response time â‰ˆ **500 ms** (`100 + 20Ã—20`). See
+`dummy-model-server/README.md` in the repository.
+
+Scheduling and counts should match `test-data/reference-result.json` when you
+follow [reproducing the reference](https://github.com/metrum-ai/bench-cli/blob/main/docs/REPRODUCING.md)
+exactly. Wall-clock timestamps, UUIDs, hostname, and exact timings differ by
+design.
+
+---
+
+## 5. Read the result
+
+Every completed request is flushed incrementally to JSONL. Warmup records remain
+auditable but are excluded from measured distributions. A graceful Ctrl-C stops
+issuance, drains already-started work, and emits `partial: true` on the summary.
+
+Next steps:
+
+- [User Guide](./user-guide) for vocabulary and run shapes
+- [Modalities](./modalities) for VLM, ASR, and imagegen
+- [Performance Methodology](./performance-methodology) for metric definitions
+- [Results publication](./results-publication) before you publish a named result

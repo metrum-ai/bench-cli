@@ -1,0 +1,124 @@
+---
+title: Feature Reference
+description: Per-feature configuration lookup for Metrum AI Bench CLI 1.0.0-rc.6.
+sidebar_label: Feature Reference
+sidebar_position: 3
+---
+
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Feature Reference
+
+This page is a configuration reference for features shipping in Metrum AI Bench CLI
+**1.0.0-rc.6**. Each section covers purpose, key parameters, and where to go
+next. Live `--help` remains authoritative for the full flag set.
+
+If you are new to a feature, the [User Guide](./user-guide) covers the workflow
+first — this page is the lookup, not the tutorial.
+
+Features documented here:
+
+- [Unified entry point](#unified-entry-point)
+- [Modality runners](#modality-runners)
+- [Prompt library extractor](#prompt-library-extractor)
+- [Strategic runner](#strategic-runner)
+- [SUT and redaction](#sut-and-redaction)
+- [Selftest](#selftest)
+
+---
+
+## Unified entry point {#unified-entry-point}
+
+`metrum-ai-bench` dispatches to modality and helper tools. Forward tool-specific
+flags after `--`:
+
+```bash
+metrum-ai-bench llm -- --url ... --scenario ... --data-log ...
+metrum-ai-bench prompts -- --revision ... --output mix.jsonl
+metrum-ai-bench selftest
+```
+
+During v1.x, modality binaries (`metrum-ai-bench-llm`, …) remain callable
+directly. Deprecated legacy shims print a v2.0 removal notice.
+
+---
+
+## Modality runners {#modality-runners}
+
+| Tool | Endpoint family | Required clap inputs (typical) |
+| --- | --- | --- |
+| `metrum-ai-bench-llm` | Chat / completions | `--scenario`, `--num-requests`, `--concurrency`, `--prompts`, `--mode`, `--model`, `--data-log`, `--max-tokens` (+ `--url` or `--endpoints-file`) |
+| `metrum-ai-bench-vlm` | Vision chat | Same family as LLM plus image fields in prompts |
+| `metrum-ai-bench-asr` | `/v1/audio/transcriptions` | Runtime-required: `--scenario`, `--num-requests`, `--input`, `--model` (+ `--url` or `--endpoints-file`); `--concurrency` / `--data-log` have defaults; optional `--ground-truth`, `--normalizer` |
+| `metrum-ai-bench-imagegen` | `/v1/images/generations` | `--scenario`, `--model`, `--num-requests`, `--concurrency`, `--data-log` (+ `--url` or endpoints); plus `--prompt` or `--prompts` (and size/model as needed) |
+
+Shared load parameters (non-exhaustive): `--url` / `--endpoints-file`,
+`--warmup-requests`, `--seed`, `--request-rate`, `--arrival`,
+`--max-concurrency`, `--slo`, `--streaming`, `--system-prompt`,
+`--insecure`, `--ca-cert`.
+
+`--tokenizer` requires a build with Cargo feature `tokenizer`. GitHub Release
+binaries are built with `--features otlp` only (not `tokenizer`). Local
+tokenizer counts need a source build:
+
+```bash
+cargo build --release --features tokenizer
+```
+
+Walkthroughs: [Modalities](./modalities). Flag lists: [CLI Reference](./cli-reference).
+
+---
+
+## Prompt library extractor {#prompt-library-extractor}
+
+| Parameter | Notes |
+| --- | --- |
+| `--revision` | Pin a 40-character commit SHA (preferred) |
+| `--config` | `sample` or `full` |
+| `--count` / `--count-slack` | Preferred size and allowed deviation |
+| `--isl-*` / `--osl-*` | Target, unit (`tokens` / `words`), stat (`mean` / `median`), tolerance |
+| `--output` / `--report` | JSONL mix and selection report |
+
+Success = statistics within tolerance, not exact `--count`. Details:
+[Prompt library](./prompt-library).
+
+---
+
+## Strategic runner {#strategic-runner}
+
+| Capability | Key flags |
+| --- | --- |
+| Concurrency sweep | `--sweep`, `--sweep-by concurrency`, `--requests-per-stage` |
+| Rate sweep | `--sweep-by rate`, `--max-in-flight` |
+| Server metrics | `--metrics-url` |
+| Exports | `--html`, `--csv`, `--mlperf-dir`, `--mlperf-scenario` |
+| Sessions / validity | session JSONL, `--json-schema`, `--tools`, `--shared-prefix` |
+| Embeddings / rerank | `--kind embeddings` / `--kind rerank` |
+| OTLP (optional) | `--otlp-endpoint` (release binaries include `otlp`; see strategic docs) |
+
+`metrum-ai-bench-strategic` is a **separate binary**, not
+`metrum-ai-bench strategic`. Details: [Strategic benchmarking](./strategic-benchmarking).
+
+---
+
+## SUT and redaction {#sut-and-redaction}
+
+| Flag / env | Behavior |
+| --- | --- |
+| `--sut <PATH>` | Embed declared SUT JSON/YAML into summary (`provenance: "declared"`) |
+| `--require-sut` / `METRUM_AI_BENCH_REQUIRE_SUT=1` | Refuse to run without SUT; implies hostname redaction |
+| `--redact-hostname` / `METRUM_AI_BENCH_REDACT_HOSTNAME=1` | Write `environment.hostname: null` |
+
+Policy: [Results publication](./results-publication).
+
+---
+
+## Selftest {#selftest}
+
+```bash
+metrum-ai-bench selftest
+```
+
+Local sanity check after install or unpack. Use before debugging endpoint
+connectivity issues so you know the binary itself is healthy.
