@@ -34,7 +34,7 @@ the dummy server; the benchmark binaries themselves do not.
 cargo build --release
 
 # 2. Start a local OpenAI-compatible server that needs no credentials (needs Go 1.26.6+)
-go run ./dummy-model-server/cmd/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms &
+(cd dummy-model-server && go run ./cmd/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms) &
 
 # 3. Describe what you are testing. Copy and edit examples/sut.example.json.
 cp examples/sut.example.json sut.json
@@ -207,8 +207,8 @@ run notes.
 
 ```bash
 cargo build --release --bin metrum-ai-bench-prompts --bin metrum-ai-bench-llm
-go run ./dummy-model-server/cmd/dummy-model-server \
-  -port 18321 -latency 100ms -chunk-interval 20ms
+(cd dummy-model-server && go run ./cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms) &
 
 # Median targets (sample config; pin a commit SHA)
 target/release/metrum-ai-bench-prompts \
@@ -263,8 +263,8 @@ server-metrics correlation, and CSV, HTML (`--html`), MLPerf-shaped
 ## Dummy server
 
 ```bash
-go run ./dummy-model-server/cmd/dummy-model-server \
-  -port 18321 -latency 100ms -chunk-interval 20ms
+(cd dummy-model-server && go run ./cmd/dummy-model-server \
+  -port 18321 -latency 100ms -chunk-interval 20ms) &
 ```
 
 Then run any modality against `http://127.0.0.1:18321` with `--api-key dummy`.

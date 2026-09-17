@@ -24,7 +24,8 @@
   sessions get `Metrum AI Bench <tool> <version>`.
 - README reordered for agent scanning: Quickstart, Tools entry points,
   Reasoning models, Publishing (with SUT example), Prompt library, Dummy
-  server.
+  server. Dummy-server `go run` commands use `(cd dummy-model-server && …)`
+  because the Go module lives in that subdirectory.
 - `docs/METRICS.md`: TTFT vs first reasoning under its own heading.
 - `docs/LIMITATIONS.md`: NVIDIA smoke matrix wording is coverage-only; SUT
   flags described as shipped.
