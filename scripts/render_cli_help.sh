@@ -31,7 +31,9 @@ done
 render_help() {
   local bin="$1"
   # Skip ASCII banner / preamble; clap usage starts at "Usage:"
-  "${BIN_DIR}/${bin}" --help 2>/dev/null | sed -n '/^Usage:/,$p'
+  # Unset API key env vars so clap does not embed live secrets into docs/CLI.md.
+  env -u OPENAI_API_KEY -u METRUM_AI_BENCH_API_KEY \
+    "${BIN_DIR}/${bin}" --help 2>/dev/null | sed -n '/^Usage:/,$p'
 }
 
 {
