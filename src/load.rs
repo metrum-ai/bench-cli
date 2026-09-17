@@ -6,7 +6,7 @@
 //! Wall clocks are not used here. Tests drive time with [`FakeClock`].
 
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -12,7 +12,7 @@ use clap::ValueEnum;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::RowAccessor;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
