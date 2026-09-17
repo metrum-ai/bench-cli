@@ -31,7 +31,7 @@ description = "Internal hostname matching the org suffix pattern"
 regex = '''(?i)\b[a-z0-9][a-z0-9.-]*\.metrum\.ai\b'''
 keywords = ["metrum.ai"]
 
-[allowlist]
+[[allowlists]]
 description = "Fixture dir + pre-#44 history that still contains the removed leak class (tree is clean; Phase 3/GitHub purge for tags)"
 paths = [
   '''scripts/tests/gitleaks/''',
