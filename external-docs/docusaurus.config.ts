@@ -7,7 +7,7 @@ const docsVersionsUrl =
   process.env.DOCS_VERSIONS_URL || '/metrum-ai-bench/versions.json';
 
 const config: Config = {
-  title: 'Metrum AI Bench Docs',
+  title: 'Metrum AI Bench CLI Docs',
   tagline:
     'Load and performance measurement for OpenAI-compatible AI endpoints',
   favicon: 'img/favicon.ico',
@@ -68,7 +68,7 @@ const config: Config = {
     navbar: {
       // No `title`: the logo artwork includes the product name.
       logo: {
-        alt: 'Metrum AI Bench',
+        alt: 'Metrum AI Bench CLI',
         src: 'img/metrum_ai_bench_black.svg',
         srcDark: 'img/metrum_ai_bench_white.svg',
       },

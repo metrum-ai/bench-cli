@@ -1,6 +1,6 @@
 ---
 title: User Guide
-description: Concepts, run shapes, and day-to-day workflows for Metrum AI Bench.
+description: Concepts, run shapes, and day-to-day workflows for Metrum AI Bench CLI.
 sidebar_label: User Guide
 sidebar_position: 2
 ---
@@ -9,7 +9,7 @@ sidebar_position: 2
 # User Guide
 
 This guide walks through the workflows that make up day-to-day work with
-Metrum AI Bench. Each section is task-oriented and links to the
+Metrum AI Bench CLI. Each section is task-oriented and links to the
 [Feature Reference](./feature-reference) for flag-level detail.
 
 If you have not run anything yet, do the [Quickstart](./quickstart) first.
@@ -89,8 +89,8 @@ Shared across modality binaries (exact lists: [CLI Reference](./cli-reference)):
 | Control | Role |
 | --- | --- |
 | `--url` / `--endpoints-file` | Single endpoint or multi-endpoint pool |
-| `--num-requests` | Measured issuance count (must be ≥ 1) |
-| `--concurrency` | Closed-loop parallelism (≥ 1) |
+| `--num-requests` | Measured issuance count (must be â‰¥ 1) |
+| `--concurrency` | Closed-loop parallelism (â‰¥ 1) |
 | `--warmup-requests` | Issued before measure; excluded from measured distributions |
 | `--seed` | Deterministic scheduling / prompt cycling where applicable |
 | `--request-rate` / `--arrival` | Open-loop scheduling |

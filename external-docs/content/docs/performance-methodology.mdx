@@ -1,6 +1,6 @@
 ---
 title: Performance Methodology
-description: How Metrum AI Bench defines and measures every metric.
+description: How Metrum AI Bench CLI defines and measures every metric.
 sidebar_label: Performance Methodology
 sidebar_position: 1
 ---
@@ -8,7 +8,7 @@ sidebar_position: 1
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Performance Methodology
 
-This page defines how Metrum AI Bench measures client-observed performance.
+This page defines how Metrum AI Bench CLI measures client-observed performance.
 All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 
 If a value is undefined, it serializes as null or absent — never as a measured
@@ -34,7 +34,7 @@ zero.
 
 | Metric | Definition |
 | --- | --- |
-| **Request throughput** | Measured successes divided by the explicit window: first measured send → last measured successful completion, from monotonic `send_offset_s` plus `latency_s`. Wall-clock `started_at` must not recompute the window (an NTP step would otherwise inflate it). Warmup excluded; drain for requests issued during measurement included. |
+| **Request throughput** | Measured successes divided by the explicit window: first measured send â†’ last measured successful completion, from monotonic `send_offset_s` plus `latency_s`. Wall-clock `started_at` must not recompute the window (an NTP step would otherwise inflate it). Warmup excluded; drain for requests issued during measurement included. |
 | **Throughput bins** | Fixed-width bins over send offsets (open-loop: `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by its **actual** width so a trailing partial bin is not under-normalized. |
 | **Token throughput** | Successful server-usage tokens divided by the same window. Optional local tokenizer counts are separate fields and require Cargo feature `tokenizer` (not in GitHub Release builds). |
 | **Error rate** | Measured failures divided by measured attempts. |

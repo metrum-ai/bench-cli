@@ -1,6 +1,6 @@
-# Metrum AI Bench external docs
+# Metrum AI Bench CLI external docs
 
-Customer-facing documentation for Metrum AI Bench. Docusaurus v3 site with
+Customer-facing documentation for Metrum AI Bench CLI. Docusaurus v3 site with
 `content/` as the docs root.
 
 ## Local preview

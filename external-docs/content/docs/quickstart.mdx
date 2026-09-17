@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Install Metrum AI Bench and complete your first measured run against the dummy server.
+description: Install Metrum AI Bench CLI and complete your first measured run against the dummy server.
 sidebar_label: Quickstart
 sidebar_position: 1
 ---
@@ -152,8 +152,8 @@ metrum-ai-bench llm -- \
 ```
 
 During the v1.x compatibility period the four modality binaries can also be
-invoked directly. Deprecated `metrumbench-*` shims remain and print a v2.0
-removal notice.
+invoked directly. Deprecated legacy shims remain and print a v2.0 removal
+notice.
 
 ### What success looks like
 
@@ -172,8 +172,8 @@ reproduction guide expects roughly:
 | Mean ITL | 0.010–0.040 s |
 
 Those bands surround the dummy server's timing model for
-`-latency 100ms -chunk-interval 20ms` with `--max-tokens 20`: TTFT ≈ **120 ms**
-(latency + first chunk) and response time ≈ **500 ms** (`100 + 20×20`). See
+`-latency 100ms -chunk-interval 20ms` with `--max-tokens 20`: TTFT â‰ˆ **120 ms**
+(latency + first chunk) and response time â‰ˆ **500 ms** (`100 + 20Ã—20`). See
 `dummy-model-server/README.md` in the repository.
 
 Scheduling and counts should match `test-data/reference-result.json` when you

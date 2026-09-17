@@ -1,6 +1,6 @@
 ---
 title: CLI Reference
-description: Entry points and flag overview for Metrum AI Bench.
+description: Entry points and flag overview for Metrum AI Bench CLI.
 sidebar_label: CLI Reference
 sidebar_position: 4
 ---
@@ -69,8 +69,8 @@ API-key pair patterns described in `--help`).
 | `--url` | Single endpoint URL |
 | `--endpoints-file` | Multi-endpoint YAML (curl-style); mutually exclusive with `--url` / `--api-key` |
 | `--api-key` | Bearer / API key for the single-URL path |
-| `--num-requests` | Requests to send (≥ 1) |
-| `--concurrency` | Concurrent requests (≥ 1) |
+| `--num-requests` | Requests to send (â‰¥ 1) |
+| `--concurrency` | Concurrent requests (â‰¥ 1) |
 | `--warmup-requests` | Warmup count (excluded from measured distributions) |
 | `--seed` | Determinism for scheduling / cycling |
 | `--request-rate` | Open-loop rate |
