@@ -1,0 +1,178 @@
+---
+title: Modalities
+description: LLM, VLM, ASR, and imagegen workflows for Metrum AI Bench.
+sidebar_label: Modalities
+sidebar_position: 3
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Modalities
+
+Each modality is a dedicated load client aimed at an OpenAI-compatible path.
+Inputs are JSONL. The sections below show the shapes and a compact working
+example against the dummy server from the [Quickstart](./quickstart).
+
+Authoritative flag lists: [CLI Reference](./cli-reference) and live `--help`.
+
+---
+
+## LLM
+
+Measures chat or completion latency, TTFT (streaming), ITL/TPOT, and token
+throughput against `/v1/chat/completions` or completions.
+
+**Prompt JSONL**
+
+```json
+{"prompt":"Write a haiku about latency."}
+{"prompt":"Summarize coordinated omission in one sentence."}
+```
+
+```bash
+metrum-ai-bench-llm \
+  --url http://127.0.0.1:18321/v1/chat/completions \
+  --api-key dummy \
+  --scenario example \
+  --num-requests 100 \
+  --concurrency 8 \
+  --prompts prompts.jsonl \
+  --mode chat \
+  --streaming \
+  --model example \
+  --max-tokens 64 \
+  --data-log results.jsonl \
+  --seed 7 \
+  --warmup-requests 8 \
+  --request-rate 20 \
+  --arrival poisson \
+  --max-concurrency 64 \
+  --slo ttft=250ms \
+  --slo e2e=2s
+```
+
+`--mode` is `chat` or `completion`. LLM uses one global `--max-tokens`
+(per-request caps are out of scope).
+
+For corpus mixes selected by ISL/OSL statistics, see
+[Prompt library](./prompt-library).
+
+---
+
+## VLM
+
+Same measurement surface as LLM, plus image payload accounting, for vision
+chat endpoints that accept `image_url` / `image_urls`.
+
+**Prompt JSONL**
+
+```json
+{"prompt":"Describe the image.","image_urls":["https://example.com/a.png"]}
+{"prompt":"Count the objects.","image_url":"test-data/tiny.png"}
+```
+
+Source image bytes are sent unchanged unless `--max-image-dimension` forces a
+resize or `--reencode-jpeg` is requested; `modality_metrics.image_bytes`
+reflects what the server received. VLM honors `--system-prompt` (empty
+disables), `--min-tokens`, and `--tokenizer` like the LLM binary.
+`--tokenizer` requires a Cargo build with feature `tokenizer` (not enabled in
+GitHub Release archives — see [Platforms](./platforms)).
+
+```bash
+printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
+metrum-ai-bench-vlm \
+  --url http://127.0.0.1:18321/v1/chat/completions \
+  --api-key dummy \
+  --scenario vlm \
+  --num-requests 4 \
+  --concurrency 2 \
+  --prompts /tmp/vlm.jsonl \
+  --model dummy \
+  --max-tokens 16 \
+  --data-log /tmp/vlm.jsonl.out \
+  --streaming
+```
+
+---
+
+## ASR
+
+Benchmarks `/v1/audio/transcriptions`. Input is JSONL with audio location and
+duration metadata.
+
+**Input JSONL**
+
+```json
+{"id":"sample-1","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}
+{"id":"sample-2","url":"https://example.com/clip.wav","format":"wav","duration":1.5}
+```
+
+Optional ground truth is JSONL with matching `id` and `transcript`. WER/CER use
+`--normalizer`:
+
+| Value | Behavior |
+| --- | --- |
+| `whisper-english` (default) | Case, punctuation, and bracketed fillers folded; contractions expanded; small numerals digitized |
+| `whisper-basic` | Case, punctuation, and bracketed fillers only |
+| `none` | Raw string comparison |
+
+The choice is recorded in `config.normalizer`. Scores from different normalizers
+are not comparable.
+
+**Client RTFx** is `audio_seconds / client_request_seconds`
+(`modality_metrics.rtfx_client`). This is the sole RTFx definition; legacy
+whole-run aggregates are not emitted.
+
+```bash
+printf '%s\n' '{"id":"a","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}' > /tmp/asr.jsonl
+metrum-ai-bench-asr \
+  --url http://127.0.0.1:18321/v1/audio/transcriptions \
+  --api-key dummy \
+  --scenario asr \
+  --num-requests 4 \
+  --concurrency 2 \
+  --input /tmp/asr.jsonl \
+  --model dummy \
+  --data-log /tmp/asr.jsonl.out
+```
+
+---
+
+## Image generation
+
+Benchmarks `/v1/images/generations`. Clap-required flags include `--scenario`,
+`--model`, `--num-requests`, `--concurrency`, and `--data-log` (plus `--url` or
+an endpoints path). Pass `--prompt` once, or `--prompts` JSONL:
+
+```json
+{"id":"p0","prompt":"a red cube on a table"}
+{"prompt":"a blue sphere","negative_prompt":"blurry","size":"512x512"}
+```
+
+Latency is time until response body bytes are fully read. Decode, hash, and
+artifact writes happen after the timer stops. Artifact SHA-256 digests appear in
+`modality_labels.artifact_N_sha256` on request records.
+
+```bash
+metrum-ai-bench-imagegen \
+  --url http://127.0.0.1:18321/v1 \
+  --api-key dummy \
+  --scenario img \
+  --num-requests 2 \
+  --concurrency 1 \
+  --prompt "a square" \
+  --model dummy \
+  --size 64x64 \
+  --data-log /tmp/img.jsonl
+```
+
+---
+
+## Dummy server coverage
+
+The Go dummy model server in this repository can exercise LLM, VLM, ASR, and
+imagegen without a real model. See the repository `dummy-model-server/README.md`
+for modality-specific flags beyond the Quickstart defaults.
+
+For strategic sweeps, embeddings, and rerank, use the Rust
+`metrum-ai-bench-mock-server` instead — see
+[Strategic benchmarking](./strategic-benchmarking).

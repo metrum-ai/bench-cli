@@ -1,0 +1,71 @@
+---
+title: Platforms
+description: Supported client platforms, install paths, and smoke coverage notes.
+sidebar_label: Platforms
+sidebar_position: 7
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Platforms
+
+Metrum AI Bench is a **client**. It runs on your measurement host and talks to
+whatever OpenAI-compatible endpoint you point it at. Server hardware support is
+therefore “whatever your serving stack exposes,” not a Bench-managed
+accelerator matrix.
+
+---
+
+## Client install targets
+
+| Path | Platforms |
+| --- | --- |
+| GitHub Release binaries | Linux `x86_64` / `aarch64` `*-unknown-linux-gnu` (glibc **2.17** floor); macOS Darwin `x86_64` / `aarch64` |
+| From source | Rust **1.85+** on a host that can build the crate |
+| Homebrew | Optional formula `metrum-ai-bench.rb` attached to releases when tap publish is configured |
+
+Not shipped as release targets:
+
+- musl / Alpine-style static Linux archives
+- OpenSSL-linked builds (TLS is rustls)
+- **Windows** — no release archives. Building from source on Windows may work
+  for development but is not a supported or smoke-tested install path for 1.0.
+
+Verify release archives with the published `.sha256` and optional Sigstore
+bundle before unpacking.
+
+### Optional Cargo features
+
+| Feature | In GitHub Release binaries? | Purpose |
+| --- | --- | --- |
+| `otlp` | Yes (`--features otlp`) | Strategic OpenTelemetry export (`--otlp-endpoint`) |
+| `tokenizer` | No | Local `--tokenizer` counts; build from source with `--features tokenizer` |
+
+---
+
+## Build and test prerequisites
+
+| Tool | When needed |
+| --- | --- |
+| Rust 1.85+ | Source builds and `cargo test` |
+| Go **1.26.6+** (matches `dummy-model-server/go.mod` and CI) | Dummy model server and its tests |
+| Network / Hugging Face Hub | Prompt-library extracts (unless using `--local-jsonl` / `--local-parquet` / `--offline`) |
+
+---
+
+## Smoke and publication matrix
+
+Published smoke results in the repository (`docs/SMOKE_RESULTS.md`) are
+**NVIDIA-only**. AMD Instinct coverage is in progress. No comparative vendor
+results are published there.
+
+Fleet-wide comparison, history, and attestation are Platform concerns, not this
+OSS client. One Bench process drives one endpoint or one configured pool.
+
+---
+
+## Security notes for shared hosts
+
+- Do not put credentials in endpoint files committed to source control.
+- Run summaries may record client `environment.hostname`. Use
+  `--redact-hostname` (or `--require-sut`, which implies redaction) when
+  publishing or sharing logs.

@@ -1,0 +1,149 @@
+---
+title: Strategic benchmarking
+description: Concurrency and rate sweeps, sessions, validity checks, and exports.
+sidebar_label: Strategic benchmarking
+sidebar_position: 4
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Strategic benchmarking
+
+`metrum-ai-bench-strategic` is the runner for concurrency/rate sweeps, chat
+sessions, structured output, embeddings, reranking, optional server-metrics
+correlation, and portable exports. It is a **separate binary** (not
+`metrum-ai-bench strategic`). Existing modality-specific binaries remain
+supported for single-cell runs.
+
+### Which local server to use
+
+| Fixture | Binary | Typical use |
+| --- | --- | --- |
+| Go dummy model server | `go run ./dummy-model-server/cmd/dummy-model-server` | LLM/VLM/ASR/imagegen compatibility (Quickstart uses port **18321**) |
+| Rust mock server | `metrum-ai-bench-mock-server` | Deterministic strategic fixtures (health, Prometheus metrics, chat, embeddings, rerank, tools, JSON schema); examples often use **8080** |
+
+Do not mix them casually: the Go dummy is the deeper modality compatibility
+stub; the Rust mock is the strategic/embeddings/rerank fixture.
+
+### Obtaining the mock server
+
+`metrum-ai-bench-mock-server` ships in GitHub Release archives alongside the
+other binaries. From a checkout:
+
+```bash
+cargo build --release --bin metrum-ai-bench-mock-server
+# or, when the crate is published:
+cargo install metrum-ai-bench --bin metrum-ai-bench-mock-server
+```
+
+Useful flags: `--listen` (default `127.0.0.1:8080`), `--latency-ms`,
+`--fail-every N` (inject reproducible HTTP 503 responses).
+
+---
+
+## Sweep and server correlation
+
+```bash
+metrum-ai-bench-mock-server --listen 127.0.0.1:8080 &
+metrum-ai-bench-strategic \
+  --url http://127.0.0.1:8080/v1/chat/completions \
+  --model mock \
+  --sweep 1,2,4,8,16 \
+  --sweep-by concurrency \
+  --requests-per-stage 100 \
+  --metrics-url http://127.0.0.1:8080/metrics \
+  --html report.html \
+  --csv requests.csv \
+  --mlperf-dir mlperf \
+  --mlperf-scenario server
+```
+
+Each load stage is measured independently. The HTML report plots achieved
+throughput against p95 latency and marks the unit-normalized Kneedle result.
+The metrics scraper recognizes vLLM, SGLang, and TensorRT-LLM names for
+KV-cache utilization, preemptions, and running/waiting queues.
+
+Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages. Rate
+requests retain their intended schedule while waiting for an in-flight slot.
+
+CSV fields include scheduled and sent timestamps, queue delay,
+send-to-completion service latency, and scheduled-to-completion latency. Sweep
+percentiles use Hyndman–Fan type 7 over the last value so overload cannot hide
+behind coordinated omission. Each sweep point carries `n`, `errors`, a full
+`latency_s` DistSummary (including reliability flags), redacted stage `config`,
+and `goodput`.
+
+### Goodput on strategic
+
+Use repeatable `--slo e2e=…` so goodput counts only schema-valid successes that
+also meet the end-to-end latency threshold. Without `--slo`,
+`goodput_equals_throughput` is true and goodput is validity-filtered throughput
+(often identical to throughput when no validity checker is configured).
+
+`ttft=` / `tpot=` are accepted for CLI parity but ignored here because strategic
+records do not carry those timings.
+
+The HTTP client is shared across stages (warm connection pool).
+
+---
+
+## Exports
+
+| Flag | Output |
+| --- | --- |
+| `--csv` | One row per request |
+| `--html` | Self-contained report (inline SVG and CSS) |
+| `--mlperf-dir` | LoadGen-shaped text for parser-oriented interoperability |
+
+MLPerf-shaped exports contain `mlperf_log_summary.txt`, `mlperf_log_detail.txt`,
+and `mlperf_log_accuracy.json` for Server or Offline scenarios. Every export
+file begins with an **UNOFFICIAL** disclaimer; the summary never prints a bare
+`Result is : VALID` without that disclaimer. This export is parser-oriented
+interoperability and is **not** an audited or submitted MLPerf result; official
+submissions must execute the MLPerf LoadGen and compliance suite.
+
+Optional OpenTelemetry export is available on the strategic runner. GitHub
+Release archives are built with Cargo feature `otlp` enabled. From source,
+build with `--features otlp` (or use a release binary). No network telemetry
+occurs unless `--otlp-endpoint` is supplied:
+
+```bash
+cargo build --release --features otlp
+OTEL_EXPORTER_OTLP_HEADERS='authorization=Bearer token' \
+metrum-ai-bench-strategic ... --otlp-endpoint https://collector.example.com
+```
+
+The exporter emits OTLP/HTTP JSON spans to `/v1/traces` and summary request
+counters plus p95 latency to `/v1/metrics`. See live `--help` for the current
+OTLP flags.
+
+---
+
+## Multi-turn and structured output
+
+Session input is JSONL:
+
+```json
+{"session_id":"support-1","messages":[{"role":"user","content":"My order is late"},{"role":"assistant","content":"What is the order ID?"},{"role":"user","content":"A-42"}]}
+```
+
+Every successive turn is submitted with its preceding history.
+`--shared-prefix TEXT --prefix-control shared` preserves a cacheable prefix;
+`unique` adds a stable per-session discriminator; `none` omits it.
+
+`--json-schema schema.json` requests strict JSON-schema output and counts
+syntactically valid objects containing every required property.
+`--tools tools.json` requests a tool call and checks the selected function name
+and JSON arguments. Valid responses determine `validity_rate` and feed goodput
+(together with optional `--slo`).
+
+These paths are request **validity** helpers, not an agent evaluation harness.
+See [Known limitations](./limitations).
+
+---
+
+## Embeddings and reranking
+
+| Kind | Flag pattern | Endpoint style |
+| --- | --- | --- |
+| Embeddings | `--kind embeddings --prompt TEXT` | `/v1/embeddings` |
+| Rerank | `--kind rerank --prompt 'query\|document one\|document two'` | Jina/Cohere-style `/v1/rerank` |

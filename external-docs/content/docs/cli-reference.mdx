@@ -1,0 +1,139 @@
+---
+title: CLI Reference
+description: Entry points and flag overview for Metrum AI Bench.
+sidebar_label: CLI Reference
+sidebar_position: 4
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# CLI Reference
+
+Live `--help` on each binary is authoritative. The repository regenerates a
+modality/prompts dump with `scripts/render_cli_help.sh` into `docs/CLI.md`
+(llm/vlm/asr/imagegen/prompts only). If this page and `--help` ever disagree,
+trust `--help`. Strategic, mock-server, unified dispatcher, and selftest are
+**not** covered by that dump.
+
+---
+
+## Entry points
+
+| Binary / subcommand | Role |
+| --- | --- |
+| `metrum-ai-bench` | Unified dispatcher (`llm`, `vlm`, `asr`, `imagegen`, `prompts`, `selftest`) |
+| `metrum-ai-bench-llm` | LLM modality client |
+| `metrum-ai-bench-vlm` | VLM modality client |
+| `metrum-ai-bench-asr` | ASR modality client |
+| `metrum-ai-bench-imagegen` | Image generation client |
+| `metrum-ai-bench-prompts` | Prompt-library mix extractor |
+| `metrum-ai-bench-strategic` | Sweeps, sessions, exports (**separate binary**, not a unified subcommand) |
+| `metrum-ai-bench-mock-server` | Deterministic local mock for strategic fixtures |
+
+```bash
+metrum-ai-bench --help
+metrum-ai-bench-llm --help
+metrum-ai-bench-strategic --help
+```
+
+Print version only (where supported):
+
+```bash
+metrum-ai-bench-llm --version-only
+```
+
+---
+
+## LLM required options (typical)
+
+```text
+metrum-ai-bench-llm
+  --scenario <SCENARIO>
+  --num-requests <N>
+  --concurrency <N>
+  --prompts <PATH|URL>
+  --mode <chat|completion>
+  --model <MODEL>
+  --data-log <PATH>
+  --max-tokens <N>
+```
+
+Plus `--url` or `--endpoints-file` (mutually exclusive with the single-URL /
+API-key pair patterns described in `--help`).
+
+---
+
+## Shared load flags (common)
+
+| Flag | Purpose |
+| --- | --- |
+| `--url` | Single endpoint URL |
+| `--endpoints-file` | Multi-endpoint YAML (curl-style); mutually exclusive with `--url` / `--api-key` |
+| `--api-key` | Bearer / API key for the single-URL path |
+| `--num-requests` | Requests to send (≥ 1) |
+| `--concurrency` | Concurrent requests (≥ 1) |
+| `--warmup-requests` | Warmup count (excluded from measured distributions) |
+| `--seed` | Determinism for scheduling / cycling |
+| `--request-rate` | Open-loop rate |
+| `--arrival` | `poisson` or `constant` |
+| `--max-concurrency` | Outstanding-work cap |
+| `--slo` | Repeatable thresholds, e.g. `ttft=250ms`, `e2e=2s` |
+| `--streaming` | Stream responses (needed for TTFT) |
+| `--tokenizer` | Path to `tokenizer.json` (**requires** Cargo feature `tokenizer`; not in GitHub Release builds) |
+| `--log-level` | `error`, `warn`, `info`, `debug`, `trace` (default often `warn`) |
+| `--data-log` | JSONL output path |
+| `--runs` | Sequential independent runs + bootstrap aggregate (unified entry) |
+| `--sut` / `--require-sut` / `--redact-hostname` | Publication and privacy controls |
+| `--ntp-check` | Opt-in NTP offset recording (does not hard-fail) |
+| `--insecure` / `--ca-cert` | TLS overrides (use only when you intend them) |
+
+---
+
+## Prompt extractor (high-signal flags)
+
+| Flag | Purpose |
+| --- | --- |
+| `--revision` | Dataset commit SHA |
+| `--config` | `sample` / `full` |
+| `--count` / `--count-slack` | Preferred size and slack |
+| `--isl-target` / `--osl-target` | Length targets |
+| `--isl-unit` / `--osl-unit` | `tokens` or `words` |
+| `--isl-stat` / `--osl-stat` | `mean` or `median` |
+| `--isl-tolerance` / `--osl-tolerance` | Absolute tolerances |
+| `--output` / `--report` | Mix JSONL and report JSON |
+
+---
+
+## Strategic (high-signal flags)
+
+| Flag | Purpose |
+| --- | --- |
+| `--sweep` / `--sweep-by` | Stage list and axis (`concurrency` / `rate`) |
+| `--requests-per-stage` | Requests per sweep stage |
+| `--metrics-url` | Optional server metrics scrape |
+| `--html` / `--csv` / `--mlperf-dir` | Exports |
+| `--mlperf-scenario` | `server` or offline-style scenario name per `--help` |
+| `--kind` | Chat default, or `embeddings` / `rerank` |
+| `--json-schema` / `--tools` | Validity checkers |
+| `--slo e2e=…` | Goodput threshold on strategic (`ttft=` / `tpot=` accepted but ignored) |
+| `--otlp-endpoint` | OTLP export (release builds include feature `otlp`) |
+
+---
+
+## Getting the full dump
+
+Live `--help` on each binary is always authoritative.
+
+`scripts/render_cli_help.sh` regenerates `docs/CLI.md` for **modality and
+prompts binaries only** (`metrum-ai-bench-llm`, `-vlm`, `-asr`, `-imagegen`,
+`-prompts`). It does **not** dump `metrum-ai-bench` (unified), `selftest`,
+`metrum-ai-bench-strategic`, or `metrum-ai-bench-mock-server` — use those
+binaries' `--help` (and [Strategic benchmarking](./strategic-benchmarking))
+for their full surfaces.
+
+```bash
+# from a checkout (after cargo build --bins)
+./scripts/render_cli_help.sh
+```
+
+Or inspect `docs/CLI.md` in the repository for the last generated modality /
+prompts text dump.
