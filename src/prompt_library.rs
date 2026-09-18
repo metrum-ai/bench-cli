@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const HINT_TEMPLATE: &str =
     "\n\nPlease aim for approximately {target_output_length} words in your response.";
@@ -325,6 +325,127 @@ fn try_move(mix: &[usize], cands: &[Cand], req: &SelectRequest, rng: &mut StdRng
     trial
 }
 
+/// When an entire (ISL, OSL) cell already sits inside both tolerances, draw from
+/// that cell directly: unique rows first, then bounded repeats. Falls through
+/// when no constant cell can satisfy the request (mixed-value mean/median).
+fn try_homogeneous_bucket(
+    cands: &[Cand],
+    req: &SelectRequest,
+    rng: &mut StdRng,
+) -> Option<SelectedMix> {
+    struct HomogeneousPick {
+        score: Score,
+        n: usize,
+        isl: f64,
+        osl: f64,
+        isl_gap: f64,
+        osl_gap: f64,
+        idxs: Vec<usize>,
+    }
+
+    let min_len = req.count.saturating_sub(req.count_slack).max(1);
+    let max_len = req.count.saturating_add(req.count_slack).max(min_len);
+
+    let mut groups: BTreeMap<(u64, u64), Vec<usize>> = BTreeMap::new();
+    for (idx, cand) in cands.iter().enumerate() {
+        groups
+            .entry((cand.isl.to_bits(), cand.osl.to_bits()))
+            .or_default()
+            .push(idx);
+    }
+
+    let mut best: Option<HomogeneousPick> = None;
+    for ((isl_bits, osl_bits), idxs) in groups {
+        let isl = f64::from_bits(isl_bits);
+        let osl = f64::from_bits(osl_bits);
+        let isl_gap = isl - req.isl_target;
+        let osl_gap = osl - req.osl_target;
+        let excess = (isl_gap.abs() - req.isl_tolerance).max(0.0)
+            + (osl_gap.abs() - req.osl_tolerance).max(0.0);
+        if excess > 0.0 {
+            continue;
+        }
+        let unique = idxs.len();
+        let capacity = unique.saturating_mul(req.max_repeats);
+        if capacity < min_len {
+            continue;
+        }
+        let n = req.count.clamp(min_len, max_len.min(capacity));
+        let unique_used = n.min(unique);
+        let score = Score {
+            excess: 0.0,
+            count_dev: n.abs_diff(req.count),
+            extra_copies: n.saturating_sub(unique_used),
+        };
+        let better = match &best {
+            None => true,
+            Some(best_pick) => score.better_than(best_pick.score),
+        };
+        if better {
+            best = Some(HomogeneousPick {
+                score,
+                n,
+                isl,
+                osl,
+                isl_gap,
+                osl_gap,
+                idxs,
+            });
+        }
+    }
+
+    let HomogeneousPick {
+        score,
+        n,
+        isl,
+        osl,
+        isl_gap,
+        osl_gap,
+        mut idxs,
+    } = best?;
+    for i in (1..idxs.len()).rev() {
+        let j = rng.random_range(0..=i);
+        idxs.swap(i, j);
+    }
+    let mut mix = Vec::with_capacity(n);
+    let mut used = vec![0usize; idxs.len()];
+    for (slot, &idx) in idxs.iter().enumerate() {
+        if mix.len() >= n {
+            break;
+        }
+        mix.push(idx);
+        used[slot] = 1;
+    }
+    while mix.len() < n {
+        let mut progressed = false;
+        for (slot, &idx) in idxs.iter().enumerate() {
+            if mix.len() >= n {
+                break;
+            }
+            if used[slot] < req.max_repeats {
+                mix.push(idx);
+                used[slot] += 1;
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    if mix.len() != n || !multiplicity_ok(&mix, req.max_repeats) {
+        return None;
+    }
+    Some(SelectedMix {
+        rows: mix.iter().map(|&i| cands[i].row.clone()).collect(),
+        isl_achieved: isl,
+        osl_achieved: osl,
+        isl_gap,
+        osl_gap,
+        extra_copies: score.extra_copies,
+        work_used: 0,
+    })
+}
+
 pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMix, SelectFailure> {
     if req.count == 0 {
         return Err(SelectFailure {
@@ -367,6 +488,9 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
         });
     }
     let mut rng = StdRng::seed_from_u64(req.seed);
+    if let Some(exact) = try_homogeneous_bucket(&cands, req, &mut rng) {
+        return Ok(exact);
+    }
     let mut mix = seed_mix(&cands, req, &mut rng);
     let mut best_mix = mix.clone();
     let mut best_eval = evaluate(&mix, &cands, req);
@@ -880,7 +1004,7 @@ pub fn load_hub_dataset(
             spec.split
         );
     }
-    verify_cached_checksums(&base)?;
+    verify_cached_checksums(&base, &spec.config)?;
     let mut rows = load_parquet_files(&parquet_paths, 0)?;
     let index_path = base.join("sample-index.json");
     if spec.config == "sample" && index_path.exists() {
@@ -891,12 +1015,14 @@ pub fn load_hub_dataset(
     Ok((rows, sha))
 }
 
-fn verify_cached_checksums(dir: &Path) -> Result<()> {
+fn verify_cached_checksums(dir: &Path, config: &str) -> Result<()> {
     let sums = dir.join("checksums.sha256");
     if !sums.exists() {
         return Ok(());
     }
     let text = std::fs::read_to_string(&sums)?;
+    let prefix = format!("data/{config}/");
+    let mut seen_basenames: HashMap<String, String> = HashMap::new();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -905,13 +1031,28 @@ fn verify_cached_checksums(dir: &Path) -> Result<()> {
         let (digest, name) = line
             .split_once(char::is_whitespace)
             .ok_or_else(|| anyhow!("invalid checksums.sha256 line"))?;
-        let name = name.trim().trim_start_matches('*');
-        let file_name = Path::new(name)
+        let name = name.trim().trim_start_matches('*').trim_start_matches("./");
+        let path = Path::new(name);
+        if path.components().any(|c| matches!(c, Component::ParentDir)) {
+            bail!("forbidden path in checksums.sha256: {name}");
+        }
+        let file_name = path
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| name.to_string());
         if file_name == "checksums.sha256" {
             continue;
+        }
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let digest = digest.trim().to_ascii_lowercase();
+        if let Some(prev) = seen_basenames.get(&file_name) {
+            if prev != &digest {
+                bail!("checksum basename collision for {file_name} under config {config}");
+            }
+        } else {
+            seen_basenames.insert(file_name.clone(), digest.clone());
         }
         let path = dir.join(&file_name);
         if !path.exists() {
@@ -919,7 +1060,7 @@ fn verify_cached_checksums(dir: &Path) -> Result<()> {
         }
         let bytes = std::fs::read(&path)?;
         let actual = hex_digest(Sha256::digest(&bytes).as_slice());
-        if actual != digest.trim().to_ascii_lowercase() {
+        if actual != digest {
             bail!("checksum mismatch for {}", path.display());
         }
     }
@@ -1137,6 +1278,114 @@ mod tests {
         let mix = select_mix(&rows, &req).expect("even median");
         assert_eq!(mix.rows.len(), 4);
         assert_eq!(mix.isl_achieved, 12.5);
+    }
+
+    #[test]
+    fn exact_joint_bucket_unique_no_repeats() {
+        let mut rows: Vec<_> = (0..80)
+            .map(|i| row(i, "exact", 1024, 1024, 700, false))
+            .collect();
+        rows.extend((80..120).map(|i| row(i, "same-isl", 1024, 768, 500, false)));
+        rows.extend((120..160).map(|i| row(i, "noise", 384, 512, 300, false)));
+        let mut req = base_req();
+        req.count = 40;
+        req.count_slack = 0;
+        req.seed = 7;
+        req.isl_target = 1024.0;
+        req.osl_target = 1024.0;
+        req.isl_stat = LengthStat::Median;
+        req.osl_stat = LengthStat::Median;
+        req.isl_tolerance = 0.0;
+        req.osl_tolerance = 0.0;
+        req.max_repeats = 1;
+        let mix = select_mix(&rows, &req).expect("exact bucket");
+        assert_eq!(mix.rows.len(), 40);
+        assert_eq!(mix.isl_achieved, 1024.0);
+        assert_eq!(mix.osl_achieved, 1024.0);
+        assert_eq!(mix.extra_copies, 0);
+        assert!(mix.rows.iter().all(|r| r.target_input_tokens == 1024));
+        assert!(mix.rows.iter().all(|r| r.target_output_tokens == 1024));
+        let mut ordinals: Vec<_> = mix.rows.iter().map(|r| r.ordinal).collect();
+        ordinals.sort_unstable();
+        ordinals.dedup();
+        assert_eq!(ordinals.len(), 40);
+    }
+
+    #[test]
+    fn exact_bucket_preferred_over_same_isl_other_osl() {
+        let mut rows: Vec<_> = (0..20)
+            .map(|i| row(i, "joint", 1024, 1024, 700, false))
+            .collect();
+        rows.extend((20..120).map(|i| row(i, "other-osl", 1024, 768, 500, false)));
+        let mut req = base_req();
+        req.count = 10;
+        req.count_slack = 0;
+        req.seed = 3;
+        req.isl_target = 1024.0;
+        req.osl_target = 1024.0;
+        req.isl_stat = LengthStat::Median;
+        req.osl_stat = LengthStat::Median;
+        req.isl_tolerance = 0.0;
+        req.osl_tolerance = 0.0;
+        req.max_repeats = 1;
+        let mix = select_mix(&rows, &req).expect("joint cell");
+        assert_eq!(mix.rows.len(), 10);
+        assert_eq!(mix.isl_achieved, 1024.0);
+        assert_eq!(mix.osl_achieved, 1024.0);
+        assert_eq!(mix.extra_copies, 0);
+        assert!(mix.rows.iter().all(|r| r.target_output_tokens == 1024));
+    }
+
+    #[test]
+    fn exact_bucket_is_deterministic_for_seed() {
+        let rows: Vec<_> = (0..50)
+            .map(|i| row(i, "exact", 1024, 1024, 700, false))
+            .collect();
+        let mut req = base_req();
+        req.count = 12;
+        req.count_slack = 0;
+        req.seed = 99;
+        req.isl_target = 1024.0;
+        req.osl_target = 1024.0;
+        req.isl_stat = LengthStat::Median;
+        req.osl_stat = LengthStat::Median;
+        req.max_repeats = 1;
+        let a = select_mix(&rows, &req).expect("first");
+        let b = select_mix(&rows, &req).expect("second");
+        let a_ord: Vec<_> = a.rows.iter().map(|r| r.ordinal).collect();
+        let b_ord: Vec<_> = b.rows.iter().map(|r| r.ordinal).collect();
+        assert_eq!(a_ord, b_ord);
+    }
+
+    #[test]
+    fn verify_checksums_scopes_to_requested_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = b"full-shard-bytes";
+        let full_digest = hex_digest(Sha256::digest(payload).as_slice());
+        let sample_digest = hex_digest(Sha256::digest(b"sample-shard-bytes").as_slice());
+        std::fs::write(dir.path().join("train-00000.parquet"), payload).unwrap();
+        let sums = format!(
+            "{full_digest} data/full/train-00000.parquet\n{sample_digest} data/sample/train-00000.parquet\n"
+        );
+        std::fs::write(dir.path().join("checksums.sha256"), sums).unwrap();
+        verify_cached_checksums(dir.path(), "full").expect("full config");
+        let err = verify_cached_checksums(dir.path(), "sample").expect_err("sample mismatch");
+        assert!(
+            err.to_string().contains("checksum mismatch"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn verify_checksums_rejects_parent_dir_components() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("checksums.sha256"),
+            "abc data/full/../secret.parquet\n",
+        )
+        .unwrap();
+        let err = verify_cached_checksums(dir.path(), "full").expect_err("forbidden");
+        assert!(err.to_string().contains("forbidden path"));
     }
 
     #[test]

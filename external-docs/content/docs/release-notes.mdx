@@ -13,6 +13,39 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.0.0
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.0.0 |
+| **Previous version** | 1.0.0-rc.6 |
+| **Release Date** | September 18, 2026 |
+
+First stable release. Includes the post-rc.6 CLI hardening plus prompt-library
+and release provenance fixes.
+
+### Prompt library (Fixed)
+
+- Hub checksum verification is scoped to the requested config so `full` and
+  `sample` no longer collide on `train-00000.parquet`.
+- Exact ISL/OSL target buckets select unique rows first, so `--count-slack 0`
+  and `--no-repeats` work when the bucket is fully populated.
+
+### CLI and release docs (Fixed)
+
+- `metrum-ai-bench-prompts` and `metrum-ai-bench-strategic` expose `-V` /
+  `--version`; strategic also has `--version-only`.
+- Release verification examples use the v-prefixed archive names that ships
+  attach.
+
+### Operator docs (Added / Changed)
+
+- Quiet / `NO_BANNER` controls, mutually required `--url` / `--api-key`, and
+  agent-oriented README / CLI help updates from the rc.6 follow-ups.
+
+---
+
 ## Metrum AI Bench CLI 1.0.0-rc.6
 
 | | |

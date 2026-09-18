@@ -72,7 +72,7 @@ Example verify (replace tag and target):
 ```bash
 TAG=v1.0.0
 TARGET=x86_64-unknown-linux-gnu
-ARCHIVE="metrum-ai-bench-${TAG#v}-${TARGET}.tar.gz"   # or current tarball prefix on the release
+ARCHIVE="metrum-ai-bench-${TAG}-${TARGET}.tar.gz"
 
 gh release download "$TAG" --pattern "${ARCHIVE}*"
 cosign verify-blob \

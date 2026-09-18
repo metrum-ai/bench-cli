@@ -28,6 +28,10 @@ fn metrum_ai_bench_prompts_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-prompts"))
 }
 
+fn metrum_ai_bench_strategic_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"))
+}
+
 fn metrum_ai_bench_imagegen_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-imagegen"))
 }
@@ -550,6 +554,52 @@ fn metrum_ai_bench_prompts_version_only() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("metrum-ai-bench-prompts version"));
+}
+
+#[test]
+fn metrum_ai_bench_prompts_version_flag() {
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args(["--version"])
+        .output()
+        .expect("run metrum-ai-bench-prompts --version");
+    assert!(
+        out.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let combined = combined_output(&out);
+    assert!(
+        combined.contains(env!("CARGO_PKG_VERSION")),
+        "unexpected version output: {combined}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_strategic_version_flags() {
+    for flag in ["--version", "--version-only", "-V"] {
+        let out = Command::new(metrum_ai_bench_strategic_bin())
+            .args([flag])
+            .output()
+            .unwrap_or_else(|_| panic!("run metrum-ai-bench-strategic {flag}"));
+        assert!(
+            out.status.success(),
+            "{flag} stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let combined = combined_output(&out);
+        assert!(
+            combined.contains(env!("CARGO_PKG_VERSION")),
+            "{flag} unexpected output: {combined}"
+        );
+    }
+    let only = Command::new(metrum_ai_bench_strategic_bin())
+        .args(["--version-only"])
+        .output()
+        .expect("strategic --version-only");
+    let stdout = String::from_utf8_lossy(&only.stdout);
+    assert!(stdout.contains("metrum-ai-bench-strategic version"));
 }
 
 #[test]

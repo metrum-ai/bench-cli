@@ -19,6 +19,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Parser, Debug)]
 #[command(
     name = "metrum-ai-bench-prompts",
+    author,
+    version,
     about = "Select ISL/OSL mixes from metrum-ai/prompt-library for metrum-ai-bench-llm"
 )]
 struct Args {
