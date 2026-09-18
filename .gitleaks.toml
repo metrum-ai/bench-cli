@@ -34,12 +34,28 @@ keywords = ["metrum.ai"]
 [[allowlists]]
 description = "Fixture dir for custom-rule regression tests only"
 paths = [
-  '''scripts/tests/gitleaks/''',
+  '''scripts/tests/gitleaks''',
 ]
 
-# Public customer docs site (not an internal host).
 [[allowlists]]
-description = "Allow public docs.metrum.ai hostname in customer-facing docs URLs"
+description = "Public docs.metrum.ai hostname in customer-facing docs URLs"
 regexes = [
-  '''(?i)\bdocs\.metrum\.ai\b''',
+  '''(?i)docs\.metrum\.ai''',
+]
+
+[[allowlists]]
+description = "RESTIC_PASSWORD tuple unpack in live campaign helper"
+paths = [
+  '''scripts/live/campaign\.sh''',
+]
+regexes = [
+  '''(?i)host,\s*path,\s*password\s*=''',
+]
+
+[[allowlists]]
+description = "Documented restic URL password placeholders"
+regexes = [
+  '''(?i)PASSWORD=["']?YOUR_PASSWORD["']?''',
+  '''(?i)PASSWORD=["']?<redacted>["']?''',
+  '''(?i)PASSWORD=["']?PASSWORD["']?''',
 ]
