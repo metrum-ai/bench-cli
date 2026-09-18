@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 (2026-09-18)
+
+First stable release after the 1.0.0-rc series.
 
 ### Added
 - `docs/REASONING_MODELS.md`: operator guide for thinking models (TTFT vs
@@ -12,6 +14,18 @@
   binary.
 - `--quiet` and `NO_BANNER=1`: suppress ASCII banner art; one-line identity
   remains. Documented in README Install and regenerated `docs/CLI.md`.
+
+### Fixed
+- `metrum-ai-bench-prompts` Hub checksum verification is scoped to the
+  requested dataset config so `full` and `sample` no longer collide on shared
+  parquet basenames (#101).
+- Prompt mix selection prefers a unique draw from an exact ISL/OSL cell before
+  the sparse hill-climber, so `--count-slack 0` and `--no-repeats` succeed when
+  the target bucket is fully populated (#102).
+- `metrum-ai-bench-prompts` and `metrum-ai-bench-strategic` expose clap
+  `-V` / `--version`; strategic also supports `--version-only` (#99).
+- `docs/RELEASING.md` cosign verify example uses the v-prefixed archive names
+  that the release workflow actually attaches (#100).
 
 ### Changed
 - `--url` and `--api-key` are mutually required at clap parse time on llm,
