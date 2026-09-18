@@ -1,0 +1,348 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+name: Deploy Docs
+
+# Triggers:
+#   - Push to main           -> dev preview (LATEST=0), published to Restic but never restored to docs.metrum.ai
+#   - Push of v* tag         -> production release (LATEST=1), restored to docs.metrum.ai
+#   - Manual workflow_dispatch -> rollback (docs_version) or explicit snapshot restore (docs_snapshot_id)
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      docs_version:
+        description: "Docs version to restore (rollback). Skips build/publish, restores this version directly from Restic."
+        required: false
+        type: string
+        default: ""
+      docs_snapshot_id:
+        description: "Explicit Restic snapshot ID for docs rollback (optional, overrides tag resolution)."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  publish-docs:
+    name: Publish external docs to Restic
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.docs_version == ''
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      latest: ${{ steps.resolve.outputs.latest }}
+      latest_version: ${{ steps.resolve.outputs.latest_version }}
+      restic_env: ${{ steps.resolve.outputs.restic_env }}
+    env:
+      RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+      RESTIC_PASSWORD_INPUT: ${{ secrets.RESTIC_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: external-docs/package-lock.json
+
+      - name: Install Restic
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/restic.bz2 \
+            https://github.com/restic/restic/releases/download/v0.18.1/restic_0.18.1_linux_amd64.bz2
+          bunzip2 /tmp/restic.bz2
+          chmod +x /tmp/restic
+          sudo mv /tmp/restic /usr/local/bin/restic
+          restic version
+
+      - name: Materialize Restic credential file
+        run: |
+          set -euo pipefail
+          if [ -z "${RESTIC_REPOSITORY:-}" ]; then
+            echo "Missing required GitHub secrets for docs publishing." >&2
+            echo "Configure RESTIC_REPOSITORY and RESTIC_PASSWORD in repository secrets." >&2
+            exit 1
+          fi
+          credential_file="${RUNNER_TEMP}/restic-bench-cli-docs.credential"
+          umask 077
+          printf '%s' "${RESTIC_PASSWORD_INPUT}" > "${credential_file}"
+          if [ ! -s "${credential_file}" ]; then
+            echo "Missing required GitHub secrets for docs publishing." >&2
+            echo "Configure RESTIC_REPOSITORY and RESTIC_PASSWORD in repository secrets." >&2
+            exit 1
+          fi
+          echo "RESTIC_PASSWORD_FILE=${credential_file}" >> "$GITHUB_ENV"
+
+      - name: Resolve docs VERSION, LATEST policy, and RESTIC_ENV
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+            latest_flag="1"
+            latest_version="${version}"
+            restic_env="production"
+            echo "Tag push ${version}: publishing release with LATEST=1 to restic-env-production." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            short="$(git rev-parse --short=7 HEAD)"
+            version="v0.dev-${short}"
+            latest_flag="0"
+            latest_version="$(git tag --list 'v*' --sort=-v:refname \
+              | head -n1 || true)"
+            if [ -z "${latest_version}" ] || [ "${latest_version}" = "${version}" ]; then
+              latest_version="${version}-fallback"
+            fi
+            restic_env="staging"
+            echo "Branch push ${short}: publishing dev preview ${version} with LATEST=0 to restic-env-staging." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "version=${version}"
+            echo "latest=${latest_flag}"
+            echo "latest_version=${latest_version}"
+            echo "restic_env=${restic_env}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and package docs
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          LATEST_VERSION: ${{ steps.resolve.outputs.latest_version }}
+          LATEST_FLAG: ${{ steps.resolve.outputs.latest }}
+        working-directory: external-docs
+        run: |
+          set -euo pipefail
+          npm ci
+          make build VERSION="${VERSION}"
+          if [ "${LATEST_FLAG}" = "1" ]; then
+            make build-latest VERSION="${VERSION}"
+          fi
+          make package VERSION="${VERSION}" DOCS_LATEST_VERSION="${LATEST_VERSION}"
+
+      - name: Publish docs to Restic
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          RESTIC_ENV: ${{ steps.resolve.outputs.restic_env }}
+        working-directory: external-docs/dist
+        run: |
+          set -euo pipefail
+          ARCHIVE="metrum-ai-bench-cli-docs-${VERSION}.tar.gz"
+          CHECKSUM="${ARCHIVE}.sha256"
+          MANIFEST="metrum-ai-bench-cli-docs-versions.json"
+
+          artifacts=("${ARCHIVE}")
+          [ -f "${CHECKSUM}" ] && artifacts+=("${CHECKSUM}")
+          [ -f "${MANIFEST}" ] && artifacts+=("${MANIFEST}")
+
+          restic backup --json \
+            --tag docs-releases \
+            --tag metrum-ai-bench-cli-docs \
+            --tag "${VERSION}" \
+            --tag "restic-env-${RESTIC_ENV}" \
+            "${artifacts[@]}"
+          echo "Published ${VERSION} to Restic."
+
+      - name: Verify Restic snapshot
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          RESTIC_ENV: ${{ steps.resolve.outputs.restic_env }}
+        run: |
+          set -euo pipefail
+          SNAP_COUNT=$(restic snapshots --json \
+            --tag "docs-releases,metrum-ai-bench-cli-docs,${VERSION},restic-env-${RESTIC_ENV}" \
+            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+          if [ "${SNAP_COUNT}" -lt 1 ]; then
+            echo "ERROR: No Restic snapshot found with expected tags." >&2
+            exit 1
+          fi
+          echo "Verified: ${SNAP_COUNT} snapshot(s) for ${VERSION}."
+
+  restore-docs:
+    name: Restore docs to docs.metrum.ai
+    needs: [publish-docs]
+    if: >
+      always() && (
+        (needs.publish-docs.result == 'success' &&
+         needs.publish-docs.outputs.latest == '1') ||
+        github.event.inputs.docs_version != ''
+      )
+    runs-on: [self-hosted, linux, x64, bench-cli-docs-deploy]
+    timeout-minutes: 15
+    concurrency:
+      group: bench-cli-docs-restore-production
+      cancel-in-progress: false
+    env:
+      RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+      RESTIC_PASSWORD_INPUT: ${{ secrets.RESTIC_PASSWORD }}
+    steps:
+      - name: Resolve restore parameters
+        id: params
+        env:
+          INPUT_DOCS_VERSION: ${{ github.event.inputs.docs_version }}
+          INPUT_DOCS_SNAPSHOT_ID: ${{ github.event.inputs.docs_snapshot_id }}
+          PUBLISH_VERSION: ${{ needs.publish-docs.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_DOCS_VERSION}" ]; then
+            if ! [[ "${INPUT_DOCS_VERSION}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+              echo "Error: docs_version contains invalid characters." >&2
+              exit 1
+            fi
+            if [ -n "${INPUT_DOCS_SNAPSHOT_ID}" ] && ! [[ "${INPUT_DOCS_SNAPSHOT_ID}" =~ ^[a-fA-F0-9]+$ ]]; then
+              echo "Error: docs_snapshot_id must be a hex string." >&2
+              exit 1
+            fi
+            version="${INPUT_DOCS_VERSION}"
+            snapshot_id="${INPUT_DOCS_SNAPSHOT_ID}"
+            echo "Manual rollback: VERSION=${version}, SNAPSHOT_ID=${snapshot_id:-auto-resolve}"
+          else
+            version="${PUBLISH_VERSION}"
+            snapshot_id=""
+            echo "Auto-deploy after publish: VERSION=${version}"
+          fi
+          if [ -z "${version}" ]; then
+            echo "Error: no version resolved." >&2
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "snapshot_id=${snapshot_id}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Materialize Restic credential file
+        run: |
+          set -euo pipefail
+          if [ -z "${RESTIC_REPOSITORY:-}" ]; then
+            echo "Error: RESTIC_REPOSITORY or RESTIC_PASSWORD secret is missing." >&2
+            exit 1
+          fi
+          credential_file="${RUNNER_TEMP}/restic-bench-cli-docs.credential"
+          umask 077
+          printf '%s' "${RESTIC_PASSWORD_INPUT}" > "${credential_file}"
+          if [ ! -s "${credential_file}" ]; then
+            echo "Error: RESTIC_REPOSITORY or RESTIC_PASSWORD secret is missing." >&2
+            exit 1
+          fi
+          echo "RESTIC_PASSWORD_FILE=${credential_file}" >> "$GITHUB_ENV"
+
+      - name: Discover Docker volume mount path
+        id: volume
+        run: |
+          set -euo pipefail
+          WEB_ROOT="$(docker volume inspect newsite_metrum_insights_docs_data -f '{{ .Mountpoint }}')"
+          if [ -z "${WEB_ROOT}" ]; then
+            echo "Error: could not resolve newsite_metrum_insights_docs_data volume mount." >&2
+            exit 1
+          fi
+          echo "web_root=${WEB_ROOT}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Restic cache
+        run: |
+          sudo rm -rf /tmp/restic-cache-bench-cli-docs-deploy
+          sudo mkdir -p /tmp/restic-cache-bench-cli-docs-deploy
+          sudo chmod 777 /tmp/restic-cache-bench-cli-docs-deploy
+
+      - name: Resolve Restic snapshot ID
+        id: snapshot
+        env:
+          VERSION: ${{ steps.params.outputs.version }}
+          SNAPSHOT_ID: ${{ steps.params.outputs.snapshot_id }}
+          RESTIC_CACHE_DIR: /tmp/restic-cache-bench-cli-docs-deploy
+        run: |
+          set -euo pipefail
+          if [ -n "${SNAPSHOT_ID}" ]; then
+            echo "Using explicit SNAPSHOT_ID=${SNAPSHOT_ID}"
+            echo "snapshot_id=${SNAPSHOT_ID}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Resolving snapshot for VERSION=${VERSION}..."
+          SNAP_ID=$(restic snapshots --json \
+            --tag "docs-releases,metrum-ai-bench-cli-docs,${VERSION}" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); c=sorted(d,key=lambda s:s.get("time",""),reverse=True); print(c[0]["id"]) if c else sys.exit(1)' \
+          ) || {
+            echo "Error: no Restic snapshot found with tags [docs-releases, metrum-ai-bench-cli-docs, ${VERSION}]" >&2
+            exit 1
+          }
+          echo "Resolved snapshot: ${SNAP_ID}"
+          echo "snapshot_id=${SNAP_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore docs from Restic
+        id: restore
+        env:
+          VERSION: ${{ steps.params.outputs.version }}
+          SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot_id }}
+          WEB_ROOT: ${{ steps.volume.outputs.web_root }}
+          RESTIC_CACHE_DIR: /tmp/restic-cache-bench-cli-docs-deploy
+        run: |
+          set -euo pipefail
+          RESTORE_SCRIPT="/home/ubuntu/src/metrum-internal-infra-admin/newsite/scripts/restore-metrum-ai-bench-cli-docs-version.sh"
+          if [ ! -x "${RESTORE_SCRIPT}" ]; then
+            echo "Error: restore script not found at ${RESTORE_SCRIPT}" >&2
+            exit 1
+          fi
+          sudo -E env \
+            VERSION="${VERSION}" \
+            WEB_ROOT="${WEB_ROOT}" \
+            RESTIC_REPOSITORY="${RESTIC_REPOSITORY}" \
+            RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE}" \
+            RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR}" \
+            SNAPSHOT_ID="${SNAPSHOT_ID}" \
+            SKIP_HEALTH="1" \
+            SKIP_RESTART="0" \
+            "${RESTORE_SCRIPT}"
+
+      - name: Health check docs.metrum.ai
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.params.outputs.version }}"
+          echo "Waiting for docs.metrum.ai to serve restored content..."
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 "https://docs.metrum.ai/metrum-ai-bench-cli/versions.json" > /dev/null 2>&1; then
+              echo "versions.json OK"
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "Error: docs.metrum.ai/metrum-ai-bench-cli/versions.json not responding after 20s" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          if curl -fsS --max-time 10 "https://docs.metrum.ai/metrum-ai-bench-cli/${VERSION}/index.html" > /dev/null 2>&1; then
+            echo "Versioned path OK: /metrum-ai-bench-cli/${VERSION}/"
+          else
+            echo "Warning: versioned path /metrum-ai-bench-cli/${VERSION}/index.html not reachable."
+          fi
+          if curl -fsS --max-time 10 "https://docs.metrum.ai/metrum-ai-bench-cli/latest/" > /dev/null 2>&1; then
+            echo "Latest alias OK: /metrum-ai-bench-cli/latest/"
+          else
+            echo "Warning: /metrum-ai-bench-cli/latest/ not reachable."
+          fi
+
+      - name: Report deployment evidence
+        if: always()
+        run: |
+          VERSION="${{ steps.params.outputs.version }}"
+          SNAPSHOT_ID="${{ steps.snapshot.outputs.snapshot_id }}"
+          {
+            echo ""
+            echo "## Bench CLI docs deployment to docs.metrum.ai"
+            echo "- **Version**: \`${VERSION}\`"
+            echo "- **Snapshot ID**: \`${SNAPSHOT_ID:-resolution failed}\`"
+            echo "- **Trigger**: \`${{ github.event_name }}\` on \`${{ github.ref }}\`"
+            echo "- **Web root**: \`${{ steps.volume.outputs.web_root }}\`"
+            echo "- **Restore status**: \`${{ steps.restore.outcome }}\`"
+            echo "- **Health check URLs**:"
+            echo "  - https://docs.metrum.ai/metrum-ai-bench-cli/latest/"
+            echo "  - https://docs.metrum.ai/metrum-ai-bench-cli/${VERSION}/"
+            echo "  - https://docs.metrum.ai/metrum-ai-bench-cli/versions.json"
+          } >> "$GITHUB_STEP_SUMMARY"
