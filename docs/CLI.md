@@ -618,14 +618,18 @@ Options:
           Write selection report JSON
   -h, --help
           Print help
+  -V, --version
+          Print version
 ```
 
 ## `metrum-ai-bench-strategic`
 
 ```text
-Usage: metrum-ai-bench-strategic [OPTIONS] --url <URL> --model <MODEL>
+Usage: metrum-ai-bench-strategic [OPTIONS]
 
 Options:
+      --version-only
+          Print version information and exit
       --url <URL>
           
       --api-key <API_KEY>
@@ -676,6 +680,8 @@ Options:
           Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)
   -h, --help
           Print help
+  -V, --version
+          Print version
 ```
 
 ## `metrum-ai-bench-mock-server`

@@ -19,6 +19,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum EndpointKind {
     Chat,
@@ -27,14 +29,20 @@ enum EndpointKind {
 }
 
 #[derive(Parser, Debug)]
-#[command(about = "Sweep and benchmark OpenAI-compatible inference endpoints")]
+#[command(
+    author,
+    version,
+    about = "Sweep and benchmark OpenAI-compatible inference endpoints"
+)]
 struct Args {
-    #[arg(long)]
-    url: String,
+    #[arg(long, help = "Print version information and exit")]
+    version_only: bool,
+    #[arg(long, required_unless_present = "version_only")]
+    url: Option<String>,
     #[arg(long, env = "OPENAI_API_KEY", default_value = "")]
     api_key: String,
-    #[arg(long)]
-    model: String,
+    #[arg(long, required_unless_present = "version_only")]
+    model: Option<String>,
     #[arg(long, value_enum, default_value = "chat")]
     kind: EndpointKind,
     #[arg(long, default_value_t = 100)]
@@ -131,7 +139,12 @@ fn read_json(path: &Path) -> Result<Value> {
     .with_context(|| format!("parse {}", path.display()))
 }
 
-fn make_inputs(args: &Args, schema: Option<&Value>, tools: Option<&Value>) -> Result<Vec<Input>> {
+fn make_inputs(
+    args: &Args,
+    model: &str,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+) -> Result<Vec<Input>> {
     if let Some(path) = &args.sessions {
         if !matches!(args.kind, EndpointKind::Chat) {
             bail!("--sessions is only valid for chat endpoints");
@@ -145,7 +158,7 @@ fn make_inputs(args: &Args, schema: Option<&Value>, tools: Option<&Value>) -> Re
                     args.prefix_control,
                     &session.session_id,
                 );
-                let mut body = json!({"model":args.model,"messages":messages});
+                let mut body = json!({"model":model,"messages":messages});
                 add_structured(&mut body, schema, tools);
                 inputs.push(Input {
                     body,
@@ -164,12 +177,12 @@ fn make_inputs(args: &Args, schema: Option<&Value>, tools: Option<&Value>) -> Re
                 args.prefix_control,
                 "default",
             );
-            json!({"model":args.model,"messages":messages})
+            json!({"model":model,"messages":messages})
         }
-        EndpointKind::Embeddings => json!({"model":args.model,"input":args.prompt}),
+        EndpointKind::Embeddings => json!({"model":model,"input":args.prompt}),
         EndpointKind::Rerank => {
             let documents: Vec<_> = args.prompt.split('|').map(str::trim).collect();
-            json!({"model":args.model,"query":documents.first().copied().unwrap_or(""),"documents":documents.iter().skip(1).collect::<Vec<_>>()})
+            json!({"model":model,"query":documents.first().copied().unwrap_or(""),"documents":documents.iter().skip(1).collect::<Vec<_>>()})
         }
     };
     add_structured(&mut body, schema, tools);
@@ -224,6 +237,7 @@ fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
 
 async fn run_stage(
     args: &Args,
+    url: &str,
     stage: f64,
     inputs: &[Input],
     validator: Option<&Validity>,
@@ -255,7 +269,7 @@ async fn run_stage(
             });
         let client = client.clone();
         let input = inputs[index as usize % inputs.len()].clone();
-        let url = args.url.clone();
+        let url = url.to_string();
         let api_key = args.api_key.clone();
         let validator = validator.cloned();
         let sequence = seq.fetch_add(1, Ordering::Relaxed);
@@ -333,6 +347,18 @@ fn aggregate_server(samples: &[ServerMetrics]) -> ServerMetrics {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if args.version_only {
+        println!("metrum-ai-bench-strategic version {VERSION}");
+        return Ok(());
+    }
+    let url = args
+        .url
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("--url is required"))?;
+    let model = args
+        .model
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("--model is required"))?;
     let stages = parse_sweep(&args.sweep)?;
     let schema = args.json_schema.as_deref().map(read_json).transpose()?;
     let tools = args.tools.as_deref().map(read_json).transpose()?;
@@ -344,17 +370,17 @@ async fn main() -> Result<()> {
         (None, Some(tools)) => Some(Validity::tool_names(tools)?),
         _ => None,
     };
-    let inputs = make_inputs(&args, schema.as_ref(), tools.as_ref())?;
+    let inputs = make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?;
     let stop_scraper = Arc::new(AtomicBool::new(false));
     let server_samples = Arc::new(Mutex::new(Vec::new()));
-    let scraper = if let Some(url) = args.metrics_url.clone() {
+    let scraper = if let Some(metrics_url) = args.metrics_url.clone() {
         let stop = stop_scraper.clone();
         let samples = server_samples.clone();
         let interval = Duration::from_millis(args.metrics_interval_ms.max(50));
         Some(tokio::spawn(async move {
             let client = reqwest::Client::new();
             while !stop.load(Ordering::Relaxed) {
-                if let Ok(sample) = scrape_metrics(&client, &url).await {
+                if let Ok(sample) = scrape_metrics(&client, &metrics_url).await {
                     samples.lock().await.push(sample);
                 }
                 tokio::time::sleep(interval).await;
@@ -366,8 +392,8 @@ async fn main() -> Result<()> {
     let sequence = Arc::new(AtomicU64::new(0));
     let slos = metrum_ai_bench::summary::SloConfig::parse(&args.slos)?;
     let redacted_config = json!({
-        "url": args.url,
-        "model": args.model,
+        "url": url,
+        "model": model,
         "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
         "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
         "requests_per_stage": args.requests_per_stage,
@@ -390,6 +416,7 @@ async fn main() -> Result<()> {
     for stage in stages {
         let (records, seconds) = run_stage(
             &args,
+            &url,
             stage,
             &inputs,
             validator.as_ref(),
