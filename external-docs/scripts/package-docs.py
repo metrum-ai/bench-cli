@@ -91,10 +91,16 @@ def main() -> None:
     staging.mkdir()
 
     version_dest = staging / site_root / version
-    latest_dest = staging / site_root / "latest"
-
     shutil.copytree(build_dir, version_dest)
-    shutil.copytree(latest_build_dir or build_dir, latest_dest)
+
+    # Only ship a latest/ tree when this build is actually promoting to
+    # latest (latest_build_dir given and present). A non-promoted publish
+    # (e.g. a -rc. tag) must never carry a latest/ tree in its archive: the
+    # restore script uses that tree's presence to decide whether to touch
+    # the live /latest/ alias at all, so a stray latest/ here would clobber
+    # the real latest release with this non-promoted build's own content.
+    if latest_build_dir:
+        shutil.copytree(latest_build_dir, staging / site_root / "latest")
 
     release_versions = args.release_versions.split()
     if version not in release_versions:

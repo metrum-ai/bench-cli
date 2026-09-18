@@ -3,9 +3,22 @@
 name: Deploy Docs
 
 # Triggers:
-#   - Push to main           -> dev preview (LATEST=0), published to Restic but never restored to docs.metrum.ai
-#   - Push of v* tag         -> production release (LATEST=1), restored to docs.metrum.ai
+#   - Push to main           -> dev preview, published to Restic but never restored to docs.metrum.ai
+#   - Push of a final v* tag (no -rc./-alpha./-beta.) -> production release,
+#     promotes docs.metrum.ai/metrum-ai-bench-cli/latest/ to this version
+#   - Push of a -rc./-alpha./-beta. tag -> published and restored to its own
+#     versioned path, but never promoted to /latest/ (mirrors release.yml's
+#     own prerelease convention; see docs/RELEASING.md)
 #   - Manual workflow_dispatch -> rollback (docs_version) or explicit snapshot restore (docs_snapshot_id)
+#
+# PLATFORM ONBOARDING GATE: the restore-docs job below runs on a self-hosted
+# runner labelled bench-cli-docs-deploy. That runner, the RESTIC_REPOSITORY /
+# RESTIC_PASSWORD secrets, and the backing S3 bucket do not exist yet as of
+# this PR (tracked in metrum-internal-infra-admin, not this repo). Do not push
+# a v* tag until all three are confirmed live -- otherwise restore-docs queues
+# indefinitely (self-hosted job queue has no timeout while waiting for a
+# runner) and holds the bench-cli-docs-restore-production concurrency group
+# for every tag pushed after it.
 on:
   push:
     branches:
@@ -38,18 +51,19 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       latest: ${{ steps.resolve.outputs.latest }}
       latest_version: ${{ steps.resolve.outputs.latest_version }}
+      release_versions: ${{ steps.resolve.outputs.release_versions }}
       restic_env: ${{ steps.resolve.outputs.restic_env }}
     env:
       RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
       RESTIC_PASSWORD_INPUT: ${{ secrets.RESTIC_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: npm
@@ -58,8 +72,11 @@ jobs:
       - name: Install Restic
         run: |
           set -euo pipefail
+          RESTIC_VERSION="0.18.1"
+          RESTIC_SHA256="680838f19d67151adba227e1570cdd8af12c19cf1735783ed1ba928bc41f363d"
           curl -fsSL -o /tmp/restic.bz2 \
-            https://github.com/restic/restic/releases/download/v0.18.1/restic_0.18.1_linux_amd64.bz2
+            "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2"
+          echo "${RESTIC_SHA256}  /tmp/restic.bz2" | sha256sum -c -
           bunzip2 /tmp/restic.bz2
           chmod +x /tmp/restic
           sudo mv /tmp/restic /usr/local/bin/restic
@@ -87,23 +104,67 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
+
+          # A tag counts as a real release only if it does not carry a
+          # prerelease marker. Mirrors release.yml's own prerelease test
+          # (contains '-rc.' / '-alpha.' / '-beta.') so docs promotion never
+          # disagrees with what the GitHub Release / crates.io gates decide.
+          is_prerelease() {
+            case "$1" in
+              *-rc.*|*-alpha.*|*-beta.*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # Newest tag that is a real release (excludes -rc./-alpha./-beta.).
+          # Used as the DOCS_LATEST_VERSION fallback whenever the current
+          # push is not itself promoting a new latest.
+          latest_release_tag() {
+            git tag --list 'v*' --sort=-v:refname 2>/dev/null | while read -r t; do
+              if ! is_prerelease "$t"; then
+                echo "$t"
+                break
+              fi
+            done
+          }
+
+          # Full accumulated version history for the versions.json manifest
+          # (see Chetan's PR #103 review: a manifest built from a single
+          # VERSION drops every earlier release from the version picker on
+          # each new publish). Includes prerelease tags too, since after a
+          # restore they do have their own live versioned path.
+          all_release_tags() {
+            git tag --list 'v*' --sort=-v:refname 2>/dev/null | tr '\n' ' '
+          }
+
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
-            latest_flag="1"
-            latest_version="${version}"
             restic_env="production"
-            echo "Tag push ${version}: publishing release with LATEST=1 to restic-env-production." \
-              >> "$GITHUB_STEP_SUMMARY"
+            if is_prerelease "${version}"; then
+              latest_flag="0"
+              latest_version="$(latest_release_tag)"
+              if [ -z "${latest_version}" ]; then
+                latest_version="${version}-fallback"
+              fi
+              echo "Tag push ${version}: prerelease tag, publishing with LATEST=0 (latest stays ${latest_version}) to restic-env-production." \
+                >> "$GITHUB_STEP_SUMMARY"
+            else
+              latest_flag="1"
+              latest_version="${version}"
+              echo "Tag push ${version}: publishing release with LATEST=1 to restic-env-production." \
+                >> "$GITHUB_STEP_SUMMARY"
+            fi
+            release_versions="$(all_release_tags)"
           else
             short="$(git rev-parse --short=7 HEAD)"
             version="v0.dev-${short}"
             latest_flag="0"
-            latest_version="$(git tag --list 'v*' --sort=-v:refname \
-              | head -n1 || true)"
+            latest_version="$(latest_release_tag)"
             if [ -z "${latest_version}" ] || [ "${latest_version}" = "${version}" ]; then
               latest_version="${version}-fallback"
             fi
             restic_env="staging"
+            release_versions="$(all_release_tags) ${version}"
             echo "Branch push ${short}: publishing dev preview ${version} with LATEST=0 to restic-env-staging." \
               >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -111,6 +172,7 @@ jobs:
             echo "version=${version}"
             echo "latest=${latest_flag}"
             echo "latest_version=${latest_version}"
+            echo "release_versions=${release_versions}"
             echo "restic_env=${restic_env}"
           } >> "$GITHUB_OUTPUT"
 
@@ -119,6 +181,7 @@ jobs:
           VERSION: ${{ steps.resolve.outputs.version }}
           LATEST_VERSION: ${{ steps.resolve.outputs.latest_version }}
           LATEST_FLAG: ${{ steps.resolve.outputs.latest }}
+          RELEASE_VERSIONS: ${{ steps.resolve.outputs.release_versions }}
         working-directory: external-docs
         run: |
           set -euo pipefail
@@ -127,7 +190,7 @@ jobs:
           if [ "${LATEST_FLAG}" = "1" ]; then
             make build-latest VERSION="${VERSION}"
           fi
-          make package VERSION="${VERSION}" DOCS_LATEST_VERSION="${LATEST_VERSION}"
+          make package VERSION="${VERSION}" DOCS_LATEST_VERSION="${LATEST_VERSION}" DOCS_RELEASE_VERSIONS="${RELEASE_VERSIONS}"
 
       - name: Publish docs to Restic
         env:
@@ -170,10 +233,15 @@ jobs:
   restore-docs:
     name: Restore docs to docs.metrum.ai
     needs: [publish-docs]
+    # Restore runs for every tag push (final or -rc./-alpha./-beta.), not
+    # only when latest=1: a prerelease tag still needs its own versioned
+    # path deployed, it just must not touch the /latest/ alias. The archive
+    # itself carries no latest/ tree for a non-promoted version (see
+    # package-docs.py) and the restore script only touches /latest/ when
+    # the archive it extracted actually has one, so this is safe either way.
     if: >
       always() && (
-        (needs.publish-docs.result == 'success' &&
-         needs.publish-docs.outputs.latest == '1') ||
+        (needs.publish-docs.result == 'success' && github.ref_type == 'tag') ||
         github.event.inputs.docs_version != ''
       )
     runs-on: [self-hosted, linux, x64, bench-cli-docs-deploy]
@@ -317,11 +385,18 @@ jobs:
             fi
             sleep 2
           done
+          # The version we just restored must be reachable at its own path -
+          # this is a hard failure, not a warning, since it is exactly what
+          # this run was supposed to deploy.
           if curl -fsS --max-time 10 "https://docs.metrum.ai/metrum-ai-bench-cli/${VERSION}/index.html" > /dev/null 2>&1; then
             echo "Versioned path OK: /metrum-ai-bench-cli/${VERSION}/"
           else
-            echo "Warning: versioned path /metrum-ai-bench-cli/${VERSION}/index.html not reachable."
+            echo "Error: versioned path /metrum-ai-bench-cli/${VERSION}/index.html not reachable." >&2
+            exit 1
           fi
+          # /latest/ is only expected to have moved for a promoted (non-rc)
+          # release; a prerelease tag intentionally leaves it untouched, so
+          # this stays a warning rather than a hard failure.
           if curl -fsS --max-time 10 "https://docs.metrum.ai/metrum-ai-bench-cli/latest/" > /dev/null 2>&1; then
             echo "Latest alias OK: /metrum-ai-bench-cli/latest/"
           else
