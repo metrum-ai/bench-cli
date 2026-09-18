@@ -2,7 +2,10 @@
 
 ## 1.0.0 (2026-09-18)
 
-First stable release after the 1.0.0-rc series.
+First stable release after the 1.0.0-rc series. This tag was re-cut after a
+history rewrite that removes `docs/OSS_READINESS_ASSESSMENT.md` from every
+published ref; release archives and Sigstore bundles are regenerated for the
+rewritten commit.
 
 ### Added
 - `docs/REASONING_MODELS.md`: operator guide for thinking models (TTFT vs
@@ -14,6 +17,11 @@ First stable release after the 1.0.0-rc series.
   binary.
 - `--quiet` and `NO_BANNER=1`: suppress ASCII banner art; one-line identity
   remains. Documented in README Install and regenerated `docs/CLI.md`.
+- Shared `chat_stream` consumer for LLM, VLM, and strategic chat streaming.
+- `metrum-ai-bench-strategic --streaming`: opt-in SSE for chat turns with
+  per-turn `first_byte_s` / `ttft_s` and TTFT SLO enforcement.
+- Known limitation: gateways that synthesize SSE from unary upstream calls
+  report total latency as TTFT (undetectable client-side).
 
 ### Fixed
 - `metrum-ai-bench-prompts` Hub checksum verification is scoped to the
@@ -28,6 +36,10 @@ First stable release after the 1.0.0-rc series.
   that the release workflow actually attaches (#100).
 
 ### Changed
+- Customer-facing product name standardized as **Metrum AI Bench CLI**.
+- Counsel-pending drafts (`TRADEMARKS.md`, `docs/NAMING.md`,
+  `docs/CLAIMS_LEDGER.md`, `docs/RESULTS_PUBLICATION_POLICY.md`) and internal
+  campaign/evidence docs removed from the public tree pending sign-off.
 - `--url` and `--api-key` are mutually required at clap parse time on llm,
   vlm, asr, and imagegen (endpoints-file path unchanged). Help text states
   Bearer-token semantics and the `dummy` placeholder.

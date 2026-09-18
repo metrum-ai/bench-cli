@@ -2,10 +2,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 ---
-# DRAFT — not uploaded
+# DRAFT - not uploaded
 pretty_name: "Metrum AI Bench prompt / media fixtures (draft)"
 dataset_name: metrum-ai/bench-prompts
-license: "PLACEHOLDER — decision pending; options CC-BY-4.0 / ODC-BY-1.0"
+license: "PLACEHOLDER - decision pending; options CC-BY-4.0 / ODC-BY-1.0"
 task_categories:
   - other
 language:
@@ -20,7 +20,7 @@ size_categories:
   - n<1K
 ---
 
-# Dataset Card for `metrum-ai/bench-prompts` — DRAFT — not uploaded
+# Dataset Card for `metrum-ai/bench-prompts` - DRAFT - not uploaded
 
 > This file is a **draft** Hugging Face dataset card. It has **not** been
 > uploaded. License choice is pending. Do not treat filenames or splits below
@@ -45,7 +45,7 @@ separately; it does **not** claim this git tree hosts the prompt-library corpus.
 
 ## License
 
-**Placeholder — decision pending.** Candidate options under discussion:
+**Placeholder - decision pending.** Candidate options under discussion:
 
 - CC-BY-4.0
 - ODC-BY-1.0
@@ -99,7 +99,7 @@ revision and a CHANGELOG note on the Hub card.
   author       = {Metrum AI, Inc.},
   year         = {2026},
   howpublished = {\url{https://github.com/metrum-ai/bench-cli}},
-  note         = {DRAFT — dataset not uploaded; license pending}
+  note         = {DRAFT - dataset not uploaded; license pending}
 }
 ```
 

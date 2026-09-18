@@ -61,7 +61,7 @@ Within a tier, prefer fewer GPUs, then lower hourly price.
 ./scripts/live/shadeform.sh create --engine vllm --modality llm
 ./scripts/live/shadeform.sh create --engine sglang --modality llm
 
-# Real create — only when you are ready to spend money
+# Real create - only when you are ready to spend money
 ./scripts/live/shadeform.sh create --engine vllm --modality llm --execute
 
 # Wait until the instance is active; prints IP
@@ -93,7 +93,7 @@ Results should go under gitignored `live-results/` (added by the hygiene PR).
 
 After local tests and release verification are green, launch **one GPU per
 lane in parallel**, keep them until validate + `docs/SMOKE_RESULTS.md` exist,
-then teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
+then teardown. See [published smoke results](../../docs/SMOKE_RESULTS.md).
 
 ```bash
 ./scripts/live/campaign.sh plan
@@ -107,7 +107,7 @@ then teardown. See [docs/CAMPAIGN.md](../../docs/CAMPAIGN.md).
 
 Artifacts ship via GitHub Releases (not private backup tooling).
 
-## Teardown — always trap DELETE
+## Teardown - always trap DELETE
 
 Shadeform bills while the VM exists. **Always** register a trap that deletes
 the instance on exit (success, failure, or Ctrl-C):

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Fail if authored source files lack a Copyright line and SPDX-License-Identifier.
-# Also enforces product-naming rules (see docs/NAMING.md / .naming-allow).
+# Also enforces product-naming rules (see .naming-allow).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -80,7 +80,7 @@ check_headers() {
   return 0
 }
 
-# $1 file, $2 line text — true if .naming-allow covers this hit.
+# $1 file, $2 line text - true if .naming-allow covers this hit.
 allowlisted() {
   local f="$1" txt="$2" glob re
   [ -f .naming-allow ] || return 1
@@ -92,11 +92,12 @@ allowlisted() {
   return 1
 }
 
-# Product-naming rule. See docs/NAMING.md. Fails CI on any unapproved form.
+# Approved name: Metrum AI Bench CLI (short form: Bench CLI).
+# Binary/crate names remain metrum-ai-bench. Reject unapproved legacy forms.
 check_naming() {
   local rc=0
   local -a forbidden=(
-    'MetrumBench'                # never; only metrum-ai-bench / Metrum AI Bench
+    'MetrumBench'                # never; use metrum-ai-bench / Metrum AI Bench CLI
     '\bmetrumbench\b'            # old crate name; shims allowlisted
     'Insights CLI'
     'Bench by Metrum'
@@ -107,7 +108,6 @@ check_naming() {
     | grep -vE '^(CHANGELOG\.md|docs/HISTORY_REWRITE\.md|HISTORY_REWRITE\.md|\.naming-allow)$' \
     | grep -vE '^(scripts/check_headers\.sh|scripts/tests/check_naming_test\.sh)$' \
     | grep -vE '^scripts/tests/gitleaks/' \
-    | grep -vE '^(docs/NAMING\.md|TRADEMARKS\.md)$' \
     | grep -vE '^docs/reviews/QUALITY_ASSESSMENT_(REPORT|PROMPT)\.md$' \
     | grep -vE '\.(png|mp3|lock)$' || true)
   if [[ -z "$files" ]]; then
@@ -128,7 +128,7 @@ check_naming() {
     [ -z "${f:-}" ] && continue
     echo "$txt" | grep -q 'formerly Metrum Insights' && continue
     allowlisted "$f" "$txt" && continue
-    echo "naming: $f:$ln: 'Metrum Insights' only allowed as 'Metrum AI Bench, formerly Metrum Insights'" >&2
+    echo "naming: $f:$ln: 'Metrum Insights' only allowed as 'Metrum AI Bench CLI, formerly Metrum Insights'" >&2
     rc=1
   done < <(echo "$files" | xargs -r grep -nH 'Metrum Insights' 2>/dev/null || true)
   if [[ "$rc" -eq 0 ]]; then

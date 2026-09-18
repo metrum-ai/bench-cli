@@ -13,6 +13,11 @@ Bench is a load-generation **client**. It measures what the client observes
 observe GPU utilization, KV-cache state, or scheduler internals on the server
 except when you optionally scrape a metrics URL from the strategic runner.
 
+## Gateways that synthesize streaming
+
+Gateways that synthesize SSE from unary upstream calls report total latency
+as TTFT. This behavior is undetectable client-side.
+
 ## SUT is declared, not verified
 
 `--sut` / `--require-sut` embed an operator-supplied system-under-test

@@ -180,7 +180,7 @@ create_one() {
     L40S) region="desmoines-usa-1" ;;
     *) die "unsupported type ${typ}" ;;
   esac
-  # Prefer kansascity if desmoines unavailable — shadeform create will fail loudly.
+  # Prefer kansascity if desmoines unavailable - shadeform create will fail loudly.
   mkdir -p "${root}/launch-logs"
   local extra=( )
   if [[ "${typ}" == "L40Sx2" ]]; then
@@ -374,7 +374,7 @@ run_asr_cell() {
   local audio="${REPO_ROOT}/test-data/dummy.mp3"
   [[ -f "${audio}" ]] || audio="${root}/fixtures/dummy.mp3"
   if [[ ! -f "${audio}" ]]; then
-    printf 'ID3' >"${audio}"  # minimal placeholder; server may error — recorded
+    printf 'ID3' >"${audio}"  # minimal placeholder; server may error - recorded
   fi
   input_jsonl="${out}/input.jsonl"
   : >"${input_jsonl}"
@@ -459,8 +459,8 @@ cmd_validate() {
 }
 
 cmd_report() {
-  # Matrix owns docs/SMOKE_RESULTS.md (do not call campaign.sh report — it overwrites).
-  # TTFT = ttft_s / summary.v3.ttft_s / stdout TTFT line only — never first_byte_s.
+  # Matrix owns docs/SMOKE_RESULTS.md (do not call campaign.sh report - it overwrites).
+  # TTFT = ttft_s / summary.v3.ttft_s / stdout TTFT line only - never first_byte_s.
   python3 - <<'PY' "${root}" "${REPO_ROOT}/docs/SMOKE_RESULTS.md" "${campaign_id}"
 import json, pathlib, re, sys
 from datetime import datetime
@@ -483,7 +483,7 @@ def pct(xs, p):
 
 def fmt(x, nd=3):
     if x is None:
-        return "—"
+        return "-"
     if isinstance(x, float):
         return f"{x:.{nd}f}"
     return str(x)
@@ -552,7 +552,7 @@ for path in jsonl_paths:
         else:
             win = summary.get("window_seconds")
             rps = summary.get("requests_per_second")
-            match = "—"
+            match = "-"
     if ttft_p50 is None:
         ttft_p50, ttft_p95 = ttft_from_stdout(path.parent)
     cells.append({
@@ -560,7 +560,7 @@ for path in jsonl_paths:
         "n": len(reqs), "err": errs,
         "lat_p50": pct(lats, 50), "lat_p95": pct(lats, 95),
         "ttft_p50": ttft_p50, "ttft_p95": ttft_p95,
-        "window": win, "rps": rps, "match": match or "—",
+        "window": win, "rps": rps, "match": match or "-",
     })
 
 # Fallback when JSONL purged: rebuild rows from stdout + prior aggregate (if shaped).
@@ -610,7 +610,7 @@ for modality in ("llm", "vlm", "asr"):
                 "ttft_p50": tp50 if tp50 is not None else prev.get("ttft_p50"),
                 "ttft_p95": tp95 if tp95 is not None else prev.get("ttft_p95"),
                 "window": prev.get("window"), "rps": prev.get("rps"),
-                "match": prev.get("match", "—"),
+                "match": prev.get("match", "-"),
             })
 
 cells.sort(key=lambda c: (c["modality"], c["model"], c["cell"]))
@@ -625,8 +625,8 @@ def table(mod):
         lines.append(
             "| `{model}` | {cell} | {n} | {err} | {lp50} | {lp95} | {tp50} | {tp95} | {win} | {rps} | {m} |".format(
                 model=c["model"], cell=c["cell"],
-                n=fmt(c["n"], 0) if isinstance(c["n"], float) else (c["n"] if c["n"] is not None else "—"),
-                err=fmt(c["err"], 0) if isinstance(c["err"], float) else (c["err"] if c["err"] is not None else "—"),
+                n=fmt(c["n"], 0) if isinstance(c["n"], float) else (c["n"] if c["n"] is not None else "-"),
+                err=fmt(c["err"], 0) if isinstance(c["err"], float) else (c["err"] if c["err"] is not None else "-"),
                 lp50=fmt(c["lat_p50"]), lp95=fmt(c["lat_p95"]),
                 tp50=fmt(c["ttft_p50"]), tp95=fmt(c["ttft_p95"]),
                 win=fmt(c["window"], 4), rps=fmt(c["rps"]), m=c["match"],
@@ -641,7 +641,7 @@ if (root / "manifest.json").is_file():
 body = f"""<!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Smoke results — campaign `{cid}`
+# Smoke results - campaign `{cid}`
 
 Shadeform smoke against the **Test Matrix for Metrum Bench CLI** (PERFORMANCE TESTS).
 Raw JSONL under gitignored `live-results/`; this document is the public summary.
@@ -678,15 +678,15 @@ Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request `ttft_s` (never `first_byte_s`). When JSONL is absent, TTFT is recovered from cell `stdout.txt`.
 
-### LLM — closed-loop (sheet conc 32/64/128)
+### LLM - closed-loop (sheet conc 32/64/128)
 
 {table('llm')}
 
-### VLM — closed-loop (sheet conc 8/16/32)
+### VLM - closed-loop (sheet conc 8/16/32)
 
 {table('vlm')}
 
-### ASR — closed-loop (sheet conc 32/64/128)
+### ASR - closed-loop (sheet conc 32/64/128)
 
 {table('asr')}
 

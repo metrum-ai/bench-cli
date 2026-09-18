@@ -1,17 +1,17 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Metrum AI Bench
+# Metrum AI Bench CLI
 
 [![CI](https://github.com/metrum-ai/bench-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/metrum-ai/bench-cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/metrum-ai/bench-cli)](https://github.com/metrum-ai/bench-cli/releases)
 
-Apache-2.0 licensed load and performance measurement for OpenAI-compatible
-LLM, VLM, ASR, and image-generation endpoints. Current release: **1.0.0**
-([CHANGELOG](CHANGELOG.md)).
+Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
+for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
+release: **1.0.0** ([CHANGELOG](CHANGELOG.md)).
 
-Metrum AI Bench measures one environment and produces a result with a
+Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
 and attests.
 
@@ -115,7 +115,7 @@ TTFT that counts reasoning looks falsely fast. Read
 
 ## Publishing a result
 
-A published number that names Metrum AI Bench must carry an unmodified run
+A published number that names Bench CLI must carry an unmodified run
 summary with a SUT block. Produce a compliant run with:
 
 ```bash
@@ -149,12 +149,8 @@ defaulted `provenance` is optional; omit or null what you do not know:
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
 must trace to a `summary.json` (or the closing `metrum-ai-bench.summary.v3`
-line in a published results directory); see
-[docs/RESULTS_PUBLICATION_POLICY.md](docs/RESULTS_PUBLICATION_POLICY.md).
-
-A claim that omits the manifest (including the SUT block) is **not** a
-Metrum AI Bench result under the publication policy, even if the software was
-used. See also [TRADEMARKS.md](TRADEMARKS.md).
+line in a published results directory). See
+[output schema](docs/OUTPUT_SCHEMA.md) for the summary and SUT fields.
 
 ## Input formats
 
@@ -338,6 +334,3 @@ smoke matrix, unofficial MLPerf export, and more):
 ## License
 
 Apache License 2.0. See `LICENSE`.
-
-Metrum AI and Metrum AI Bench are trademarks of Metrum AI, Inc. See
-[TRADEMARKS.md](TRADEMARKS.md).

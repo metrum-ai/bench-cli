@@ -1,9 +1,12 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 [package]
 name = "metrum-ai-bench"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.85"
-description = "Load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
+description = "Metrum AI Bench CLI: load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
 license = "Apache-2.0"
 authors = ["Chetan Gadgil", "Metrum AI, Inc."]
 repository = "https://github.com/metrum-ai/bench-cli"
@@ -19,7 +22,6 @@ exclude = [
     "dummy-model-server/**",
     "scripts/live/**",
     "docs/reviews/**",
-    "docs/CAMPAIGN.md",
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",
     "test-data/endpoints-4servers.yaml",

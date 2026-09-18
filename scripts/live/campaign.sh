@@ -39,7 +39,7 @@ Commands:
 
 Default is dry-run. --execute is required to create, sweep, or delete.
 Keep instances until validate + report (docs/SMOKE_RESULTS.md) are done.
-Artifacts ship via GitHub Releases — no private backup step.
+Artifacts ship via GitHub Releases - no private backup step.
 EOF
 }
 
@@ -323,7 +323,7 @@ def pct(xs, p):
 
 def fmt(v, digits=3):
     if v is None:
-        return "—"
+        return "-"
     return f"{v:.{digits}f}"
 
 rows = []
@@ -419,7 +419,7 @@ for r in asr:
 img_lines = []
 for r in imagegen_rows:
     img_lines.append(
-        f"| {r['cell']} | {r.get('successful_requests') or '—'} | "
+        f"| {r['cell']} | {r.get('successful_requests') or '-'} | "
         f"{fmt(r.get('images_per_second'))} | {fmt(r.get('latency_ms_p50'))} |"
     )
 
@@ -429,7 +429,7 @@ lines = [
     "<!-- Copyright (c) 2026 Metrum AI, Inc. -->",
     "<!-- SPDX-License-Identifier: Apache-2.0 -->",
     "",
-    f"# Smoke results — campaign `{campaign_id}`",
+    f"# Smoke results - campaign `{campaign_id}`",
     "",
     "Consolidated multi-modality smoke after local gates. Raw JSONL stays under",
     "gitignored `live-results/`; this document is the public, releasable summary",
@@ -449,17 +449,17 @@ lines = [
     "",
     "| Item | Value |",
     "|------|-------|",
-    f"| Cloud / region | {sut.get('cloud', 'Shadeform')} / {sut.get('region', '—')} |",
-    f"| Instance type | {sut.get('shade_instance_type', '—')} / {sut.get('cloud_instance_type', '—')} |",
-    f"| GPU | {gpu.get('name', '—')} ×{gpu.get('count', 1)} |",
-    f"| VRAM | {gpu.get('vram_gib', '—')} GiB |",
-    f"| Host OS | {sut.get('os', '—')} |",
-    f"| NVIDIA driver | **{gpu.get('driver', '—')}** |",
-    f"| Host CUDA (driver) | **{gpu.get('cuda', '—')}** |",
-    f"| Model server | **{server.get('name', 'vLLM')} {server.get('version', '—')}** |",
-    f"| Container image | `{server.get('image', '—')}` |",
-    f"| Image digest | `{server.get('digest', '—')}` |",
-    f"| Torch / CUDA (container) | {server.get('torch', '—')} / {server.get('torch_cuda', '—')} |",
+    f"| Cloud / region | {sut.get('cloud', 'Shadeform')} / {sut.get('region', '-')} |",
+    f"| Instance type | {sut.get('shade_instance_type', '-')} / {sut.get('cloud_instance_type', '-')} |",
+    f"| GPU | {gpu.get('name', '-')} ×{gpu.get('count', 1)} |",
+    f"| VRAM | {gpu.get('vram_gib', '-')} GiB |",
+    f"| Host OS | {sut.get('os', '-')} |",
+    f"| NVIDIA driver | **{gpu.get('driver', '-')}** |",
+    f"| Host CUDA (driver) | **{gpu.get('cuda', '-')}** |",
+    f"| Model server | **{server.get('name', 'vLLM')} {server.get('version', '-')}** |",
+    f"| Container image | `{server.get('image', '-')}` |",
+    f"| Image digest | `{server.get('digest', '-')}` |",
+    f"| Torch / CUDA (container) | {server.get('torch', '-')} / {server.get('torch_cuda', '-')} |",
     f"| LLM model | `{sut.get('llm_model', 'Qwen/Qwen2.5-7B-Instruct')}` |",
     f"| VLM model | `{sut.get('vlm_model', 'Qwen/Qwen2.5-VL-7B-Instruct')}` |",
     "",
@@ -470,39 +470,39 @@ lines = [
     "",
     "## Results",
     "",
-    "### LLM — closed-loop concurrency",
+    "### LLM - closed-loop concurrency",
     "",
     table(
         ["Cell", "n", "latency p50", "latency p95", "TTFT p50", "TTFT p95"],
         lat_rows(llm_closed),
     ),
     "",
-    "### LLM — open-loop request rate",
+    "### LLM - open-loop request rate",
     "",
     table(
         ["Cell", "n", "latency p50", "latency p95", "TTFT p50", "TTFT p95"],
         lat_rows(llm_rate),
     ),
     "",
-    "### VLM — concurrency",
+    "### VLM - concurrency",
     "",
     table(
         ["Cell", "n", "latency p50", "latency p95", "TTFT p50", "TTFT p95"],
         lat_rows(vlm),
     ),
     "",
-    "### ASR — dummy-certified",
+    "### ASR - dummy-certified",
     "",
     table(
         ["Cell", "n", "latency p50 (s)", "RTFx client p50", "WER p50"],
-        asr_lines or ["| — | — | — | — | — |"],
+        asr_lines or ["| - | - | - | - | - |"],
     ),
     "",
-    "### Imagegen — dummy-certified",
+    "### Imagegen - dummy-certified",
     "",
     table(
         ["Cell", "Successful images", "Images/s", "Latency p50 (ms)"],
-        img_lines or ["| — | — | — | — |"],
+        img_lines or ["| - | - | - | - |"],
     ),
     "",
     "## Reproducing",

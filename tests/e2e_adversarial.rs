@@ -288,3 +288,21 @@ fn error_kind(error: &Value) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| error.to_string())
 }
+
+#[test]
+fn llm_mid_stream_error_is_api_error() {
+    let Some(dummy) = spawn_dummy(&["-error-rate", "1"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    assert!(run_llm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        1,
+        &[]
+    ));
+    let records = request_records(&fixture.data_log);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["error"]["kind"], "api_error");
+}

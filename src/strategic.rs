@@ -26,6 +26,12 @@ pub struct BenchRecord {
     pub queue_delay_s: f64,
     /// Send-to-completion service latency.
     pub service_latency_s: f64,
+    /// Send-to-response-headers timing, matching the chat benchmark binaries.
+    #[serde(default)]
+    pub first_byte_s: Option<f64>,
+    /// Send-to-first-visible-output timing; absent for unary responses.
+    #[serde(default)]
+    pub ttft_s: Option<f64>,
     pub success: bool,
     pub valid: Option<bool>,
     pub input_tokens: u64,
@@ -66,7 +72,12 @@ fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) 
             return false;
         }
     }
-    // Strategic records do not carry TTFT/TPOT; those SLO keys are ignored here.
+    if let (Some(limit), Some(ttft)) = (slos.ttft_s, record.ttft_s) {
+        if ttft > limit {
+            return false;
+        }
+    }
+    // TPOT is not measured by strategic records.
     true
 }
 
@@ -436,15 +447,15 @@ pub fn export_html(
                 point
                     .p95_s
                     .map(|value| format!("{value:.3}"))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .unwrap_or_else(|| "-".to_string()),
                 point
                     .p99_s
                     .map(|value| format!("{value:.3}"))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .unwrap_or_else(|| "-".to_string()),
                 point
                     .error_rate
                     .map(|value| format!("{:.2}%", value * 100.0))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .unwrap_or_else(|| "-".to_string()),
                 point.goodput
             )
         })
@@ -739,6 +750,8 @@ mod tests {
             latency_s,
             queue_delay_s: 0.0,
             service_latency_s: latency_s,
+            first_byte_s: None,
+            ttft_s: None,
             success: true,
             valid: None,
             input_tokens: 0,
@@ -747,6 +760,20 @@ mod tests {
             turn: None,
             error: None,
         };
+        let slos = crate::summary::SloConfig {
+            ttft_s: Some(0.5),
+            ..Default::default()
+        };
+        let mut timed = record(0, 1.0);
+        assert!(strategic_meets_slos(&timed, &slos));
+        timed.ttft_s = Some(0.5);
+        assert!(strategic_meets_slos(&timed, &slos));
+        timed.ttft_s = Some(0.6);
+        assert!(!strategic_meets_slos(&timed, &slos));
+        let point = summarize_stage(1.0, &[timed], 1.0, &slos, None);
+        assert_eq!(point.goodput, 0.0);
+        assert_eq!(point.throughput, 1.0);
+
         let point = summarize_stage(
             1.0,
             &[
@@ -784,6 +811,8 @@ mod tests {
             latency_s: 0.25,
             queue_delay_s: 0.02,
             service_latency_s: 0.23,
+            first_byte_s: None,
+            ttft_s: None,
             success: true,
             valid: None,
             input_tokens: 1,
@@ -851,6 +880,8 @@ mod tests {
             latency_s: 0.5,
             queue_delay_s: 0.1,
             service_latency_s: 0.4,
+            first_byte_s: None,
+            ttft_s: None,
             success: true,
             valid: Some(true),
             input_tokens: 2,

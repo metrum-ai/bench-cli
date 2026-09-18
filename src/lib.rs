@@ -3,6 +3,7 @@
 
 pub mod args_common;
 pub mod asr;
+pub mod chat_stream;
 pub mod endpoints;
 pub mod environment;
 pub mod error;

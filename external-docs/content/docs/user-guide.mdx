@@ -135,8 +135,8 @@ interval.
 
 ## Publishing-oriented runs {#publishing-oriented-runs}
 
-A published number that **names** Metrum AI Bench must carry an unmodified run
-summary with a SUT block:
+`--sut` / `--require-sut` are required to publish a Metrum AI Bench CLI result.
+Include the unmodified run summary with its SUT block:
 
 ```bash
 metrum-ai-bench llm -- \
@@ -148,8 +148,7 @@ metrum-ai-bench llm -- \
 `--redact-hostname`. Example files ship as `examples/sut.example.json` and
 `examples/sut.example.yaml`.
 
-Policy summary: [Results publication](./results-publication). The SUT is
-**declared**, not probed — see [Known limitations](./limitations).
+The SUT is **declared**, not probed. See [Known limitations](./limitations).
 
 ---
 

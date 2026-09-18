@@ -45,6 +45,12 @@ struct Args {
     model: Option<String>,
     #[arg(long, value_enum, default_value = "chat")]
     kind: EndpointKind,
+    #[arg(
+        long,
+        conflicts_with = "tools",
+        help = "Stream chat responses to measure TTFT; embeddings and rerank remain JSON"
+    )]
+    streaming: bool,
     #[arg(long, default_value_t = 100)]
     requests_per_stage: u64,
     #[arg(long, default_value = "1,2,4,8")]
@@ -91,7 +97,7 @@ struct Args {
     #[arg(
         long = "slo",
         value_name = "METRIC=SECONDS",
-        help = "Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)"
+        help = "Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured"
     )]
     slos: Vec<String>,
 }
@@ -158,7 +164,10 @@ fn make_inputs(
                     args.prefix_control,
                     &session.session_id,
                 );
-                let mut body = json!({"model":model,"messages":messages});
+                let mut body = json!({"model":model,"messages":messages,"stream":args.streaming});
+                if args.streaming {
+                    body["stream_options"] = json!({"include_usage": true});
+                }
                 add_structured(&mut body, schema, tools);
                 inputs.push(Input {
                     body,
@@ -177,7 +186,7 @@ fn make_inputs(
                 args.prefix_control,
                 "default",
             );
-            json!({"model":model,"messages":messages})
+            json!({"model":model,"messages":messages,"stream":args.streaming})
         }
         EndpointKind::Embeddings => json!({"model":model,"input":args.prompt}),
         EndpointKind::Rerank => {
@@ -185,6 +194,9 @@ fn make_inputs(
             json!({"model":model,"query":documents.first().copied().unwrap_or(""),"documents":documents.iter().skip(1).collect::<Vec<_>>()})
         }
     };
+    if args.streaming && matches!(args.kind, EndpointKind::Chat) {
+        body["stream_options"] = json!({"include_usage": true});
+    }
     add_structured(&mut body, schema, tools);
     Ok(vec![Input {
         body,
@@ -251,6 +263,7 @@ async fn run_stage(
     .max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let kind = args.kind;
+    let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
     let start = Instant::now();
     let stage_unix_ns = now_unix_ns();
     let mut handles = Vec::with_capacity(args.requests_per_stage as usize);
@@ -280,26 +293,30 @@ async fn run_stage(
                 .json(&input.body)
                 .send()
                 .await;
-            let (success, valid, input_tokens, output_tokens, error, completed) = match result {
-                Ok(response) => match response.error_for_status() {
-                    Ok(response) => match response.json::<Value>().await {
-                        Ok(value) => {
-                            let completed = Instant::now();
-                            let (input_tokens, output_tokens) = response_tokens(kind, &value);
-                            (
-                                true,
-                                validator.as_ref().map(|check| check.validate(&value)),
-                                input_tokens,
-                                output_tokens,
-                                None,
-                                completed,
-                            )
-                        }
-                        Err(error) => (false, None, 0, 0, Some(error.to_string()), Instant::now()),
-                    },
-                    Err(error) => (false, None, 0, 0, Some(error.to_string()), Instant::now()),
-                },
-                Err(error) => (false, None, 0, 0, Some(error.to_string()), Instant::now()),
+            let mut first_byte_s = None;
+            let mut ttft_s = None;
+            let result: Result<Value> = async {
+                let response = result?;
+                first_byte_s = Some(sent.elapsed().as_secs_f64());
+                let response = response.error_for_status()?;
+                if streaming {
+                    let stream = metrum_ai_bench::chat_stream::consume(response.bytes_stream(), sent).await?;
+                    ttft_s = Some(stream.ttft.as_secs_f64());
+                    Ok(json!({
+                        "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
+                        "usage": {"prompt_tokens": stream.prompt_tokens, "completion_tokens": stream.completion_tokens}
+                    }))
+                } else {
+                    Ok(response.json::<Value>().await?)
+                }
+            }.await;
+            let completed = Instant::now();
+            let (success, valid, input_tokens, output_tokens, error) = match result {
+                Ok(value) => {
+                    let (input_tokens, output_tokens) = response_tokens(kind, &value);
+                    (true, validator.as_ref().map(|check| check.validate(&value)), input_tokens, output_tokens, None)
+                }
+                Err(error) => (false, None, 0, 0, Some(error.to_string())),
             };
             drop(permit);
             BenchRecord {
@@ -311,6 +328,8 @@ async fn run_stage(
                 latency_s: completed.saturating_duration_since(scheduled).as_secs_f64(),
                 queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
                 service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
+                first_byte_s,
+                ttft_s,
                 success,
                 valid,
                 input_tokens,
@@ -403,6 +422,7 @@ async fn main() -> Result<()> {
         "prefix_control": format!("{:?}", args.prefix_control).to_ascii_lowercase(),
         "json_schema": args.json_schema.is_some(),
         "tools": args.tools.is_some(),
+        "streaming": args.streaming,
         // Secrets intentionally omitted (api_key never stamped).
     });
     // Warm connection pool across stages (single shared client).
@@ -492,6 +512,39 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_only_changes_chat_inputs() {
+        for kind in ["chat", "embeddings", "rerank"] {
+            for streaming in [false, true] {
+                let mut flags = vec![
+                    "bench",
+                    "--url",
+                    "http://localhost",
+                    "--model",
+                    "dummy",
+                    "--kind",
+                    kind,
+                ];
+                if streaming {
+                    flags.push("--streaming");
+                }
+                let args = Args::try_parse_from(flags).expect("args");
+                let inputs = make_inputs(&args, "dummy", None, None).expect("inputs");
+                let body = &inputs[0].body;
+                if kind == "chat" {
+                    assert_eq!(body["stream"], streaming);
+                    assert_eq!(
+                        body["stream_options"]["include_usage"].as_bool(),
+                        streaming.then_some(true)
+                    );
+                } else {
+                    assert!(body.get("stream").is_none());
+                    assert!(body.get("stream_options").is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn sweep_parser_rejects_invalid_values() {

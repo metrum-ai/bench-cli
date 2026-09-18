@@ -218,7 +218,7 @@ build_docker_config() {
 print_trap_hint() {
   cat <<'EOF'
 
-# Teardown — always trap DELETE on exit when holding a real instance:
+# Teardown - always trap DELETE on exit when holding a real instance:
 # INSTANCE_ID="<id-from-create>"
 # cleanup() { [[ -n "${INSTANCE_ID}" ]] && ./scripts/live/shadeform.sh delete "${INSTANCE_ID}" || true; }
 # trap cleanup EXIT

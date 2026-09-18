@@ -1,4 +1,5 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. Licensed under the Apache License, Version 2.0. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Security Policy
 
@@ -25,8 +26,8 @@ contain request payloads; do not share it without review.
 
 Run summaries may include `environment.hostname`. Prefer `--redact-hostname`
 (and publication flows that use `--require-sut`) before sharing results.
-Published-result rules and SUT/manifest expectations are in
-[docs/RESULTS_PUBLICATION_POLICY.md](docs/RESULTS_PUBLICATION_POLICY.md).
+See [Publishing a result](README.md#publishing-a-result) for SUT and run
+summary requirements.
 
 First-party Rust sources under `src/` contain no `unsafe` blocks.
 

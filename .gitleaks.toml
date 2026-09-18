@@ -32,15 +32,9 @@ regex = '''(?i)\b[a-z0-9][a-z0-9.-]*\.metrum\.ai\b'''
 keywords = ["metrum.ai"]
 
 [[allowlists]]
-description = "Fixture dir + pre-#44 history that still contains the removed leak class (tree is clean; Phase 3/GitHub purge for tags)"
+description = "Fixture dir for custom-rule regression tests only"
 paths = [
   '''scripts/tests/gitleaks/''',
-]
-commits = [
-  "59afa0ed12614de0e072c0ea304b2ae604177fa7",
-  "a3947d4af8add3e7aeb4daf8754bb2a2e8e745cf",
-  "bffdb7f79d0a38c94c42a23ba4d9f81d85a3155e",
-  "da80829d17502688b50d08e5ea1145e6c7082531"
 ]
 
 # Public customer docs site (not an internal host).

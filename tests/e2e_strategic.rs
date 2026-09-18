@@ -125,3 +125,96 @@ fn strategic_sweep_exports_all_formats() {
             && point["latency_s"]["percentile_method"] == "hyndman_fan_type7"
             && point["goodput_equals_throughput"] == true));
 }
+
+mod common;
+
+#[test]
+fn strategic_sessions_measure_ttft_only_when_streaming() {
+    let Some(dummy) = common::spawn_dummy(&["-latency", "20ms", "-chunk-interval", "2ms"]) else {
+        common::skip("go dummy-model-server not available");
+        return;
+    };
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let sessions = directory.path().join("sessions.jsonl");
+    fs::write(&sessions, r#"{"session_id":"s1","messages":[{"role":"user","content":"Hello"},{"role":"user","content":"Again"}]}"#).expect("sessions");
+    for streaming in [false, true] {
+        let csv = directory.path().join("records.csv");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"));
+        command
+            .args([
+                "--url",
+                &dummy.url("/v1/chat/completions"),
+                "--model",
+                "dummy",
+                "--sweep",
+                "1",
+                "--requests-per-stage",
+                "2",
+                "--slo",
+                "ttft=0.000001",
+            ])
+            .arg("--sessions")
+            .arg(&sessions)
+            .arg("--csv")
+            .arg(&csv)
+            .arg("--html")
+            .arg(directory.path().join("report.html"));
+        if streaming {
+            command.arg("--streaming");
+        }
+        let output = command.output().expect("run strategic");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let records: Vec<metrum_ai_bench::strategic::BenchRecord> = csv::Reader::from_path(&csv)
+            .expect("CSV")
+            .deserialize()
+            .collect::<Result<_, _>>()
+            .expect("records");
+        assert_eq!(records.len(), 2);
+        for (index, record) in records.iter().enumerate() {
+            assert!(record.success, "{:?}", record.error);
+            assert_eq!(record.session_id.as_deref(), Some("s1"));
+            assert_eq!(record.turn, Some(index + 1));
+            assert!(record.first_byte_s.is_some());
+            assert_eq!(record.ttft_s.is_some(), streaming);
+            if let Some(ttft) = record.ttft_s {
+                assert!(ttft >= 0.015 && ttft <= record.service_latency_s);
+                assert!(record.output_tokens > 0);
+            }
+        }
+        let summary: Value = serde_json::from_slice(&output.stdout).expect("summary");
+        let goodput = summary["points"][0]["goodput"].as_f64().expect("goodput");
+        if streaming {
+            assert_eq!(goodput, 0.0);
+        } else {
+            assert!(goodput > 0.0);
+        }
+    }
+}
+
+#[test]
+fn strategic_streaming_rejects_tools_clearly() {
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"))
+        .args([
+            "--url",
+            "http://127.0.0.1:1",
+            "--model",
+            "dummy",
+            "--tools",
+            "unused.json",
+            "--streaming",
+        ])
+        .output()
+        .expect("run strategic");
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("--tools")
+            && error.contains("--streaming")
+            && error.contains("cannot be used"),
+        "{error}"
+    );
+}

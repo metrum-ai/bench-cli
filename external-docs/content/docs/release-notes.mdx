@@ -22,8 +22,9 @@ in the repository `CHANGELOG.md`.
 | **Previous version** | 1.0.0-rc.6 |
 | **Release Date** | September 18, 2026 |
 
-First stable release. Includes the post-rc.6 CLI hardening plus prompt-library
-and release provenance fixes.
+First stable release. This tag was re-cut after a history sanitization rewrite;
+download the current GitHub Release assets and verify the regenerated Sigstore
+bundles rather than any earlier `v1.0.0` archive.
 
 ### Prompt library (Fixed)
 
@@ -39,10 +40,21 @@ and release provenance fixes.
 - Release verification examples use the v-prefixed archive names that ships
   attach.
 
+### Measurement and honesty (Added / Changed)
+
+- Shared streaming consumer for LLM and VLM; strategic chat supports opt-in
+  `--streaming` with per-turn TTFT.
+- Known limitations document gateways that synthesize SSE from unary upstream
+  calls (total latency reported as TTFT).
+- Product name aligned to **Metrum AI Bench CLI** across README, crate
+  description, and customer docs.
+
 ### Operator docs (Added / Changed)
 
 - Quiet / `NO_BANNER` controls, mutually required `--url` / `--api-key`, and
   agent-oriented README / CLI help updates from the rc.6 follow-ups.
+- Publication guidance centers on `--sut` / `--require-sut` without pointing
+  at counsel-pending draft policy files.
 
 ---
 
@@ -70,7 +82,7 @@ Release candidate: prompt-library mix extractor and a `rand` soundness bump.
 
 ### Dependencies (Changed)
 
-- Direct dependency `rand` 0.9.5 â†’ 0.10.2 (soundness fixes). Transitive
+- Direct dependency `rand` 0.9.5 -> 0.10.2 (soundness fixes). Transitive
   `tokenizers` still uses `rand` 0.9.x.
 
 ---

@@ -75,7 +75,7 @@ resize or `--reencode-jpeg` is requested; `modality_metrics.image_bytes`
 reflects what the server received. VLM honors `--system-prompt` (empty
 disables), `--min-tokens`, and `--tokenizer` like the LLM binary.
 `--tokenizer` requires a Cargo build with feature `tokenizer` (not enabled in
-GitHub Release archives — see [Platforms](./platforms)).
+GitHub Release archives - see [Platforms](./platforms)).
 
 ```bash
 printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
@@ -174,5 +174,5 @@ imagegen without a real model. See the repository `dummy-model-server/README.md`
 for modality-specific flags beyond the Quickstart defaults.
 
 For strategic sweeps, embeddings, and rerank, use the Rust
-`metrum-ai-bench-mock-server` instead — see
+`metrum-ai-bench-mock-server` instead - see
 [Strategic benchmarking](./strategic-benchmarking).

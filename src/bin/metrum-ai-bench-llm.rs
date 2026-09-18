@@ -4,7 +4,6 @@
 
 use chrono::Utc;
 use clap::Parser;
-use futures_util::StreamExt;
 use log::{debug, error, info, trace, warn};
 use metrum_ai_bench::endpoints::resolve_endpoints;
 use metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts;
@@ -257,100 +256,20 @@ async fn make_request(
             return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
         }
 
-        trace!("Request started streaming");
-        let mut stream = response.bytes_stream();
-        let mut parser = metrum_ai_bench::sse::SseParser::new();
-        let mut first_token_time = None;
-        let mut first_reasoning_time = None;
-        let mut last_token_at: Option<Instant> = None;
-        let mut itl: Vec<Duration> = Vec::new();
-        let mut prompt_tokens = 0;
-        let mut completion_tokens = 0;
-        let mut total_tokens = 0;
-        let mut done = false;
-        let mut saw_finish = false;
-        let mut completion_text = String::new();
-
-        while let Some(item) = stream.next().await {
-            let bytes = item.map_err(|e| metrum_ai_bench::error::RequestError::from_reqwest(&e))?;
-            for event in parser.feed(&bytes) {
-                match event {
-                    metrum_ai_bench::sse::SseEvent::Done => {
-                        done = true;
-                    }
-                    metrum_ai_bench::sse::SseEvent::Json(parsed) => {
-                        if let Some(error) = parsed.get("error") {
-                            return Err(metrum_ai_bench::error::RequestError::ApiError {
-                                message: error.to_string(),
-                            }
-                            .into());
-                        }
-                        if let Some(usage) = parsed.get("usage") {
-                            prompt_tokens = usage
-                                .get("prompt_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(prompt_tokens);
-                            completion_tokens = usage
-                                .get("completion_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(completion_tokens);
-                            total_tokens = usage
-                                .get("total_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(total_tokens);
-                        }
-                        if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
-                            for choice in choices {
-                                if metrum_ai_bench::sse::choice_finish_reason(choice).is_some() {
-                                    saw_finish = true;
-                                }
-                                if first_reasoning_time.is_none()
-                                    && metrum_ai_bench::sse::choice_has_reasoning_token(choice)
-                                {
-                                    first_reasoning_time = Some(start_time.elapsed());
-                                }
-                                if metrum_ai_bench::sse::choice_has_output_token(choice) {
-                                    let now = Instant::now();
-                                    if first_token_time.is_none() {
-                                        first_token_time = Some(start_time.elapsed());
-                                    } else if let Some(prev) = last_token_at {
-                                        itl.push(now.saturating_duration_since(prev));
-                                    }
-                                    last_token_at = Some(now);
-                                }
-                                if let Some(content) =
-                                    metrum_ai_bench::sse::choice_output_text(choice)
-                                {
-                                    completion_text.push_str(content);
-                                }
-                            }
-                        }
-                    }
-                    metrum_ai_bench::sse::SseEvent::Raw(_) => {}
-                }
-            }
-            if done {
-                break;
-            }
-        }
-
-        if !done && !saw_finish {
-            return Err(metrum_ai_bench::error::RequestError::StreamTruncated.into());
-        }
-        let Some(ttft) = first_token_time else {
-            return Err(metrum_ai_bench::error::RequestError::NoOutputToken.into());
-        };
+        let stream =
+            metrum_ai_bench::chat_stream::consume(response.bytes_stream(), start_time).await?;
+        let completion_text = stream.completion_text;
         trace!("Request completed successfully");
         let completion_word_count = count_words(&completion_text);
         Ok(StreamMetrics {
-            latency: start_time.elapsed(),
+            latency: stream.latency,
             first_byte,
-            ttft: Some(ttft),
-            first_reasoning: first_reasoning_time,
-            itl,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
+            ttft: Some(stream.ttft),
+            first_reasoning: stream.first_reasoning,
+            itl: stream.itl,
+            prompt_tokens: stream.prompt_tokens,
+            completion_tokens: stream.completion_tokens,
+            total_tokens: stream.total_tokens,
             prompt_words: prompt_word_count,
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
@@ -1104,44 +1023,6 @@ fn count_words(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
-#[allow(dead_code)]
-fn stream_choice_output_text(choice: &serde_json::Value) -> Option<&str> {
-    choice
-        .get("delta")
-        .and_then(|delta| delta.get("content"))
-        .and_then(|content| content.as_str())
-        .or_else(|| choice.get("text").and_then(|text| text.as_str()))
-}
-
-#[allow(dead_code)]
-fn stream_choice_has_output_token(choice: &serde_json::Value) -> bool {
-    if stream_choice_output_text(choice).is_some_and(|content| !content.is_empty()) {
-        return true;
-    }
-
-    let Some(delta) = choice.get("delta") else {
-        return false;
-    };
-
-    delta
-        .get("function_call")
-        .and_then(|function_call| function_call.get("arguments"))
-        .and_then(|arguments| arguments.as_str())
-        .is_some_and(|arguments| !arguments.is_empty())
-        || delta
-            .get("tool_calls")
-            .and_then(|tool_calls| tool_calls.as_array())
-            .is_some_and(|tool_calls| {
-                tool_calls.iter().any(|tool_call| {
-                    tool_call
-                        .get("function")
-                        .and_then(|function| function.get("arguments"))
-                        .and_then(|arguments| arguments.as_str())
-                        .is_some_and(|arguments| !arguments.is_empty())
-                })
-            })
-}
-
 /// Parse token count from JSON value; accepts u64 or i64 (clamped to 0).
 fn parse_token_count(v: &serde_json::Value) -> u64 {
     v.as_u64()
@@ -1151,9 +1032,10 @@ fn parse_token_count(v: &serde_json::Value) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        effective_ramp_up_seconds, error_message_indicates_oom, stream_choice_has_output_token,
-        stream_choice_output_text,
+    use super::{effective_ramp_up_seconds, error_message_indicates_oom};
+    use metrum_ai_bench::sse::{
+        choice_has_output_token as stream_choice_has_output_token,
+        choice_output_text as stream_choice_output_text,
     };
     use serde_json::json;
 

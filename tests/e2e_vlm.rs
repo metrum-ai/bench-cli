@@ -280,3 +280,21 @@ fn vlm_honors_system_prompt_and_min_tokens() {
     assert_eq!(body["min_tokens"], 3);
     assert_eq!(body["ignore_eos"], true);
 }
+
+#[test]
+fn vlm_mid_stream_error_is_api_error() {
+    let Some(dummy) = spawn_dummy(&["-error-rate", "1"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    run_vlm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        1,
+        &["--streaming"],
+    );
+    let records = request_records(&fixture.data_log);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["error"]["kind"], "api_error");
+}

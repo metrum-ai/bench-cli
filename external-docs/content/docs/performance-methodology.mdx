@@ -11,7 +11,7 @@ sidebar_position: 1
 This page defines how Metrum AI Bench CLI measures client-observed performance.
 All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 
-If a value is undefined, it serializes as null or absent — never as a measured
+If a value is undefined, it serializes as null or absent - never as a measured
 zero.
 
 ---
@@ -41,7 +41,7 @@ zero.
 | **Goodput** | Measured successes satisfying every configured TTFT, TPOT, and E2E SLO, divided by the window. |
 
 **Effective max concurrency** is stamped on `summary.v3.config` as
-`effective_max_concurrency` — `--max-concurrency` when set, otherwise the
+`effective_max_concurrency` - `--max-concurrency` when set, otherwise the
 closed-loop `--concurrency` value that caps outstanding work.
 
 ---

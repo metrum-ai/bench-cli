@@ -1,24 +1,24 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-> **Disposition — 2026-09-17.** This is the internal production-fidelity review of 0.1.82 (verdict at that time: **NO-GO** for public use), retained as a record.
+> **Disposition - 2026-09-17.** This is the internal production-fidelity review of 0.1.82 (verdict at that time: **NO-GO** for public use), retained as a record.
 > **Superseded by** [`SCORECARD_1.0.0.md`](./SCORECARD_1.0.0.md) / [`QUALITY_ASSESSMENT_1.0.0.md`](./QUALITY_ASSESSMENT_1.0.0.md): current verdict **GO** at `v1.0.0-rc.4`.
 >
 > | Finding | Status | Closed in |
 > |---|---|---|
-> | N-02 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-03 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-04 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-05 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-06 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-07 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | N-09 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | F-05 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
-> | F-09 | Closed | `059f195` / #62 — 1.0.0-rc.2 |
-> | F-14 | Closed | `d03bfa1` / #50 (disclaimer); residual `059f195` / #62 — 1.0.0-rc.1 / rc.2 |
-> | F-16 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
-> | F-25 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
-> | F-26 | Closed | `d03bfa1` / #50 — 1.0.0-rc.1 |
+> | N-02 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-03 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-04 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-05 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-06 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-07 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | N-09 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | F-05 | Closed | `d03bfa1` / #50 - 1.0.0-rc.1 |
+> | F-09 | Closed | `059f195` / #62 - 1.0.0-rc.2 |
+> | F-14 | Closed | `d03bfa1` / #50 (disclaimer); residual `059f195` / #62 - 1.0.0-rc.1 / rc.2 |
+> | F-16 | Closed | `d03bfa1` / #50 - 1.0.0-rc.1 |
+> | F-25 | Closed | `d03bfa1` / #50 - 1.0.0-rc.1 |
+> | F-26 | Closed | `d03bfa1` / #50 - 1.0.0-rc.1 |
 >
 > Findings still open at rc.5: none (Findings 5–6 closed in #82).
 
@@ -653,7 +653,7 @@ git ls-files --error-unmatch env.json   -> not tracked
 git log --all -- env.json env.chetan 'env.*.json' create_release.env -> (empty)
 python: value in `git log --all -p` output? -> False; in working tree files other than env.json? -> []
 git grep -nE '(sk-[A-Za-z0-9]{10,}|AKIA[0-9A-Z]{16}|hf_[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,}|api[_-]?key...)' -> 0 hits
-grep -rn 'restic|ecr\.|<aws-account-id>|<password>|ssh-rsa AAAA...<REDACTED>|<public-ip>|<public-ip>|<backup-host>' (tracked, excluding prior report) -> only docs/CAMPAIGN.md:58 and scripts/live/campaign.sh:295-299 (comments about dropping legacy fields)
+grep -rn 'restic|ecr\.|<aws-account-id>|<password>|ssh-rsa AAAA...<REDACTED>|<public-ip>|<public-ip>|<backup-host>' (tracked, excluding prior report) -> only [archived campaign draft]:58 and scripts/live/campaign.sh:295-299 (comments about dropping legacy fields)
 grep -rn 'check_license|from_ymd_opt|METRUM_SKIP_LICENSE|METRUM_SKIP_NTP' src/ -> 0
 ```
 
@@ -2015,7 +2015,7 @@ only counts and categories. Commands and raw output are in Appendix A.15.
 | G7 | Governance | Internal-only material in the public tree | FAIL | `CLAUDE.md` (agent instructions), `docs/QUALITY_ASSESSMENT_PROMPT.md`, `(removed from main; prior OSS readiness assessment)`, `CONTRIBUTING.md:44` pointing contributors to the internal assessment |
 | G8 | History | Public history free of private ancestry | PASS on remote, ATTENTION locally | remote has only `main` and three tags; the maintainer clone has a local `private-archive-main` branch (11 commits importing from the "insights monorepo") that a `git push --all` would publish |
 | P1 | Packaging | crates.io | PASS | name `metrumbench` is unregistered; `cargo publish --dry-run` runs in the release workflow; crates.io publish is skipped without a token by design |
-| P2 | Packaging | Crate contents | FAIL (minor) | `cargo package --list` ships `CLAUDE.md`, `README-METRUMBENCH-ASR.md`, `endpoints-4servers.yaml`, `docs/CAMPAIGN.md`, `docs/HISTORY_REWRITE.md`, `docs/SMOKE_RESULTS.md`, `docs/QUALITY_ASSESSMENT_*.md`, `test-data/dummy-endpoints-4.yaml` |
+| P2 | Packaging | Crate contents | FAIL (minor) | `cargo package --list` ships `CLAUDE.md`, `README-METRUMBENCH-ASR.md`, `endpoints-4servers.yaml`, the archived campaign draft, `docs/HISTORY_REWRITE.md`, `docs/SMOKE_RESULTS.md`, `docs/QUALITY_ASSESSMENT_*.md`, `test-data/dummy-endpoints-4.yaml` |
 | P3 | Packaging | Homebrew formula | FAIL | `test do` asserts `"Sweep and benchmark"` in `metrum-ai-bench --help` (0 matches) so `brew test` fails; checked-in formula says 0.1.80 with placeholder sha256 (regenerated at release, but the tracked copy is what users read) |
 | P4 | Packaging | MSRV | UNDETERMINED | `rust-version = "1.85"` declared; no 1.85 toolchain locally and no MSRV job in CI |
 | P5 | Packaging | Binary naming | ATTENTION | crate `metrumbench`, binaries `metrum-ai-bench-*`, deprecated shims `metrumbench-*`, formula `metrumbench`, mock server `metrumbench-mock-server` |
@@ -2049,7 +2049,7 @@ gh run list -> Release [push v0.1.82] success; Release [push v0.1.81] failure; a
 packaging/homebrew/metrumbench.rb:35 assert_match "Sweep and benchmark" -> metrum-ai-bench --help matches 0; :36 "Deterministic mock" -> mock-server --help matches 1
 curl crates.io/api/v1/crates/metrumbench -> "crate `metrumbench` does not exist"
 rustup toolchain list -> stable, 1.80 (no 1.85 for an MSRV check)
-cargo package --list --allow-dirty -> includes CLAUDE.md README-METRUMBENCH-ASR.md endpoints-4servers.yaml docs/CAMPAIGN.md docs/HISTORY_REWRITE.md docs/QUALITY_ASSESSMENT_PROMPT.md docs/QUALITY_ASSESSMENT_REPORT.md docs/SMOKE_RESULTS.md test-data/dummy-endpoints-4.yaml
+cargo package --list --allow-dirty -> includes CLAUDE.md README-METRUMBENCH-ASR.md endpoints-4servers.yaml [archived campaign draft] docs/HISTORY_REWRITE.md docs/QUALITY_ASSESSMENT_PROMPT.md docs/QUALITY_ASSESSMENT_REPORT.md docs/SMOKE_RESULTS.md test-data/dummy-endpoints-4.yaml
 tracked files without 'Copyright (c) 2026 Metrum AI': .gitignore CHANGELOG.md THIRD_PARTY_LICENSES dummy-model-server/go.mod endpoints-4servers.yaml test-data/dummy-endpoints-4.yaml
 workflow 'uses:' pins: 20, all mutable tags
 ```

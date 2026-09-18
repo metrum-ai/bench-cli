@@ -20,7 +20,6 @@ const sidebars: SidebarsConfig = {
         'docs/modalities',
         'docs/strategic-benchmarking',
         'docs/prompt-library',
-        'docs/results-publication',
         'docs/platforms',
       ],
     },

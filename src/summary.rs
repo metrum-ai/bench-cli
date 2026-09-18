@@ -130,7 +130,7 @@ impl RunSummary {
     /// Summarize measurement-phase records. Warmup/drain excluded from latency
     /// distributions. Error rate uses attempted = successes + errors in the
     /// supplied slice (caller should pass measurement-phase records only, or
-    /// all records — attempted is the slice length).
+    /// all records - attempted is the slice length).
     pub fn from_records(records: &[RequestRecord], window_seconds: f64, partial: bool) -> Self {
         Self::from_records_with_options(
             records,
@@ -305,7 +305,7 @@ fn print_dist(label: &str, dist: &DistSummary) {
 pub fn print_run_summary(summary: &RunSummary) {
     println!("\n=== Run summary ({}) ===", summary.schema_version);
     if summary.partial {
-        println!("  (partial — interrupted)");
+        println!("  (partial - interrupted)");
     }
     println!(
         "  Attempted: {}  Successes: {}  Errors: {}  Error rate: {:.3}",

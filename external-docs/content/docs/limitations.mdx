@@ -22,6 +22,13 @@ except when you optionally scrape a metrics URL from the strategic runner.
 
 ---
 
+## Gateways that synthesize streaming
+
+Gateways that synthesize SSE from unary upstream calls report total latency
+as TTFT. This behavior is undetectable client-side.
+
+---
+
 ## SUT is declared, not verified
 
 `--sut` / `--require-sut` (when present) embed an operator-supplied

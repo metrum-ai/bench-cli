@@ -65,7 +65,7 @@ Additional v3 fields:
 | `environment.hostname` | May be `null` when redaction is enabled. |
 | `config.run_id` | UUID generated once per run |
 | `config.effective_max_concurrency` | Outstanding-request cap in force |
-| `config.common` | Effective `CommonBenchArgs` JSON object. Real field names include `seed`, `warmup_requests`, `request_rate`, `arrival`, `max_concurrency`, `slos`, `tokenizer`, and related keys — not prose shorthand. Secrets are never stamped. |
+| `config.common` | Effective `CommonBenchArgs` JSON object. Real field names include `seed`, `warmup_requests`, `request_rate`, `arrival`, `max_concurrency`, `slos`, `tokenizer`, and related keys - not prose shorthand. Secrets are never stamped. |
 | `config.effective_system_prompt` | System string actually sent (omitted/`null` when N/A) |
 | `config.body_template` | Sanitized request skeleton with a `{{prompt}}` placeholder |
 | `config.unique_prompt_nonce_template` | Present when `--unique-prompts` is on |
@@ -83,10 +83,10 @@ Readers must treat `sut` and `hostname` as optional.
 ## Security and provenance
 
 `environment` is client-observed (OS, architecture, optional hostname). The
-`sut` block is **declared by the operator**, not measured by the client —
+`sut` block is **declared by the operator**, not measured by the client -
 `provenance` is always `"declared"`. Do not present declared values as observed
 measurements. For publication runs use `--sut <file> --require-sut` (implies
-`--redact-hostname`). See [Results publication](./results-publication).
+`--redact-hostname`). See [Publishing-oriented runs](./user-guide#publishing-oriented-runs).
 
 ---
 

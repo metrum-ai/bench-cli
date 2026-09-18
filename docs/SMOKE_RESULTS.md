@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Smoke results — campaign `matrix-20260915-195537`
+# Smoke results - campaign `matrix-20260915-195537`
 
 > **Coverage:** the published smoke matrix is currently **NVIDIA-only** (L40S, RTX PRO 6000 via Shadeform / Massed Compute). AMD Instinct coverage is in progress and will be added under the same manifest standard. No comparative vendor results are published here.
 
@@ -42,7 +42,7 @@ Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request `ttft_s` (never `first_byte_s`). When JSONL is absent, TTFT is recovered from cell `stdout.txt`.
 
-### LLM — closed-loop (sheet conc 32/64/128)
+### LLM - closed-loop (sheet conc 32/64/128)
 
 | Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -53,7 +53,7 @@ TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request
 | `google_gemma-4-12B-it` | c32 | 64 | 0 | 7.355 | 14.154 | 0.449 | 5.264 | 21.1478 | 3.026 | yes |
 | `google_gemma-4-12B-it` | c64 | 128 | 0 | 11.992 | 22.632 | 0.616 | 7.526 | 30.4229 | 4.207 | yes |
 
-### VLM — closed-loop (sheet conc 8/16/32)
+### VLM - closed-loop (sheet conc 8/16/32)
 
 | Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -64,13 +64,13 @@ TTFT columns are `ttft_s` (first visible token) from tool `summary.v3` / request
 | `google_gemma-4-12B-it` | c32 | 64 | 0 | 2.072 | 2.162 | 0.369 | 0.601 | 5.3183 | 12.034 | yes |
 | `google_gemma-4-12B-it` | c8 | 16 | 0 | 1.391 | 1.452 | 0.241 | 0.282 | 2.9095 | 5.499 | yes |
 
-### ASR — closed-loop (sheet conc 32/64/128)
+### ASR - closed-loop (sheet conc 32/64/128)
 
 | Model | Cell | n | err | lat p50 | lat p95 | TTFT p50 | TTFT p95 | window_s | rps | recompute |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `openai_whisper-large-v3` | c128 | 0 | 264 | — | — | — | — | 0.7009 | 0.000 | — |
-| `openai_whisper-large-v3` | c32 | 0 | 72 | — | — | — | — | 0.6473 | 0.000 | — |
-| `openai_whisper-large-v3` | c64 | 0 | 136 | — | — | — | — | 1.1839 | 0.000 | — |
+| `openai_whisper-large-v3` | c128 | 0 | 264 | - | - | - | - | 0.7009 | 0.000 | - |
+| `openai_whisper-large-v3` | c32 | 0 | 72 | - | - | - | - | 0.6473 | 0.000 | - |
+| `openai_whisper-large-v3` | c64 | 0 | 136 | - | - | - | - | 1.1839 | 0.000 | - |
 
 Whisper `/v1/models` answered, but every transcription upload returned **HTTP 400** `Invalid or unsupported audio file` (ffmpeg wav/mp3/flac and repo `dummy.mp3`). Probe evidence: `asr/probe/`. Cells retained as all-error measurements.
 

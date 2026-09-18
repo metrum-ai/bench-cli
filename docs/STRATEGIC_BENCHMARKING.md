@@ -3,6 +3,14 @@
 
 # Strategic benchmarking
 
+For agent-bench, start from the streaming LLM/chat path so TTFT measures visible
+output as it arrives. The unary strategic path cannot measure TTFT. Strategic
+chat turns opt in with `--streaming`, including `--sessions`; their per-turn CSV
+records include `first_byte_s` and `ttft_s`, and measured TTFT enforces `--slo ttft=`.
+Streaming is off by default. Embeddings and rerank remain JSON, and `--tools`
+cannot be combined with `--streaming`.
+
+
 `metrum-ai-bench-strategic` is the runner for concurrency/rate sweeps, chat
 sessions, structured output, embeddings, reranking, server correlation and
 portable exports. Existing modality-specific binaries remain supported.

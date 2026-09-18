@@ -106,11 +106,11 @@ Read all of:
   `.gitleaks.toml`, `rust-toolchain.toml`, `Makefile`, `test-data/**`.
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`,
   `THIRD_PARTY_LICENSES`, and every file under `docs/` including
-  `SMOKE_RESULTS.md`, `CAMPAIGN.md`, `REPRODUCING.md`, `METRICS.md`,
+  `SMOKE_RESULTS.md`, `REPRODUCING.md`, `METRICS.md`,
   `OUTPUT_SCHEMA.md`, `CLI.md`, `COMPARISON.md`, `STRATEGIC_BENCHMARKING.md`,
   `HISTORY_REWRITE.md`.
 - `live-results/**` if present. It is gitignored and may hold real GPU runs
-  from the campaign described in `docs/CAMPAIGN.md`. Use it as evidence of how
+  from the campaign described in `scripts/live/README.md`. Use it as evidence of how
   the tool behaves against real vLLM and SGLang, and cross-check
   `docs/SMOKE_RESULTS.md` against the raw files it claims to summarize.
 

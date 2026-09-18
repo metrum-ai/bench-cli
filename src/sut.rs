@@ -99,7 +99,7 @@ pub fn resolve_sut_flags(
         )),
         None => {
             eprintln!(
-                "sut: not provided; result is not self-describing (see docs/RESULTS_PUBLICATION_POLICY.md)"
+                "sut: not provided; result is not self-describing (see README.md#publishing-a-result)"
             );
             Ok((None, redact))
         }

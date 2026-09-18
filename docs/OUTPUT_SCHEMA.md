@@ -47,27 +47,27 @@ full `per_endpoint` distributions, environment metadata, and `partial`.
 
 Additional v3 fields:
 
-- `sut` — optional operator-declared system-under-test block (rc.5). Always present in JSON; `null` when `--sut` was not provided. Fields are labelled `provenance: "declared"` (not observed). See `--sut`, `--require-sut`, and `--redact-hostname`.
-- `environment.hostname` — may be `null` when `--redact-hostname` (or `--require-sut`, which implies redaction) is set (rc.5). Readers must treat `sut` and `hostname` as optional.
-- `config` — effective run configuration:
-  - `run_id` — UUID generated once per run
-  - `effective_max_concurrency` — outstanding-request cap in force
+- `sut` - optional operator-declared system-under-test block (rc.5). Always present in JSON; `null` when `--sut` was not provided. Fields are labelled `provenance: "declared"` (not observed). See `--sut`, `--require-sut`, and `--redact-hostname`.
+- `environment.hostname` - may be `null` when `--redact-hostname` (or `--require-sut`, which implies redaction) is set (rc.5). Readers must treat `sut` and `hostname` as optional.
+- `config` - effective run configuration:
+  - `run_id` - UUID generated once per run
+  - `effective_max_concurrency` - outstanding-request cap in force
     (`--max-concurrency`, or `--concurrency` when unset)
-  - `common` — every `CommonBenchArgs` field (`seed`, `warmup_requests`,
+  - `common` - every `CommonBenchArgs` field (`seed`, `warmup_requests`,
     `request_rate`, `arrival`, `max_concurrency`, `load_balancer`, `ignore_eos`,
     `min_tokens`, `extra_body_json`, `system_prompt`, `unique_prompts`,
     `tokenizer`, `slos`, `throughput_bin_seconds`, `insecure`, optional
     `ca_cert` path). Secrets are never stamped.
-  - `effective_system_prompt` — system string actually sent (omitted/`null` when
+  - `effective_system_prompt` - system string actually sent (omitted/`null` when
     N/A or disabled); VLM currently records its hardcoded image-capable default
-  - `body_template` — sanitized request skeleton with a `{{prompt}}` placeholder
+  - `body_template` - sanitized request skeleton with a `{{prompt}}` placeholder
     (no secrets, no raw images/audio)
-  - `unique_prompt_nonce_template` — present when `--unique-prompts` is on:
+  - `unique_prompt_nonce_template` - present when `--unique-prompts` is on:
     `[nonce-{run_id}-{seed}-{seq}]`
-- `usage_missing_count` — measure-phase successes with `usage_missing`
-- `completion_tokens_per_second` — `null` when any measured success has
+- `usage_missing_count` - measure-phase successes with `usage_missing`
+- `completion_tokens_per_second` - `null` when any measured success has
   `usage_missing` without a tokenizer count to fill the gap; otherwise a rate
-- `completion_tokens_source` — `"server_usage"` or `"tokenizer_fallback"` when
+- `completion_tokens_source` - `"server_usage"` or `"tokenizer_fallback"` when
   the rate is present
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
@@ -88,8 +88,7 @@ rejects any JSONL line without `schema_version`.
 ## Security and provenance
 
 `environment` is client-observed (OS, architecture, optional hostname). The
-`sut` block is **declared by the operator**, not measured by the client —
+`sut` block is **declared by the operator**, not measured by the client -
 `provenance` is always `"declared"`. For publication runs use
 `--sut <file> --require-sut` (implies `--redact-hostname`). See
-[RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md) and
-[TRADEMARKS.md](../TRADEMARKS.md).
+[Publishing a result](../README.md#publishing-a-result).

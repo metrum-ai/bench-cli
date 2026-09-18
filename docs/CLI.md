@@ -638,6 +638,8 @@ Options:
           
       --kind <KIND>
           [default: chat] [possible values: chat, embeddings, rerank]
+      --streaming
+          Stream chat responses to measure TTFT; embeddings and rerank remain JSON
       --requests-per-stage <REQUESTS_PER_STAGE>
           [default: 100]
       --sweep <SWEEP>
@@ -677,7 +679,7 @@ Options:
       --timeout-seconds <TIMEOUT_SECONDS>
           [default: 300]
       --slo <METRIC=SECONDS>
-          Repeatable goodput threshold: e2e= (ttft=/tpot= accepted but ignored; strategic records lack those timings)
+          Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured
   -h, --help
           Print help
   -V, --version
