@@ -40,11 +40,25 @@ Versioning is env-driven (not Docusaurus `versioned_docs/`):
 | `DOCS_BASE_URL` | `/metrum-ai-bench-cli/` | Site `baseUrl` for this build |
 | `DOCS_VERSIONS_URL` | `{DOCS_BASE_URL}versions.json` | Manifest fetched by `src/theme/Root.tsx` |
 
-Publish each versioned tree under a distinct `DOCS_BASE_URL` (for example
-`/metrum-ai-bench-cli/v1.0.0-rc.6/`) and host a `versions.json` listing
-`{ version, label, path }` entries so the navbar selector can switch trees.
-Until that manifest is deployed, the selector falls back to the current
-`DOCS_VERSION` only.
+Each versioned tree is published under a distinct `DOCS_BASE_URL` (for example
+`/metrum-ai-bench-cli/v1.0.0/`), with a `versions.json` manifest hosted
+alongside them so the navbar selector can switch trees.
+
+This is automated end to end by `Makefile` (`make build`, `make build-latest`,
+`make package`) and `.github/workflows/deploy-docs.yml`:
+
+- A push to `main` builds and publishes a dev preview to Restic. It is never
+  restored to the live site.
+- A push of a final `v*` tag (no `-rc.` / `-alpha.` / `-beta.`) builds,
+  publishes, and restores to `docs.metrum.ai`, promoting `/latest/` to this
+  version.
+- A push of a prerelease tag (`-rc.` / `-alpha.` / `-beta.`, matching the
+  prerelease convention in `release.yml` and `docs/RELEASING.md`) publishes
+  and restores to its own versioned path only. `/latest/` is left untouched.
+
+The `versions.json` manifest always lists every tagged version, not only the
+one just published, so earlier releases stay visible in the version picker.
+See `scripts/package-docs.py` and `docs/RELEASING.md`.
 
 ## Brand
 
