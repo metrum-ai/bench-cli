@@ -13,6 +13,29 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.0.1
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.0.1 |
+| **Previous version** | 1.0.0 |
+| **Release Date** | September 19, 2026 |
+
+Operational release focused on self-hosted CI runner hygiene.
+
+### CI self-hosted bench-cli lane (Added / Changed)
+
+- Added a dedicated self-hosted CI job for `cargo test --all-targets --all-features` on label set `self-hosted`, `linux`, `x64`, `bench-cli`.
+- The job skips fork pull requests so untrusted code does not run on the org runner host.
+- Per-ref concurrency is serialized for this lane to avoid overlap on the same branch head.
+
+### Runner operations package (Added)
+
+- Added a compose-based runner pool package under `deploy/github-runners-bench-cli/`, including bootstrap, env template, and operator scripts for manual start, stop, restart, logs, and optional systemd boot wiring.
+
+---
+
 ## Metrum AI Bench CLI 1.0.0
 
 | | |
