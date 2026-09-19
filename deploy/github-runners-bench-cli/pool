@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Manual start/stop/restart for a GitHub runner compose pool.
+# Copy this file next to docker-compose.yml on pikachu.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+
+usage() {
+    cat <<EOF
+Usage: $0 <command> [service]
+
+Commands:
+  start       docker compose up -d
+  stop        docker compose stop (containers kept)
+  down        docker compose down (containers removed)
+  restart     recreate the pool, or restart one service
+  status      docker compose ps
+  logs        follow logs (optional service, e.g. runner-1)
+  build       rebuild images
+  recreate    build + force-recreate
+
+Examples:
+  $ROOT/pool start
+  $ROOT/pool restart runner-1
+  $ROOT/pool logs runner-2
+  $ROOT/pool stop
+
+AppArmor is not required.
+EOF
+}
+
+compose() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+    else
+        docker-compose "$@"
+    fi
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+    usage
+    exit 0
+fi
+shift
+svc=("$@")
+
+case "$cmd" in
+    start | up)
+        compose up -d "${svc[@]}"
+        compose ps
+        ;;
+    stop)
+        if ((${#svc[@]})); then
+            compose stop "${svc[@]}"
+        else
+            compose stop
+        fi
+        compose ps
+        ;;
+    down)
+        compose down
+        ;;
+    restart)
+        if ((${#svc[@]})); then
+            compose restart "${svc[@]}"
+        else
+            compose up -d --force-recreate
+        fi
+        compose ps
+        ;;
+    status | ps)
+        compose ps
+        ;;
+    logs)
+        compose logs -f --tail=100 "${svc[@]}"
+        ;;
+    build)
+        compose build "${svc[@]}"
+        ;;
+    recreate)
+        compose build "${svc[@]}"
+        compose up -d --force-recreate "${svc[@]}"
+        compose ps
+        ;;
+    *)
+        echo "unknown command: $cmd" >&2
+        usage
+        exit 1
+        ;;
+esac

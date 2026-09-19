@@ -1,0 +1,34 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# GitHub runner compose pool on pikachu. AppArmor is not required.
+#
+# Layout:
+#   ~/github-runners-bench-cli-compose   CI label bench-cli (this pool)
+#   ~/github-runners-router-compose      CI label router
+#   ~/github-runners-all-smi-compose     CI label all-smi
+#   ~/github-runners-bench-cli           old bare-metal; docs-deploy stays here
+#
+# First time (once .env has RUNNER_TOKEN or ACCESS_TOKEN):
+#   cd ~/github-runners-bench-cli-compose
+#   ./bootstrap.sh
+#
+# Daily / manual:
+#   ./pool start              # up -d
+#   ./pool stop               # stop, keep containers
+#   ./pool down               # remove containers
+#   ./pool restart            # recreate whole pool
+#   ./pool restart runner-1   # one worker
+#   ./pool status
+#   ./pool logs
+#   ./pool logs runner-2
+#   ./pool recreate           # rebuild image then recreate
+#
+# Optional systemd (boot start):
+#   sudo cp gha-bench-cli-pool.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gha-bench-cli-pool
+#   sudo systemctl restart gha-bench-cli-pool
+#   sudo systemctl status gha-bench-cli-pool
+#
+# Do not attach bench-cli-docs-deploy to this pool.

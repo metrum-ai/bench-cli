@@ -1,0 +1,74 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ephemeral self-hosted pool for metrum-ai/bench-cli (label: bench-cli).
+# Deploy on pikachu. Replaces bare-metal ~/github-runners-bench-cli for CI
+# cargo test. Do not put bench-cli-docs-deploy here: restore-docs inspects
+# host Docker volumes and runs sudo scripts under /home/ubuntu/src.
+#
+# AppArmor is not required. apparmor:unconfined skips the host
+# docker-default profile so the pool starts on hosts without AA policy.
+
+# Compatible with docker-compose v1.29 (no top-level `name:`).
+x-runner: &runner
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  security_opt:
+    - apparmor:unconfined
+  env_file:
+    - .env
+  environment:
+    RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+    REPO_URL: ${REPO_URL:-https://github.com/metrum-ai/bench-cli}
+    ORG_NAME: ${ORG_NAME:-metrum-ai}
+    LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
+    EPHEMERAL: ${EPHEMERAL:-true}
+    DISABLE_AUTO_UPDATE: "true"
+    RUNNER_WORKDIR: /tmp/runner-work
+  volumes:
+    - runner-tools:/opt/hostedtoolcache
+
+services:
+  runner-1:
+    <<: *runner
+    container_name: gha-bench-cli-1
+    environment:
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-pikachu-bench-cli}-1
+      RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+      REPO_URL: ${REPO_URL:-https://github.com/metrum-ai/bench-cli}
+      ORG_NAME: ${ORG_NAME:-metrum-ai}
+      LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
+      EPHEMERAL: ${EPHEMERAL:-true}
+      DISABLE_AUTO_UPDATE: "true"
+      RUNNER_WORKDIR: /tmp/runner-work
+
+  runner-2:
+    <<: *runner
+    container_name: gha-bench-cli-2
+    environment:
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-pikachu-bench-cli}-2
+      RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+      REPO_URL: ${REPO_URL:-https://github.com/metrum-ai/bench-cli}
+      ORG_NAME: ${ORG_NAME:-metrum-ai}
+      LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
+      EPHEMERAL: ${EPHEMERAL:-true}
+      DISABLE_AUTO_UPDATE: "true"
+      RUNNER_WORKDIR: /tmp/runner-work
+
+  runner-3:
+    <<: *runner
+    container_name: gha-bench-cli-3
+    environment:
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-pikachu-bench-cli}-3
+      RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+      REPO_URL: ${REPO_URL:-https://github.com/metrum-ai/bench-cli}
+      ORG_NAME: ${ORG_NAME:-metrum-ai}
+      LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
+      EPHEMERAL: ${EPHEMERAL:-true}
+      DISABLE_AUTO_UPDATE: "true"
+      RUNNER_WORKDIR: /tmp/runner-work
+
+volumes:
+  runner-tools:
