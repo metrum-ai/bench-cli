@@ -13,6 +13,28 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.1.0
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.1.0 |
+| **Previous version** | 1.0.1 |
+| **Release Date** | September 19, 2026 |
+
+Release archives now include the local dummy server, so a Go toolchain is not
+required to run the quickstart against an unpacked tarball.
+
+### Dummy server in release archives (Added)
+
+- Each `metrum-ai-bench` archive for Linux and macOS (`x86_64` and `aarch64`)
+  includes a static `bin/dummy-model-server`.
+- Linux and macOS release smoke checks, and the Homebrew formula test, cover
+  that binary.
+- The Go server is still not published to crates.io.
+
+---
+
 ## Metrum AI Bench CLI 1.0.1
 
 | | |
