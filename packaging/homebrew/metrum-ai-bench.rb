@@ -34,5 +34,6 @@ class MetrumAiBench < Formula
   test do
     assert_match "Benchmark OpenAI-compatible", shell_output("#{bin}/metrum-ai-bench --help")
     assert_match "Deterministic mock", shell_output("#{bin}/metrum-ai-bench-mock-server --help")
+    assert_match "Listen port", shell_output("#{bin}/dummy-model-server -h 2>&1", 1)
   end
 end

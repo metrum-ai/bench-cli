@@ -22,6 +22,9 @@ go build -o bin/dummy-model-server ./cmd/dummy-model-server
 
 `GET /health` returns 200 for `wait_for_vllm`.
 
+GitHub Release archives ship this binary at `bin/dummy-model-server` for Linux
+and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
+
 ## Flags
 
 | Flag | Default | Description |

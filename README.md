@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.0.0** ([CHANGELOG](CHANGELOG.md)).
+release: **1.1.0** ([CHANGELOG](CHANGELOG.md)).
 
 Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -26,15 +26,19 @@ other modality fixtures:
 
 ## Quickstart (60 seconds)
 
-One publishable LLM run against the local dummy server. Needs Go 1.26.6+ for
-the dummy server; the benchmark binaries themselves do not.
+One publishable LLM run against the local dummy server. From a GitHub Release
+tarball, start `bin/dummy-model-server` (no Go required). From source, the
+dummy server needs Go 1.26.6+; the benchmark binaries themselves do not.
 
 ```bash
 # 1. Build (or unpack a release tarball; see Install)
 cargo build --release
 
-# 2. Start a local OpenAI-compatible server that needs no credentials (needs Go 1.26.6+)
+# 2. Start a local OpenAI-compatible server that needs no credentials.
+#    From source (needs Go 1.26.6+):
 (cd dummy-model-server && go run ./cmd/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms) &
+#    From a release tarball:
+# bin/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms &
 
 # 3. Describe what you are testing. Copy and edit examples/sut.example.json.
 cp examples/sut.example.json sut.json
@@ -64,7 +68,9 @@ target from [Releases](https://github.com/metrum-ai/bench-cli/releases), verify
 the `.sha256` and optional Sigstore bundle, then unpack. Release archives are
 cross-built with [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)
 on Linux for `x86_64`/`aarch64` **glibc** (`*-unknown-linux-gnu`, glibc 2.17
-floor) and macOS Darwin, not musl. TLS is rustls (no OpenSSL link).
+floor) and macOS Darwin, not musl. TLS is rustls (no OpenSSL link). Each
+archive also includes `bin/dummy-model-server`, a static Go binary for that
+same target, so the local dummy server does not need a Go toolchain.
 
 **From source:**
 
@@ -74,9 +80,11 @@ cd bench-cli
 cargo build --release
 ```
 
-Rust 1.85 or later is required. The dummy server used in Quickstart and the
-examples requires Go; the benchmark binaries do not. Pass `--quiet` or set
-`NO_BANNER=1` to suppress ASCII banner art (a one-line identity still prints).
+Rust 1.85 or later is required to build from source. The dummy server used in
+Quickstart and the examples requires Go when built from source; a release
+tarball already includes it. The benchmark binaries do not need Go. Pass
+`--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
+identity still prints).
 Optional Homebrew formula is attached to each GitHub Release
 (`metrum-ai-bench.rb`); a tap publish runs when the release workflow is
 configured with a Homebrew tap repository.
@@ -257,6 +265,8 @@ server-metrics correlation, and CSV, HTML (`--html`), MLPerf-shaped
 [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md).
 
 ## Dummy server
+
+A GitHub Release tarball includes `bin/dummy-model-server`. From source:
 
 ```bash
 (cd dummy-model-server && go run ./cmd/dummy-model-server \

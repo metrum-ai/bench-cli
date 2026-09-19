@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 (2026-09-19)
+
+### Added
+- GitHub Release tarballs include a static `bin/dummy-model-server` for the
+  same four Linux and macOS targets as the Rust binaries, so unpacking a
+  release does not require a Go toolchain.
+
 ## 1.0.1 (2026-09-19)
 
 ### Added
