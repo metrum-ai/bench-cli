@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.1 (2026-09-19)
+
+### Added
+- `deploy/github-runners-bench-cli/`: compose-based `bench-cli` self-hosted
+  runner pool assets for pikachu (`Dockerfile`, `docker-compose.yml`,
+  `.env.example`, `bootstrap.sh`) plus manual `pool` operations and an optional
+  `gha-bench-cli-pool.service`.
+
+### Changed
+- CI now includes a `self-hosted` cargo test job on
+  `[self-hosted, linux, x64, bench-cli]` with fork-PR isolation and serialized
+  per-ref execution to keep untrusted code off the org runner host.
+
 ## 1.0.0 (2026-09-18)
 
 First stable release after the 1.0.0-rc series. This tag was re-cut after a
