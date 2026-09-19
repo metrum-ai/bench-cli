@@ -20,6 +20,13 @@ Leave both unset (or set to anything other than `true`) for rc tags and for
 dry-run releases. A configured `CRATES_IO_TOKEN` / `HOMEBREW_TAP_TOKEN` alone
 is not enough.
 
+## Release archives
+
+Each signed `metrum-ai-bench-v<version>-<target>.tar.gz` contains the Rust
+binaries plus `bin/dummy-model-server`. The dummy is a static Go binary
+cross-compiled with `CGO_ENABLED=0` for the same four targets (Linux and
+macOS, `x86_64` and `aarch64`). It is not published to crates.io.
+
 ## Never publish an rc
 
 Tags containing `-rc.` must never be published to crates.io. The `crates-io`
