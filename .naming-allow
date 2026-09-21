@@ -9,3 +9,7 @@ README.md	metrumbench-\*|deprecated `metrumbench|shim will be removed|removed in
 docs/**	metrumbench-\*|shim will be removed|removed in v2\.0|deprecated shim
 .gitignore	metrumbench-imagegen-artifacts
 scripts/live/**	metrumbench
+TRADEMARKS.md	^\*\*Forbidden\*\* \(non-exhaustive\): `MetrumBench`, `Insights CLI`, `Bench by Metrum`\.$
+docs/NAMING.md	^\| Formal \| `Metrum AI Bench CLI` \| `MetrumBench`, `Insights CLI`, `Bench by Metrum` \|$
+docs/NAMING.md	^\| Short \| `Bench CLI` \| `MetrumBench` \|$
+docs/NAMING.md	^\| Binary \| `metrum-ai-bench` \| `metrumbench` as the primary product binary name in new docs \|$

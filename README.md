@@ -157,8 +157,13 @@ defaulted `provenance` is optional; omit or null what you do not know:
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
 must trace to a `summary.json` (or the closing `metrum-ai-bench.summary.v3`
-line in a published results directory). See
-[output schema](docs/OUTPUT_SCHEMA.md) for the summary and SUT fields.
+line in a published results directory); see the
+[results publication policy](docs/RESULTS_PUBLICATION_POLICY.md).
+
+A claim that omits the manifest, including the SUT block, is **not** a Metrum
+AI Bench CLI result under the publication policy, even if the software was
+used. See also [TRADEMARKS.md](TRADEMARKS.md) and the
+[output schema](docs/OUTPUT_SCHEMA.md).
 
 ## Input formats
 
@@ -344,3 +349,9 @@ smoke matrix, unofficial MLPerf export, and more):
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+Metrum AI and Metrum AI Bench CLI are trademarks of Metrum AI, Inc. See
+[TRADEMARKS.md](TRADEMARKS.md).
+
+Project governance also includes the approved [naming rules](docs/NAMING.md)
+and [claims ledger](docs/CLAIMS_LEDGER.md).

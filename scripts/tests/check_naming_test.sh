@@ -33,4 +33,37 @@ if scripts/check_headers.sh; then
   exit 1
 fi
 
-echo "check_naming_test: ok (forbidden name rejected)"
+rm bad.txt
+printf 'Metrum AI Bench CLI, formerly Metrum Insights CLI\n' > transition.txt
+git add -A
+git commit -q -m "use approved transition form"
+if ! scripts/check_headers.sh; then
+  echo "check_naming_test: approved transition form was rejected" >&2
+  exit 1
+fi
+
+printf 'Metrum AI Bench CLI, formerly Metrum Insights CLI; avoid Insights CLI.\n' > transition.txt
+git add transition.txt
+git commit -q -m "append a second forbidden legacy name"
+if scripts/check_headers.sh; then
+  echo "check_naming_test: transition exception hid a second legacy name" >&2
+  exit 1
+fi
+
+printf 'Metrum Insights CLI is the current product name.\n' > transition.txt
+git add transition.txt
+git commit -q -m "use forbidden legacy name"
+if scripts/check_headers.sh; then
+  echo "check_naming_test: expected non-zero exit for a bare legacy name" >&2
+  exit 1
+fi
+
+printf 'Metrum Bench CLI is missing the canonical AI token.\n' > transition.txt
+git add transition.txt
+git commit -q -m "use incomplete product name"
+if scripts/check_headers.sh; then
+  echo "check_naming_test: expected non-zero exit for Metrum Bench CLI" >&2
+  exit 1
+fi
+
+echo "check_naming_test: ok (forbidden names rejected; transition form accepted)"
