@@ -14,9 +14,12 @@ It is not a hands-on bake-off. Metric names only match when tokenizer, prompt
 sequence, sampling parameters, warmup, measurement window, endpoint topology,
 and SLO definitions match.
 
+Comparative behavior remains untested until a controlled side-by-side run
+exists.
+
 ---
 
-## What Bench ships at 1.0
+## What Bench CLI ships
 
 | Capability | Where |
 | --- | --- |
@@ -35,15 +38,15 @@ and SLO definitions match.
 
 ## Landscape
 
-| Tool | What it answers | Overlap with Bench | What Bench adds | What it does better than Bench |
+| Tool | What it answers | Overlap with Bench CLI | What Bench CLI adds | What it does better than Bench CLI |
 | --- | --- | --- | --- | --- |
 | **SemiAnalysis InferenceX** | How named stacks score on a published, recurring hardware CI matrix | Client-visible latency/throughput language | Local, operator-owned runs with a stamped manifest; four modalities in one client | Continuous public CI and a recognized public scoreboard |
 | **NVIDIA AIPerf** (successor to GenAI-Perf) | How a Triton / NIM / NVIDIA-oriented path behaves under load | Rate, Poisson-style arrivals, tokenizer counts, SLO-style ideas | Multi-modality and pooled multi-endpoint mixture labeling; strategic sweeps/exports | Ecosystem familiarity and telemetry already wired into many NVIDIA pipelines |
 | **MLPerf Inference** | Whether a submission meets audited workload and accuracy rules | Latency/throughput language; Server/Offline names | Informal LoadGen-shaped **export** only | Audited rules, accuracy requirements, submission standing |
 | **vLLM / SGLang `bench_serving`** | How *this* engine build behaves on *these* datasets | Rate/concurrency, seeds, ignore-EOS, local tokenizer counts | Cross-engine OpenAI-compatible client; multi-modality; strategic exports | Already installed next to the engine; deep stack-specific datasets |
-| **GuideLLM / LLMPerf** | Latency/throughput under scripted load | Rate/concurrency sweeps; HTML-style reporting (GuideLLM) | Shared Rust client across four modalities; typed errors; stamped `summary.v3` | Packaging / Python ecosystem fit for quick scripts |
-| **lm-evaluation-harness / HELM / OpenCompass** | Quality and task scores | Occasional shared prompt corpora | Bench measures serving performance (plus ASR WER/CER only) | Breadth of quality tasks and academic protocols |
-| **NVIDIA Dynamo** | How to *run* multi-node inference | You may point Bench **at** Dynamo-fronted endpoints | Dynamo is a **target**, not a measurement alternative | End-to-end serving product features |
+| **[GuideLLM 0.7](https://github.com/vllm-project/guidellm/releases/tag/v0.7.0) (`vllm-project`) / LLMPerf** | Latency/throughput under scripted load | Rate/concurrency sweeps; HTML-style reporting (GuideLLM) | Shared Rust client across four modalities; typed errors; stamped `summary.v3` | Packaging / Python ecosystem fit for quick scripts |
+| **lm-evaluation-harness / HELM / OpenCompass** | Quality and task scores | Occasional shared prompt corpora | Bench CLI measures serving performance (plus ASR WER/CER only) | Breadth of quality tasks and academic protocols |
+| **NVIDIA Dynamo** | How to *run* multi-node inference | You may point Bench CLI **at** Dynamo-fronted endpoints | Dynamo is a **target**, not a measurement alternative | End-to-end serving product features |
 
 ---
 
@@ -62,7 +65,7 @@ substring `Result is : VALID`.
 - A stamped manifest is table stakes for publishable runs, not a moat.
 - Not a competitor to MLPerf Inference submissions.
 - Not a head-to-head performance bake-off against AIPerf or InferenceX.
-- No claim that Bench replaces engine-native `bench_serving` for engine
+- No claim that Bench CLI replaces engine-native `bench_serving` for engine
   developers who already live in that tree.
 
 ---
@@ -77,7 +80,7 @@ Planned for a **next release** (no dates):
 
 ---
 
-## Bench vs Bench Platform
+## Metrum AI Bench CLI vs Metrum AI Bench Platform
 
 | | Metrum AI Bench CLI (this product) | Metrum AI Bench Platform |
 | --- | --- | --- |

@@ -98,6 +98,7 @@ check_naming() {
   local rc=0
   local -a forbidden=(
     'MetrumBench'                # never; use metrum-ai-bench / Metrum AI Bench CLI
+    'Metrum Bench CLI'           # missing "AI"
     '\bmetrumbench\b'            # old crate name; shims allowlisted
     'Insights CLI'
     'Bench by Metrum'
@@ -114,21 +115,30 @@ check_naming() {
     echo "check_naming: no files to scan" >&2
     return 0
   fi
-  local pat
+  local pat without_transition
   for pat in "${forbidden[@]}"; do
     while IFS=: read -r f ln txt || [ -n "${f:-}" ]; do
       [ -z "${f:-}" ] && continue
+      if [[ "$pat" == "Insights CLI" ]]; then
+        without_transition="${txt//Metrum AI Bench CLI, formerly Metrum Insights CLI/}"
+        if ! echo "$without_transition" | grep -q 'Insights CLI'; then
+          continue
+        fi
+      fi
       if allowlisted "$f" "$txt"; then continue; fi
       echo "naming: $f:$ln: forbidden form matching /$pat/: $txt" >&2
       rc=1
     done < <(echo "$files" | xargs -r grep -nHE "$pat" 2>/dev/null || true)
   done
-  # bare "Metrum Insights" allowed only in the transition form
+  # bare "Metrum Insights" allowed only in the approved transition form
   while IFS=: read -r f ln txt || [ -n "${f:-}" ]; do
     [ -z "${f:-}" ] && continue
-    echo "$txt" | grep -q 'formerly Metrum Insights' && continue
+    without_transition="${txt//Metrum AI Bench CLI, formerly Metrum Insights CLI/}"
+    if ! echo "$without_transition" | grep -q 'Metrum Insights'; then
+      continue
+    fi
     allowlisted "$f" "$txt" && continue
-    echo "naming: $f:$ln: 'Metrum Insights' only allowed as 'Metrum AI Bench CLI, formerly Metrum Insights'" >&2
+    echo "naming: $f:$ln: 'Metrum Insights' only allowed as 'Metrum AI Bench CLI, formerly Metrum Insights CLI'" >&2
     rc=1
   done < <(echo "$files" | xargs -r grep -nH 'Metrum Insights' 2>/dev/null || true)
   if [[ "$rc" -eq 0 ]]; then

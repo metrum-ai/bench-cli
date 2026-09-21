@@ -27,7 +27,10 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Methodology',
       collapsed: true,
-      items: ['docs/performance-methodology'],
+      items: [
+        'docs/performance-methodology',
+        'docs/results-publication',
+      ],
     },
     {
       type: 'category',

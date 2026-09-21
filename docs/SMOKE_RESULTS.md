@@ -5,8 +5,14 @@
 
 > **Coverage:** the published smoke matrix is currently **NVIDIA-only** (L40S, RTX PRO 6000 via Shadeform / Massed Compute). AMD Instinct coverage is in progress and will be added under the same manifest standard. No comparative vendor results are published here.
 
-Shadeform smoke against the **Test Matrix for Metrum Bench CLI** (PERFORMANCE TESTS).
-Raw JSONL under gitignored `live-results/`; this document is the public summary.
+Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
+(PERFORMANCE TESTS). Raw JSONL is under gitignored `live-results/`; this
+document is the historical campaign summary.
+
+> **Historical provenance:** these measurements were made with `1.0.0-rc.1`.
+> That value records the package that produced the results; it is not the
+> current release number. This table is not citable until it is regenerated
+> from `summary.v3` or `campaign.sh report`.
 
 | Field | Value |
 |-------|-------|

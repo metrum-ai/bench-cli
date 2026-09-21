@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Restored the counsel-approved trademark, naming, claims-ledger, and
+  results-publication policies, approved September 21, 2026.
+- Restored the customer-facing results-publication guide.
+
+### Changed
+- Comparison guidance pins GuideLLM 0.7 and labels the landscape review as
+  documentation research rather than a side-by-side benchmark.
+- Smoke-results documentation preserves its `1.0.0-rc.1` campaign provenance,
+  clarifies that the table awaits regeneration, and uses the canonical
+  **Metrum AI Bench CLI** name.
+
 ## 1.1.0 (2026-09-19)
 
 ### Added

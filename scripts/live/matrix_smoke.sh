@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Shadeform smoke against the published Test Matrix for Metrum Bench CLI:
+# Shadeform smoke against the published Test Matrix for Metrum AI Bench CLI:
 #   LLM/VLM on 2x L40S; ASR/imagegen on 1x L40S; ISL×OSL 1024×1024 where applicable.
 # Dry-run unless --execute. Retains instances until teardown; set CAMPAIGN_MAX_HOURS.
 #
@@ -268,7 +268,7 @@ cmd_launch() {
     "bench_git_tag": "$(git -C "${REPO_ROOT}" describe --tags --exact-match HEAD 2>/dev/null || git -C "${REPO_ROOT}" rev-parse --short HEAD)",
     "recorded_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "cloud": "massedcompute",
-    "matrix_source": "Test Matrix for Metrum Bench CLI / PERFORMANCE TESTS",
+    "matrix_source": "Test Matrix for Metrum AI Bench CLI / PERFORMANCE TESTS",
     "engine": "${ENGINE}",
     "shade_instance_type": "L40Sx2 (llm/vlm), L40S (asr)",
     "vlm_model": "${first_vlm}",
@@ -643,7 +643,7 @@ body = f"""<!-- Copyright (c) 2026 Metrum AI, Inc. -->
 
 # Smoke results - campaign `{cid}`
 
-Shadeform smoke against the **Test Matrix for Metrum Bench CLI** (PERFORMANCE TESTS).
+Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI** (PERFORMANCE TESTS).
 Raw JSONL under gitignored `live-results/`; this document is the public summary.
 
 | Field | Value |
