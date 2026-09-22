@@ -5,6 +5,8 @@
 ### Changed
 - Deprecated shims `metrumbench-*` will be removed in **1.3.0** (stderr warning
   on every invocation, including `--help`).
+- Smoke-results docs state package and campaign provenance without a redundant
+  "not citable" banner; smoke is smoke.
 
 ## 1.1.2 (2026-09-22)
 
