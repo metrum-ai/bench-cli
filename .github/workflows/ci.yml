@@ -9,6 +9,7 @@ on:
   schedule:
     # Recurring advisory scan (new RUSTSEC entries after merge).
     - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -240,3 +241,34 @@ jobs:
         env:
           # Match production path so absolute links resolve under baseUrl.
           DOCS_BASE_URL: /metrum-ai-bench-cli/
+
+  # Hub dataset must stay public and license-aligned with docs/datasets/DATASET_CARD.md.
+  # Manual confirmation that upstream prompt sources permit Apache-2.0 remains a
+  # human operator step (not automated here).
+  hf-visibility:
+    name: hf-visibility (prompt-library)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require public ungated Hub dataset matching local card license
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(awk '
+            BEGIN { in_fm=0 }
+            /^---[[:space:]]*$/ { in_fm++; next }
+            in_fm == 1 && $1 == "license:" { print $2; exit }
+          ' docs/datasets/DATASET_CARD.md)"
+          test -n "${expected}"
+          echo "local card license: ${expected}"
+          curl -sfL "https://huggingface.co/api/datasets/metrum-ai/prompt-library" \
+            | jq -e --arg lic "${expected}" '
+                .private == false
+                and (.gated == false or .gated == null)
+                and (
+                  (.cardData.license | tostring | ascii_downcase)
+                  == ($lic | ascii_downcase)
+                )
+              '
+          echo "hf-visibility: ok"
