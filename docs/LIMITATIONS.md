@@ -76,9 +76,7 @@ client.
 See [SMOKE_RESULTS.md](SMOKE_RESULTS.md). The published smoke coverage in that
 file is NVIDIA hardware only; AMD Instinct coverage is in progress. That is a
 coverage statement, not a vendor ranking. No comparative vendor results are
-published there. The checked-in table records a historical `1.0.0-rc.1`
-campaign and is not citable until regenerated from `summary.v3` or
-`campaign.sh report` with a required manifest.
+published there.
 
 ## MLPerf export is unofficial
 

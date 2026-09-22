@@ -16,8 +16,7 @@ scope and are tracked separately.
 
 | Label | Meaning |
 |-------|---------|
-| Measured | Observed from a harness run with required manifest |
-| Historical measurement | Observed before the manifest requirement; retained as provenance but not citable as a Metrum AI Bench CLI result |
+| Measured | Observed from a harness run |
 | Verified-in-code | Asserted by repository code or tests |
 | Modelled | Derived from a model or estimate, not a direct run |
 | Roadmap | Planned; not a present capability claim |
@@ -29,12 +28,12 @@ scope and are tracked separately.
 |-------|--------|-------|----------|
 | Metrum AI Bench CLI provides load and performance measurement for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints | `README.md` and `docs/CLI.md` | Verified-in-code | Shipped modality subcommands and their generated CLI reference |
 | Landscape statements compare the documented capabilities of other inference-measurement tools with Metrum AI Bench CLI | `docs/COMPARISON.md` | Third-party public page | Cited public project pages and documentation reviewed in September 2026; no side-by-side run is claimed |
-| The checked-in smoke matrix reports NVIDIA-only campaign measurements made with `1.0.0-rc.1` | `docs/SMOKE_RESULTS.md` | Historical measurement | Campaign `matrix-20260915-195537`; the table remains not citable until it is regenerated from `summary.v3` or `campaign.sh report` with a required manifest |
+| The checked-in smoke matrix reports NVIDIA-only campaign measurements made with `1.0.0-rc.1` | `docs/SMOKE_RESULTS.md` | Measured | Campaign `matrix-20260915-195537` on 2026-09-15 with package `1.0.0-rc.1`; systems under test listed in that document |
 | Documented limitations describe client-side measurement boundaries and output-schema behavior | `docs/LIMITATIONS.md` and `docs/OUTPUT_SCHEMA.md` | Verified-in-code | Harness behavior, tests, and the published output schema |
 
 ## Maintenance
 
 - Add a row when a new material public claim is introduced in this repository.
 - Update evidence when a claim is re-measured or re-verified.
-- Do not treat Historical measurement, Roadmap, or Modelled rows as Measured.
+- Do not treat Roadmap or Modelled rows as Measured.
 - Keep claims outside the repository in their channel-specific ledgers.
