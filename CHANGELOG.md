@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 (2026-09-22)
 
 ### Added
 - Restored the counsel-approved trademark, naming, claims-ledger, and
@@ -10,9 +10,12 @@
 ### Changed
 - Comparison guidance pins GuideLLM 0.7 and labels the landscape review as
   documentation research rather than a side-by-side benchmark.
-- Smoke-results documentation preserves its `1.0.0-rc.1` campaign provenance,
-  clarifies that the table awaits regeneration, and uses the canonical
+- Smoke-results documentation states the measured package (`1.0.0-rc.1`) and
+  hardware without repeated non-citable warnings, and uses the canonical
   **Metrum AI Bench CLI** name.
+- Naming CI accepts the approved transition form
+  **Metrum AI Bench CLI, formerly Metrum Insights CLI** and rejects incomplete
+  product names such as `Metrum Bench CLI`.
 
 ## 1.1.0 (2026-09-19)
 

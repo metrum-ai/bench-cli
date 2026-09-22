@@ -7,12 +7,7 @@
 
 Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
 (PERFORMANCE TESTS). Raw JSONL is under gitignored `live-results/`; this
-document is the historical campaign summary.
-
-> **Historical provenance:** these measurements were made with `1.0.0-rc.1`.
-> That value records the package that produced the results; it is not the
-> current release number. This table is not citable until it is regenerated
-> from `summary.v3` or `campaign.sh report`.
+document is the public summary.
 
 | Field | Value |
 |-------|-------|
