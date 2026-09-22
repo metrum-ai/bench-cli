@@ -3,9 +3,7 @@
 
 # Smoke campaign manifests
 
-Campaign manifests land here as `<campaign-id>/manifest.json` after
-`make smoke-regen EXECUTE=1` (or `scripts/live/regen_smoke.sh --execute`) on a
-live GPU host.
+Optional home for `<campaign-id>/manifest.json` after
+`make smoke-regen EXECUTE=1` on a live GPU host.
 
-The public smoke summary is [SMOKE_RESULTS.md](../SMOKE_RESULTS.md) (package
-version and campaign id are in that file).
+See [SMOKE_RESULTS.md](../SMOKE_RESULTS.md) for the current smoke summary.
