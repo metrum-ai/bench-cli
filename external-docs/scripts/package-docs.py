@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Package the Bench CLI Docusaurus build into a versioned tarball for Restic upload.
+"""Package the Metrum AI Bench CLI Docusaurus build into a versioned tarball for Restic upload.
 
 Writes the docs.metrum.ai standard manifest schema (generated_at / latest /
 product / versions[] / aliases[]). The consumer is docs-shell/registry.json
@@ -55,7 +55,7 @@ def build_manifest(release_versions: list[str], latest_version: str, site_root: 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Package Bench CLI docs for release.")
+    parser = argparse.ArgumentParser(description="Package Metrum AI Bench CLI docs for release.")
     parser.add_argument("--version", required=True, help="Docs version, e.g. v1.0.0")
     parser.add_argument("--latest-version", required=True, help="Version to alias as latest")
     parser.add_argument("--release-versions", required=True, help="Space-separated list of released versions")

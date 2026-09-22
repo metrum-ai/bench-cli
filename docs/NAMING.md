@@ -11,15 +11,13 @@ Canonical product and artifact names for Metrum AI Bench CLI. See also
 ## Reason
 
 Router and related surfaces drifted across three names. This document and CI
-checks exist to keep formal, short, binary, crate, and commercial forms
-aligned.
+checks exist to keep formal, binary, crate, and commercial forms aligned.
 
 ## Approved and forbidden names
 
 | Form | Approved | Forbidden (examples) |
 |------|----------|----------------------|
 | Formal | `Metrum AI Bench CLI` | `MetrumBench`, `Insights CLI`, `Bench by Metrum` |
-| Short | `Bench CLI` | `MetrumBench` |
 | Binary | `metrum-ai-bench` | `metrumbench` as the primary product binary name in new docs |
 | Crate | `metrum-ai-bench` | alternate crate names implying a different product |
 | Commercial | `Metrum AI Bench Platform` | unofficial "Platform" variants |

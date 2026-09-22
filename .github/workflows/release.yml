@@ -37,6 +37,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Tag must be on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          git merge-base --is-ancestor "${tag_commit}" origin/main \
+            || { echo "::error::${RELEASE_TAG} (${tag_commit}) is not on main"; exit 1; }
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Verify tag and package
         shell: bash
@@ -150,7 +161,10 @@ jobs:
           test -x "${root}/bin/metrum-ai-bench"
           test -x "${root}/bin/metrum-ai-bench-mock-server"
           test -x "${root}/bin/dummy-model-server"
-          cp LICENSE README.md "${root}/"
+          cp LICENSE README.md TRADEMARKS.md "${root}/"
+          mkdir -p "${root}/docs"
+          cp docs/RESULTS_PUBLICATION_POLICY.md docs/CLAIMS_LEDGER.md \
+             docs/NAMING.md docs/COMPARISON.md "${root}/docs/"
           tar -czf "${root}.tar.gz" "${root}"
           if command -v shasum >/dev/null 2>&1; then
             shasum -a 256 "${root}.tar.gz" > "${root}.tar.gz.sha256"
@@ -233,6 +247,9 @@ jobs:
           fi
           tar -xzf "${archive}"
           root="${archive%.tar.gz}"
+          test -f "${root}/TRADEMARKS.md"
+          test -f "${root}/docs/RESULTS_PUBLICATION_POLICY.md"
+          test -f "${root}/docs/CLAIMS_LEDGER.md"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
           "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock
@@ -262,6 +279,9 @@ jobs:
           shasum -a 256 -c "${archive}.sha256"
           tar -xzf "${archive}"
           root="${archive%.tar.gz}"
+          test -f "${root}/TRADEMARKS.md"
+          test -f "${root}/docs/RESULTS_PUBLICATION_POLICY.md"
+          test -f "${root}/docs/CLAIMS_LEDGER.md"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
           "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock

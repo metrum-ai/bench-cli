@@ -34,15 +34,15 @@ One client process (`metrum-ai-bench` with modality subcommands; see
 
 ## 3. Landscape
 
-| Tool | What it is | What it answers | Overlap with Bench CLI | What Bench CLI adds | What it does better than Bench CLI |
-|------|------------|-----------------|--------------------|-----------------|--------------------------------|
+| Tool | What it is | What it answers | Overlap with Metrum AI Bench CLI | What Metrum AI Bench CLI adds | What it does better than Metrum AI Bench CLI |
+|------|------------|-----------------|----------------------------------|-------------------------------|---------------------------------------------|
 | **SemiAnalysis InferenceX** (formerly InferenceMAX) | Public continuous inference benchmarking program and reporting surface | How named stacks score on a published, recurring hardware CI matrix | Client-visible latency/throughput language; interest in real serving | Local, operator-owned runs with a stamped manifest you control; four OpenAI-compatible modalities in one client | Continuous public CI on real hardware; a recognized public scoreboard beats a self-reported local manifest for industry narrative |
 | **NVIDIA AIPerf** (successor to GenAI-Perf (retired; see AIPerf)) | NVIDIA's generative-AI performance client and reporting stack | How a Triton / NIM / NVIDIA-oriented serving path behaves under load with rich telemetry | Request rate, Poisson-style arrivals, tokenizer counts, SLO-style goodput ideas | Multi-modality (LLM/VLM/ASR/imagegen) and pooled multi-endpoint mixture labeling in one OSS client; strategic `--sweep` / `--html` / `--mlperf-dir` | Broader ecosystem familiarity and telemetry; already wired into many NVIDIA CI and partner pipelines |
-| **MLPerf Inference** | Audited industry suite (LoadGen + compliance) | Whether a submission meets a fixed, audited workload and accuracy rules | Latency/throughput language; Server/Offline scenario names | Informal LoadGen-shaped **export** for parser experiments (`--mlperf-dir`); not a substitute for LoadGen | Audited rules, accuracy requirements, and submission standing Bench CLI does not have |
+| **MLPerf Inference** | Audited industry suite (LoadGen + compliance) | Whether a submission meets a fixed, audited workload and accuracy rules | Latency/throughput language; Server/Offline scenario names | Informal LoadGen-shaped **export** for parser experiments (`--mlperf-dir`); not a substitute for LoadGen | Audited rules, accuracy requirements, and submission standing Metrum AI Bench CLI does not have |
 | **vLLM / SGLang `bench_serving`** | Engine-adjacent serving microbenchmarks | How *this* engine build behaves on *these* datasets at a chosen rate/concurrency | `--request-rate`, concurrency caps, seeds, ignore-EOS, local tokenizer counts | Cross-engine OpenAI-compatible client; multi-modality; strategic sweeps and exports | Already installed next to the engine; deep dataset integrations for that stack |
 | **[GuideLLM 0.7](https://github.com/vllm-project/guidellm/releases/tag/v0.7.0) (`vllm-project`) / LLMPerf** | Python load / perf clients aimed at LLM HTTP APIs | Latency and throughput under scripted load, often with sweep/report UX | Rate/concurrency sweeps; HTML-style reporting (GuideLLM) | Shared Rust client across four modalities; typed errors; stamped `summary.v3` config; open-loop coordinated-omission fields | GuideLLM's sweep/report packaging and LLMPerf's Python ecosystem fit for quick scripts |
-| **lm-evaluation-harness / HELM / OpenCompass** | Accuracy and capability evaluation harnesses | Quality and task scores, not serving goodput under SLOs | Prompt corpora and model IDs sometimes shared informally | Bench CLI measures serving performance (plus ASR WER/CER only); these measure task quality | Breadth of quality tasks, leaderboards, and academic comparison protocols |
-| **NVIDIA Dynamo** | Inference serving / runtime stack | How to *run* multi-node inference efficiently | You may point Bench CLI **at** Dynamo-fronted OpenAI-compatible endpoints | Dynamo is a **measurement target**, not an alternative measurement tool | End-to-end serving product features Bench CLI does not replace |
+| **lm-evaluation-harness / HELM / OpenCompass** | Accuracy and capability evaluation harnesses | Quality and task scores, not serving goodput under SLOs | Prompt corpora and model IDs sometimes shared informally | Metrum AI Bench CLI measures serving performance (plus ASR WER/CER only); these measure task quality | Breadth of quality tasks, leaderboards, and academic comparison protocols |
+| **NVIDIA Dynamo** | Inference serving / runtime stack | How to *run* multi-node inference efficiently | You may point Metrum AI Bench CLI **at** Dynamo-fronted OpenAI-compatible endpoints | Dynamo is a **measurement target**, not an alternative measurement tool | End-to-end serving product features Metrum AI Bench CLI does not replace |
 
 ## 4. MLPerf export
 
@@ -67,8 +67,8 @@ official LoadGen substring `Result is : VALID` (covered in
 - A stamped manifest is table stakes for publishable runs, not a moat.
 - Not a competitor to MLPerf Inference submissions.
 - Not a head-to-head performance bake-off against AIPerf or InferenceX.
-- No claim that Bench CLI replaces engine-native `bench_serving` for engine
-  developers who already live in that tree.
+- No claim that Metrum AI Bench CLI replaces engine-native `bench_serving` for
+  engine developers who already live in that tree.
 
 ## 6. Not in 1.0 (roadmap)
 

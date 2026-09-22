@@ -2,7 +2,20 @@
 
 ## Unreleased
 
+## 1.1.2 (2026-09-22)
+
+### Added
+- GitHub Release tarballs include `TRADEMARKS.md` and the policy docs under
+  `docs/` (`RESULTS_PUBLICATION_POLICY.md`, `CLAIMS_LEDGER.md`, `NAMING.md`,
+  `COMPARISON.md`). Unpack smoke asserts those files are present.
+- Release verify requires the release tag commit to be an ancestor of `main`.
+
 ### Changed
+- Dropped the short form `Bench CLI` from naming policy so it matches
+  `TRADEMARKS.md`; customer-facing docs use the formal name.
+- CodeQL no longer soft-fails (`continue-on-error` removed); the repo is public.
+- Self-hosted runner systemd unit uses `User=runner` and `/home/runner/...`
+  paths instead of a personal home directory.
 - Dataset docs treat [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
   as published (Apache-2.0). `docs/datasets/DATASET_CARD.md` is the local card;
   `DATASET_CARD.draft.md` is a superseded pointer, not an unpublished Hub set.

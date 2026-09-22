@@ -92,7 +92,7 @@ allowlisted() {
   return 1
 }
 
-# Approved name: Metrum AI Bench CLI (short form: Bench CLI).
+# Approved name: Metrum AI Bench CLI.
 # Binary/crate names remain metrum-ai-bench. Reject unapproved legacy forms.
 check_naming() {
   local rc=0
