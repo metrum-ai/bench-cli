@@ -30,6 +30,7 @@ scope and are tracked separately.
 | Landscape statements compare the documented capabilities of other inference-measurement tools with Metrum AI Bench CLI | `docs/COMPARISON.md` | Third-party public page | Cited public project pages and documentation reviewed in September 2026; no side-by-side run is claimed |
 | The checked-in smoke matrix reports NVIDIA-only campaign measurements made with `1.0.0-rc.1` ([Not citable](SMOKE_RESULTS.md)) | `docs/SMOKE_RESULTS.md` | Measured | Campaign `matrix-20260915-195537` on 2026-09-15 with package `1.0.0-rc.1`; systems under test listed in that document; regeneration on 1.1.x pending |
 | Documented limitations describe client-side measurement boundaries and output-schema behavior | `docs/LIMITATIONS.md` and `docs/OUTPUT_SCHEMA.md` | Verified-in-code | Harness behavior, tests, and the published output schema |
+| `metrum-ai/prompt-library` is published on Hugging Face as a public Apache-2.0 dataset for LLM workload mixes | `docs/datasets/DATASET_CARD.md`, Hub card | Third-party public page | Hub API 2026-09-22: `private=false`, `gated=false`, `cardData.license=apache-2.0`, root `LICENSE` present; publisher asserts Apache-2.0 while upstream collection authors remain undocumented on the card |
 
 ## Maintenance
 

@@ -65,7 +65,21 @@ not a frequency-representative draw of `full`.
 
 ## License
 
-Apache-2.0, matching the Hub card and this repository.
+Apache-2.0, matching the Hub card, Hub `LICENSE` file, and this repository.
+
+Verified 2026-09-22 against the public Hub API and card:
+
+- Dataset `metrum-ai/prompt-library` is **public** and **not gated**
+- Card / tag license is `apache-2.0`; root `LICENSE` is Apache-2.0 text
+- Hub README "Provenance, intended use, and license" states the source file
+  was supplied by the dataset publisher, that original authors / collection /
+  tokenizer are **not documented** in the accompanying materials, and that the
+  publisher selected Apache-2.0 for publication
+
+Redistribution therefore relies on that **publisher assertion**. A named
+upstream inventory is not published on the Hub card; if one appears later,
+re-check compatibility before treating third-party source licenses as
+independently verified.
 
 ## Fields (selection)
 
