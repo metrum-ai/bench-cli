@@ -3,6 +3,9 @@
 
 # Smoke results - campaign `matrix-20260915-195537`
 
+> **Not citable.** Generated on 1.0.0-rc.1. Regeneration on 1.1.x with
+> `--sut --require-sut` is pending; manifests will be published alongside.
+
 > **Coverage:** the published smoke matrix is currently **NVIDIA-only** (L40S, RTX PRO 6000 via Shadeform / Massed Compute). AMD Instinct coverage is in progress and will be added under the same manifest standard. No comparative vendor results are published here.
 
 Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
