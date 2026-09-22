@@ -207,10 +207,8 @@ jobs:
           archive="$(ls metrum-ai-bench-v*-${{ matrix.target }}.tar.gz)"
           cosign sign-blob --yes \
             --bundle "${archive}.sigstore.json" "${archive}"
-      # Attestation soft-fails only while the repository is private (feature /
-      # billing may be unavailable). Required once the repository is public.
+      # Build provenance attestation is required (repository is public).
       - uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
-        continue-on-error: ${{ github.event.repository.private }}
         with:
           subject-path: metrum-ai-bench-v*-${{ matrix.target }}.tar.gz
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
