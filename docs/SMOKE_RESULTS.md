@@ -6,10 +6,11 @@
 > **Coverage:** the published smoke matrix is currently **NVIDIA-only** (L40S, RTX PRO 6000 via Shadeform / Massed Compute). AMD Instinct coverage is in progress and will be added under the same manifest standard. No comparative vendor results are published here.
 
 Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
-(PERFORMANCE TESTS). Measured with package **1.0.0-rc.1**. Raw JSONL is under
-gitignored `live-results/`; this document is the public smoke summary. To
-regenerate on a current release with `--sut --require-sut`, see
-`make smoke-regen` / `scripts/live/regen_smoke.sh`.
+(PERFORMANCE TESTS). Measured with package **1.0.0-rc.1** (before
+`--require-sut`). This page is a smoke summary, not a publication under
+[RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Raw JSONL is
+under gitignored `live-results/`. To re-run on a current release with
+`--sut --require-sut`, see `make smoke-regen` / `scripts/live/regen_smoke.sh`.
 
 | Field | Value |
 |-------|-------|
@@ -36,7 +37,7 @@ regenerate on a current release with `--sut --require-sut`, see
 
 ### Launch flags
 
-> Publication runs should pass `--sut sut.json --require-sut` (rc.5+). Hostname redaction is implied.
+> `--sut` / `--require-sut` arrived in rc.5+. Use them for publication runs.
 
 - **llm/vlm (gemma then Qwen recreate)**: `--model <id> --host 0.0.0.0 --port 8000 --tensor-parallel-size 2` on `L40Sx2`
 - **asr**: `--model openai/whisper-large-v3 --host 0.0.0.0 --port 8000` on `L40S`
