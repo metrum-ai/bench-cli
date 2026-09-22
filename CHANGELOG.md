@@ -2,13 +2,30 @@
 
 ## Unreleased
 
+### Added
+- Docs: [Agent-driven benchmarking](external-docs/content/docs/agent-driven.mdx)
+  with a drop-in `AGENTS.md` / `CLAUDE.md` hint and a copy-paste sample prompt
+  for Claude Code, Codex, and OpenCode.
+- Release archives stage `examples/` and `test-data/` (smoke asserts
+  `sut.example.json` and `llm-hi.jsonl`).
+- Docs quickstart: tarball `bin/dummy-model-server`, SHA-256 / Sigstore verify,
+  unpack + `PATH` commands; `/docs` client redirect to quickstart.
+- `metrum-ai-bench selftest` prints a final `selftest: ok` line after the
+  environment JSON (exit 0 = success).
+
 ### Changed
 - Deprecated shims `metrumbench-*` will be removed in **1.3.0** (stderr warning
-  on every invocation, including `--help`).
+  on every invocation, including `--help`). Release notes state they ship as
+  back-compat aliases until then.
 - Smoke-results intro notes package `1.0.0-rc.1` predates `--require-sut` and
   that the page is a smoke summary, not a
   [RESULTS_PUBLICATION_POLICY.md](docs/RESULTS_PUBLICATION_POLICY.md)
   publication.
+- Limitations "No agent mode" clarifies workloads under test vs driving the
+  CLI from a coding agent.
+- GitHub Release assets no longer attach orphan `metrum-ai-bench.rb`; formula
+  still generates for the gated Homebrew tap job.
+- README quickstart notes docs-site latency bands assume `--max-tokens 20`.
 
 ## 1.1.2 (2026-09-22)
 

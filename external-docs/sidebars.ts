@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'docs/user-guide',
+        'docs/agent-driven',
         'docs/modalities',
         'docs/strategic-benchmarking',
         'docs/prompt-library',

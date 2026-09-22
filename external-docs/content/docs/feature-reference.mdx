@@ -120,5 +120,7 @@ For publication requirements, see [Publishing-oriented runs](./user-guide#publis
 metrum-ai-bench selftest
 ```
 
-Local sanity check after install or unpack. Use before debugging endpoint
+Local sanity check after install or unpack. Prints a JSON environment object,
+then a final `selftest: ok` line. Exit code **0** means success; non-zero means
+failure (for example JSON serialization error). Use before debugging endpoint
 connectivity issues so you know the binary itself is healthy.

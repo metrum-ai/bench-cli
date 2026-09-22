@@ -48,7 +48,7 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
     },
-    /// Print client environment and verify local runtime capabilities.
+    /// Print client environment JSON and `selftest: ok` (exit 0 on success).
     Selftest,
 }
 
@@ -169,6 +169,7 @@ fn main() -> ExitCode {
         match serde_json::to_string_pretty(&environment()) {
             Ok(value) => {
                 println!("{value}");
+                println!("selftest: ok");
                 return ExitCode::SUCCESS;
             }
             Err(error) => {

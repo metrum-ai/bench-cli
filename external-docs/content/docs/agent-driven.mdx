@@ -1,0 +1,121 @@
+---
+title: Agent-driven benchmarking
+description: Drive Metrum AI Bench CLI from Claude Code, Codex, or OpenCode with a drop-in project hint and sample prompt.
+sidebar_label: Agent-driven
+sidebar_position: 3
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Agent-driven benchmarking
+
+Use Metrum AI Bench CLI from a coding agent (Claude Code, Codex, OpenCode, or
+similar). The CLI is a non-interactive client: explicit flags, deterministic
+`--seed`, and JSONL output. That shape fits agent loops without special
+plugins.
+
+This page is about **driving** the CLI. It is not about evaluating agent
+workloads as the system under test. See [Limitations](./limitations#no-agent-mode)
+for that distinction.
+
+If you have not installed a binary yet, do the [Quickstart](./quickstart) first.
+
+## Why agents work well here
+
+- Flags are complete; there is no interactive prompt.
+- `--seed` makes request ordering and mixes reproducible.
+- `--data-log` writes one JSON object per line; the last line is
+  `summary.v3` (see [Output schema](./output-schema)).
+- `--require-sut` refuses to emit an unpublishable run instead of silently
+  dropping SUT metadata.
+
+## Drop-in project hint
+
+Paste this into `AGENTS.md` or `CLAUDE.md` in a project that already has the
+CLI on `PATH` and an OpenAI-compatible endpoint:
+
+```markdown
+# Metrum AI Bench CLI (agent notes)
+
+- Prefer `metrum-ai-bench <modality> -- <flags>` (unified entry). Standalone
+  binaries such as `metrum-ai-bench-llm` are equivalent for that modality.
+- Sweeps, knee, and session exports need the separate
+  `metrum-ai-bench-strategic` binary (not a unified subcommand).
+- Endpoint: set URL via flags or env; never commit API keys.
+  Example env: `BENCH_URL`, `BENCH_API_KEY`.
+- For any number you might publish or share: pass `--sut <file> --require-sut`.
+  Template shape: `examples/sut.example.json` in the repo, or the inline JSON
+  in the README "Publishing a result" section.
+- Write `--data-log` under a known directory (for example `./bench-out/`).
+- After a run, summarize with:
+  `tail -n 1 <data-log> | jq '{attempted, errors, ttft_s, completion_tokens_per_second, sut, partial}'`
+- Prompt files are JSONL only. Thinking models: read docs on reasoning / max
+  tokens before choosing `--max-tokens`.
+```
+
+## Sample prompt
+
+Copy the block below into the agent. Replace the placeholders, then let the
+agent execute the shell commands.
+
+```text
+Run a closed-loop LLM measure with Metrum AI Bench CLI.
+
+Constraints:
+- Use `metrum-ai-bench llm --` (unified entry). Do not invent interactive flags.
+- Endpoint: $BENCH_URL (OpenAI-compatible chat completions URL).
+- API key: $BENCH_API_KEY (pass as --api-key; do not print the secret).
+- Model id: <MODEL_ID>
+- Scenario label: agent-smoke
+- --num-requests 16 --concurrency 4 --max-tokens 64 --seed 7 --streaming
+- Mode: chat
+- Prompts: a tiny local JSONL file with one user turn (create prompts.jsonl if needed).
+- Write sut.json from this shape, filling real inventory for this host/endpoint:
+  {
+    "provenance": "declared",
+    "name": "<host / GPU summary>",
+    "vendor": "<OEM or cloud>",
+    "gpu": { "model": "<GPU>", "count": 1, "memory_gb": <N> },
+    "cpu": "<CPU>",
+    "memory_gb": <N>,
+    "driver_version": "<driver>",
+    "runtime": { "name": "<engine>", "version": "<ver>", "config": "<notes>" },
+    "model": { "id": "<MODEL_ID>", "revision": null, "quantization": null },
+    "host_os": "<OS>",
+    "notes": "Agent-driven run"
+  }
+- Pass --sut sut.json --require-sut
+- Write --data-log bench-out/results.jsonl (create bench-out/ first)
+- On success, print only:
+  tail -n 1 bench-out/results.jsonl | jq '{attempted, errors, ttft_s, e2e_s, completion_tokens_per_second, sut: .sut.name, partial}'
+- If the binary is missing or --require-sut fails, stop and report the error; do not invent metrics.
+```
+
+A concrete shell skeleton the agent should converge on (values are examples):
+
+```bash
+mkdir -p bench-out
+# prompts.jsonl and sut.json created or edited by the agent as instructed
+
+metrum-ai-bench llm -- \
+  --url "$BENCH_URL" --api-key "$BENCH_API_KEY" \
+  --scenario agent-smoke --model "$MODEL_ID" --mode chat --streaming \
+  --prompts prompts.jsonl \
+  --num-requests 16 --concurrency 4 --max-tokens 64 --seed 7 \
+  --sut sut.json --require-sut \
+  --data-log bench-out/results.jsonl
+
+tail -n 1 bench-out/results.jsonl | jq \
+  '{attempted, errors, ttft_s, e2e_s, completion_tokens_per_second, sut: .sut.name, partial}'
+```
+
+## Entry points
+
+| Form | Role |
+| --- | --- |
+| `metrum-ai-bench llm -- …` | Preferred unified modality entry (`--` separates dispatcher args from modality flags) |
+| `metrum-ai-bench-llm …` | Same modality binary without the dispatcher |
+| `metrum-ai-bench-strategic …` | Concurrency/rate sweeps, knee, sessions, exports (separate binary) |
+
+Day-to-day concepts: [User Guide](./user-guide). Publishing rules:
+[Publishing-oriented runs](./user-guide#publishing-oriented-runs). Sweeps:
+[Strategic benchmarking](./strategic-benchmarking).
