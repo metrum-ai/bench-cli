@@ -71,7 +71,6 @@ Publication of measurements that name Metrum AI Bench CLI, and use of
 | Form | Approved name |
 |------|----------------|
 | Formal | `Metrum AI Bench CLI` |
-| Short | `Bench CLI` |
 | Binary | `metrum-ai-bench` |
 | Crate | `metrum-ai-bench` |
 | Commercial | `Metrum AI Bench Platform` |
