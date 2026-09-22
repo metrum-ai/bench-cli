@@ -120,4 +120,5 @@ the failure is a proven empty candidate set vs search/tolerance miss.
 
 - [LIMITATIONS.md](LIMITATIONS.md): mix fidelity and global token-cap caveats
 - [CLI.md](CLI.md): regenerated `--help` text
-- Dataset card pointer: [datasets/DATASET_CARD.draft.md](datasets/DATASET_CARD.draft.md)
+- Dataset card: [datasets/DATASET_CARD.md](datasets/DATASET_CARD.md)
+- Hub: [metrum-ai/prompt-library](https://huggingface.co/datasets/metrum-ai/prompt-library)

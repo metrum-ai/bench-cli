@@ -16,13 +16,13 @@ manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
 and attests.
 
 Large prompt corpora for LLM workload mixes are published on Hugging Face as
-[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library).
-Use `metrum-ai-bench-prompts` to select a mix by ISL/OSL mean or median within
-CLI tolerances, then feed the resulting JSONL to `metrum-ai-bench-llm` (see
-[docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md)). This repository ships only
-tiny fixtures ([test-data/README.md](test-data/README.md)). Draft card for
-other modality fixtures:
-[docs/datasets/DATASET_CARD.draft.md](docs/datasets/DATASET_CARD.draft.md).
+[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+(Apache-2.0). Use `metrum-ai-bench-prompts` to select a mix by ISL/OSL mean or
+median within CLI tolerances, then feed the resulting JSONL to
+`metrum-ai-bench-llm` (see [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md) and
+[docs/datasets/DATASET_CARD.md](docs/datasets/DATASET_CARD.md)). This repository
+ships only tiny fixtures ([test-data/README.md](test-data/README.md)). VLM, ASR,
+and image-generation still use those local fixtures; they are not on the Hub.
 
 ## Quickstart (60 seconds)
 

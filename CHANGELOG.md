@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Dataset docs treat [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+  as published (Apache-2.0). `docs/datasets/DATASET_CARD.md` is the local card;
+  `DATASET_CARD.draft.md` is a superseded pointer, not an unpublished Hub set.
+
 ## 1.1.1 (2026-09-22)
 
 ### Added
