@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # Product-naming allowlist (shim paths only). Format: path-glob<TAB>regex
-# Approved customer-facing name: Metrum AI Bench CLI (short form: Bench CLI).
+# Approved customer-facing name: Metrum AI Bench CLI.
 # Binary/crate names remain metrum-ai-bench. Exceptions below cover legacy shims.
 Cargo.toml	name = "metrumbench|path = "src/bin/metrumbench
 src/bin/metrumbench*	.
@@ -11,5 +11,4 @@ docs/**	metrumbench-\*|shim will be removed|removed in v2\.0|deprecated shim
 scripts/live/**	metrumbench
 TRADEMARKS.md	^\*\*Forbidden\*\* \(non-exhaustive\): `MetrumBench`, `Insights CLI`, `Bench by Metrum`\.$
 docs/NAMING.md	^\| Formal \| `Metrum AI Bench CLI` \| `MetrumBench`, `Insights CLI`, `Bench by Metrum` \|$
-docs/NAMING.md	^\| Short \| `Bench CLI` \| `MetrumBench` \|$
 docs/NAMING.md	^\| Binary \| `metrum-ai-bench` \| `metrumbench` as the primary product binary name in new docs \|$

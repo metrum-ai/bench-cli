@@ -3,7 +3,7 @@
 
 [package]
 name = "metrum-ai-bench"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2021"
 rust-version = "1.85"
 description = "Metrum AI Bench CLI: load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"

@@ -410,7 +410,7 @@ jobs:
           SNAPSHOT_ID="${{ steps.snapshot.outputs.snapshot_id }}"
           {
             echo ""
-            echo "## Bench CLI docs deployment to docs.metrum.ai"
+            echo "## Metrum AI Bench CLI docs deployment to docs.metrum.ai"
             echo "- **Version**: \`${VERSION}\`"
             echo "- **Snapshot ID**: \`${SNAPSHOT_ID:-resolution failed}\`"
             echo "- **Trigger**: \`${{ github.event_name }}\` on \`${{ github.ref }}\`"

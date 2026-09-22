@@ -16,11 +16,11 @@ After=docker.service network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-User=cgadgil
+User=runner
 Group=docker
-WorkingDirectory=/home/cgadgil/github-runners-bench-cli-compose
-ExecStart=/home/cgadgil/github-runners-bench-cli-compose/pool start
-ExecStop=/home/cgadgil/github-runners-bench-cli-compose/pool stop
+WorkingDirectory=/home/runner/github-runners-bench-cli-compose
+ExecStart=/home/runner/github-runners-bench-cli-compose/pool start
+ExecStop=/home/runner/github-runners-bench-cli-compose/pool stop
 TimeoutStartSec=0
 
 [Install]
