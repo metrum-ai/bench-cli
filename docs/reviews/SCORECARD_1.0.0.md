@@ -1,6 +1,9 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+> **Historical review of 1.0.0.** Superseded by the v1.1.2 state; policy docs
+> and `metrum-ai/prompt-library` are live. See CHANGELOG.
+
 # Metrum AI Bench CLI 1.0.0: scorecard
 
 | Field | Value |
