@@ -73,10 +73,10 @@ client.
 
 ## Published smoke matrix is NVIDIA-only
 
-See [SMOKE_RESULTS.md](SMOKE_RESULTS.md) (**Not citable**; numbers are from
-`1.0.0-rc.1`). The published smoke coverage in that file is NVIDIA hardware
-only; AMD Instinct coverage is in progress. That is a coverage statement, not a
-vendor ranking. No comparative vendor results are published there.
+See [SMOKE_RESULTS.md](SMOKE_RESULTS.md). Those rows are smoke results from
+package `1.0.0-rc.1` on NVIDIA hardware only; AMD Instinct coverage is in
+progress. That is a coverage statement, not a vendor ranking. No comparative
+vendor results are published there.
 
 ## MLPerf export is unofficial
 
