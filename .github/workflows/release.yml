@@ -165,6 +165,8 @@ jobs:
           mkdir -p "${root}/docs"
           cp docs/RESULTS_PUBLICATION_POLICY.md docs/CLAIMS_LEDGER.md \
              docs/NAMING.md docs/COMPARISON.md "${root}/docs/"
+          cp -a examples "${root}/"
+          cp -a test-data "${root}/"
           tar -czf "${root}.tar.gz" "${root}"
           if command -v shasum >/dev/null 2>&1; then
             shasum -a 256 "${root}.tar.gz" > "${root}.tar.gz.sha256"
@@ -248,6 +250,8 @@ jobs:
           test -f "${root}/TRADEMARKS.md"
           test -f "${root}/docs/RESULTS_PUBLICATION_POLICY.md"
           test -f "${root}/docs/CLAIMS_LEDGER.md"
+          test -f "${root}/examples/sut.example.json"
+          test -f "${root}/test-data/llm-hi.jsonl"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
           "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock
@@ -280,6 +284,8 @@ jobs:
           test -f "${root}/TRADEMARKS.md"
           test -f "${root}/docs/RESULTS_PUBLICATION_POLICY.md"
           test -f "${root}/docs/CLAIMS_LEDGER.md"
+          test -f "${root}/examples/sut.example.json"
+          test -f "${root}/test-data/llm-hi.jsonl"
           "${root}/bin/metrum-ai-bench" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench" selftest
           "${root}/bin/metrum-ai-bench-mock-server" --help | grep -qi mock
@@ -319,7 +325,6 @@ jobs:
             *.sha256
             *.sigstore.json
             *.cdx.json
-            metrum-ai-bench.rb
 
   crates-io:
     # Deliberate gate: never publish -rc. tags; require CRATES_IO_PUBLISH=true.

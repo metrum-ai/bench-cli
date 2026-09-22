@@ -33,8 +33,9 @@ You'll need:
 - A Linux (`x86_64` or `aarch64` glibc) or macOS Darwin host for release
   binaries, **or** Rust **1.85+** to build from source. Windows has no release
   binaries (see [Platforms](./platforms)).
-- Go **1.26.6+** if you will run the dummy model server from this repository
-  (matches `dummy-model-server/go.mod` and CI).
+- Go **1.26.6+** only if you start the dummy model server from a **source
+  clone** with `go run` (matches `dummy-model-server/go.mod` and CI). Release
+  tarballs already ship `bin/dummy-model-server` and need no Go.
 - Network access only if you download a GitHub Release or fetch the prompt
   library later. The dummy-server loop needs no API key beyond the literal
   value `dummy`.
@@ -46,11 +47,30 @@ You'll need:
 ### Option A: GitHub Release (preferred for binaries)
 
 1. Open [Releases](https://github.com/metrum-ai/bench-cli/releases) and download
-   the archive for your target.
-2. Verify the accompanying `.sha256` checksum (and optional Sigstore bundle when
-   present).
-3. Unpack the archive so `metrum-ai-bench` (and modality binaries) are on your
-   `PATH`.
+   the archive for your target (replace `VERSION` and `TARGET` below).
+2. Verify the checksum (and Sigstore bundle when present):
+
+```bash
+# SHA-256 of the tarball (file next to the archive on the release)
+shasum -a 256 -c metrum-ai-bench-vVERSION-TARGET.tar.gz.sha256
+
+# Optional: Sigstore keyless verify (requires cosign)
+cosign verify-blob \
+  --bundle metrum-ai-bench-vVERSION-TARGET.tar.gz.sigstore.json \
+  metrum-ai-bench-vVERSION-TARGET.tar.gz
+```
+
+Each target also publishes a CycloneDX SBOM as
+`metrum-ai-bench-TARGET.cdx.json` on the same release.
+
+3. Unpack so the binaries are on your `PATH`. The archive has a versioned root
+   with `bin/` inside it; do not strip that layout into `~/.local/bin` directly:
+
+```bash
+mkdir -p ~/.local/opt ~/.local/bin
+tar -xzf metrum-ai-bench-vVERSION-TARGET.tar.gz -C ~/.local/opt
+ln -sf ~/.local/opt/metrum-ai-bench-vVERSION-TARGET/bin/* ~/.local/bin/
+```
 
 Release archives are cross-built with cargo-zigbuild for:
 
@@ -59,9 +79,9 @@ Release archives are cross-built with cargo-zigbuild for:
 | Linux `*-unknown-linux-gnu` | glibc **2.17** floor; **not** musl |
 | macOS Darwin | `x86_64` / `aarch64` |
 
-TLS uses rustls (no OpenSSL link). An optional Homebrew formula
-(`metrum-ai-bench.rb`) is attached to each release when the publish workflow is
-configured with a tap repository.
+TLS uses rustls (no OpenSSL link). A Homebrew formula is generated for tap
+publish when `HOMEBREW_TAP_REPOSITORY` is configured; it is not a standalone
+install path from the GitHub Release assets alone.
 
 ### Option B: Build from source
 
@@ -84,7 +104,20 @@ Release archives include the `otlp` feature but not `tokenizer`. See
 
 ## 2. Start the dummy server
 
-From the repository root (second terminal is fine):
+From a **GitHub Release tarball** (no Go required; second terminal is fine):
+
+```bash
+bin/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms
+```
+
+If you installed under `~/.local/opt/.../bin` and that directory is on `PATH`,
+the same binary name works without the `bin/` prefix:
+
+```bash
+dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms
+```
+
+From a **source clone** (needs Go **1.26.6+**), from the repository root:
 
 ```bash
 go run ./dummy-model-server/cmd/dummy-model-server \
@@ -152,8 +185,8 @@ metrum-ai-bench llm -- \
 ```
 
 During the v1.x compatibility period the four modality binaries can also be
-invoked directly. Deprecated legacy shims remain and print a v2.0 removal
-notice.
+invoked directly. Deprecated `metrumbench-*` shims remain and print a **1.3.0**
+removal notice.
 
 ### What success looks like
 
@@ -172,9 +205,11 @@ reproduction guide expects roughly:
 | Mean ITL | 0.010–0.040 s |
 
 Those bands surround the dummy server's timing model for
-`-latency 100ms -chunk-interval 20ms` with `--max-tokens 20`: TTFT â‰ˆ **120 ms**
-(latency + first chunk) and response time â‰ˆ **500 ms** (`100 + 20Ã-20`). See
-`dummy-model-server/README.md` in the repository.
+`-latency 100ms -chunk-interval 20ms` with `--max-tokens 20`: TTFT ~ **120 ms**
+(latency + first chunk) and response time ~ **500 ms** (`100 + 20*20`). See
+`dummy-model-server/README.md` in the repository. E2E scales with
+`--max-tokens`; a README quickstart that uses `64` is healthy but will not
+land in this table.
 
 Scheduling and counts should match `test-data/reference-result.json` when you
 follow [reproducing the reference](https://github.com/metrum-ai/bench-cli/blob/main/docs/REPRODUCING.md)

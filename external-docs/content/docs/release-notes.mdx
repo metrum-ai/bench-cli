@@ -13,6 +13,21 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Unreleased
+
+- Release archives include `examples/` and `test-data/` so the README quickstart
+  paths resolve after unpack.
+- Docs quickstart covers tarball `bin/dummy-model-server`, checksum / Sigstore
+  verify, and unpack + `PATH` commands.
+- Agent-driven benchmarking guide (Claude Code / Codex / OpenCode) with a
+  sample prompt.
+- Deprecated `metrumbench-*` aliases remain in the archive through **1.3.0**
+  (stderr removal notice). They are back-compat only; prefer `metrum-ai-bench-*`.
+- Homebrew formula is generated for tap publish when configured; it is no
+  longer attached as a free-floating GitHub Release asset.
+
+---
+
 ## Metrum AI Bench CLI 1.1.1
 
 | | |

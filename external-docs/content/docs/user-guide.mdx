@@ -13,10 +13,13 @@ Metrum AI Bench CLI. Each section is task-oriented and links to the
 [Feature Reference](./feature-reference) for flag-level detail.
 
 If you have not run anything yet, do the [Quickstart](./quickstart) first.
+To drive the CLI from Claude Code, Codex, or OpenCode, see
+[Agent-driven benchmarking](./agent-driven).
 
 Sections:
 
 - [Building blocks](#building-blocks)
+- [Entry points](#entry-points)
 - [Tools at a glance](#tools-at-a-glance)
 - [Closed-loop vs open-loop](#closed-loop-vs-open-loop)
 - [Common load controls](#common-load-controls)
@@ -26,7 +29,8 @@ Sections:
 - [When something fails](#when-something-fails)
 
 Modality-specific walkthroughs live in [Modalities](./modalities). Sweeps and
-exports live in [Strategic benchmarking](./strategic-benchmarking).
+exports live in [Strategic benchmarking](./strategic-benchmarking). Agent loops:
+[Agent-driven benchmarking](./agent-driven).
 
 ---
 
@@ -48,6 +52,20 @@ already operate, measures what the client observes, and writes JSONL.
 Read it as a sentence: choose a **modality**, label a **scenario**, execute a
 **run**, inspect the **data log**, and optionally attach a declared **SUT**
 before publication.
+
+---
+
+## Entry points {#entry-points}
+
+| Form | Role |
+| --- | --- |
+| `metrum-ai-bench <modality> -- <flags>` | Preferred unified entry. Everything after `--` is forwarded to that modality binary. |
+| `metrum-ai-bench-llm` (and `vlm` / `asr` / `imagegen` / `prompts`) | Same modality without the dispatcher; equivalent flags. |
+| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports. **Separate binary**, not a unified subcommand. |
+| `metrumbench-*` | Deprecated shims; stderr warns; removed in **1.3.0**. |
+
+Flag maps: [CLI Reference](./cli-reference). Agent-oriented copy-paste:
+[Agent-driven benchmarking](./agent-driven).
 
 ---
 

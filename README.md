@@ -56,6 +56,11 @@ target/release/metrum-ai-bench llm -- \
 tail -n 1 results.jsonl | jq '{requests: .attempted, errors: .errors, ttft_p50_s: .ttft_s.p50, tokens_per_s: .completion_tokens_per_second, sut: .sut}'
 ```
 
+Expected latency bands on the docs site assume `--max-tokens 20` with the same
+dummy `-latency` / `-chunk-interval` flags; this quickstart uses `64`, so E2E
+is longer and still healthy. See the expected-band table in
+[Quickstart](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/quickstart/).
+
 `--sut` is the operator-declared system under test embedded in the summary.
 `--require-sut` refuses to run without that block and is what makes the number
 publishable; see [Publishing a result](#publishing-a-result). If you are about

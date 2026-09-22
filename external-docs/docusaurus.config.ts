@@ -76,7 +76,16 @@ const config: Config = {
     ],
   ],
 
-  plugins: ['@signalwire/docusaurus-plugin-llms-txt'],
+  plugins: [
+    '@signalwire/docusaurus-plugin-llms-txt',
+    [
+      '@docusaurus/plugin-client-redirects',
+      {
+        // trailingSlash is false: one entry covers /docs and /docs/
+        redirects: [{from: '/docs', to: '/docs/quickstart'}],
+      },
+    ],
+  ],
 
   themeConfig: {
     // Social card: white product logo (platforms compose cards on dark chrome).
