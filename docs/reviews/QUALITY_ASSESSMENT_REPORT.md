@@ -1,6 +1,9 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+> **Historical review of 0.1.82.** Superseded by the v1.1.2 state; policy docs
+> and `metrum-ai/prompt-library` are live. See CHANGELOG.
+
 > **Disposition - 2026-09-17.** This is the internal production-fidelity review of 0.1.82 (verdict at that time: **NO-GO** for public use), retained as a record.
 > **Superseded by** [`SCORECARD_1.0.0.md`](./SCORECARD_1.0.0.md) / [`QUALITY_ASSESSMENT_1.0.0.md`](./QUALITY_ASSESSMENT_1.0.0.md): current verdict **GO** at `v1.0.0-rc.4`.
 >

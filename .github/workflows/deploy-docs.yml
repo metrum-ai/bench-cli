@@ -353,7 +353,7 @@ jobs:
           RESTIC_CACHE_DIR: /tmp/restic-cache-bench-cli-docs-deploy
         run: |
           set -euo pipefail
-          RESTORE_SCRIPT="/home/ubuntu/src/metrum-internal-infra-admin/newsite/scripts/restore-metrum-ai-bench-cli-docs-version.sh"
+          RESTORE_SCRIPT="/home/runner/src/metrum-internal-infra-admin/newsite/scripts/restore-metrum-ai-bench-cli-docs-version.sh"
           if [ ! -x "${RESTORE_SCRIPT}" ]; then
             echo "Error: restore script not found at ${RESTORE_SCRIPT}" >&2
             exit 1

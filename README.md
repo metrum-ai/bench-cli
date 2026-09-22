@@ -109,7 +109,7 @@ cargo test --all-targets
 The preferred entry point for modalities is `metrum-ai-bench` with those
 subcommands. During the v1.x compatibility period the four modality binaries
 can also be invoked directly; deprecated `metrumbench-*` shims remain (they
-print a v2.0 removal notice). `metrum-ai-bench-strategic` is a separate
+print a 1.3.0 removal notice). `metrum-ai-bench-strategic` is a separate
 binary. Shared load flags live in clap common args; modality-specific flags
 are in [docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
 

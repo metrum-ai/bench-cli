@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- Deprecated shims `metrumbench-*` will be removed in **1.3.0** (stderr warning
+  on every invocation, including `--help`).
+
 ## 1.1.2 (2026-09-22)
 
 ### Added

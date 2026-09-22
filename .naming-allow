@@ -5,8 +5,8 @@
 # Binary/crate names remain metrum-ai-bench. Exceptions below cover legacy shims.
 Cargo.toml	name = "metrumbench|path = "src/bin/metrumbench
 src/bin/metrumbench*	.
-README.md	metrumbench-\*|deprecated `metrumbench|shim will be removed|removed in v2\.0
-docs/**	metrumbench-\*|shim will be removed|removed in v2\.0|deprecated shim
+README.md	metrumbench-\*|deprecated `metrumbench|shim will be removed|removed in 1\.3\.0
+docs/**	metrumbench-\*|shim will be removed|removed in 1\.3\.0|deprecated shim|removed in v2\.0
 .gitignore	metrumbench-imagegen-artifacts
 scripts/live/**	metrumbench
 TRADEMARKS.md	^\*\*Forbidden\*\* \(non-exhaustive\): `MetrumBench`, `Insights CLI`, `Bench by Metrum`\.$
