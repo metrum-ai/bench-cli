@@ -14,6 +14,8 @@
   environment JSON (exit 0 = success).
 
 ### Changed
+- Comparison docs: AIPerf already ships ASR, image, video, and VLM; stop
+  claiming multi-modality as what Metrum AI Bench CLI adds over AIPerf.
 - Deprecated shims `metrumbench-*` will be removed in **1.3.0** (stderr warning
   on every invocation, including `--help`). Release notes state they ship as
   back-compat aliases until then.
