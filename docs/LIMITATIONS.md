@@ -38,7 +38,11 @@ success metric in 1.0. For thinking-model timing (TTFT vs first reasoning,
 ## No agent mode
 
 Multi-turn / tool / schema paths on strategic are request validity helpers,
-not an agent evaluation harness.
+not an agent evaluation harness. That means Bench does not score agent
+**workloads under test**. It does not forbid driving the CLI from a coding
+agent (Claude Code, Codex, OpenCode, and similar); see the docs-site
+[Agent-driven benchmarking](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/agent-driven/)
+page.
 
 ## No cost per accepted task
 
