@@ -6,13 +6,14 @@
 ## 1. What this document is
 
 This is a scoped comparison of **client-side** inference measurement tools,
-compiled **2026-09** from public project pages and documentation. It is not a
-hands-on bake-off: no tool was re-run here for this rewrite. Metric names only
-match when tokenizer, prompt sequence, sampling parameters, warmup, measurement
-window, endpoint topology, and SLO definitions match.
+compiled **2026-09** from public project pages and documentation. Metric names
+only match when tokenizer, prompt sequence, sampling parameters, warmup,
+measurement window, endpoint topology, and SLO definitions match.
 
-Comparative behavior remains untested until a controlled side-by-side run
-exists.
+A controlled on-host LLM bake-off vs [ai-dynamo/aiperf](https://github.com/ai-dynamo/aiperf)
+(Shadeform RTX PRO 6000, Qwen2.5-7B-Instruct, prompt-library `chat-short`) is
+documented in [reviews/BAKEOFF_LLM_AIPERF.md](reviews/BAKEOFF_LLM_AIPERF.md).
+That study is LLM-only and does not replace the landscape table below.
 
 ## 2. What Metrum AI Bench CLI ships
 
@@ -66,7 +67,8 @@ official LoadGen substring `Result is : VALID` (covered in
 - Not first, only, or industry-standard.
 - A stamped manifest is table stakes for publishable runs, not a moat.
 - Not a competitor to MLPerf Inference submissions.
-- Not a head-to-head performance bake-off against AIPerf or InferenceX.
+- Not a head-to-head against InferenceX. LLM-only AIPerf numbers: see
+  [reviews/BAKEOFF_LLM_AIPERF.md](reviews/BAKEOFF_LLM_AIPERF.md).
 - No claim that Metrum AI Bench CLI replaces engine-native `bench_serving` for
   engine developers who already live in that tree.
 

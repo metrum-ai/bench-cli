@@ -1,0 +1,9 @@
+{"phase":"host_prep","tool":"shared","start":"2026-09-23T15:41:15Z","end":"2026-09-23T15:41:15Z","duration_s":0,"notes":"exit=0"}
+{"phase":"install_metrum","tool":"metrum","start":"2026-09-23T15:41:15Z","end":"2026-09-23T15:41:15Z","duration_s":0,"notes":"exit=0"}
+{"phase":"install_aiperf","tool":"aiperf","start":"2026-09-23T15:41:15Z","end":"2026-09-23T15:41:40Z","duration_s":25,"notes":"exit=0"}
+{"phase":"prompt_extract","tool":"metrum","start":"2026-09-23T15:41:40Z","end":"2026-09-23T15:41:42Z","duration_s":2,"notes":"exit=0"}
+{"phase":"sut_write","tool":"shared","start":"2026-09-23T15:41:42Z","end":"2026-09-23T15:41:42Z","duration_s":0,"notes":"exit=0"}
+{"phase":"metrum_sweep","tool":"metrum","start":"2026-09-23T15:41:42Z","end":"2026-09-23T15:42:15Z","duration_s":33,"notes":"exit=0"}
+{"phase":"aiperf_sweep","tool":"aiperf","start":"2026-09-23T15:42:15Z","end":"2026-09-23T15:42:25Z","duration_s":10,"notes":"exit=0"}
+{"phase":"client_ceiling","tool":"metrum","start":"2026-09-23T15:42:25Z","end":"2026-09-23T15:42:26Z","duration_s":1,"notes":"exit=0"}
+{"phase":"aiperf_matched_sweep","tool":"aiperf","start":"2026-09-23T15:45:05Z","end":"2026-09-23T15:46:09Z","duration_s":64,"notes":"exit=0"}
