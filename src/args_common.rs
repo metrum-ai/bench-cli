@@ -155,6 +155,9 @@ pub struct CommonBenchArgs {
 /// Serializable mirror of [`CommonBenchArgs`] for `summary.v3.config`.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct EffectiveCommonArgs {
+    /// Operator workload label from `--scenario` (modality binaries).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
     pub seed: u64,
     pub warmup_requests: u32,
     pub request_rate: Option<f64>,
@@ -182,6 +185,7 @@ pub struct EffectiveCommonArgs {
 impl From<&CommonBenchArgs> for EffectiveCommonArgs {
     fn from(common: &CommonBenchArgs) -> Self {
         Self {
+            scenario: None,
             seed: common.seed,
             warmup_requests: common.warmup_requests,
             request_rate: common.request_rate,
@@ -203,6 +207,14 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             require_sut: common.require_sut,
             redact_hostname: common.redact_hostname || common.require_sut,
         }
+    }
+}
+
+impl EffectiveCommonArgs {
+    /// Stamp the modality `--scenario` label into `summary.v3.config.common`.
+    pub fn with_scenario(mut self, scenario: impl Into<Option<String>>) -> Self {
+        self.scenario = scenario.into();
+        self
     }
 }
 
@@ -301,6 +313,12 @@ mod tests {
             redact_hostname: false,
             quiet: false,
         };
+        let stamped: EffectiveCommonArgs = (&args).into();
+        assert!(stamped.scenario.is_none());
+        assert_eq!(
+            stamped.with_scenario(Some("demo".into())).scenario.as_deref(),
+            Some("demo")
+        );
         assert_eq!(
             args.effective_system_prompt("default"),
             Some("default".into())

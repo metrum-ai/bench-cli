@@ -92,6 +92,7 @@ pub fn resolve_sut_flags(
     match sut_path {
         Some(path) => {
             let sut = load_sut(path)?;
+            warn_quantization(&sut);
             Ok((Some(sut), redact))
         }
         None if require_sut => Err(anyhow::anyhow!(
@@ -103,6 +104,78 @@ pub fn resolve_sut_flags(
             );
             Ok((None, redact))
         }
+    }
+}
+
+/// Warn that quantized/accelerated weights measure speed, not answer quality.
+pub fn warn_quantization(sut: &Sut) {
+    let Some(q) = sut
+        .model
+        .as_ref()
+        .and_then(|m| m.quantization.as_deref())
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    else {
+        return;
+    };
+    eprintln!(
+        "sut: model.quantization={q:?}; this run measures performance, not answer quality (see docs/LIMITATIONS.md)"
+    );
+}
+
+/// True when host is loopback or RFC1918 / link-local (safe for publishable TTFT).
+pub fn url_host_is_local(host: &str) -> bool {
+    let host = host.trim().trim_matches(|c| c == '[' || c == ']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback() || v4.is_private() || v4.is_link_local()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 /* ULA */
+            }
+        };
+    }
+    false
+}
+
+/// Warn when `--url` is not loopback / private (WAN RTT lands in TTFT).
+///
+/// Silence with `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1`.
+pub fn warn_remote_benchmark_url(url: &str) {
+    if std::env::var_os("METRUM_AI_BENCH_ALLOW_REMOTE_URL").is_some_and(|v| v == "1") {
+        return;
+    }
+    let Some(host) = host_from_http_url(url) else {
+        return;
+    };
+    if url_host_is_local(host) {
+        return;
+    }
+    eprintln!(
+        "url: {host} is not loopback/RFC1918; WAN RTT is included in TTFT. Prefer running the load generator on the serving host (loopback). Set METRUM_AI_BENCH_ALLOW_REMOTE_URL=1 to silence."
+    );
+}
+
+fn host_from_http_url(url: &str) -> Option<&str> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split('/').next()?;
+    let hostport = authority.rsplit('@').next()?;
+    let host = if hostport.starts_with('[') {
+        hostport.trim_start_matches('[').split(']').next()?
+    } else {
+        hostport.split(':').next()?
+    };
+    Some(host)
+}
+
+/// Warn for every endpoint URL in a resolved list.
+pub fn warn_remote_benchmark_urls<'a>(urls: impl IntoIterator<Item = &'a str>) {
+    for url in urls {
+        warn_remote_benchmark_url(url);
     }
 }
 
@@ -145,6 +218,17 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("--require-sut"), "{err}");
+    }
+
+    #[test]
+    fn url_host_classifies_local_and_remote() {
+        assert!(url_host_is_local("127.0.0.1"));
+        assert!(url_host_is_local("localhost"));
+        assert!(url_host_is_local("10.1.2.3"));
+        assert!(url_host_is_local("192.168.1.1"));
+        assert!(url_host_is_local("172.16.0.9"));
+        assert!(!url_host_is_local("8.8.8.8"));
+        assert!(!url_host_is_local("example.com"));
     }
 
     #[test]

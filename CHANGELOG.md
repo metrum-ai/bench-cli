@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Modality summaries stamp `--scenario` into `summary.v3.config.common.scenario`.
+- `metrum-ai-bench-cli-strategic`: `--sut` / `--require-sut` (publication parity);
+  SUT embedded in stage config, stdout JSON, and HTML.
+- Warn when `--url` is not loopback/RFC1918 (WAN RTT in TTFT); silence with
+  `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1`.
+- Warn when SUT `model.quantization` is set (performance, not answer quality).
 - `metrum-ai-bench-cli-strategic`: `--prompts` (JSONL / Hub-extractable mix),
   `--max-tokens` (required with `--prompts`), `--warmup-requests` (per-stage;
   excluded from aggregates), optional `--shuffle-prompts` / `--seed`. Stage

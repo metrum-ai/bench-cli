@@ -507,6 +507,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         eprintln!("Error: {}", e);
         e
     })?;
+    metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
@@ -1041,7 +1042,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
-        common: (&args.common).into(),
+        common: metrum_ai_bench::args_common::EffectiveCommonArgs::from(&args.common)
+            .with_scenario(args.scenario.clone()),
         effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt: None,
         body_template,

@@ -57,7 +57,8 @@ Additional v3 fields:
     `request_rate`, `arrival`, `max_concurrency`, `load_balancer`, `ignore_eos`,
     `min_tokens`, `extra_body_json`, `system_prompt`, `unique_prompts`,
     `tokenizer`, `slos`, `throughput_bin_seconds`, `insecure`, optional
-    `ca_cert` path). Secrets are never stamped.
+    `ca_cert` path) plus optional `scenario` (the modality `--scenario` label).
+    Secrets are never stamped.
   - `effective_system_prompt` - system string actually sent (omitted/`null` when
     N/A or disabled); VLM currently records its hardcoded image-capable default
   - `body_template` - sanitized request skeleton with a `{{prompt}}` placeholder

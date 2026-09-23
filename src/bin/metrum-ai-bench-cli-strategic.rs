@@ -132,6 +132,26 @@ struct Args {
         help = "Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured"
     )]
     slos: Vec<String>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML"
+    )]
+    sut: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REQUIRE_SUT",
+        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+    )]
+    require_sut: bool,
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
+        help = "Reserved for parity with modality binaries (strategic stamps SUT only)"
+    )]
+    redact_hostname: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -508,6 +528,17 @@ async fn main() -> Result<()> {
         .model
         .clone()
         .ok_or_else(|| anyhow::anyhow!("--model is required"))?;
+    metrum_ai_bench::sut::warn_remote_benchmark_url(&url);
+    let (sut_block, _redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
+        args.sut.as_deref(),
+        args.require_sut,
+        args.redact_hostname,
+    )?;
+    let sut_json = sut_block
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .context("serialize sut")?;
     let stages = parse_sweep(&args.sweep)?;
     let schema = args.json_schema.as_deref().map(read_json).transpose()?;
     let tools = args.tools.as_deref().map(read_json).transpose()?;
@@ -559,6 +590,8 @@ async fn main() -> Result<()> {
         "json_schema": args.json_schema.is_some(),
         "tools": args.tools.is_some(),
         "streaming": args.streaming,
+        "sut": sut_json,
+        "require_sut": args.require_sut,
         // Secrets intentionally omitted (api_key never stamped).
     });
     // Warm connection pool across stages (single shared client).
@@ -603,6 +636,7 @@ async fn main() -> Result<()> {
         &points,
         knee,
         &server,
+        sut_json.as_ref(),
     )?;
     if let Some(directory) = &args.mlperf_dir {
         export_mlperf(directory, args.mlperf_scenario, &all_records, duration_s)?;
@@ -638,6 +672,7 @@ async fn main() -> Result<()> {
             "points": points,
             "knee": knee.map(|index| &points[index]),
             "server_metrics": server,
+            "sut": sut_json,
             "records_csv": args.csv,
             "html_report": args.html,
         }))?

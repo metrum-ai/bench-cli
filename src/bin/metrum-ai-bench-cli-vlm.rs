@@ -667,6 +667,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
     )?;
+    metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
 
     // Validate ramp-up period if specified
     if let Some(ramp_up) = args.ramp_up_seconds {
@@ -1439,7 +1440,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
-        common: (&args.common).into(),
+        common: metrum_ai_bench::args_common::EffectiveCommonArgs::from(&args.common)
+            .with_scenario(Some(args.scenario.clone())),
         effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt: vlm_system,
         body_template,
