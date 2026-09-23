@@ -88,8 +88,8 @@ pub struct CommonBenchArgs {
 
     #[arg(
         long = "slo",
-        value_name = "METRIC=SECONDS",
-        help = "Repeatable goodput threshold: ttft=, tpot=, e2e="
+        value_name = "METRIC=VALUE",
+        help = "Repeatable goodput threshold: ttft=, tpot=, e2e= (seconds); user_tps= (tok/s per in-flight user)"
     )]
     pub slos: Vec<String>,
 
@@ -120,6 +120,13 @@ pub struct CommonBenchArgs {
         help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
     )]
     pub fail_on_error: bool,
+
+    #[arg(
+        long,
+        value_name = "USD_PER_HOUR",
+        help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
+    )]
+    pub price_per_hour: Option<f64>,
 
     #[arg(
         long,
@@ -177,6 +184,8 @@ pub struct EffectiveCommonArgs {
     pub ca_cert: Option<String>,
     pub fail_on_error: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_per_hour: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sut: Option<String>,
     pub require_sut: bool,
     pub redact_hostname: bool,
@@ -203,6 +212,7 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             insecure: common.insecure,
             ca_cert: common.ca_cert.clone(),
             fail_on_error: common.fail_on_error,
+            price_per_hour: common.price_per_hour,
             sut: common.sut.as_ref().map(|p| p.display().to_string()),
             require_sut: common.require_sut,
             redact_hostname: common.redact_hostname || common.require_sut,
@@ -308,6 +318,7 @@ mod tests {
             ca_cert: None,
             insecure: false,
             fail_on_error: false,
+            price_per_hour: None,
             sut: None,
             require_sut: false,
             redact_hostname: false,

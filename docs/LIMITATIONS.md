@@ -45,10 +45,13 @@ agent (Claude Code, Codex, OpenCode, and similar); see the docs-site
 [Agent-driven benchmarking](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/agent-driven/)
 page.
 
-## No cost per accepted task
+## Cost is declared, not a full TCO
 
-Token, dollar, or “accepted task” cost accounting is not in 1.0 (roadmap:
-next release, no date).
+Optional `--price-per-hour` / `sut.cost.price_per_hour` yields
+`cost_per_million_output_tokens` from measured output-token throughput. That is
+a simple `$ / 1M output tokens` conversion, not total cost of ownership
+(network, storage, multi-node, idle time, or currency FX). Absent price leaves
+the field `null`. There is still no "cost per accepted task" quality gate.
 
 ## Open-loop and closed-loop
 

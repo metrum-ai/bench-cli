@@ -70,6 +70,11 @@ Additional v3 fields:
   `usage_missing` without a tokenizer count to fill the gap; otherwise a rate
 - `completion_tokens_source` - `"server_usage"` or `"tokenizer_fallback"` when
   the rate is present
+- `price_per_hour` / `price_provenance` - declared `$/hour` from
+  `--price-per-hour` (`"cli"`) or `sut.cost.price_per_hour` (`"sut"`); both
+  `null` when absent. CLI overrides SUT.
+- `cost_per_million_output_tokens` - `price_per_hour / (completion_tokens_per_second * 3600) * 1e6`
+  when both inputs are usable; otherwise `null` (always present in JSON)
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 `p99_unreliable` using `percentile_unreliable(n, p)` (unreliable when

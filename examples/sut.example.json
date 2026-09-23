@@ -9,5 +9,6 @@
   "runtime": { "name": "vllm", "version": "latest", "config": "TP=1" },
   "model": { "id": "example/model", "revision": null, "quantization": null },
   "host_os": "Ubuntu 22.04",
+  "cost": { "price_per_hour": 3.6, "currency": "USD" },
   "notes": "Example only: replace with your declared inventory."
 }

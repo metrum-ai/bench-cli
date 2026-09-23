@@ -82,8 +82,8 @@ Options:
           Prefix each prompt with a unique nonce to avoid prefix-cache hits
       --tokenizer <TOKENIZER>
           Path to tokenizer.json (requires build feature `tokenizer`)
-      --slo <METRIC=SECONDS>
-          Repeatable goodput threshold: ttft=, tpot=, e2e=
+      --slo <METRIC=VALUE>
+          Repeatable goodput threshold: ttft=, tpot=, e2e= (seconds); user_tps= (tok/s per in-flight user)
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
       --ca-cert <PATH>
@@ -92,6 +92,8 @@ Options:
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --price-per-hour <USD_PER_HOUR>
+          Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
@@ -180,8 +182,8 @@ Options:
           Prefix each prompt with a unique nonce to avoid prefix-cache hits
       --tokenizer <TOKENIZER>
           Path to tokenizer.json (requires build feature `tokenizer`)
-      --slo <METRIC=SECONDS>
-          Repeatable goodput threshold: ttft=, tpot=, e2e=
+      --slo <METRIC=VALUE>
+          Repeatable goodput threshold: ttft=, tpot=, e2e= (seconds); user_tps= (tok/s per in-flight user)
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds [default: 10]
       --ca-cert <PATH>
@@ -190,6 +192,8 @@ Options:
           Disable TLS certificate verification (opt-in; stamped into config)
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --price-per-hour <USD_PER_HOUR>
+          Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
@@ -325,8 +329,8 @@ Options:
       --tokenizer <TOKENIZER>
           Path to tokenizer.json (requires build feature `tokenizer`)
 
-      --slo <METRIC=SECONDS>
-          Repeatable goodput threshold: ttft=, tpot=, e2e=
+      --slo <METRIC=VALUE>
+          Repeatable goodput threshold: ttft=, tpot=, e2e= (seconds); user_tps= (tok/s per in-flight user)
 
       --throughput-bin-seconds <THROUGHPUT_BIN_SECONDS>
           Throughput dispersion bin width in seconds
@@ -341,6 +345,9 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --price-per-hour <USD_PER_HOUR>
+          Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
@@ -538,6 +545,8 @@ Options:
           
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+      --price-per-hour <USD_PER_HOUR>
+          Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
@@ -558,66 +567,125 @@ Usage: metrum-ai-bench-cli-prompts [OPTIONS]
 Options:
       --version-only
           Print version information and exit
+
       --quiet
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
+
       --dataset <DATASET>
           [default: metrum-ai/prompt-library]
+
       --revision <REVISION>
           Pinned dataset revision (40-char commit SHA unless --allow-moving-revision)
+
       --config <CONFIG>
-          Dataset config: sample|full [default: sample]
+          Dataset config: sample|full
+          
+          [default: sample]
+
       --split <SPLIT>
           [default: train]
+
       --allow-moving-revision
           Allow floating revisions such as main (resolves to a commit)
+
       --cache-dir <CACHE_DIR>
           Cache directory for Hub downloads
+
       --offline
           Do not download; use files already in the cache
+
       --local-parquet <LOCAL_PARQUET>
           Load rows from local parquet shards (repeatable); skips Hub
+
       --local-jsonl <LOCAL_JSONL>
           Load rows from a local JSONL file with full metadata; skips Hub
+
       --count <COUNT>
           Preferred mix size (soft target; actual size may differ within --count-slack)
+
       --count-slack <COUNT_SLACK>
           Max absolute deviation from --count (default: max(count, 32))
+
       --seed <SEED>
-          RNG seed for selection [default: 0]
+          RNG seed for selection
+          
+          [default: 0]
+
+      --profile <PROFILE>
+          Named versioned ISL/OSL profile (chat-short, chat-medium, rag-medium, summarize-long, code-medium); conflicts with --isl-target/--osl-target
+
+          Possible values:
+          - chat-short:     Short interactive chat smoke (256 / 64 tokens)
+          - chat-medium:    Default publishable chat (512 / 128 tokens)
+          - rag-medium:     Retrieval-augmented generation (2048 / 256 tokens)
+          - summarize-long: Long-context summarization (4096 / 512 tokens)
+          - code-medium:    Coding-assistant turns (1024 / 512 tokens)
+
       --isl-target <ISL_TARGET>
-          ISL target (same units as --isl-unit)
+          ISL target (same units as --isl-unit); omitted when --profile is set
+
       --isl-unit <ISL_UNIT>
-          [default: tokens] [possible values: words, tokens]
+          [default: tokens]
+          [possible values: words, tokens]
+
       --isl-stat <ISL_STAT>
-          [default: median] [possible values: mean, median]
+          [default: median]
+          [possible values: mean, median]
+
       --isl-tolerance <ISL_TOLERANCE>
-          Absolute ISL tolerance [default: 0]
+          Absolute ISL tolerance
+          
+          [default: 0]
+
       --osl-target <OSL_TARGET>
-          OSL target (same units as --osl-unit)
+          OSL target (same units as --osl-unit); omitted when --profile is set
+
       --osl-unit <OSL_UNIT>
-          [default: tokens] [possible values: words, tokens]
+          [default: tokens]
+          [possible values: words, tokens]
+
       --osl-stat <OSL_STAT>
-          [default: median] [possible values: mean, median]
+          [default: median]
+          [possible values: mean, median]
+
       --osl-tolerance <OSL_TOLERANCE>
-          Absolute OSL tolerance [default: 0]
+          Absolute OSL tolerance
+          
+          [default: 0]
+
       --isl-token-basis <ISL_TOKEN_BASIS>
-          [default: supplied-target] [possible values: supplied-target]
+          [default: supplied-target]
+          [possible values: supplied-target]
+
       --reasoning <REASONING>
-          [default: any] [possible values: any, true, false]
+          [default: any]
+          [possible values: any, true, false]
+
       --max-repeats <MAX_REPEATS>
-          Max copies of one source row [default: 8]
+          Max copies of one source row
+          
+          [default: 8]
+
       --no-repeats
           Disable repeats (equivalent to --max-repeats 1)
+
       --osl-tokens-per-word <OSL_TOKENS_PER_WORD>
           Tokens-per-word factor for recommending --max-tokens when --osl-unit words
+
       --select-work-limit <SELECT_WORK_LIMIT>
-          Selector work / iteration budget [default: 50000]
+          Selector work / iteration budget
+          
+          [default: 50000]
+
       --output <OUTPUT>
           Write selected prompts as JSONL for metrum-ai-bench-cli-llm
+
       --report <REPORT>
           Write selection report JSON
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
   -V, --version
           Print version
 ```
@@ -688,8 +756,10 @@ Options:
           [default: metrum-ai-bench-cli]
       --timeout-seconds <TIMEOUT_SECONDS>
           [default: 300]
-      --slo <METRIC=SECONDS>
-          Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured
+      --slo <METRIC=VALUE>
+          Repeatable goodput threshold: e2e=, ttft=, tpot= (streaming, seconds); user_tps= (tok/s per in-flight user)
+      --price-per-hour <USD_PER_HOUR>
+          Declared platform cost ($/hour); overrides sut.cost.price_per_hour for stage cost_per_million_output_tokens
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML
       --require-sut

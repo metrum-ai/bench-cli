@@ -256,6 +256,13 @@ struct Args {
 
     #[arg(
         long,
+        value_name = "USD_PER_HOUR",
+        help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
+    )]
+    price_per_hour: Option<f64>,
+
+    #[arg(
+        long,
         value_name = "PATH",
         help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut"
     )]
@@ -633,6 +640,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             insecure: args.insecure,
             ca_cert: args.ca_cert.clone(),
             fail_on_error: args.fail_on_error,
+            price_per_hour: args.price_per_hour,
             sut: args.sut.as_ref().map(|p| p.display().to_string()),
             require_sut: args.require_sut,
             redact_hostname: args.redact_hostname || args.require_sut,
@@ -667,7 +675,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Some(args.model.clone()),
         redact_hostname,
     );
-    shared_summary = shared_summary.with_sut(sut_block);
+    let price =
+        metrum_ai_bench::summary::resolve_price_per_hour(args.price_per_hour, sut_block.as_ref());
+    shared_summary = shared_summary.with_sut(sut_block).with_price(price);
     sink.write(&shared_summary)?;
     shared_summary.print_console();
     if let Some(path) = &args.summary_json {

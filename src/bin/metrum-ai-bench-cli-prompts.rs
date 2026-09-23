@@ -7,9 +7,9 @@
 use clap::Parser;
 use metrum_ai_bench::prompt_library::{
     default_cache_dir, format_select_failure, load_hub_dataset, load_jsonl, load_parquet_files,
-    recommended_max_tokens, resolve_revision, select_mix, selection_report, write_jsonl,
-    DatasetRef, IslTokenBasis, LengthStat, LengthUnit, ReasoningFilter, SelectRequest,
-    DEFAULT_DATASET,
+    recommended_max_tokens, resolve_revision, select_mix, selection_report_with_profile,
+    write_jsonl, DatasetRef, IslTokenBasis, LengthStat, LengthUnit, ReasoningFilter, SelectRequest,
+    WorkloadProfile, DEFAULT_DATASET,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -92,8 +92,15 @@ struct Args {
 
     #[arg(
         long,
-        required_unless_present = "version_only",
-        help = "ISL target (same units as --isl-unit)"
+        value_enum,
+        help = "Named versioned ISL/OSL profile (chat-short, chat-medium, rag-medium, summarize-long, code-medium); conflicts with --isl-target/--osl-target"
+    )]
+    profile: Option<WorkloadProfile>,
+
+    #[arg(
+        long,
+        required_unless_present_any = ["version_only", "profile"],
+        help = "ISL target (same units as --isl-unit); omitted when --profile is set"
     )]
     isl_target: Option<f64>,
 
@@ -108,8 +115,8 @@ struct Args {
 
     #[arg(
         long,
-        required_unless_present = "version_only",
-        help = "OSL target (same units as --osl-unit)"
+        required_unless_present_any = ["version_only", "profile"],
+        help = "OSL target (same units as --osl-unit); omitted when --profile is set"
     )]
     osl_target: Option<f64>,
 
@@ -187,12 +194,38 @@ fn run(args: Args) -> anyhow::Result<()> {
     let count = args
         .count
         .ok_or_else(|| anyhow::anyhow!("--count is required"))? as usize;
-    let isl_target = args
-        .isl_target
-        .ok_or_else(|| anyhow::anyhow!("--isl-target is required"))?;
-    let osl_target = args
-        .osl_target
-        .ok_or_else(|| anyhow::anyhow!("--osl-target is required"))?;
+    let profile_spec = args.profile.map(|profile| profile.spec());
+    let (isl_target, osl_target, isl_tolerance, osl_tolerance) = if let Some(spec) = profile_spec {
+        if args.isl_target.is_some() || args.osl_target.is_some() {
+            anyhow::bail!(
+                "--profile cannot be combined with --isl-target/--osl-target (use one or the other)"
+            );
+        }
+        let isl_tol = if args.isl_tolerance > 0.0 {
+            args.isl_tolerance
+        } else {
+            spec.isl_tolerance
+        };
+        let osl_tol = if args.osl_tolerance > 0.0 {
+            args.osl_tolerance
+        } else {
+            spec.osl_tolerance
+        };
+        (spec.isl_target, spec.osl_target, isl_tol, osl_tol)
+    } else {
+        let isl_target = args
+            .isl_target
+            .ok_or_else(|| anyhow::anyhow!("--isl-target is required (or pass --profile)"))?;
+        let osl_target = args
+            .osl_target
+            .ok_or_else(|| anyhow::anyhow!("--osl-target is required (or pass --profile)"))?;
+        (
+            isl_target,
+            osl_target,
+            args.isl_tolerance,
+            args.osl_tolerance,
+        )
+    };
     let output = args
         .output
         .ok_or_else(|| anyhow::anyhow!("--output is required"))?;
@@ -203,7 +236,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     if isl_target <= 0.0 || osl_target <= 0.0 {
         anyhow::bail!("--isl-target and --osl-target must be positive");
     }
-    if args.isl_tolerance < 0.0 || args.osl_tolerance < 0.0 {
+    if isl_tolerance < 0.0 || osl_tolerance < 0.0 {
         anyhow::bail!("tolerances must be nonnegative");
     }
     if matches!(args.osl_unit, LengthUnit::Words) && args.osl_tokens_per_word.is_none() {
@@ -278,11 +311,11 @@ fn run(args: Args) -> anyhow::Result<()> {
         isl_target,
         isl_unit: args.isl_unit,
         isl_stat: args.isl_stat,
-        isl_tolerance: args.isl_tolerance,
+        isl_tolerance,
         osl_target,
         osl_unit: args.osl_unit,
         osl_stat: args.osl_stat,
-        osl_tolerance: args.osl_tolerance,
+        osl_tolerance,
         isl_token_basis: args.isl_token_basis,
         reasoning: args.reasoning,
         max_repeats,
@@ -298,7 +331,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     };
 
     let max_tokens = recommended_max_tokens(&mix, &req)?;
-    let report = selection_report(
+    let report = selection_report_with_profile(
         &dataset_label,
         &revision,
         &config_label,
@@ -306,6 +339,7 @@ fn run(args: Args) -> anyhow::Result<()> {
         &req,
         &mix,
         max_tokens,
+        profile_spec,
     )?;
 
     if let Some(parent) = output.parent() {

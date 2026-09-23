@@ -1475,7 +1475,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Some(args.model.clone()),
         redact_hostname,
     );
-    shared_summary = shared_summary.with_sut(sut_block);
+    let price = metrum_ai_bench::summary::resolve_price_per_hour(
+        args.common.price_per_hour,
+        sut_block.as_ref(),
+    );
+    shared_summary = shared_summary.with_sut(sut_block).with_price(price);
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
