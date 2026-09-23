@@ -23,12 +23,40 @@ metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8080/v1/chat/completions \
   --model mock --sweep 1,2,4,8,16 --sweep-by concurrency \
   --requests-per-stage 100 \
+  --max-tokens 64 \
+  --warmup-requests 4 \
   --metrics-url http://127.0.0.1:8080/metrics \
   --html report.html --csv requests.csv \
   --mlperf-dir mlperf --mlperf-scenario server
 ```
 
-Each load stage is measured independently. The report plots achieved
+Each load stage is measured independently. `--warmup-requests` are issued at the
+start of every stage and written to the CSV with `warmup=true`, but they are
+excluded from stage `n`, latency percentiles, throughput, goodput, and knee
+detection. Prefer a non-zero warmup on GPU endpoints so cold model-load does
+not inflate the baseline stage.
+
+For a Hugging Face prompt-library mix, extract JSONL with
+`metrum-ai-bench-cli-prompts`, then pass the file and the report's
+`recommended_max_tokens`:
+
+```bash
+metrum-ai-bench-cli-strategic \
+  --url http://127.0.0.1:8080/v1/chat/completions \
+  --model mock --streaming \
+  --prompts /tmp/mix.jsonl \
+  --max-tokens "$(jq .recommended_max_tokens /tmp/mix-report.json)" \
+  --warmup-requests 2 \
+  --sweep 1,2,4,8 --requests-per-stage 32 \
+  --html report.html --csv requests.csv
+```
+
+`--prompts` requires `--max-tokens`. Without `--max-tokens` on a plain
+`--prompt` chat sweep, the CLI prints a warning: output length is uncontrolled
+and token throughput is not comparable across configs. Stage `config` stamps
+`max_tokens`, `prompts`, `prompt_pool_size`, and `warmup_requests`.
+
+The report plots achieved
 throughput against p95 latency and marks the unit-normalized Kneedle result.
 The metrics scraper recognizes vLLM, SGLang and TensorRT-LLM names for
 KV-cache utilization, preemptions, and running/waiting queues.

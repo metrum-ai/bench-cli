@@ -1,6 +1,6 @@
 ---
 title: Agent-driven benchmarking
-description: Drive Metrum AI Bench CLI from Claude Code, Codex, or OpenCode with a drop-in project hint and sample prompt.
+description: Drive Metrum AI Bench CLI from Claude Code, Codex, or OpenCode with Hugging Face prompt-library defaults.
 sidebar_label: Agent-driven
 sidebar_position: 3
 ---
@@ -19,6 +19,26 @@ for that distinction.
 
 If you have not installed a binary yet, do the [Quickstart](./quickstart) first.
 
+## Default workload: Hugging Face prompt library
+
+**Do not invent a one-line prompt for publishable runs.** The default agent path
+selects a mix from
+[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+with pinned `--revision`, then feeds that JSONL to `llm` (or strategic). See
+[Prompt library](./prompt-library).
+
+Until named `--profile` values ship, use these defaults unless the operator
+overrides them in writing:
+
+| Profile intent | ISL target | OSL target | Units / stat |
+| --- | --- | --- | --- |
+| Chat (default) | 512 | 128 | tokens / median |
+| Short chat smoke | 256 | 64 | tokens / median |
+
+Pin revision `0666f62e581b482838ae2e17b333ee36ff3d01b0` in examples (replace when
+the Hub pin advances). Use `--config sample` for smoke; `--config full` for
+publishable compares.
+
 ## Why agents work well here
 
 - Flags are complete; there is no interactive prompt.
@@ -36,71 +56,77 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 ```markdown
 # Metrum AI Bench CLI (agent notes)
 
-- Prefer `metrum-ai-bench-cli <modality> -- <flags>` (unified entry). Standalone
-  binaries such as `metrum-ai-bench-cli-llm` are equivalent for that modality.
-- Sweeps, knee, and session exports need the separate
-  `metrum-ai-bench-cli-strategic` binary (not a unified subcommand).
-- Endpoint: set URL via flags or env; never commit API keys.
-  Example env: `BENCH_URL`, `BENCH_API_KEY`.
-- For any number you might publish or share: pass `--sut <file> --require-sut`.
-  Template shape: `examples/sut.example.json` in the repo, or the inline JSON
-  in the README "Publishing a result" section.
-- Write `--data-log` under a known directory (for example `./bench-out/`).
-- After a run, summarize with:
-  `tail -n 1 <data-log> | jq '{attempted, errors, ttft_s, completion_tokens_per_second, sut, partial}'`
-- Prompt files are JSONL only. Thinking models: read docs on reasoning / max
-  tokens before choosing `--max-tokens`.
+- Prefer `metrum-ai-bench-cli <modality> -- <flags>` (unified entry).
+- Sweeps need the separate `metrum-ai-bench-cli-strategic` binary.
+- Default prompts: extract from Hugging Face `metrum-ai/prompt-library` with a
+  pinned `--revision`. Do not invent a handmade one-line prompt for shared
+  numbers.
+- After extract: set `--num-requests` to `report.selected_count`,
+  `--max-tokens` to `report.recommended_max_tokens`, and
+  `--warmup-requests 0` on llm so the mix is preserved. For GPU cold-start,
+  run a separate short warmup or use strategic `--warmup-requests` on sweeps.
+- Run the load generator on the serving host (loopback / same private network).
+  WAN RTT lands in TTFT.
+- Prefer vendor Docker images for vLLM / SGLang (see Platforms). Pip install on
+  bare metal is advanced and often fails on CUDA/JIT.
+- For any number you might publish: `--sut <file> --require-sut`.
+- Write `--data-log` under `./bench-out/`. Summarize with jq only; never invent
+  metrics.
 ```
 
-## Sample prompt
+## Sample prompt (llm + prompt library)
 
-Copy the block below into the agent. Replace the placeholders, then let the
-agent execute the shell commands.
+Copy the block below into the agent. Replace placeholders, then let the agent
+run the shell commands.
 
 ```text
-Run a closed-loop LLM measure with Metrum AI Bench CLI.
+Run a publishable closed-loop LLM measure with Metrum AI Bench CLI using the
+Hugging Face prompt library (not a handmade prompt).
 
 Constraints:
-- Use `metrum-ai-bench-cli llm --` (unified entry). Do not invent interactive flags.
-- Endpoint: $BENCH_URL (OpenAI-compatible chat completions URL).
-- API key: $BENCH_API_KEY (pass as --api-key; do not print the secret).
+- Use `metrum-ai-bench-cli prompts --` then `metrum-ai-bench-cli llm --`.
+- Endpoint: $BENCH_URL (OpenAI-compatible chat completions). Prefer loopback on
+  the GPU host.
+- API key: $BENCH_API_KEY as --api-key (do not print the secret).
 - Model id: <MODEL_ID>
-- Scenario label: agent-smoke
-- --num-requests 16 --concurrency 4 --max-tokens 64 --seed 7 --streaming
-- Mode: chat
-- Prompts: a tiny local JSONL file with one user turn (create prompts.jsonl if needed).
-- Write sut.json from this shape, filling real inventory for this host/endpoint:
-  {
-    "provenance": "declared",
-    "name": "<host / GPU summary>",
-    "vendor": "<OEM or cloud>",
-    "gpu": { "model": "<GPU>", "count": 1, "memory_gb": <N> },
-    "cpu": "<CPU>",
-    "memory_gb": <N>,
-    "driver_version": "<driver>",
-    "runtime": { "name": "<engine>", "version": "<ver>", "config": "<notes>" },
-    "model": { "id": "<MODEL_ID>", "revision": null, "quantization": null },
-    "host_os": "<OS>",
-    "notes": "Agent-driven run"
-  }
-- Pass --sut sut.json --require-sut
-- Write --data-log bench-out/results.jsonl (create bench-out/ first)
-- On success, print only:
+- Scenario label: hf-chat-512-128
+- Pin Hub revision 0666f62e581b482838ae2e17b333ee36ff3d01b0, --config sample,
+  --count 32 --seed 42
+- ISL/OSL: --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64
+  --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32
+- Write mix to bench-out/mix.jsonl and report to bench-out/mix-report.json
+- llm: --mode chat --streaming --concurrency 4 --seed 42
+  --num-requests "$(jq .selected_count bench-out/mix-report.json)"
+  --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)"
+  --warmup-requests 0 --prompts bench-out/mix.jsonl
+- Write sut.json with real inventory; pass --sut sut.json --require-sut
+- --data-log bench-out/results.jsonl
+- On success print only:
   tail -n 1 bench-out/results.jsonl | jq '{attempted, errors, ttft_s, e2e_s, completion_tokens_per_second, sut: .sut.name, partial}'
-- If the binary is missing or --require-sut fails, stop and report the error; do not invent metrics.
+- If extract, binary, or --require-sut fails, stop; do not invent metrics.
 ```
 
-A concrete shell skeleton the agent should converge on (values are examples):
+Shell skeleton:
 
 ```bash
 mkdir -p bench-out
-# prompts.jsonl and sut.json created or edited by the agent as instructed
+
+metrum-ai-bench-cli prompts -- \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --count 32 --seed 42 \
+  --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
+  --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32 \
+  --output bench-out/mix.jsonl --report bench-out/mix-report.json
+
+# Create sut.json with real inventory for this host/endpoint, then:
 
 metrum-ai-bench-cli llm -- \
   --url "$BENCH_URL" --api-key "$BENCH_API_KEY" \
-  --scenario agent-smoke --model "$MODEL_ID" --mode chat --streaming \
-  --prompts prompts.jsonl \
-  --num-requests 16 --concurrency 4 --max-tokens 64 --seed 7 \
+  --scenario hf-chat-512-128 --model "$MODEL_ID" --mode chat --streaming \
+  --prompts bench-out/mix.jsonl \
+  --num-requests "$(jq .selected_count bench-out/mix-report.json)" \
+  --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" \
+  --concurrency 4 --warmup-requests 0 --seed 42 \
   --sut sut.json --require-sut \
   --data-log bench-out/results.jsonl
 
@@ -108,14 +134,44 @@ tail -n 1 bench-out/results.jsonl | jq \
   '{attempted, errors, ttft_s, e2e_s, completion_tokens_per_second, sut: .sut.name, partial}'
 ```
 
+## Sample prompt (strategic sweep)
+
+```text
+Run a concurrency sweep with metrum-ai-bench-cli-strategic using the same
+prompt-library mix.
+
+Constraints:
+- Reuse bench-out/mix.jsonl from the extract above (or re-extract with the same pin).
+- --prompts bench-out/mix.jsonl
+- --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" (required with --prompts)
+- --warmup-requests 4 (GPU) or 2 (mock)
+- --sweep 1,2,4,8 --requests-per-stage 16 --streaming
+- --html bench-out/sweep.html --csv bench-out/sweep.csv
+- Do not use the default --prompt Hello for shared numbers.
+- Summarize knee and stage throughput from stdout JSON; do not invent metrics.
+```
+
+```bash
+metrum-ai-bench-cli-strategic \
+  --url "$BENCH_URL" --api-key "$BENCH_API_KEY" \
+  --model "$MODEL_ID" --streaming \
+  --prompts bench-out/mix.jsonl \
+  --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" \
+  --warmup-requests 4 \
+  --sweep 1,2,4,8 --requests-per-stage 16 \
+  --html bench-out/sweep.html --csv bench-out/sweep.csv
+```
+
 ## Entry points
 
 | Form | Role |
 | --- | --- |
 | `metrum-ai-bench-cli llm -- …` | Preferred unified modality entry (`--` separates dispatcher args from modality flags) |
+| `metrum-ai-bench-cli prompts -- …` | ISL/OSL mix extract from Hugging Face |
 | `metrum-ai-bench-cli-llm …` | Same modality binary without the dispatcher |
 | `metrum-ai-bench-cli-strategic …` | Concurrency/rate sweeps, knee, sessions, exports (separate binary) |
 
 Day-to-day concepts: [User Guide](./user-guide). Publishing rules:
 [Publishing-oriented runs](./user-guide#publishing-oriented-runs). Sweeps:
-[Strategic benchmarking](./strategic-benchmarking).
+[Strategic benchmarking](./strategic-benchmarking). Serving hosts:
+[Platforms](./platforms).
