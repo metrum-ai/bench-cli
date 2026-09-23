@@ -10,8 +10,28 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
 - **First byte**: response headers received minus send (`first_byte_s`).
-  Separates gateway/header delay from prefill. `connect_s` is not yet
-  recorded (deferred post-v1).
+  Separates gateway/header delay from later body progress.
+- **Connect**: HTTP connector duration for a new TCP/TLS session (`connect_s`).
+  A value of `0` means the client reused a pooled connection (pool hit).
+  Fresh connects include DNS plus TCP and, for HTTPS, TLS. TTFT still includes
+  connect/TLS/queue by design; use `connect_s` with `first_byte_s` / `ttft_s`
+  to attribute slow TTFT to network setup vs server queue/prefill.
+- **Prefill (proxy)**: `prefill_s`. When `connect_s` is present,
+  `max(0, ttft_s - connect_s)`; otherwise `ttft_s`. This is a client-side
+  proxy, not a server engine prefill trace.
+- **Decode**: `decode_s = max(0, e2e - ttft)` on streaming successes.
+  `decode_tok_s = completion_tokens / decode_s` (strategic uses
+  `output_tokens / decode_s`).
+- **Observed concurrency**: client outstanding requests while the semaphore
+  is held. Summary fields `observed_concurrency.in_flight_{mean,p50,max}` and
+  `cap_engagement_fraction` (fraction of acquires that blocked on the cap).
+  Optional per-request `in_flight_at_send`.
+- **ISL/OSL validation**: optional `--isl-target` / `--osl-target` (or
+  `--prompt-mix-report` metadata) compared to measured prompt/completion
+  tokens. Summary `isl_osl` carries means, p50, and mismatch counts.
+  `--fail-on-osl-mismatch` exits non-zero for publishable gates. Interact with
+  `--max-tokens` / `ignore_eos`: unbounded OSL without a token cap will
+  mismatch a tight target.
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at

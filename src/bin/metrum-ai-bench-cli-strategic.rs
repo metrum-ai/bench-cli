@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use metrum_ai_bench::strategic::{
     controlled_messages, detect_knee, export_csv, export_html, export_mlperf, load_sessions,
-    now_unix_ns, scrape_metrics, summarize_stage_with_price, BenchRecord, MlperfScenario,
+    now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord, MlperfScenario,
     PrefixControl, ServerMetrics, Validity,
 };
 use rand::rngs::StdRng;
@@ -138,6 +138,42 @@ struct Args {
         help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for stage cost_per_million_output_tokens"
     )]
     price_per_hour: Option<f64>,
+    #[arg(
+        long,
+        value_name = "TOKENS",
+        help = "Expected input tokens for runtime ISL validation (overrides mix-report)"
+    )]
+    isl_target: Option<f64>,
+    #[arg(
+        long,
+        value_name = "TOKENS",
+        help = "Expected output tokens for runtime OSL validation (overrides mix-report)"
+    )]
+    osl_target: Option<f64>,
+    #[arg(
+        long,
+        default_value_t = 0.0,
+        help = "Allowed absolute deviation from --isl-target (tokens)"
+    )]
+    isl_tolerance: f64,
+    #[arg(
+        long,
+        default_value_t = 0.0,
+        help = "Allowed absolute deviation from --osl-target (tokens)"
+    )]
+    osl_tolerance: f64,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset"
+    )]
+    prompt_mix_report: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Exit non-zero when measured OSL mismatches exceed --osl-tolerance"
+    )]
+    fail_on_osl_mismatch: bool,
     #[arg(
         long,
         value_name = "PATH",
@@ -388,13 +424,20 @@ async fn run_stage(
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
     client: &reqwest::Client,
-) -> Result<(Vec<BenchRecord>, f64)> {
+) -> Result<(
+    Vec<BenchRecord>,
+    f64,
+    metrum_ai_bench::concurrency::ObservedConcurrency,
+)> {
     let concurrency = match args.sweep_by {
         SweepBy::Concurrency => stage.ceil() as usize,
         SweepBy::Rate => args.max_in_flight as usize,
     }
     .max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
+    let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
+        concurrency as u32,
+    ));
     let kind = args.kind;
     let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
     let start = Instant::now();
@@ -417,7 +460,13 @@ async fn run_stage(
                 tokio::time::sleep(offset.saturating_sub(start.elapsed())).await;
             }
         }
-        let permit = semaphore.clone().acquire_owned().await?;
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            Arc::clone(&semaphore),
+            &inflight_tracker,
+        )
+        .await?;
+        let inflight_guard = inflight_tracker.guard();
+        let in_flight_at_send = inflight_guard.in_flight;
         let sent = Instant::now();
         let sent_unix_ns = now_unix_ns();
         let (scheduled, scheduled_unix_ns) = scheduled_offset
@@ -431,12 +480,17 @@ async fn run_stage(
         let validator = validator.cloned();
         let sequence = seq.fetch_add(1, Ordering::Relaxed);
         handles.push(tokio::spawn(async move {
-            let result = client
-                .post(&url)
-                .bearer_auth(api_key)
-                .json(&input.body)
-                .send()
-                .await;
+            let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+            let result = metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                client
+                    .post(&url)
+                    .bearer_auth(api_key)
+                    .json(&input.body)
+                    .send(),
+            )
+            .await;
+            let connect_s = connect_slot.take();
             let mut first_byte_s = None;
             let mut ttft_s = None;
             let mut itl_s = Vec::new();
@@ -465,6 +519,7 @@ async fn run_stage(
                 Err(error) => (false, None, 0, 0, Some(error.to_string())),
             };
             drop(permit);
+            drop(inflight_guard);
             BenchRecord {
                 seq: sequence,
                 stage,
@@ -475,8 +530,13 @@ async fn run_stage(
                 queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
                 service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
                 first_byte_s,
+                connect_s: Some(connect_s),
                 ttft_s,
+                prefill_s: None,
+                decode_s: None,
+                decode_tok_s: None,
                 itl_s,
+                in_flight_at_send: Some(in_flight_at_send),
                 success,
                 valid,
                 input_tokens,
@@ -486,6 +546,7 @@ async fn run_stage(
                 error,
                 warmup,
             }
+            .with_phase_metrics()
         }));
     }
     let mut records = Vec::with_capacity(handles.len());
@@ -503,7 +564,7 @@ async fn run_stage(
             start.elapsed().as_secs_f64()
         }
     };
-    Ok((records, measured_seconds))
+    Ok((records, measured_seconds, inflight_tracker.snapshot()))
 }
 
 fn aggregate_server(samples: &[ServerMetrics]) -> ServerMetrics {
@@ -608,16 +669,31 @@ async fn main() -> Result<()> {
         "require_sut": args.require_sut,
         // Secrets intentionally omitted (api_key never stamped).
     });
-    // Warm connection pool across stages (single shared client).
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout_seconds))
-        .pool_max_idle_per_host(args.max_in_flight as usize)
-        .build()?;
+    // Warm connection pool across stages (single shared client with connect timing).
+    let client = metrum_ai_bench::http_client::build_http_client(
+        metrum_ai_bench::http_client::HttpClientOptions {
+            request_timeout: Some(Duration::from_secs(args.timeout_seconds)),
+            connect_timeout: Duration::from_secs(args.timeout_seconds.clamp(1, 30)),
+            pool_max_idle_per_host: args.max_in_flight as usize,
+            pool_idle_timeout: Duration::from_secs(90),
+            tcp_keepalive: Duration::from_secs(60),
+            ca_cert: None,
+            insecure: false,
+        },
+    )?;
+    let isl_osl_targets = metrum_ai_bench::isl_osl::IslOslTargets::resolve(
+        args.isl_target,
+        args.osl_target,
+        args.isl_tolerance,
+        args.osl_tolerance,
+        args.prompt_mix_report.as_deref(),
+    )?;
     let started = Instant::now();
     let mut all_records = Vec::new();
     let mut points = Vec::new();
+    let mut any_osl_validation = None;
     for stage in stages {
-        let (records, seconds) = run_stage(
+        let (records, seconds, observed) = run_stage(
             &args,
             &url,
             stage,
@@ -627,13 +703,25 @@ async fn main() -> Result<()> {
             &client,
         )
         .await?;
-        points.push(summarize_stage_with_price(
+        let token_rows: Vec<(u64, u64)> = records
+            .iter()
+            .filter(|r| !r.warmup && r.success)
+            .map(|r| (r.input_tokens, r.output_tokens))
+            .collect();
+        let isl_osl =
+            metrum_ai_bench::isl_osl::validate_token_counts(&token_rows, &isl_osl_targets);
+        if let Some(ref v) = isl_osl {
+            any_osl_validation = Some(v.clone());
+        }
+        points.push(summarize_stage_with_options(
             stage,
             &records,
             seconds,
             &slos,
             Some(redacted_config.clone()),
             price_per_hour,
+            Some(observed),
+            isl_osl,
         ));
         all_records.extend(records);
     }
@@ -692,6 +780,9 @@ async fn main() -> Result<()> {
             "html_report": args.html,
         }))?
     );
+    if let Some(ref validation) = any_osl_validation {
+        metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.fail_on_osl_mismatch)?;
+    }
     Ok(())
 }
 

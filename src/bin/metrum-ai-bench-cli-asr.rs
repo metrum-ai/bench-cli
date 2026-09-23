@@ -662,8 +662,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
 
-    let semaphore = Arc::new(Semaphore::new(
-        args.common.max_concurrency.unwrap_or(args.concurrency) as usize,
+    let concurrency_cap = args.common.max_concurrency.unwrap_or(args.concurrency);
+    let semaphore = Arc::new(Semaphore::new(concurrency_cap as usize));
+    let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
+        concurrency_cap,
     ));
     let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
@@ -712,7 +714,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
-        let permit = semaphore.clone().acquire_owned().await?;
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            semaphore.clone(),
+            &inflight_tracker,
+        )
+        .await?;
         let client = client.clone();
         let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
             arrival_kind,
@@ -749,8 +755,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
         let run_start = start_time;
+        let tracker_task = Arc::clone(&inflight_tracker);
 
         let handle = tokio::spawn(async move {
+            let inflight_guard = tracker_task.guard();
+            let in_flight_at_send = inflight_guard.in_flight;
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
@@ -767,6 +776,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .await;
             drop(permit);
             drop(endpoint_lease);
+            drop(inflight_guard);
 
             let record = match result {
                 Ok((
@@ -822,6 +832,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         0,
                     )
                     .with_first_byte(first_byte)
+                    .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
@@ -901,6 +912,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         latency,
                         request_error,
                     )
+                    .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
@@ -1068,7 +1080,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.common.price_per_hour,
         sut_block.as_ref(),
     );
-    shared_summary = shared_summary.with_sut(sut_block).with_price(price);
+    shared_summary = shared_summary
+        .with_sut(sut_block)
+        .with_price(price)
+        .with_observed_concurrency(Some(inflight_tracker.snapshot()));
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }

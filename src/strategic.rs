@@ -29,9 +29,21 @@ pub struct BenchRecord {
     /// Send-to-response-headers timing, matching the chat benchmark binaries.
     #[serde(default)]
     pub first_byte_s: Option<f64>,
+    /// Connector TCP/TLS duration; `0.0` is a pool hit.
+    #[serde(default)]
+    pub connect_s: Option<f64>,
     /// Send-to-first-visible-output timing; absent for unary responses.
     #[serde(default)]
     pub ttft_s: Option<f64>,
+    /// Prefill proxy (`ttft - connect` or `ttft`).
+    #[serde(default)]
+    pub prefill_s: Option<f64>,
+    /// Decode proxy (`service_latency - ttft`).
+    #[serde(default)]
+    pub decode_s: Option<f64>,
+    /// Output tokens per decode second.
+    #[serde(default)]
+    pub decode_tok_s: Option<f64>,
     /// Inter-token latency samples from streaming visible-output chunks.
     /// Serialized as a semicolon-joined string for CSV compatibility.
     #[serde(
@@ -40,6 +52,9 @@ pub struct BenchRecord {
         deserialize_with = "deserialize_itl_s"
     )]
     pub itl_s: Vec<f64>,
+    /// Outstanding client requests at send (after semaphore acquire).
+    #[serde(default)]
+    pub in_flight_at_send: Option<u64>,
     pub success: bool,
     pub valid: Option<bool>,
     pub input_tokens: u64,
@@ -98,6 +113,25 @@ impl BenchRecord {
         }
         Some(self.output_tokens as f64 / self.service_latency_s)
     }
+
+    /// Fill prefill/decode proxies from TTFT, connect, and token counts.
+    pub fn with_phase_metrics(mut self) -> Self {
+        self.prefill_s = match (self.ttft_s, self.connect_s) {
+            (Some(ttft), Some(connect)) => Some((ttft - connect).max(0.0)),
+            (Some(ttft), None) => Some(ttft),
+            _ => None,
+        };
+        self.decode_s = self
+            .ttft_s
+            .map(|ttft| (self.service_latency_s - ttft).max(0.0));
+        self.decode_tok_s = match self.decode_s {
+            Some(decode) if decode > 0.0 && self.output_tokens > 0 => {
+                Some(self.output_tokens as f64 / decode)
+            }
+            _ => None,
+        };
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,6 +166,16 @@ pub struct SweepPoint {
     pub completion_tokens_per_second: Option<f64>,
     /// `$ / 1M output tokens` from declared price and stage token rate; null when absent.
     pub cost_per_million_output_tokens: Option<f64>,
+    /// Client-observed outstanding concurrency vs stage cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_concurrency: Option<crate::concurrency::ObservedConcurrency>,
+    pub connect_s: crate::stats::DistSummary,
+    pub prefill_s: crate::stats::DistSummary,
+    pub decode_s: crate::stats::DistSummary,
+    pub decode_tok_s: crate::stats::DistSummary,
+    /// Runtime ISL/OSL vs optional targets for this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isl_osl: Option<crate::isl_osl::IslOslValidation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
 }
@@ -169,7 +213,7 @@ pub fn summarize_stage(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
 ) -> SweepPoint {
-    summarize_stage_with_price(load, records, seconds, slos, config, None)
+    summarize_stage_with_options(load, records, seconds, slos, config, None, None, None)
 }
 
 /// Like [`summarize_stage`] but optionally stamps `$ / 1M output tokens`.
@@ -180,6 +224,30 @@ pub fn summarize_stage_with_price(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
     price_per_hour: Option<f64>,
+) -> SweepPoint {
+    summarize_stage_with_options(
+        load,
+        records,
+        seconds,
+        slos,
+        config,
+        price_per_hour,
+        None,
+        None,
+    )
+}
+
+/// Full stage summary with optional price, observed concurrency, and ISL/OSL.
+#[allow(clippy::too_many_arguments)]
+pub fn summarize_stage_with_options(
+    load: f64,
+    records: &[BenchRecord],
+    seconds: f64,
+    slos: &crate::summary::SloConfig,
+    config: Option<Value>,
+    price_per_hour: Option<f64>,
+    observed_concurrency: Option<crate::concurrency::ObservedConcurrency>,
+    isl_osl: Option<crate::isl_osl::IslOslValidation>,
 ) -> SweepPoint {
     // Warmup rows stay in the CSV for audit but never enter knee / HTML aggregates.
     let measured: Vec<&BenchRecord> = records.iter().filter(|record| !record.warmup).collect();
@@ -231,6 +299,22 @@ pub fn summarize_stage_with_price(
         (Some(price), Some(rate)) => crate::summary::cost_per_million_output_tokens(price, rate),
         _ => None,
     };
+    let connect: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.connect_s)
+        .collect();
+    let prefill: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.prefill_s)
+        .collect();
+    let decode: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.decode_s)
+        .collect();
+    let decode_tok: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.decode_tok_s)
+        .collect();
     let mut thresholds: std::collections::BTreeMap<String, f64> = [
         ("ttft", slos.ttft_s),
         ("tpot", slos.tpot_s),
@@ -267,6 +351,12 @@ pub fn summarize_stage_with_price(
         users_meeting_user_tps: meeting_user_tps,
         completion_tokens_per_second,
         cost_per_million_output_tokens,
+        observed_concurrency,
+        connect_s: crate::stats::DistSummary::from_values(&connect),
+        prefill_s: crate::stats::DistSummary::from_values(&prefill),
+        decode_s: crate::stats::DistSummary::from_values(&decode),
+        decode_tok_s: crate::stats::DistSummary::from_values(&decode_tok),
+        isl_osl,
         config,
     }
 }
@@ -813,6 +903,12 @@ mod tests {
                     users_meeting_user_tps: None,
                     completion_tokens_per_second: None,
                     cost_per_million_output_tokens: None,
+                    observed_concurrency: None,
+                    connect_s: crate::stats::DistSummary::from_values(&[]),
+                    prefill_s: crate::stats::DistSummary::from_values(&[]),
+                    decode_s: crate::stats::DistSummary::from_values(&[]),
+                    decode_tok_s: crate::stats::DistSummary::from_values(&[]),
+                    isl_osl: None,
                     config: None,
                 }
             })
@@ -893,8 +989,13 @@ mod tests {
             queue_delay_s: 0.0,
             service_latency_s: 0.5,
             first_byte_s: None,
+            connect_s: None,
             ttft_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             itl_s: Vec::new(),
+            in_flight_at_send: None,
             success: true,
             valid: None,
             input_tokens: 1,
@@ -933,8 +1034,13 @@ mod tests {
             queue_delay_s: 0.0,
             service_latency_s: latency_s,
             first_byte_s: None,
+            connect_s: None,
             ttft_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             itl_s: Vec::new(),
+            in_flight_at_send: None,
             success: true,
             valid: None,
             input_tokens: 0,
@@ -997,8 +1103,13 @@ mod tests {
             queue_delay_s: 0.0,
             service_latency_s: 1.0,
             first_byte_s: None,
+            connect_s: None,
             ttft_s: Some(0.2),
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             itl_s: vec![0.05, 0.05],
+            in_flight_at_send: None,
             success: true,
             valid: None,
             input_tokens: 0,
@@ -1054,8 +1165,13 @@ mod tests {
             queue_delay_s: 0.02,
             service_latency_s: 0.23,
             first_byte_s: None,
+            connect_s: None,
             ttft_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             itl_s: Vec::new(),
+            in_flight_at_send: None,
             success: true,
             valid: None,
             input_tokens: 1,
@@ -1125,8 +1241,13 @@ mod tests {
             queue_delay_s: 0.1,
             service_latency_s: 0.4,
             first_byte_s: None,
+            connect_s: None,
             ttft_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             itl_s: Vec::new(),
+            in_flight_at_send: None,
             success: true,
             valid: Some(true),
             input_tokens: 2,

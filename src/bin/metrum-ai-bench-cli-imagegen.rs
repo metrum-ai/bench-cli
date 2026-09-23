@@ -435,8 +435,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let metrics = Arc::new(Mutex::new(Metrics::default()));
     let rr = Arc::new(AtomicUsize::new(0));
-    let sem = Arc::new(Semaphore::new(
-        args.max_concurrency.unwrap_or(args.concurrency) as usize,
+    let concurrency_cap = args.max_concurrency.unwrap_or(args.concurrency);
+    let sem = Arc::new(Semaphore::new(concurrency_cap as usize));
+    let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
+        concurrency_cap,
     ));
     let run_start = Instant::now();
     let run_id = metrum_ai_bench::unique_id::generate_uuid();
@@ -469,7 +471,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tokio::time::sleep(wait).await;
         }
         let request_index = slot.seq as usize;
-        let permit = sem.clone().acquire_owned().await?;
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            Arc::clone(&sem),
+            &inflight_tracker,
+        )
+        .await?;
         let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
             arrival_kind,
             run_start.elapsed(),
@@ -490,7 +496,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
         let send_offset = run_start.elapsed();
+        let tracker_task = Arc::clone(&inflight_tracker);
         handles.push(tokio::spawn(async move {
+            let inflight_guard = tracker_task.guard();
+            let in_flight_at_send = inflight_guard.in_flight;
             let _permit = permit;
             let outcome = run_logical_request(
                 request_index,
@@ -502,6 +511,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &rr,
             )
             .await;
+            drop(inflight_guard);
             if outcome.status != "success" {
                 let _ = write_error(
                     &error_log,
@@ -530,7 +540,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     0,
                     0,
                     0,
-                );
+                )
+                .with_in_flight(in_flight_at_send);
                 if let Some(fb) = outcome.first_byte_s {
                     rec = rec.with_first_byte(Duration::from_secs_f64(fb));
                 }
@@ -560,6 +571,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     latency,
                     request_error,
                 )
+                .with_in_flight(in_flight_at_send)
             };
             record = record.with_send_offset(send_offset);
             if record_schedule {
@@ -641,6 +653,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ca_cert: args.ca_cert.clone(),
             fail_on_error: args.fail_on_error,
             price_per_hour: args.price_per_hour,
+            isl_target: None,
+            osl_target: None,
+            isl_tolerance: 0.0,
+            osl_tolerance: 0.0,
+            prompt_mix_report: None,
+            fail_on_osl_mismatch: false,
             sut: args.sut.as_ref().map(|p| p.display().to_string()),
             require_sut: args.require_sut,
             redact_hostname: args.redact_hostname || args.require_sut,
@@ -677,7 +695,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let price =
         metrum_ai_bench::summary::resolve_price_per_hour(args.price_per_hour, sut_block.as_ref());
-    shared_summary = shared_summary.with_sut(sut_block).with_price(price);
+    shared_summary = shared_summary
+        .with_sut(sut_block)
+        .with_price(price)
+        .with_observed_concurrency(Some(inflight_tracker.snapshot()));
     sink.write(&shared_summary)?;
     shared_summary.print_console();
     if let Some(path) = &args.summary_json {

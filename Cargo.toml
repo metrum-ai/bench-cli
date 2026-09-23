@@ -143,6 +143,8 @@ uuid = { version = "1.26.1", features = ["v4"] }
 tempfile = "3.27.0"
 parquet = { version = "59.3.0", default-features = false, features = ["zstd", "snap"] }
 tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
 
 [profile.release]
 lto = "thin"

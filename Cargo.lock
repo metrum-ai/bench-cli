@@ -1321,6 +1321,8 @@ dependencies = [
  "tempfile",
  "tokenizers",
  "tokio",
+ "tower-layer",
+ "tower-service",
  "uuid",
 ]
 
