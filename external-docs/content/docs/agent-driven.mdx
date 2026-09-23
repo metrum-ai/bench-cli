@@ -95,7 +95,9 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
   `--warmup-requests 0` on llm so the mix is preserved. For GPU cold-start,
   run a separate short warmup or use strategic `--warmup-requests` on sweeps.
 - Run the load generator on the serving host (loopback / same private network).
-  WAN RTT lands in TTFT.
+  WAN RTT lands in TTFT. The CLI warns on public/non-RFC1918 `--url` hosts;
+  set `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1` only when you intentionally accept
+  that contamination.
 - Prefer vendor Docker images for vLLM / SGLang (see Platforms). Pip install on
   bare metal is advanced and often fails on CUDA/JIT.
 - For any number you might publish: `--sut <file> --require-sut`.

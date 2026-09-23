@@ -5,6 +5,7 @@
 use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, trace, warn};
+use metrum_ai_bench::args_common::EffectiveCommonArgs;
 use metrum_ai_bench::endpoints::resolve_endpoints;
 use metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts;
 use metrum_ai_bench::unique_id;
@@ -479,6 +480,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
     )?;
+    metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();
         if let Some(offset_ms) = offset {
@@ -903,7 +905,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
-        common: (&args.common).into(),
+        common: EffectiveCommonArgs::from(&args.common).with_scenario(Some(args.scenario.clone())),
         effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
         effective_system_prompt,
         body_template,

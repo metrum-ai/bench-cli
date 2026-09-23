@@ -690,6 +690,12 @@ Options:
           [default: 300]
       --slo <METRIC=SECONDS>
           Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured
+      --sut <PATH>
+          Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML
+      --require-sut
+          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+      --redact-hostname
+          Reserved for parity with modality binaries (strategic stamps SUT only) [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
   -h, --help
           Print help
   -V, --version

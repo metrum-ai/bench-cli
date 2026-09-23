@@ -22,7 +22,7 @@ zero.
 | --- | --- |
 | **E2E latency** | Response body completion minus actual send. Successful measure-phase requests only. Field: `latency_s`. |
 | **Coordinated-omission latency** | E2E latency plus delay between scheduled arrival and actual send. Headline open-loop latency. |
-| **TTFT** | First **visible** output delta minus send. Role and reasoning-only deltas do not count. Missing visible output is `no_output_token`. Includes connection setup, TLS, and queueing by design. Non-streaming responses report `ttft_s: null` (never fabricated from E2E). |
+| **TTFT** | First **visible** output delta minus send. Role and reasoning-only deltas do not count. Missing visible output is `no_output_token`. Includes connection setup, TLS, and queueing by design. Non-streaming responses report `ttft_s: null` (never fabricated from E2E). For publishable TTFT, run the load generator on the serving host (loopback or same private network); a public WAN URL adds RTT into TTFT. The CLI warns on non-loopback / non-RFC1918 hosts; set `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1` to silence. |
 | **First byte** | Response headers received minus send (`first_byte_s`). Separates gateway/header delay from prefill. `connect_s` is not yet recorded (deferred post-v1). |
 | **First reasoning** | First non-empty `reasoning_content` / `reasoning` delta minus send; reported separately from TTFT. |
 | **ITL** | Every successive visible-output chunk timestamp delta, pooled across measured successes. |

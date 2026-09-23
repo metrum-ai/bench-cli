@@ -25,10 +25,16 @@ metrum-ai-bench-cli-strategic \
   --requests-per-stage 100 \
   --max-tokens 64 \
   --warmup-requests 4 \
+  --sut examples/sut.example.json --require-sut \
   --metrics-url http://127.0.0.1:8080/metrics \
   --html report.html --csv requests.csv \
   --mlperf-dir mlperf --mlperf-scenario server
 ```
+
+Publishable sweeps need `--sut` (and typically `--require-sut`) so the
+machine-readable summary and HTML carry a SUT block under
+`docs/RESULTS_PUBLICATION_POLICY.md`. Without `--sut`, the CLI prints the same
+self-describing notice as the modality binaries.
 
 Each load stage is measured independently. `--warmup-requests` are issued at the
 start of every stage and written to the CSV with `warmup=true`, but they are

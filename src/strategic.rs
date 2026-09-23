@@ -408,6 +408,7 @@ pub fn export_html(
     points: &[SweepPoint],
     knee: Option<usize>,
     server: &ServerMetrics,
+    sut: Option<&Value>,
 ) -> Result<()> {
     let width = 760.0;
     let height = 300.0;
@@ -469,12 +470,20 @@ pub fn export_html(
         .and_then(|index| coordinates.get(index))
         .map(|(x, y)| format!(r##"<circle cx="{x:.1}" cy="{y:.1}" r="7" fill="#ef4444"/>"##))
         .unwrap_or_default();
+    let sut_block = match sut {
+        Some(value) => format!(
+            "<h2>System under test</h2><pre>{}</pre>",
+            escape_html(&serde_json::to_string_pretty(value)?)
+        ),
+        None => String::new(),
+    };
     let html = format!(
         r##"<!doctype html><html><head><meta charset="utf-8"><title>{}</title>
 <style>body{{font:14px system-ui;margin:2rem;max-width:900px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:.45rem;border-bottom:1px solid #ddd;text-align:right}}th:first-child,td:first-child{{text-align:left}}.knee{{background:#fee2e2}}svg{{border:1px solid #ddd;background:#fafafa}}</style></head>
 <body><h1>{}</h1><p>Latency-throughput curve; red marks the automatically detected knee.</p>
 <svg viewBox="0 0 {width} {height}" role="img" aria-label="p95 latency by throughput"><polyline points="{polyline}" fill="none" stroke="#2563eb" stroke-width="3"/>{knee_circle}</svg>
 <h2>Sweep</h2><table><thead><tr><th>Load</th><th>n</th><th>Throughput</th><th>p95 seconds</th><th>p99 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
+{sut_block}
 <h2>Server correlation</h2><pre>{}</pre></body></html>"##,
         escape_html(title),
         escape_html(title),

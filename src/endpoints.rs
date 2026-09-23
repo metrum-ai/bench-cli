@@ -50,6 +50,22 @@ impl ResolvedEndpoints {
             } => endpoint_names_with_weights.clone(),
         }
     }
+
+    /// Unique endpoint URLs (for placement warnings).
+    pub fn urls(&self) -> Vec<&str> {
+        match self {
+            ResolvedEndpoints::Single { url, .. } => vec![url.as_str()],
+            ResolvedEndpoints::Multi { weighted_list, .. } => {
+                let mut out = Vec::new();
+                for (url, _, _) in weighted_list {
+                    if !out.contains(&url.as_str()) {
+                        out.push(url.as_str());
+                    }
+                }
+                out
+            }
+        }
+    }
 }
 
 /// Default temporary ejection window after a connect failure (least-inflight).

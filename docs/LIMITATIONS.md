@@ -31,9 +31,10 @@ policy/process failure, not something the client can detect.
 Headline outputs are latency, throughput, goodput under SLOs, and related
 distributions. The only built-in **quality** scores are ASR **WER/CER** (with
 `--normalizer`). There is no general task accuracy, judge score, or agent
-success metric in 1.0. For thinking-model timing (TTFT vs first reasoning,
-`--max-tokens`, `reasoning_effort`), see
-[REASONING_MODELS.md](REASONING_MODELS.md).
+success metric in 1.0. When `sut.model.quantization` is set, the CLI prints a
+stderr warning that the run measures performance, not answer quality. For
+thinking-model timing (TTFT vs first reasoning, `--max-tokens`,
+`reasoning_effort`), see [REASONING_MODELS.md](REASONING_MODELS.md).
 
 ## No agent mode
 

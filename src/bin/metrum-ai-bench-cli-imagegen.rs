@@ -393,6 +393,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
 
     let endpoints = resolve_endpoints(&args)?;
+    metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));
     let runtime = endpoints
         .iter()
         .map(|ep| (ep.name.clone(), EndpointRuntime::default()))
@@ -609,6 +610,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         run_id: run_id.clone(),
         effective_max_concurrency: args.max_concurrency.unwrap_or(args.concurrency),
         common: metrum_ai_bench::args_common::EffectiveCommonArgs {
+            scenario: Some(args.scenario.clone()),
             seed: args.seed.unwrap_or(0) as u64,
             warmup_requests: args.warmup_requests,
             request_rate: args.request_rate,

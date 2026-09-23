@@ -555,6 +555,7 @@ mod tests {
 
     fn sample_common() -> EffectiveCommonArgs {
         EffectiveCommonArgs {
+            scenario: Some("unit-test".into()),
             seed: 7,
             warmup_requests: 0,
             request_rate: None,
