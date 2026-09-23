@@ -140,8 +140,14 @@ metrum-ai-bench-cli llm -- \
   --prompts test-data/llm-hi.jsonl \
   --num-requests 16 --concurrency 4 --max-tokens 64 \
   --data-log results.jsonl \
-  --sut sut.json --require-sut
+  --sut sut.json --require-sut \
+  --osl-target 64 --osl-tolerance 8 --fail-on-osl-mismatch
 ```
+
+For matched ISL/OSL compares, pass `--isl-target` / `--osl-target` (or
+`--prompt-mix-report` from `metrum-ai-bench-cli-prompts`) and enable
+`--fail-on-osl-mismatch` so drifted output length cannot silent-pass a
+publishable gate. Pair with `--max-tokens` near the OSL target.
 
 Example SUT declaration (`examples/sut.example.json`). Every field except the
 defaulted `provenance` is optional; omit or null what you do not know:

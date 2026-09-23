@@ -4,10 +4,13 @@
 pub mod args_common;
 pub mod asr;
 pub mod chat_stream;
+pub mod concurrency;
+pub mod connect_timing;
 pub mod endpoints;
 pub mod environment;
 pub mod error;
 pub mod http_client;
+pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
 pub mod prompt_inputs;

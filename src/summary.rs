@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::args_common::EffectiveCommonArgs;
+use crate::concurrency::ObservedConcurrency;
+use crate::isl_osl::IslOslValidation;
 use crate::record::{Phase, RequestRecord, SCHEMA_VERSION_SUMMARY};
 use crate::stats::{bootstrap_mean_ci, ConfidenceInterval, DistSummary};
 use crate::sut::Sut;
@@ -45,6 +47,14 @@ pub struct RunSummary {
     pub ttft_s: DistSummary,
     pub tpot_s: DistSummary,
     pub itl_s: DistSummary,
+    /// TCP/TLS connector duration (`0` = pool hit).
+    pub connect_s: DistSummary,
+    /// Prefill proxy (`ttft - connect` when connect present, else `ttft`).
+    pub prefill_s: DistSummary,
+    /// Decode proxy (`e2e - ttft`).
+    pub decode_s: DistSummary,
+    /// Completion tokens per decode second.
+    pub decode_tok_s: DistSummary,
     pub throughput_bins_rps: DistSummary,
     pub goodput: GoodputSummary,
     pub pooled_mixture: bool,
@@ -58,6 +68,12 @@ pub struct RunSummary {
     pub price_provenance: Option<&'static str>,
     /// `$ / 1M output tokens` from price and measured output tok/s; null when absent.
     pub cost_per_million_output_tokens: Option<f64>,
+    /// Client-observed outstanding concurrency vs configured cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_concurrency: Option<ObservedConcurrency>,
+    /// Runtime ISL/OSL vs optional targets; omitted when no targets configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isl_osl: Option<IslOslValidation>,
     pub partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<EffectiveRunConfig>,
@@ -217,6 +233,10 @@ impl RunSummary {
             .iter()
             .flat_map(|r| r.itl_s.iter().copied())
             .collect();
+        let connect: Vec<f64> = successes.iter().filter_map(|r| r.connect_s).collect();
+        let prefill: Vec<f64> = successes.iter().filter_map(|r| r.prefill_s).collect();
+        let decode: Vec<f64> = successes.iter().filter_map(|r| r.decode_s).collect();
+        let decode_tok: Vec<f64> = successes.iter().filter_map(|r| r.decode_tok_s).collect();
         let (usage_missing_count, completion_tokens, completion_tokens_source, ctps_valid) =
             token_throughput_accounting(&successes);
         let window = if window_seconds > 0.0 {
@@ -274,6 +294,10 @@ impl RunSummary {
             ttft_s: DistSummary::from_values(&ttft),
             tpot_s: DistSummary::from_values(&tpot),
             itl_s: DistSummary::from_values(&itl),
+            connect_s: DistSummary::from_values(&connect),
+            prefill_s: DistSummary::from_values(&prefill),
+            decode_s: DistSummary::from_values(&decode),
+            decode_tok_s: DistSummary::from_values(&decode_tok),
             throughput_bins_rps: DistSummary::from_values(&bins),
             goodput: GoodputSummary {
                 count: good.len(),
@@ -292,6 +316,8 @@ impl RunSummary {
             price_per_hour: None,
             price_provenance: None,
             cost_per_million_output_tokens: None,
+            observed_concurrency: None,
+            isl_osl: None,
             partial,
             config: None,
         }
@@ -306,6 +332,18 @@ impl RunSummary {
     /// Embed an operator-declared SUT block (`None` serializes as JSON `null`).
     pub fn with_sut(mut self, sut: Option<Sut>) -> Self {
         self.sut = sut;
+        self
+    }
+
+    /// Attach client-observed concurrency snapshot.
+    pub fn with_observed_concurrency(mut self, observed: Option<ObservedConcurrency>) -> Self {
+        self.observed_concurrency = observed;
+        self
+    }
+
+    /// Attach runtime ISL/OSL validation block.
+    pub fn with_isl_osl(mut self, isl_osl: Option<IslOslValidation>) -> Self {
+        self.isl_osl = isl_osl;
         self
     }
 
@@ -416,6 +454,44 @@ pub fn print_run_summary(summary: &RunSummary) {
     print_dist("TTFT", &summary.ttft_s);
     print_dist("TPOT", &summary.tpot_s);
     print_dist("ITL", &summary.itl_s);
+    if summary.connect_s.n > 0 {
+        print_dist("Connect", &summary.connect_s);
+    }
+    if summary.prefill_s.n > 0 {
+        print_dist("Prefill (proxy)", &summary.prefill_s);
+    }
+    if summary.decode_s.n > 0 {
+        print_dist("Decode", &summary.decode_s);
+    }
+    if summary.decode_tok_s.n > 0 {
+        println!(
+            "  Decode tok/s: n={} avg={} p50={}",
+            summary.decode_tok_s.n,
+            fmt_opt(summary.decode_tok_s.avg, 3),
+            fmt_opt(summary.decode_tok_s.p50, 3),
+        );
+    }
+    if let Some(obs) = &summary.observed_concurrency {
+        println!(
+            "  Observed concurrency: mean={} p50={} max={} cap={} engagement={}",
+            fmt_opt(obs.in_flight_mean, 2),
+            fmt_opt(obs.in_flight_p50, 2),
+            fmt_opt(obs.in_flight_max, 2),
+            obs.cap,
+            fmt_opt(obs.cap_engagement_fraction, 3),
+        );
+    }
+    if let Some(v) = &summary.isl_osl {
+        println!(
+            "  ISL/OSL: isl_mean={} osl_mean={} isl_mismatch={} osl_mismatch={} (targets isl={:?} osl={:?})",
+            fmt_opt(v.isl_mean, 1),
+            fmt_opt(v.osl_mean, 1),
+            v.isl_mismatch_count,
+            v.osl_mismatch_count,
+            v.isl_target,
+            v.osl_target,
+        );
+    }
     println!(
         "  Goodput: {:.3} req/s ({}/{} attempted; thresholds={:?})",
         summary.goodput.requests_per_second,
@@ -648,6 +724,12 @@ mod tests {
             ca_cert: None,
             fail_on_error: false,
             price_per_hour: None,
+            isl_target: None,
+            osl_target: None,
+            isl_tolerance: 0.0,
+            osl_tolerance: 0.0,
+            prompt_mix_report: None,
+            fail_on_osl_mismatch: false,
             sut: None,
             require_sut: false,
             redact_hostname: false,
@@ -853,5 +935,40 @@ mod tests {
         let null_summary = RunSummary::from_records(&records, 1.0, false).with_price(None);
         let null_value = serde_json::to_value(&null_summary).unwrap();
         assert!(null_value["cost_per_million_output_tokens"].is_null());
+    }
+
+    #[test]
+    fn summary_includes_phase_and_concurrency_blocks() {
+        let mut rec = ok(0, 500, 120, 20, &[20; 19]).with_connect(0.02);
+        rec = rec.with_in_flight(3);
+        let summary = RunSummary::from_records(&[rec], 1.0, false).with_observed_concurrency(Some(
+            crate::concurrency::ObservedConcurrency {
+                cap: 8,
+                in_flight_mean: Some(3.0),
+                in_flight_p50: Some(3.0),
+                in_flight_max: Some(4.0),
+                cap_engagement_fraction: Some(0.25),
+                acquire_count: 4,
+                wait_count: 1,
+            },
+        ));
+        assert_eq!(summary.connect_s.n, 1);
+        assert_eq!(summary.prefill_s.n, 1);
+        assert_eq!(summary.decode_s.n, 1);
+        assert!(summary.decode_tok_s.avg.unwrap() > 0.0);
+        assert_eq!(summary.observed_concurrency.as_ref().unwrap().cap, 8);
+        let isl = crate::isl_osl::validate_records(
+            &[ok(0, 100, 20, 8, &[])],
+            &crate::isl_osl::IslOslTargets {
+                isl_target: Some(18.0),
+                osl_target: Some(8.0),
+                isl_tolerance: 0.0,
+                osl_tolerance: 0.0,
+                source: Some("cli"),
+            },
+        )
+        .unwrap();
+        assert_eq!(isl.osl_mismatch_count, 0);
+        assert_eq!(isl.isl_mismatch_count, 0);
     }
 }

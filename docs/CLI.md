@@ -94,6 +94,18 @@ Options:
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
+      --isl-target <TOKENS>
+          Expected mean/median input tokens for runtime ISL validation (overrides mix-report)
+      --osl-target <TOKENS>
+          Expected mean/median output tokens for runtime OSL validation (overrides mix-report)
+      --isl-tolerance <ISL_TOLERANCE>
+          Allowed absolute deviation from --isl-target (tokens) [default: 0]
+      --osl-tolerance <OSL_TOLERANCE>
+          Allowed absolute deviation from --osl-target (tokens) [default: 0]
+      --prompt-mix-report <PATH>
+          Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset
+      --fail-on-osl-mismatch
+          Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
@@ -194,6 +206,18 @@ Options:
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
+      --isl-target <TOKENS>
+          Expected mean/median input tokens for runtime ISL validation (overrides mix-report)
+      --osl-target <TOKENS>
+          Expected mean/median output tokens for runtime OSL validation (overrides mix-report)
+      --isl-tolerance <ISL_TOLERANCE>
+          Allowed absolute deviation from --isl-target (tokens) [default: 0]
+      --osl-tolerance <OSL_TOLERANCE>
+          Allowed absolute deviation from --osl-target (tokens) [default: 0]
+      --prompt-mix-report <PATH>
+          Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset
+      --fail-on-osl-mismatch
+          Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
@@ -348,6 +372,28 @@ Options:
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
+
+      --isl-target <TOKENS>
+          Expected mean/median input tokens for runtime ISL validation (overrides mix-report)
+
+      --osl-target <TOKENS>
+          Expected mean/median output tokens for runtime OSL validation (overrides mix-report)
+
+      --isl-tolerance <ISL_TOLERANCE>
+          Allowed absolute deviation from --isl-target (tokens)
+          
+          [default: 0]
+
+      --osl-tolerance <OSL_TOLERANCE>
+          Allowed absolute deviation from --osl-target (tokens)
+          
+          [default: 0]
+
+      --prompt-mix-report <PATH>
+          Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset
+
+      --fail-on-osl-mismatch
+          Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
@@ -760,6 +806,18 @@ Options:
           Repeatable goodput threshold: e2e=, ttft=, tpot= (streaming, seconds); user_tps= (tok/s per in-flight user)
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for stage cost_per_million_output_tokens
+      --isl-target <TOKENS>
+          Expected input tokens for runtime ISL validation (overrides mix-report)
+      --osl-target <TOKENS>
+          Expected output tokens for runtime OSL validation (overrides mix-report)
+      --isl-tolerance <ISL_TOLERANCE>
+          Allowed absolute deviation from --isl-target (tokens) [default: 0]
+      --osl-tolerance <OSL_TOLERANCE>
+          Allowed absolute deviation from --osl-target (tokens) [default: 0]
+      --prompt-mix-report <PATH>
+          Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset
+      --fail-on-osl-mismatch
+          Exit non-zero when measured OSL mismatches exceed --osl-tolerance
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML
       --require-sut

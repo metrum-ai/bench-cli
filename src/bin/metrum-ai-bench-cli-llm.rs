@@ -579,6 +579,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         concurrency_limit
     };
     let semaphore = Arc::new(Semaphore::new(initial_permits));
+    let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
+        concurrency_limit as u32,
+    ));
 
     // Background task that gradually adds permits during the ramp-up window.
     if let Some(ramp_up) = effective_ramp_up {
@@ -631,7 +634,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let i = slot.seq as usize;
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
 
-        let permit = semaphore.clone().acquire_owned().await?;
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            semaphore.clone(),
+            &inflight_tracker,
+        )
+        .await?;
+        let inflight_guard = inflight_tracker.guard();
+        let in_flight_at_send = inflight_guard.in_flight;
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
         let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
@@ -677,18 +686,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
-            let result = make_request(
-                &client,
-                &url,
-                request_body,
-                mode,
-                streaming,
-                request_timeout,
-                &api_key,
+            let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+            let result = metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                make_request(
+                    &client,
+                    &url,
+                    request_body,
+                    mode,
+                    streaming,
+                    request_timeout,
+                    &api_key,
+                ),
             )
             .await;
+            let connect_s = connect_slot.take();
             drop(permit);
             drop(endpoint_lease);
+            drop(inflight_guard);
 
             let tokenizer = match metrum_ai_bench::tokenizer::LocalTokenizer::from_file(
                 tokenizer_path.as_deref(),
@@ -721,6 +736,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         sm.total_tokens,
                     )
                     .with_first_byte(sm.first_byte)
+                    .with_connect(connect_s)
+                    .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
@@ -753,6 +770,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         latency,
                         request_error,
                     )
+                    .with_connect(connect_s)
+                    .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
@@ -924,11 +943,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.common.price_per_hour,
         sut_block.as_ref(),
     );
-    run_summary = run_summary.with_sut(sut_block).with_price(price);
+    let isl_osl_targets = args.common.resolve_isl_osl_targets()?;
+    let isl_osl = metrum_ai_bench::isl_osl::validate_records(&records, &isl_osl_targets);
+    run_summary = run_summary
+        .with_sut(sut_block)
+        .with_price(price)
+        .with_observed_concurrency(Some(inflight_tracker.snapshot()))
+        .with_isl_osl(isl_osl.clone());
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+
+    if let Some(ref validation) = isl_osl {
+        metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.common.fail_on_osl_mismatch)?;
+    }
 
     let measure_errors = records
         .iter()

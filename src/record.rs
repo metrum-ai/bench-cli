@@ -80,16 +80,34 @@ pub struct RequestRecord {
     pub latency_s: f64,
     /// Seconds from send start until response headers are received (after
     /// `.send()` Ok). Distinct from TTFT, which is first visible user token
-    /// and includes connect/TLS/queue. `connect_s` is deferred post-v1.
+    /// and includes connect/TLS/queue.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_byte_s: Option<f64>,
+    /// Seconds spent in the HTTP connector establishing a new TCP/TLS session.
+    /// `0.0` means a pooled connection was reused (pool hit). Absent when the
+    /// request path did not install connect timing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
+    /// Prefill proxy: `ttft_s - connect_s` when both exist, otherwise `ttft_s`.
+    /// Still includes server queueing that lands before the first visible token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefill_s: Option<f64>,
+    /// Decode phase proxy: `max(0, latency_s - ttft_s)` for streaming successes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_s: Option<f64>,
+    /// Output tokens per decode second (`completion_tokens / decode_s`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_tok_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_reasoning_s: Option<f64>,
     /// Inter-chunk intervals in seconds (visible tokens only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub itl_s: Vec<f64>,
+    /// Client outstanding requests immediately after semaphore acquire / at send.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_flight_at_send: Option<u64>,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
@@ -138,9 +156,14 @@ impl RequestRecord {
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
             first_byte_s: None,
+            connect_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             ttft_s: ttft.map(|d| d.as_secs_f64()),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
             itl_s: itl.iter().map(|d| d.as_secs_f64()).collect(),
+            in_flight_at_send: None,
             prompt_tokens,
             completion_tokens,
             total_tokens,
@@ -152,6 +175,7 @@ impl RequestRecord {
             error: None,
             partial: false,
         }
+        .with_phase_metrics()
     }
 
     pub fn failed(
@@ -176,9 +200,14 @@ impl RequestRecord {
             queue_delay_s: 0.0,
             latency_s: latency.as_secs_f64(),
             first_byte_s: None,
+            connect_s: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
             ttft_s: None,
             first_reasoning_s: None,
             itl_s: Vec::new(),
+            in_flight_at_send: None,
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
@@ -204,6 +233,33 @@ impl RequestRecord {
 
     pub fn with_first_byte(mut self, first_byte: Duration) -> Self {
         self.first_byte_s = Some(first_byte.as_secs_f64());
+        self
+    }
+
+    pub fn with_connect(mut self, connect_s: f64) -> Self {
+        self.connect_s = Some(connect_s);
+        self.with_phase_metrics()
+    }
+
+    pub fn with_in_flight(mut self, in_flight: u64) -> Self {
+        self.in_flight_at_send = Some(in_flight);
+        self
+    }
+
+    /// Fill `prefill_s` / `decode_s` / `decode_tok_s` from TTFT, connect, and tokens.
+    pub fn with_phase_metrics(mut self) -> Self {
+        self.prefill_s = match (self.ttft_s, self.connect_s) {
+            (Some(ttft), Some(connect)) => Some((ttft - connect).max(0.0)),
+            (Some(ttft), None) => Some(ttft),
+            _ => None,
+        };
+        self.decode_s = self.ttft_s.map(|ttft| (self.latency_s - ttft).max(0.0));
+        self.decode_tok_s = match self.decode_s {
+            Some(decode) if decode > 0.0 && self.completion_tokens > 0 => {
+                Some(self.completion_tokens as f64 / decode)
+            }
+            _ => None,
+        };
         self
     }
 
@@ -264,6 +320,30 @@ mod tests {
         let tpot = rec.tpot_s().expect("tpot");
         let expected = (0.500 - 0.120) / 19.0;
         assert!((tpot - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn phase_metrics_from_ttft_connect_and_tokens() {
+        let started = Utc::now();
+        let latency = Duration::from_millis(500);
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "ep".into(),
+            started,
+            started + chrono::Duration::from_std(latency).unwrap(),
+            latency,
+            Some(Duration::from_millis(120)),
+            None,
+            vec![],
+            10,
+            20,
+            30,
+        )
+        .with_connect(0.020);
+        assert!((rec.prefill_s.unwrap() - 0.100).abs() < 1e-9);
+        assert!((rec.decode_s.unwrap() - 0.380).abs() < 1e-9);
+        assert!((rec.decode_tok_s.unwrap() - (20.0 / 0.380)).abs() < 1e-9);
     }
 
     #[test]

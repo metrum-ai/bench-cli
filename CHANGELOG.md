@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Observed concurrency on modality `summary.v3` and strategic stages:
+  in-flight mean/p50/max, cap-engagement fraction, optional
+  `in_flight_at_send` (#145).
+- Phase/transport diagnostics: `connect_s` (connector TCP/TLS; `0` = pool hit),
+  `prefill_s` proxy, `decode_s` / `decode_tok_s` from e2e−ttft (#146). TTFT
+  still includes queue/TLS by design.
+- Runtime ISL/OSL validation: `--isl-target` / `--osl-target` /
+  `--prompt-mix-report`, mismatch counts on summary, `--fail-on-osl-mismatch`
+  (#147).
 - Modality summaries stamp `--scenario` into `summary.v3.config.common.scenario`.
 - `metrum-ai-bench-cli-strategic`: `--sut` / `--require-sut` (publication parity);
   SUT embedded in stage config, stdout JSON, and HTML.

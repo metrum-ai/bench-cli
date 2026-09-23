@@ -32,6 +32,10 @@ Produce a compliant run with:
 --sut <file> --require-sut
 ```
 
+For token-length-matched compares, also set `--isl-target` / `--osl-target`
+(or `--prompt-mix-report`) with `--fail-on-osl-mismatch` and a bounding
+`--max-tokens`.
+
 A claim that omits this manifest (including the SUT block) is **not** a
 Metrum AI Bench CLI result under this policy, even if the software was used.
 

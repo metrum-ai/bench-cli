@@ -130,6 +130,48 @@ pub struct CommonBenchArgs {
 
     #[arg(
         long,
+        value_name = "TOKENS",
+        help = "Expected mean/median input tokens for runtime ISL validation (overrides mix-report)"
+    )]
+    pub isl_target: Option<f64>,
+
+    #[arg(
+        long,
+        value_name = "TOKENS",
+        help = "Expected mean/median output tokens for runtime OSL validation (overrides mix-report)"
+    )]
+    pub osl_target: Option<f64>,
+
+    #[arg(
+        long,
+        default_value_t = 0.0,
+        help = "Allowed absolute deviation from --isl-target (tokens)"
+    )]
+    pub isl_tolerance: f64,
+
+    #[arg(
+        long,
+        default_value_t = 0.0,
+        help = "Allowed absolute deviation from --osl-target (tokens)"
+    )]
+    pub osl_tolerance: f64,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset"
+    )]
+    pub prompt_mix_report: Option<std::path::PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)"
+    )]
+    pub fail_on_osl_mismatch: bool,
+
+    #[arg(
+        long,
         value_name = "PATH",
         help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut"
     )]
@@ -186,6 +228,15 @@ pub struct EffectiveCommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_per_hour: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub isl_target: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub osl_target: Option<f64>,
+    pub isl_tolerance: f64,
+    pub osl_tolerance: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_mix_report: Option<String>,
+    pub fail_on_osl_mismatch: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sut: Option<String>,
     pub require_sut: bool,
     pub redact_hostname: bool,
@@ -213,6 +264,15 @@ impl From<&CommonBenchArgs> for EffectiveCommonArgs {
             ca_cert: common.ca_cert.clone(),
             fail_on_error: common.fail_on_error,
             price_per_hour: common.price_per_hour,
+            isl_target: common.isl_target,
+            osl_target: common.osl_target,
+            isl_tolerance: common.isl_tolerance,
+            osl_tolerance: common.osl_tolerance,
+            prompt_mix_report: common
+                .prompt_mix_report
+                .as_ref()
+                .map(|p| p.display().to_string()),
+            fail_on_osl_mismatch: common.fail_on_osl_mismatch,
             sut: common.sut.as_ref().map(|p| p.display().to_string()),
             require_sut: common.require_sut,
             redact_hostname: common.redact_hostname || common.require_sut,
@@ -280,6 +340,17 @@ impl CommonBenchArgs {
     pub fn parse_slos(&self) -> anyhow::Result<crate::summary::SloConfig> {
         crate::summary::SloConfig::parse(&self.slos)
     }
+
+    /// Resolve optional ISL/OSL targets from CLI and/or `--prompt-mix-report`.
+    pub fn resolve_isl_osl_targets(&self) -> anyhow::Result<crate::isl_osl::IslOslTargets> {
+        crate::isl_osl::IslOslTargets::resolve(
+            self.isl_target,
+            self.osl_target,
+            self.isl_tolerance,
+            self.osl_tolerance,
+            self.prompt_mix_report.as_deref(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +390,12 @@ mod tests {
             insecure: false,
             fail_on_error: false,
             price_per_hour: None,
+            isl_target: None,
+            osl_target: None,
+            isl_tolerance: 0.0,
+            osl_tolerance: 0.0,
+            prompt_mix_report: None,
+            fail_on_osl_mismatch: false,
             sut: None,
             require_sut: false,
             redact_hostname: false,
