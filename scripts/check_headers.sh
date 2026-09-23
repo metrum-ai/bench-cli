@@ -99,7 +99,7 @@ check_naming() {
   local -a forbidden=(
     'MetrumBench'                # never; use metrum-ai-bench-cli / Metrum AI Bench CLI
     'Metrum Bench CLI'           # missing "AI"
-    '\bmetrumbench\b'            # old crate name; shims allowlisted
+    '\bmetrumbench\b'            # old crate / product token; forbid in new docs
     'Insights CLI'
     'Bench by Metrum'
     'Metrum Smart Bench'

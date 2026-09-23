@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.2.0** ([CHANGELOG](CHANGELOG.md)).
+release: **1.3.0** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -90,9 +90,6 @@ Quickstart and the examples requires Go when built from source; a release
 tarball already includes it. The benchmark binaries do not need Go. Pass
 `--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
 identity still prints).
-A Homebrew formula is generated during the release workflow for tap publish
-when `HOMEBREW_TAP_REPOSITORY` and `HOMEBREW_PUBLISH` are configured; it is
-not attached as a free-floating GitHub Release asset.
 
 ```bash
 cargo test --all-targets
@@ -115,11 +112,11 @@ cargo test --all-targets
 | `metrum-ai-bench-cli-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
 
 The preferred entry point for modalities is `metrum-ai-bench-cli` with those
-subcommands. During the v1.x compatibility period the modality binaries can
-also be invoked directly. Deprecated shims remain through **1.3.0** (stderr
-removal notice): pre-1.2.0 `metrum-ai-bench*` names and older `metrumbench-*`.
-`metrum-ai-bench-cli-strategic` is a separate binary. Shared load flags live
-in clap common args; modality-specific flags are in
+subcommands. Modality binaries (`metrum-ai-bench-cli-llm`, and so on) can also
+be invoked directly. As of **1.3.0**, deprecated `metrumbench-*` and pre-1.2.0
+`metrum-ai-bench*` shim names are removed; only `metrum-ai-bench-cli*` binaries
+ship. `metrum-ai-bench-cli-strategic` is a separate binary. Shared load flags
+live in clap common args; modality-specific flags are in
 [docs/CLI.md](docs/CLI.md) (regenerated from `--help`). Install from crates.io
 with `cargo install metrum-ai-bench-cli`.
 

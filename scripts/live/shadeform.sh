@@ -378,27 +378,20 @@ cmd_delete() {
 
 resolve_bench_bin() {
   local want="$1" # metrum-ai-bench-cli-llm | metrum-ai-bench-cli-vlm
-  local legacy="${want/metrum-ai-bench-cli/metrumbench}"
   if command -v "${want}" >/dev/null 2>&1; then
     echo "${want}"
-    return 0
-  fi
-  if command -v "${legacy}" >/dev/null 2>&1; then
-    echo "${legacy}"
     return 0
   fi
   local candidate
   for candidate in \
     "${REPO_ROOT}/target/release/${want}" \
-    "${REPO_ROOT}/target/debug/${want}" \
-    "${REPO_ROOT}/target/release/${legacy}" \
-    "${REPO_ROOT}/target/debug/${legacy}"; do
+    "${REPO_ROOT}/target/debug/${want}"; do
     if [[ -x "${candidate}" ]]; then
       echo "${candidate}"
       return 0
     fi
   done
-  die "binary not found: ${want} (or legacy ${legacy}); build the crate first"
+  die "binary not found: ${want}; build the crate first"
 }
 
 cmd_run_llm() {

@@ -79,9 +79,8 @@ Release archives are cross-built with cargo-zigbuild for:
 | Linux `*-unknown-linux-gnu` | glibc **2.17** floor; **not** musl |
 | macOS Darwin | `x86_64` / `aarch64` |
 
-TLS uses rustls (no OpenSSL link). A Homebrew formula is generated for tap
-publish when `HOMEBREW_TAP_REPOSITORY` is configured; it is not a standalone
-install path from the GitHub Release assets alone.
+TLS uses rustls (no OpenSSL link). Install from a GitHub Release tarball or
+build from source; there is no Homebrew install path.
 
 ### Option B: Build from source
 
@@ -185,8 +184,8 @@ metrum-ai-bench-cli llm -- \
 ```
 
 During the v1.x compatibility period the four modality binaries can also be
-invoked directly. Deprecated `metrumbench-*` shims remain and print a **1.3.0**
-removal notice.
+invoked directly. Prefer the `metrum-ai-bench-cli*` names; older shim aliases
+were removed in **1.3.0**.
 
 ### What success looks like
 
