@@ -14,11 +14,9 @@ the string `true`:
 | Variable | Effect |
 |----------|--------|
 | `CRATES_IO_PUBLISH` | Allows the `crates-io` job to run `cargo publish` |
-| `HOMEBREW_PUBLISH` | Allows the `homebrew` job to push the formula to the tap |
 
-Leave both unset (or set to anything other than `true`) for rc tags and for
-dry-run releases. A configured `CRATES_IO_TOKEN` / `HOMEBREW_TAP_TOKEN` alone
-is not enough.
+Leave unset (or set to anything other than `true`) for rc tags and for
+dry-run releases. A configured `CRATES_IO_TOKEN` alone is not enough.
 
 ## Release archives
 
@@ -38,8 +36,7 @@ job `if:` requires:
 - `vars.CRATES_IO_PUBLISH == 'true'`, and
 - the tag / release tag must not contain `-rc.`
 
-Homebrew tap pushes similarly require `HOMEBREW_PUBLISH=true`. Prefer leaving
-that variable unset for every `-rc.` tag.
+Prefer leaving `CRATES_IO_PUBLISH` unset for every `-rc.` tag.
 
 ## Docs deploy (docs.metrum.ai)
 
@@ -47,9 +44,9 @@ that variable unset for every `-rc.` tag.
 `https://docs.metrum.ai/metrum-ai-bench-cli/` on every push to `main` (dev
 preview, never restored to the live site) and every `v*` tag push.
 
-Same rule as crates.io/Homebrew above: **an rc must never become the
-published latest.** A tag containing `-rc.`, `-alpha.`, or `-beta.` still
-publishes and deploys to its own versioned path (so it can be previewed at
+Same rule as crates.io above: **an rc must never become the published
+latest.** A tag containing `-rc.`, `-alpha.`, or `-beta.` still publishes and
+deploys to its own versioned path (so it can be previewed at
 `/metrum-ai-bench-cli/<tag>/`), but the workflow does not move the
 `/latest/` alias for it. Only a final `vX.Y.Z` tag promotes `/latest/`.
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Removed
+- Homebrew packaging and release automation (upcoming **1.3.0**): deleted
+  `packaging/homebrew/`, `scripts/render_homebrew_formula.sh`, and the
+  release workflow `homebrew` job / `publish_homebrew` input. Install from
+  GitHub Release tarballs, crates.io, or source.
+- Deprecated shim binaries (upcoming **1.3.0**): `metrumbench-*` and
+  pre-1.2.0 `metrum-ai-bench*` names. Only `metrum-ai-bench-cli*` binaries
+  remain.
+
 ### Added
 - `metrum-ai-bench-cli preflight --url …`: reachability, chat probe, streaming
   first-token smoke, and latency sample with a pass/fail table; remediation

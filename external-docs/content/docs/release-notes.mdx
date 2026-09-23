@@ -15,6 +15,14 @@ in the repository `CHANGELOG.md`.
 
 ## Unreleased
 
+### Removed (upcoming 1.3.0)
+
+- Homebrew packaging and release tap publish (`packaging/homebrew/`,
+  `scripts/render_homebrew_formula.sh`, and the `homebrew` release job).
+  Install from GitHub Release tarballs, crates.io, or source.
+- Deprecated shim binaries: `metrumbench-*` and pre-1.2.0 `metrum-ai-bench*`
+  names. Only `metrum-ai-bench-cli*` binaries remain.
+
 ---
 
 ## Metrum AI Bench CLI 1.2.0
@@ -26,9 +34,10 @@ in the repository `CHANGELOG.md`.
 | **Previous version** | 1.1.3 |
 | **Release Date** | September 23, 2026 |
 
-Crate, binaries, release tarball prefix, and Homebrew formula are now
+Crate, binaries, and release tarball prefix are now
 **`metrum-ai-bench-cli`**. Install with `cargo install metrum-ai-bench-cli`.
-Old `metrum-ai-bench*` binary names remain as deprecated shims through 1.3.0.
+(Through 1.2.x, old `metrum-ai-bench*` binary names remained as deprecated
+shims; those shims are removed in 1.3.0.)
 The crates.io crate `metrum-ai-bench` (1.1.2 / 1.1.3) is yanked.
 
 ---
@@ -58,10 +67,10 @@ what the README already told tarball users.
 
 ### Changed
 
-- Deprecated `metrumbench-*` aliases remain in the archive through **1.3.0**
-  (stderr removal notice). They are back-compat only; prefer `metrum-ai-bench-cli-*`.
-- Homebrew formula is generated for tap publish when configured; it is no
-  longer attached as a free-floating GitHub Release asset.
+- Deprecated `metrumbench-*` aliases remained in the archive through **1.2.x**
+  (stderr removal notice; removed in 1.3.0). Prefer `metrum-ai-bench-cli-*`.
+- GitHub Release assets no longer attach an orphan formula file; Homebrew tap
+  publish was gated separately through 1.2.x and is removed in 1.3.0.
 - Comparison docs no longer claim multi-modality as the differentiator over
   AIPerf.
 - Limitations "No agent mode" clarifies workloads under test vs driving the CLI
@@ -129,8 +138,7 @@ required to run the quickstart against an unpacked tarball.
 
 - Each `metrum-ai-bench-cli` archive for Linux and macOS (`x86_64` and `aarch64`)
   includes a static `bin/dummy-model-server`.
-- Linux and macOS release smoke checks, and the Homebrew formula test, cover
-  that binary.
+- Linux and macOS release smoke checks cover that binary.
 - The Go server is still not published to crates.io.
 
 ---
