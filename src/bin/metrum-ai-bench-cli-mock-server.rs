@@ -175,7 +175,10 @@ async fn main() -> Result<()> {
         .route("/v1/rerank", post(infer))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
-    println!("metrum-ai-bench-cli-mock-server listening on {}", args.listen);
+    println!(
+        "metrum-ai-bench-cli-mock-server listening on {}",
+        args.listen
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }
