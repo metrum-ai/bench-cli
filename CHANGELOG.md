@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- `metrum-ai-bench-cli preflight --url …`: reachability, chat probe, streaming
+  first-token smoke, and latency sample with a pass/fail table; remediation
+  points at Docker-first Platforms docs. Exit non-zero when a probe fails.
+- `metrum-ai-bench-cli sut init [--probe]`: write a SUT JSON template; `--probe`
+  fills local nvidia-smi / OS / CPU / memory with `field_provenance` marking
+  observed vs declared fields (never remote SSH).
+- `metrum-ai-bench-cli compare`: labeled delta table (Markdown/JSON) over two or
+  more strategic stdout summaries or request CSVs.
+- Strategic `--html` report: labeled axes, ticks, grid, and point tooltips
+  (still a static SVG, not a chart package).
+- Docs: agent-driven multi-run compare/chart prompt; SUT provenance and
+  preflight limits.
 - Observed concurrency on modality `summary.v3` and strategic stages:
   in-flight mean/p50/max, cap-engagement fraction, optional
   `in_flight_at_send` (#145).

@@ -54,7 +54,11 @@ full `per_endpoint` distributions, environment metadata, and `partial`.
 
 Additional v3 fields:
 
-- `sut` - optional operator-declared system-under-test block (rc.5). Always present in JSON; `null` when `--sut` was not provided. Fields are labelled `provenance: "declared"` (not observed). See `--sut`, `--require-sut`, and `--redact-hostname`.
+- `sut` - optional system-under-test block. Always present in JSON; `null` when
+  `--sut` was not provided. Top-level `provenance` is usually `"declared"`;
+  `sut init --probe` may write `"mixed"` with `field_provenance` marking local
+  observed fields. The client still does not verify the remote serving host.
+  See `--sut`, `--require-sut`, `--redact-hostname`, and `sut init`.
 - `environment.hostname` - may be `null` when `--redact-hostname` (or `--require-sut`, which implies redaction) is set (rc.5). Readers must treat `sut` and `hostname` as optional.
 - `config` - effective run configuration:
   - `run_id` - UUID generated once per run
@@ -110,7 +114,8 @@ rejects any JSONL line without `schema_version`.
 ## Security and provenance
 
 `environment` is client-observed (OS, architecture, optional hostname). The
-`sut` block is **declared by the operator**, not measured by the client -
-`provenance` is always `"declared"`. For publication runs use
-`--sut <file> --require-sut` (implies `--redact-hostname`). See
-[Publishing a result](../README.md#publishing-a-result).
+`sut` block is primarily operator-declared. When created with
+`sut init --probe`, local host fields may be marked `observed` in
+`field_provenance` while `runtime` / `model` / `vendor` stay declared. For
+publication runs use `--sut <file> --require-sut` (implies `--redact-hostname`).
+See [Publishing a result](../README.md#publishing-a-result).

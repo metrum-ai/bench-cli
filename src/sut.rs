@@ -1,8 +1,11 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Operator-declared system under test. The client cannot observe the server,
-//! so this block is declared, not measured, and is labelled as such in output.
+//! System-under-test declarations for publishable runs.
+//!
+//! `--sut` embeds an operator-supplied block. `sut init` can write a template
+//! or probe **local** host facts (`--probe`); it does not SSH-audit the remote
+//! serving host. See `field_provenance` for observed vs declared fields.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,7 +15,8 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Sut {
-    /// Always "declared". Present so a reader never mistakes this for observed data.
+    /// Top-level provenance label: typically `"declared"`, or `"mixed"` when
+    /// `sut init --probe` filled local fields (see `field_provenance`).
     #[serde(default = "declared")]
     pub provenance: String,
     pub name: Option<String>,
@@ -28,12 +32,277 @@ pub struct Sut {
     /// Optional declared cost inputs (not measured).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<SutCost>,
+    /// Per-field provenance (`observed` vs `declared`) when `sut init --probe` fills locals.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub field_provenance: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
 }
 
 fn declared() -> String {
     "declared".into()
+}
+
+fn observed() -> String {
+    "observed".into()
+}
+
+/// Write a SUT JSON template, optionally probing **local** host facts.
+///
+/// Probing never SSHs to the serving host. Without NVIDIA tooling, GPU fields
+/// stay as declared placeholders and a warning is printed.
+pub fn init_sut(path: &Path, probe: bool, force: bool) -> anyhow::Result<SutInitResult> {
+    if path.exists() && !force {
+        anyhow::bail!(
+            "sut init: {} already exists (pass --force to overwrite)",
+            path.display()
+        );
+    }
+    let mut warnings = Vec::new();
+    let sut = if probe {
+        probe_local_sut(&mut warnings)?
+    } else {
+        template_sut()
+    };
+    let json = serde_json::to_string_pretty(&sut)?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(path, format!("{json}\n"))
+        .map_err(|e| anyhow::anyhow!("sut init: failed to write {}: {e}", path.display()))?;
+    Ok(SutInitResult {
+        path: path.to_path_buf(),
+        sut,
+        probed: probe,
+        warnings,
+    })
+}
+
+/// Result of [`init_sut`].
+#[derive(Debug)]
+pub struct SutInitResult {
+    pub path: std::path::PathBuf,
+    pub sut: Sut,
+    pub probed: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Operator-editable declared template (same shape as `examples/sut.example.json`).
+pub fn template_sut() -> Sut {
+    Sut {
+        provenance: declared(),
+        name: Some("example-host / GPU x1".into()),
+        vendor: Some("Example OEM".into()),
+        gpu: Some(SutGpu {
+            model: Some("L40S".into()),
+            count: Some(1),
+            memory_gb: Some(48),
+        }),
+        cpu: Some("Example CPU".into()),
+        memory_gb: Some(256),
+        driver_version: Some("NVIDIA 580.xx".into()),
+        runtime: Some(SutRuntime {
+            name: Some("vllm".into()),
+            version: Some("latest".into()),
+            config: Some("TP=1".into()),
+        }),
+        model: Some(SutModel {
+            id: Some("example/model".into()),
+            revision: None,
+            quantization: None,
+        }),
+        host_os: Some("Ubuntu 22.04".into()),
+        notes: Some(
+            "Template from `sut init`. Replace placeholders. Remote serving host is not probed."
+                .into(),
+        ),
+        cost: Some(SutCost {
+            price_per_hour: Some(3.6),
+            currency: Some("USD".into()),
+        }),
+        field_provenance: BTreeMap::new(),
+        extra: BTreeMap::new(),
+    }
+}
+
+/// Probe local OS/CPU/memory and optional nvidia-smi GPU facts.
+pub fn probe_local_sut(warnings: &mut Vec<String>) -> anyhow::Result<Sut> {
+    let mut field_provenance = BTreeMap::new();
+    let host_os = probe_host_os();
+    if let Some(ref os) = host_os {
+        field_provenance.insert("host_os".into(), observed());
+        let _ = os;
+    } else {
+        warnings.push("sut init --probe: could not read host OS (/etc/os-release)".into());
+    }
+    let cpu = probe_cpu();
+    if cpu.is_some() {
+        field_provenance.insert("cpu".into(), observed());
+    } else {
+        warnings.push("sut init --probe: could not read CPU model".into());
+    }
+    let memory_gb = probe_memory_gb();
+    if memory_gb.is_some() {
+        field_provenance.insert("memory_gb".into(), observed());
+    } else {
+        warnings.push("sut init --probe: could not read host memory".into());
+    }
+
+    let (gpu, driver_version, gpu_warnings) = probe_nvidia();
+    warnings.extend(gpu_warnings);
+    if gpu.is_some() {
+        field_provenance.insert("gpu".into(), observed());
+    }
+    if driver_version.is_some() {
+        field_provenance.insert("driver_version".into(), observed());
+    }
+
+    let name = match &gpu {
+        Some(g) => {
+            let model = g.model.as_deref().unwrap_or("GPU");
+            let count = g.count.unwrap_or(1);
+            Some(format!("local-host / {model} x{count}"))
+        }
+        None => Some("local-host".into()),
+    };
+    field_provenance.insert("name".into(), observed());
+
+    let provenance = if field_provenance.values().any(|v| v == "observed") {
+        "mixed".into()
+    } else {
+        declared()
+    };
+
+    Ok(Sut {
+        provenance,
+        name,
+        vendor: None,
+        gpu: gpu.or(Some(SutGpu {
+            model: Some("REPLACE_ME".into()),
+            count: Some(1),
+            memory_gb: None,
+        })),
+        cpu: cpu.or(Some("REPLACE_ME".into())),
+        memory_gb,
+        driver_version,
+        runtime: Some(SutRuntime {
+            name: Some("REPLACE_ME".into()),
+            version: None,
+            config: Some("Fill vendor Docker launch args after web search".into()),
+        }),
+        model: Some(SutModel {
+            id: Some("REPLACE_ME".into()),
+            revision: None,
+            quantization: None,
+        }),
+        host_os: host_os.or(Some(std::env::consts::OS.into())),
+        notes: Some(
+            "Generated by `sut init --probe`. Observed fields are local client-host facts only; runtime/model/vendor remain operator-declared. This does not verify the remote serving host."
+                .into(),
+        ),
+        cost: None,
+        field_provenance,
+        extra: BTreeMap::new(),
+    })
+}
+
+fn probe_host_os() -> Option<String> {
+    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("PRETTY_NAME=") {
+            return Some(value.trim().trim_matches('"').to_string());
+        }
+    }
+    Some(std::env::consts::OS.into())
+}
+
+fn probe_cpu() -> Option<String> {
+    if let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") {
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix("model name") {
+                let name = value.trim().trim_start_matches(':').trim();
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn probe_memory_gb() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("MemTotal:") {
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some((kb / 1024 / 1024).max(1));
+        }
+    }
+    None
+}
+
+fn probe_nvidia() -> (Option<SutGpu>, Option<String>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let output = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=name,memory.total,driver_version",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+    let output = match output {
+        Ok(out) if out.status.success() => out,
+        Ok(out) => {
+            warnings.push(format!(
+                "sut init --probe: nvidia-smi exited {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+            return (None, None, warnings);
+        }
+        Err(err) => {
+            warnings.push(format!(
+                "sut init --probe: nvidia-smi not available ({err}); GPU fields left as placeholders"
+            ));
+            return (None, None, warnings);
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut models = Vec::new();
+    let mut mem_gb = Vec::new();
+    let mut drivers = Vec::new();
+    for line in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let parts: Vec<_> = line.split(',').map(|p| p.trim()).collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        models.push(parts[0].to_string());
+        if let Ok(mib) = parts[1].parse::<f64>() {
+            mem_gb.push((mib / 1024.0).round() as u64);
+        }
+        drivers.push(parts[2].to_string());
+    }
+    if models.is_empty() {
+        warnings.push("sut init --probe: nvidia-smi returned no GPU rows".into());
+        return (None, None, warnings);
+    }
+    let model = if models.iter().all(|m| m == &models[0]) {
+        models[0].clone()
+    } else {
+        models.join(" / ")
+    };
+    let memory_gb = mem_gb.first().copied();
+    let driver_version = drivers.first().cloned().map(|d| format!("NVIDIA {d}"));
+    (
+        Some(SutGpu {
+            model: Some(model),
+            count: Some(models.len() as u32),
+            memory_gb,
+        }),
+        driver_version,
+        warnings,
+    )
 }
 
 /// Declared monetary inputs for cost-per-token reporting.
@@ -262,5 +531,43 @@ mod tests {
         let sut = load_sut(&path).unwrap();
         assert_eq!(sut.cost.as_ref().unwrap().price_per_hour, Some(3.6));
         assert_eq!(sut.cost.as_ref().unwrap().currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn init_template_is_loadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut.json");
+        let result = init_sut(&path, false, false).unwrap();
+        assert!(!result.probed);
+        assert_eq!(result.sut.provenance, "declared");
+        let loaded = load_sut(&path).unwrap();
+        assert_eq!(loaded.name, result.sut.name);
+    }
+
+    #[test]
+    fn init_probe_marks_field_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probed.json");
+        let result = init_sut(&path, true, false).unwrap();
+        assert!(result.probed);
+        assert!(
+            result.sut.provenance == "mixed" || result.sut.provenance == "declared",
+            "provenance={}",
+            result.sut.provenance
+        );
+        assert!(
+            !result.sut.field_provenance.is_empty() || !result.warnings.is_empty(),
+            "expected observed fields or warnings"
+        );
+        let _ = load_sut(&path).unwrap();
+    }
+
+    #[test]
+    fn init_refuses_overwrite_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut.json");
+        init_sut(&path, false, false).unwrap();
+        let err = init_sut(&path, false, false).unwrap_err().to_string();
+        assert!(err.contains("--force"), "{err}");
     }
 }

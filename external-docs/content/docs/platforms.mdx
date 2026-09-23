@@ -78,6 +78,18 @@ docker run --gpus all --shm-size=32g -p 8000:8000 \
 Run **Metrum AI Bench CLI on the same host** (loopback URL). Driving a public
 cloud IP from a laptop puts WAN RTT into TTFT and can invert close comparisons.
 
+Before a long GPU run, probe the OpenAI-compatible endpoint from the client:
+
+```bash
+metrum-ai-bench-cli preflight \
+  --url http://127.0.0.1:8000/v1/chat/completions \
+  --api-key dummy --model YOUR_MODEL
+```
+
+Preflight checks reachability, a unary chat probe, streaming first-token smoke,
+and a short latency sample. It cannot see CUDA toolchains or GPU inventory on a
+remote host; when the serve path is wrong, prefer the vendor containers above.
+
 Shadeform / cloud helpers in this repository already launch these images via
 `scripts/live/shadeform.sh` (`vllm/vllm-openai:latest`, `lmsysorg/sglang`).
 

@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
@@ -47,7 +48,7 @@ impl Drop for RunningGuard {
 async fn infer(
     State(state): State<Arc<AppState>>,
     Json(request): Json<Value>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Response, StatusCode> {
     let sequence = state.requests.fetch_add(1, Ordering::Relaxed) + 1;
     state.running.fetch_add(1, Ordering::Relaxed);
     let _guard = RunningGuard(state.clone());
@@ -68,14 +69,16 @@ async fn infer(
             "model":model,
             "data":[{"object":"embedding","index":0,"embedding":[0.0,0.5,1.0]}],
             "usage":{"prompt_tokens":3,"total_tokens":3}
-        })));
+        }))
+        .into_response());
     }
     if request.get("documents").is_some() {
         return Ok(Json(json!({
             "model":model,
             "results":[{"index":0,"relevance_score":0.95}],
             "usage":{"total_tokens":8}
-        })));
+        }))
+        .into_response());
     }
     let message = if request.get("tools").is_some() {
         let arguments = mock_schema_value(
@@ -95,11 +98,58 @@ async fn infer(
     } else {
         json!({"role":"assistant","content":"Hello from metrum-ai-bench-cli."})
     };
+    let stream = request
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if stream {
+        let content = message
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("ok");
+        let id = format!("chatcmpl-{sequence}");
+        let mut body = String::new();
+        for (index, ch) in content.chars().enumerate() {
+            let chunk = json!({
+                "id": id,
+                "object": "chat.completion.chunk",
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": ch.to_string()},
+                    "finish_reason": null
+                }]
+            });
+            body.push_str(&format!("data: {chunk}\n\n"));
+            if index == 0 {
+                // Keep chunks tiny so TTFT is meaningful under latency_ms.
+            }
+        }
+        let final_chunk = json!({
+            "id": id,
+            "object": "chat.completion.chunk",
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
+        });
+        body.push_str(&format!("data: {final_chunk}\n\n"));
+        body.push_str("data: [DONE]\n\n");
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/event-stream")
+            .body(body.into())
+            .expect("sse response"));
+    }
     Ok(Json(json!({
         "id":format!("chatcmpl-{sequence}"),"object":"chat.completion","model":model,
         "choices":[{"index":0,"message":message,"finish_reason":"stop"}],
         "usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}
-    })))
+    }))
+    .into_response())
 }
 
 fn mock_schema_value(schema: &Value) -> Value {

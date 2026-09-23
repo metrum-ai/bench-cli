@@ -71,10 +71,12 @@ To feed a Hugging Face `metrum-ai/prompt-library` mix, extract JSONL with
 `recommended_max_tokens`). Stage `config` stamps `prompts`, `prompt_pool_size`,
 `max_tokens`, and `warmup_requests`.
 
-The HTML report plots achieved
-throughput against p95 latency and marks the unit-normalized Kneedle result.
-The metrics scraper recognizes vLLM, SGLang, and TensorRT-LLM names for
-KV-cache utilization, preemptions, and running/waiting queues.
+The HTML report plots achieved throughput against p95 latency with **labeled
+axes, ticks, and a grid**, and marks the unit-normalized Kneedle result. For
+side-by-side GPU deltas use `metrum-ai-bench-cli compare` on two stdout JSON
+summaries (or request CSVs). The metrics scraper recognizes vLLM, SGLang, and
+TensorRT-LLM names for KV-cache utilization, preemptions, and running/waiting
+queues.
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages. Rate
 requests retain their intended schedule while waiting for an in-flight slot.
