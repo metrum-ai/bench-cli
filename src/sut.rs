@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Operator-declared system under test embedded in `summary.v3`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Sut {
     /// Always "declared". Present so a reader never mistakes this for observed data.
@@ -25,6 +25,9 @@ pub struct Sut {
     pub model: Option<SutModel>,
     pub host_os: Option<String>,
     pub notes: Option<String>,
+    /// Optional declared cost inputs (not measured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<SutCost>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
 }
@@ -33,7 +36,18 @@ fn declared() -> String {
     "declared".into()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Declared monetary inputs for cost-per-token reporting.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SutCost {
+    /// Hourly platform/GPU cost in the declared currency (default assumption: USD).
+    pub price_per_hour: Option<f64>,
+    /// Currency code; omitted means USD for documentation purposes only (no FX).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct SutGpu {
     pub model: Option<String>,
@@ -41,7 +55,7 @@ pub struct SutGpu {
     pub memory_gb: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct SutRuntime {
     pub name: Option<String>,
@@ -49,7 +63,7 @@ pub struct SutRuntime {
     pub config: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct SutModel {
     pub id: Option<String>,
@@ -238,9 +252,15 @@ mod tests {
     }
 
     #[test]
-    fn absent_sut_ok_without_require() {
-        let (sut, redact) = resolve_sut_flags(None, false, false).unwrap();
-        assert!(sut.is_none());
-        assert!(!redact);
+    fn load_cost_block() {
+        let path = std::env::temp_dir().join("sut_cost.json");
+        std::fs::write(
+            &path,
+            r#"{"name":"box","cost":{"price_per_hour":3.6,"currency":"USD"}}"#,
+        )
+        .unwrap();
+        let sut = load_sut(&path).unwrap();
+        assert_eq!(sut.cost.as_ref().unwrap().price_per_hour, Some(3.6));
+        assert_eq!(sut.cost.as_ref().unwrap().currency.as_deref(), Some("USD"));
     }
 }

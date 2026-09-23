@@ -66,6 +66,29 @@ selection report records `isl.counting_scope`.
 
 ---
 
+## Named profiles
+
+Prefer `--profile` for publishable compares (versioned ISL/OSL; conflicts with
+explicit `--isl-target` / `--osl-target`):
+
+| Profile | ISL | OSL |
+| --- | --- | --- |
+| `chat-short` | 256 | 64 |
+| `chat-medium` | 512 | 128 |
+| `rag-medium` | 2048 | 256 |
+| `summarize-long` | 4096 | 512 |
+| `code-medium` | 1024 | 512 |
+
+```bash
+metrum-ai-bench-cli-prompts \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
+  --config sample --count 64 --seed 42 \
+  --profile chat-medium \
+  --output /tmp/mix.jsonl --report /tmp/mix-report.json
+```
+
+---
+
 ## Extract a mix
 
 ```bash

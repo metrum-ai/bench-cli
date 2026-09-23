@@ -54,6 +54,82 @@ pub enum IslTokenBasis {
     SuppliedTarget,
 }
 
+/// Named, versioned ISL/OSL workload profiles for publishable compares.
+pub const WORKLOAD_PROFILE_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkloadProfile {
+    /// Short interactive chat smoke (256 / 64 tokens).
+    ChatShort,
+    /// Default publishable chat (512 / 128 tokens).
+    ChatMedium,
+    /// Retrieval-augmented generation (2048 / 256 tokens).
+    RagMedium,
+    /// Long-context summarization (4096 / 512 tokens).
+    SummarizeLong,
+    /// Coding-assistant turns (1024 / 512 tokens).
+    CodeMedium,
+}
+
+/// Fixed targets and recommended absolute tolerances for a [`WorkloadProfile`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorkloadProfileSpec {
+    pub name: &'static str,
+    pub version: u32,
+    pub isl_target: f64,
+    pub osl_target: f64,
+    pub isl_tolerance: f64,
+    pub osl_tolerance: f64,
+}
+
+impl WorkloadProfile {
+    pub fn spec(self) -> WorkloadProfileSpec {
+        match self {
+            Self::ChatShort => WorkloadProfileSpec {
+                name: "chat-short",
+                version: WORKLOAD_PROFILE_VERSION,
+                isl_target: 256.0,
+                osl_target: 64.0,
+                isl_tolerance: 32.0,
+                osl_tolerance: 16.0,
+            },
+            Self::ChatMedium => WorkloadProfileSpec {
+                name: "chat-medium",
+                version: WORKLOAD_PROFILE_VERSION,
+                isl_target: 512.0,
+                osl_target: 128.0,
+                isl_tolerance: 64.0,
+                osl_tolerance: 32.0,
+            },
+            Self::RagMedium => WorkloadProfileSpec {
+                name: "rag-medium",
+                version: WORKLOAD_PROFILE_VERSION,
+                isl_target: 2048.0,
+                osl_target: 256.0,
+                isl_tolerance: 128.0,
+                osl_tolerance: 64.0,
+            },
+            Self::SummarizeLong => WorkloadProfileSpec {
+                name: "summarize-long",
+                version: WORKLOAD_PROFILE_VERSION,
+                isl_target: 4096.0,
+                osl_target: 512.0,
+                isl_tolerance: 256.0,
+                osl_tolerance: 64.0,
+            },
+            Self::CodeMedium => WorkloadProfileSpec {
+                name: "code-medium",
+                version: WORKLOAD_PROFILE_VERSION,
+                isl_target: 1024.0,
+                osl_target: 512.0,
+                isl_tolerance: 128.0,
+                osl_tolerance: 64.0,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LibraryRow {
     pub ordinal: u64,
@@ -633,11 +709,34 @@ pub fn selection_report(
     mix: &SelectedMix,
     recommended_max_tokens: u32,
 ) -> Result<Value> {
+    selection_report_with_profile(
+        dataset,
+        revision,
+        config,
+        split,
+        req,
+        mix,
+        recommended_max_tokens,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn selection_report_with_profile(
+    dataset: &str,
+    revision: &str,
+    config: &str,
+    split: &str,
+    req: &SelectRequest,
+    mix: &SelectedMix,
+    recommended_max_tokens: u32,
+    profile: Option<WorkloadProfileSpec>,
+) -> Result<Value> {
     let mut hist: BTreeMap<String, usize> = BTreeMap::new();
     for row in &mix.rows {
         *hist.entry(row.ordinal.to_string()).or_insert(0) += 1;
     }
-    Ok(json!({
+    let mut report = json!({
         "schema_version": REPORT_SCHEMA_VERSION,
         "dataset": dataset,
         "revision": revision,
@@ -680,7 +779,14 @@ pub fn selection_report(
         "hint_template": HINT_TEMPLATE,
         "work_used": mix.work_used,
         "osl_tokens_per_word": req.osl_tokens_per_word,
-    }))
+    });
+    if let Some(profile) = profile {
+        report["profile"] = json!({
+            "name": profile.name,
+            "version": profile.version,
+        });
+    }
+    Ok(report)
 }
 
 pub fn load_jsonl(path: &Path) -> Result<Vec<LibraryRow>> {
@@ -1139,6 +1245,26 @@ mod tests {
             work_limit: 20_000,
             osl_tokens_per_word: None,
         }
+    }
+
+    #[test]
+    fn workload_profiles_are_versioned_and_positive() {
+        for profile in [
+            WorkloadProfile::ChatShort,
+            WorkloadProfile::ChatMedium,
+            WorkloadProfile::RagMedium,
+            WorkloadProfile::SummarizeLong,
+            WorkloadProfile::CodeMedium,
+        ] {
+            let spec = profile.spec();
+            assert_eq!(spec.version, WORKLOAD_PROFILE_VERSION);
+            assert!(spec.isl_target > 0.0);
+            assert!(spec.osl_target > 0.0);
+            assert!(spec.isl_tolerance >= 0.0);
+            assert!(spec.osl_tolerance >= 0.0);
+        }
+        assert_eq!(WorkloadProfile::ChatShort.spec().name, "chat-short");
+        assert_eq!(WorkloadProfile::RagMedium.spec().isl_target, 2048.0);
     }
 
     #[test]

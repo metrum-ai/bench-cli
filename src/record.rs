@@ -229,6 +229,14 @@ impl RequestRecord {
         }
         Some(gen / (self.completion_tokens - 1) as f64)
     }
+
+    /// Output tokens per second for this request (`completion_tokens / latency_s`).
+    pub fn user_tps(&self) -> Option<f64> {
+        if !self.is_success() || self.completion_tokens == 0 || self.latency_s <= 0.0 {
+            return None;
+        }
+        Some(self.completion_tokens as f64 / self.latency_s)
+    }
 }
 
 #[cfg(test)]

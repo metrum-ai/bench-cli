@@ -1064,7 +1064,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     });
     shared_summary.environment =
         metrum_ai_bench::environment::collect(ntp_offset_ms, args.model.clone(), redact_hostname);
-    shared_summary = shared_summary.with_sut(sut_block);
+    let price = metrum_ai_bench::summary::resolve_price_per_hour(
+        args.common.price_per_hour,
+        sut_block.as_ref(),
+    );
+    shared_summary = shared_summary.with_sut(sut_block).with_price(price);
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }

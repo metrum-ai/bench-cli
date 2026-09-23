@@ -15,7 +15,13 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at
-  least two completion tokens.
+  least two completion tokens. Strategic streaming uses
+  `(service_latency - ttft) / (output_tokens - 1)`.
+- **User tok/s (`user_tps`)**: per-request output rate for an in-flight user
+  (`completion_tokens / latency_s` on modality summaries;
+  `output_tokens / service_latency_s` on strategic). The `user_tps=` SLO is a
+  **minimum** rate (higher is better). Strategic stages also emit
+  `users_at_slo = load * (meeting / successes)` when that SLO is set.
 - **Request throughput**: measured successes divided by the explicit window.
   The window is first measured send → last measured successful completion,
   derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
@@ -32,8 +38,14 @@ All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 - **Token throughput**: successful server-usage tokens divided by that same
   window. Optional local tokenizer counts are separate fields.
 - **Error rate**: measured failures divided by measured attempts.
-- **Goodput**: measured successes satisfying every configured TTFT, TPOT, and
-  E2E SLO divided by the window.
+- **Goodput**: measured successes satisfying every configured TTFT, TPOT,
+  E2E, and `user_tps` SLO divided by the window.
+- **Cost per million output tokens**: when a declared hourly price is present
+  (`--price-per-hour` or `sut.cost.price_per_hour`),
+  `price_per_hour / (completion_tokens_per_second * 3600) * 1e6`.
+  Currency is assumed USD unless `sut.cost.currency` says otherwise; there is
+  no FX conversion. Null when price or token throughput is absent, zero, or
+  non-finite (including `usage_missing` that nulls token throughput).
 - **WER/CER**: edit distance after normalization, divided by the normalized
   reference word/character count. `--normalizer` selects
   `whisper-english` (default), `whisper-basic`, or `none`, and the choice is

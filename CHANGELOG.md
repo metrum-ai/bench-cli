@@ -13,6 +13,13 @@
   `--max-tokens` (required with `--prompts`), `--warmup-requests` (per-stage;
   excluded from aggregates), optional `--shuffle-prompts` / `--seed`. Stage
   `config` stamps workload fields; CSV rows carry `warmup`.
+- Strategic streaming captures ITL; honors `--slo tpot=` and `--slo user_tps=`
+  (tok/s per in-flight user) with per-stage `users_at_slo` / `user_tps` fields.
+- Optional `--price-per-hour` and `sut.cost.price_per_hour` emit
+  `cost_per_million_output_tokens` on modality `summary.v3` and strategic
+  sweep points (`null` when price or token rate is absent).
+- `metrum-ai-bench-cli-prompts --profile` named versioned ISL/OSL workloads
+  (`chat-short`, `chat-medium`, `rag-medium`, `summarize-long`, `code-medium`).
 - Docs: agent-driven path defaults to Hugging Face `metrum-ai/prompt-library`;
   agents must web-search current vendor/model serving defaults on every run;
   platforms page leads with vendor Docker for vLLM/SGLang and notes Blackwell /

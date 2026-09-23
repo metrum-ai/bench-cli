@@ -7,8 +7,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use metrum_ai_bench::strategic::{
     controlled_messages, detect_knee, export_csv, export_html, export_mlperf, load_sessions,
-    now_unix_ns, scrape_metrics, summarize_stage, BenchRecord, MlperfScenario, PrefixControl,
-    ServerMetrics, Validity,
+    now_unix_ns, scrape_metrics, summarize_stage_with_price, BenchRecord, MlperfScenario,
+    PrefixControl, ServerMetrics, Validity,
 };
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -128,10 +128,16 @@ struct Args {
     timeout_seconds: u64,
     #[arg(
         long = "slo",
-        value_name = "METRIC=SECONDS",
-        help = "Repeatable goodput threshold: e2e=, ttft= (when streaming); tpot= accepted but not measured"
+        value_name = "METRIC=VALUE",
+        help = "Repeatable goodput threshold: e2e=, ttft=, tpot= (streaming, seconds); user_tps= (tok/s per in-flight user)"
     )]
     slos: Vec<String>,
+    #[arg(
+        long,
+        value_name = "USD_PER_HOUR",
+        help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for stage cost_per_million_output_tokens"
+    )]
+    price_per_hour: Option<f64>,
     #[arg(
         long,
         value_name = "PATH",
@@ -433,6 +439,7 @@ async fn run_stage(
                 .await;
             let mut first_byte_s = None;
             let mut ttft_s = None;
+            let mut itl_s = Vec::new();
             let result: Result<Value> = async {
                 let response = result?;
                 first_byte_s = Some(sent.elapsed().as_secs_f64());
@@ -440,6 +447,7 @@ async fn run_stage(
                 if streaming {
                     let stream = metrum_ai_bench::chat_stream::consume(response.bytes_stream(), sent).await?;
                     ttft_s = Some(stream.ttft.as_secs_f64());
+                    itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
                     Ok(json!({
                         "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
                         "usage": {"prompt_tokens": stream.prompt_tokens, "completion_tokens": stream.completion_tokens}
@@ -468,6 +476,7 @@ async fn run_stage(
                 service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
                 first_byte_s,
                 ttft_s,
+                itl_s,
                 success,
                 valid,
                 input_tokens,
@@ -571,6 +580,9 @@ async fn main() -> Result<()> {
     };
     let sequence = Arc::new(AtomicU64::new(0));
     let slos = metrum_ai_bench::summary::SloConfig::parse(&args.slos)?;
+    let price =
+        metrum_ai_bench::summary::resolve_price_per_hour(args.price_per_hour, sut_block.as_ref());
+    let price_per_hour = price.map(|(value, _)| value);
     let redacted_config = json!({
         "url": url,
         "model": model,
@@ -586,6 +598,8 @@ async fn main() -> Result<()> {
         "shuffle_prompts": args.shuffle_prompts,
         "timeout_seconds": args.timeout_seconds,
         "slos": args.slos,
+        "price_per_hour": price_per_hour,
+        "price_provenance": price.map(|(_, provenance)| provenance),
         "prefix_control": format!("{:?}", args.prefix_control).to_ascii_lowercase(),
         "json_schema": args.json_schema.is_some(),
         "tools": args.tools.is_some(),
@@ -613,12 +627,13 @@ async fn main() -> Result<()> {
             &client,
         )
         .await?;
-        points.push(summarize_stage(
+        points.push(summarize_stage_with_price(
             stage,
             &records,
             seconds,
             &slos,
             Some(redacted_config.clone()),
+            price_per_hour,
         ));
         all_records.extend(records);
     }

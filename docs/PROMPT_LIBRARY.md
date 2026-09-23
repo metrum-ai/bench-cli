@@ -52,6 +52,33 @@ Please aim for approximately {target_output_length} words in your response.
 Supplied token ISL does **not** include the hint text; word ISL does. Report
 `isl.counting_scope` records this.
 
+## Named workload profiles
+
+Prefer `--profile` for publishable compares so ISL/OSL targets stay versioned
+and comparable across runs. Profiles are tokens / median unless you override
+`--isl-stat` / `--osl-unit`. Explicit `--isl-target` / `--osl-target` conflict
+with `--profile`. Zero CLI tolerances fall back to the profile defaults.
+
+| Profile | Version | ISL | OSL | Default tolerances |
+|---------|---------|-----|-----|--------------------|
+| `chat-short` | 1 | 256 | 64 | 32 / 16 |
+| `chat-medium` | 1 | 512 | 128 | 64 / 32 |
+| `rag-medium` | 1 | 2048 | 256 | 128 / 64 |
+| `summarize-long` | 1 | 4096 | 512 | 256 / 64 |
+| `code-medium` | 1 | 1024 | 512 | 128 / 64 |
+
+```bash
+metrum-ai-bench-cli-prompts \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
+  --config sample \
+  --count 64 --seed 42 \
+  --profile chat-medium \
+  --output /tmp/mix.jsonl --report /tmp/mix-report.json
+```
+
+The mix report includes `profile.name` and `profile.version` when a profile was
+used.
+
 ## CLI knobs
 
 ```bash
@@ -66,6 +93,7 @@ metrum-ai-bench-cli-prompts \
 
 | Flag | Meaning |
 |------|---------|
+| `--profile` | Named versioned ISL/OSL pair (see table above) |
 | `--count` | Preferred mix size (soft) |
 | `--count-slack` | Max \|actual − preferred\| (default `max(count, 32)`) |
 | `--isl-stat` / `--osl-stat` | `mean` or `median` (even-n median = mean of two central values) |
@@ -86,7 +114,7 @@ closer to `--count` and with fewer repeats.
   (`source_ordinal`, `target_output_tokens`, …) are ignored by llm today.
 - **Report** (`--report`): pinned revision, preferred vs `selected_count`,
   achieved ISL/OSL and gaps, repeat histogram, `recommended_max_tokens`,
-  `recommended_num_requests`, schedule SHA-256.
+  `recommended_num_requests`, schedule SHA-256, optional `profile`.
 
 ## Feeding `metrum-ai-bench-cli-llm`
 

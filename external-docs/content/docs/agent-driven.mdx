@@ -52,17 +52,20 @@ selects a mix from
 with pinned `--revision`, then feeds that JSONL to `llm` (or strategic). See
 [Prompt library](./prompt-library).
 
-Until named `--profile` values ship, use these defaults unless the operator
-overrides them in writing:
+Use named `--profile` values unless the operator overrides targets in writing:
 
-| Profile intent | ISL target | OSL target | Units / stat |
+| Profile | ISL | OSL | Notes |
 | --- | --- | --- | --- |
-| Chat (default) | 512 | 128 | tokens / median |
-| Short chat smoke | 256 | 64 | tokens / median |
+| `chat-medium` (default publishable) | 512 | 128 | tokens / median |
+| `chat-short` | 256 | 64 | smoke / short chat |
+| `rag-medium` | 2048 | 256 | retrieval-augmented |
+| `summarize-long` | 4096 | 512 | long context |
+| `code-medium` | 1024 | 512 | coding turns |
 
 Pin revision `0666f62e581b482838ae2e17b333ee36ff3d01b0` in examples (replace when
 the Hub pin advances). Use `--config sample` for smoke; `--config full` for
-publishable compares.
+publishable compares. Record `profile.name` / `profile.version` from the mix
+report in SUT notes when publishing.
 
 ## Why agents work well here
 
@@ -128,8 +131,7 @@ Constraints:
 - Scenario label: hf-chat-512-128
 - Pin Hub revision 0666f62e581b482838ae2e17b333ee36ff3d01b0, --config sample,
   --count 32 --seed 42
-- ISL/OSL: --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64
-  --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32
+- Workload: --profile chat-medium
 - Write mix to bench-out/mix.jsonl and report to bench-out/mix-report.json
 - llm: --mode chat --streaming --concurrency 4 --seed 42
   --num-requests "$(jq .selected_count bench-out/mix-report.json)"
@@ -150,8 +152,7 @@ mkdir -p bench-out
 metrum-ai-bench-cli prompts -- \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
   --count 32 --seed 42 \
-  --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
-  --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32 \
+  --profile chat-medium \
   --output bench-out/mix.jsonl --report bench-out/mix-report.json
 
 # Create sut.json with real inventory for this host/endpoint, then:

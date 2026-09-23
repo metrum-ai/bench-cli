@@ -93,8 +93,14 @@ also meet the end-to-end latency threshold. Without `--slo`,
 `goodput_equals_throughput` is true and goodput is validity-filtered throughput
 (often identical to throughput when no validity checker is configured).
 
-`ttft=` / `tpot=` are accepted for CLI parity but ignored here because strategic
-records do not carry those timings.
+With `--streaming`, `ttft=` and `tpot=` use captured stream timings (ITL is
+retained on each CSV row; TPOT is `(service_latency - ttft) / (output_tokens - 1)`).
+`user_tps=` is a minimum output tok/s per in-flight request
+(`output_tokens / service_latency_s`); each sweep point reports `user_tps`
+distributions plus `users_at_slo` (`load * meeting_fraction`) when that SLO is set.
+
+Optional `--price-per-hour` (or `sut.cost.price_per_hour`) stamps
+`cost_per_million_output_tokens` on each stage when output tok/s is known.
 
 The HTTP client is shared across stages (warm connection pool).
 

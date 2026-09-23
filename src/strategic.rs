@@ -4,7 +4,7 @@
 //! Strategic benchmark primitives: sweeps, validity, server correlation and exports.
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -32,6 +32,14 @@ pub struct BenchRecord {
     /// Send-to-first-visible-output timing; absent for unary responses.
     #[serde(default)]
     pub ttft_s: Option<f64>,
+    /// Inter-token latency samples from streaming visible-output chunks.
+    /// Serialized as a semicolon-joined string for CSV compatibility.
+    #[serde(
+        default,
+        serialize_with = "serialize_itl_s",
+        deserialize_with = "deserialize_itl_s"
+    )]
+    pub itl_s: Vec<f64>,
     pub success: bool,
     pub valid: Option<bool>,
     pub input_tokens: u64,
@@ -42,6 +50,54 @@ pub struct BenchRecord {
     /// Warmup requests are retained for audit but excluded from stage aggregates.
     #[serde(default)]
     pub warmup: bool,
+}
+
+fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let joined = itl
+        .iter()
+        .map(|value| format!("{value}"))
+        .collect::<Vec<_>>()
+        .join(";");
+    serializer.serialize_str(&joined)
+}
+
+fn deserialize_itl_s<'de, D>(deserializer: D) -> std::result::Result<Vec<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    raw.split(';')
+        .map(|part| {
+            part.parse::<f64>()
+                .map_err(|err| serde::de::Error::custom(format!("invalid itl_s sample: {err}")))
+        })
+        .collect()
+}
+
+impl BenchRecord {
+    /// N-1 TPOT: `(service_latency - ttft) / (output_tokens - 1)`.
+    pub fn tpot_s(&self) -> Option<f64> {
+        let ttft = self.ttft_s?;
+        let gen = (self.service_latency_s - ttft).max(0.0);
+        if self.output_tokens <= 1 || gen == 0.0 {
+            return None;
+        }
+        Some(gen / (self.output_tokens - 1) as f64)
+    }
+
+    /// Output tokens per second for this in-flight user/stream.
+    pub fn user_tps(&self) -> Option<f64> {
+        if !self.success || self.output_tokens == 0 || self.service_latency_s <= 0.0 {
+            return None;
+        }
+        Some(self.output_tokens as f64 / self.service_latency_s)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +121,17 @@ pub struct SweepPoint {
     pub goodput_equals_throughput: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slo_thresholds_s: Option<std::collections::BTreeMap<String, f64>>,
+    /// Per-request output tok/s (`output_tokens / service_latency_s`) over successes.
+    pub user_tps: crate::stats::DistSummary,
+    /// Effective concurrent users meeting `user_tps=` at this stage load:
+    /// `load * (meeting / successes)`. Null when `user_tps=` is unset.
+    pub users_at_slo: Option<f64>,
+    /// Successes that individually meet the `user_tps=` threshold (when set).
+    pub users_meeting_user_tps: Option<usize>,
+    /// Stage output-token throughput (success tokens / window).
+    pub completion_tokens_per_second: Option<f64>,
+    /// `$ / 1M output tokens` from declared price and stage token rate; null when absent.
+    pub cost_per_million_output_tokens: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
 }
@@ -75,12 +142,23 @@ fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) 
             return false;
         }
     }
+    // TTFT/TPOT apply only when the request carries those timings (streaming).
     if let (Some(limit), Some(ttft)) = (slos.ttft_s, record.ttft_s) {
         if ttft > limit {
             return false;
         }
     }
-    // TPOT is not measured by strategic records.
+    if let (Some(limit), Some(tpot)) = (slos.tpot_s, record.tpot_s()) {
+        if tpot > limit {
+            return false;
+        }
+    }
+    if let Some(min_rate) = slos.user_tps {
+        match record.user_tps() {
+            Some(rate) if rate >= min_rate => {}
+            _ => return false,
+        }
+    }
     true
 }
 
@@ -91,13 +169,26 @@ pub fn summarize_stage(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
 ) -> SweepPoint {
+    summarize_stage_with_price(load, records, seconds, slos, config, None)
+}
+
+/// Like [`summarize_stage`] but optionally stamps `$ / 1M output tokens`.
+pub fn summarize_stage_with_price(
+    load: f64,
+    records: &[BenchRecord],
+    seconds: f64,
+    slos: &crate::summary::SloConfig,
+    config: Option<Value>,
+    price_per_hour: Option<f64>,
+) -> SweepPoint {
     // Warmup rows stay in the CSV for audit but never enter knee / HTML aggregates.
     let measured: Vec<&BenchRecord> = records.iter().filter(|record| !record.warmup).collect();
-    let success_lats: Vec<f64> = measured
+    let success_rows: Vec<&BenchRecord> = measured
         .iter()
+        .copied()
         .filter(|record| record.success)
-        .map(|record| record.latency_s)
         .collect();
+    let success_lats: Vec<f64> = success_rows.iter().map(|record| record.latency_s).collect();
     let latency_s = crate::stats::DistSummary::from_values(&success_lats);
     let successes = success_lats.len();
     let errors = measured.len().saturating_sub(successes);
@@ -116,7 +207,31 @@ pub fn summarize_stage(
         })
         .count();
     let elapsed = seconds.max(f64::EPSILON);
-    let thresholds: std::collections::BTreeMap<String, f64> = [
+    let user_rates: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.user_tps())
+        .collect();
+    let user_tps = crate::stats::DistSummary::from_values(&user_rates);
+    let meeting_user_tps = slos.user_tps.map(|min_rate| {
+        success_rows
+            .iter()
+            .filter(|record| record.user_tps().is_some_and(|rate| rate >= min_rate))
+            .count()
+    });
+    let users_at_slo = meeting_user_tps.map(|meeting| {
+        if successes == 0 {
+            0.0
+        } else {
+            load * (meeting as f64 / successes as f64)
+        }
+    });
+    let output_tokens: u64 = success_rows.iter().map(|record| record.output_tokens).sum();
+    let completion_tokens_per_second = (successes > 0).then_some(output_tokens as f64 / elapsed);
+    let cost_per_million_output_tokens = match (price_per_hour, completion_tokens_per_second) {
+        (Some(price), Some(rate)) => crate::summary::cost_per_million_output_tokens(price, rate),
+        _ => None,
+    };
+    let mut thresholds: std::collections::BTreeMap<String, f64> = [
         ("ttft", slos.ttft_s),
         ("tpot", slos.tpot_s),
         ("e2e", slos.e2e_s),
@@ -124,6 +239,9 @@ pub fn summarize_stage(
     .into_iter()
     .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
     .collect();
+    if let Some(rate) = slos.user_tps {
+        thresholds.insert("user_tps".to_string(), rate);
+    }
     let no_slos = thresholds.is_empty();
     SweepPoint {
         load,
@@ -144,6 +262,11 @@ pub fn summarize_stage(
         goodput: good as f64 / elapsed,
         goodput_equals_throughput: no_slos,
         slo_thresholds_s: (!no_slos).then_some(thresholds),
+        user_tps,
+        users_at_slo,
+        users_meeting_user_tps: meeting_user_tps,
+        completion_tokens_per_second,
+        cost_per_million_output_tokens,
         config,
     }
 }
@@ -685,6 +808,11 @@ mod tests {
                     goodput: throughput,
                     goodput_equals_throughput: true,
                     slo_thresholds_s: None,
+                    user_tps: crate::stats::DistSummary::from_values(&[]),
+                    users_at_slo: None,
+                    users_meeting_user_tps: None,
+                    completion_tokens_per_second: None,
+                    cost_per_million_output_tokens: None,
                     config: None,
                 }
             })
@@ -766,6 +894,7 @@ mod tests {
             service_latency_s: 0.5,
             first_byte_s: None,
             ttft_s: None,
+            itl_s: Vec::new(),
             success: true,
             valid: None,
             input_tokens: 1,
@@ -805,6 +934,7 @@ mod tests {
             service_latency_s: latency_s,
             first_byte_s: None,
             ttft_s: None,
+            itl_s: Vec::new(),
             success: true,
             valid: None,
             input_tokens: 0,
@@ -851,6 +981,64 @@ mod tests {
         assert!(value["p95_s"].is_null());
         assert!(value["p99_s"].is_null());
         assert!(value["error_rate"].is_null());
+        assert!(value["cost_per_million_output_tokens"].is_null());
+        assert!(value["users_at_slo"].is_null());
+    }
+
+    #[test]
+    fn strategic_tpot_and_user_tps_slos() {
+        let record = BenchRecord {
+            seq: 0,
+            stage: 1.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 1,
+            sent_unix_ns: 1,
+            latency_s: 1.0,
+            queue_delay_s: 0.0,
+            service_latency_s: 1.0,
+            first_byte_s: None,
+            ttft_s: Some(0.2),
+            itl_s: vec![0.05, 0.05],
+            success: true,
+            valid: None,
+            input_tokens: 0,
+            output_tokens: 21,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+        };
+        assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
+        assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
+
+        let tpot_ok = crate::summary::SloConfig {
+            tpot_s: Some(0.05),
+            ..Default::default()
+        };
+        assert!(strategic_meets_slos(&record, &tpot_ok));
+        let tpot_fail = crate::summary::SloConfig {
+            tpot_s: Some(0.03),
+            ..Default::default()
+        };
+        assert!(!strategic_meets_slos(&record, &tpot_fail));
+
+        let user_ok = crate::summary::SloConfig {
+            user_tps: Some(20.0),
+            ..Default::default()
+        };
+        assert!(strategic_meets_slos(&record, &user_ok));
+        let user_fail = crate::summary::SloConfig {
+            user_tps: Some(25.0),
+            ..Default::default()
+        };
+        assert!(!strategic_meets_slos(&record, &user_fail));
+
+        let point = summarize_stage_with_price(4.0, &[record], 1.0, &user_ok, None, Some(3.6));
+        assert_eq!(point.users_meeting_user_tps, Some(1));
+        assert!((point.users_at_slo.unwrap() - 4.0).abs() < 1e-12);
+        assert!((point.completion_tokens_per_second.unwrap() - 21.0).abs() < 1e-12);
+        let expected = 3.6 / (21.0 * 3600.0) * 1_000_000.0;
+        assert!((point.cost_per_million_output_tokens.unwrap() - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -867,6 +1055,7 @@ mod tests {
             service_latency_s: 0.23,
             first_byte_s: None,
             ttft_s: None,
+            itl_s: Vec::new(),
             success: true,
             valid: None,
             input_tokens: 1,
@@ -937,6 +1126,7 @@ mod tests {
             service_latency_s: 0.4,
             first_byte_s: None,
             ttft_s: None,
+            itl_s: Vec::new(),
             success: true,
             valid: Some(true),
             input_tokens: 2,

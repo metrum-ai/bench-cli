@@ -52,6 +52,12 @@ pub struct RunSummary {
     pub environment: serde_json::Value,
     /// Operator-declared system under test. Always present; `null` when absent.
     pub sut: Option<Sut>,
+    /// Declared `$ / hour` used for cost (CLI or SUT); null when absent.
+    pub price_per_hour: Option<f64>,
+    /// Provenance of `price_per_hour`: `"cli"` or `"sut"`.
+    pub price_provenance: Option<&'static str>,
+    /// `$ / 1M output tokens` from price and measured output tok/s; null when absent.
+    pub cost_per_million_output_tokens: Option<f64>,
     pub partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<EffectiveRunConfig>,
@@ -62,6 +68,8 @@ pub struct SloConfig {
     pub ttft_s: Option<f64>,
     pub tpot_s: Option<f64>,
     pub e2e_s: Option<f64>,
+    /// Minimum output tokens/second per in-flight user (higher is better).
+    pub user_tps: Option<f64>,
 }
 
 impl SloConfig {
@@ -70,17 +78,52 @@ impl SloConfig {
         for value in values {
             let (name, raw) = value
                 .split_once('=')
-                .ok_or_else(|| anyhow::anyhow!("SLO must be METRIC=SECONDS: {value}"))?;
-            let seconds = parse_duration_seconds(raw)?;
+                .ok_or_else(|| anyhow::anyhow!("SLO must be METRIC=VALUE: {value}"))?;
             match name {
-                "ttft" => config.ttft_s = Some(seconds),
-                "tpot" => config.tpot_s = Some(seconds),
-                "e2e" | "latency" => config.e2e_s = Some(seconds),
+                "ttft" => config.ttft_s = Some(parse_duration_seconds(raw)?),
+                "tpot" => config.tpot_s = Some(parse_duration_seconds(raw)?),
+                "e2e" | "latency" => config.e2e_s = Some(parse_duration_seconds(raw)?),
+                "user_tps" => {
+                    let rate: f64 = raw
+                        .trim()
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("user_tps rate must be a number: {e}"))?;
+                    if !rate.is_finite() || rate < 0.0 {
+                        anyhow::bail!("user_tps must be finite and non-negative");
+                    }
+                    config.user_tps = Some(rate);
+                }
                 _ => anyhow::bail!("unknown SLO metric '{name}'"),
             }
         }
         Ok(config)
     }
+}
+
+/// `$ / 1M output tokens` = `price_per_hour / (tok_per_s * 3600) * 1e6`.
+///
+/// Returns `None` when token throughput is missing, zero, or non-finite.
+pub fn cost_per_million_output_tokens(price_per_hour: f64, toks_per_sec: f64) -> Option<f64> {
+    if !price_per_hour.is_finite() || price_per_hour < 0.0 {
+        return None;
+    }
+    if !toks_per_sec.is_finite() || toks_per_sec <= 0.0 {
+        return None;
+    }
+    Some(price_per_hour / (toks_per_sec * 3600.0) * 1_000_000.0)
+}
+
+/// Resolve declared hourly price: CLI `--price-per-hour` wins over `sut.cost`.
+pub fn resolve_price_per_hour(
+    cli_price_per_hour: Option<f64>,
+    sut: Option<&Sut>,
+) -> Option<(f64, &'static str)> {
+    if let Some(price) = cli_price_per_hour {
+        return Some((price, "cli"));
+    }
+    sut.and_then(|s| s.cost.as_ref())
+        .and_then(|c| c.price_per_hour)
+        .map(|price| (price, "sut"))
 }
 
 fn parse_duration_seconds(raw: &str) -> anyhow::Result<f64> {
@@ -185,14 +228,20 @@ impl RunSummary {
             .iter()
             .filter(|record| meets_slos(record, slos))
             .collect();
-        let thresholds_s = [
-            ("ttft", slos.ttft_s),
-            ("tpot", slos.tpot_s),
-            ("e2e", slos.e2e_s),
-        ]
-        .into_iter()
-        .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
-        .collect();
+        let thresholds_s = {
+            let mut map: BTreeMap<String, f64> = [
+                ("ttft", slos.ttft_s),
+                ("tpot", slos.tpot_s),
+                ("e2e", slos.e2e_s),
+            ]
+            .into_iter()
+            .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
+            .collect();
+            if let Some(rate) = slos.user_tps {
+                map.insert("user_tps".to_string(), rate);
+            }
+            map
+        };
         let per_endpoint = endpoint_summaries(&pool);
         let bins = throughput_bins(&successes, window, bin_seconds);
         let completion_tokens_per_second = if ctps_valid {
@@ -240,6 +289,9 @@ impl RunSummary {
             per_endpoint,
             environment: crate::environment::collect(None, None, false),
             sut: None,
+            price_per_hour: None,
+            price_provenance: None,
+            cost_per_million_output_tokens: None,
             partial,
             config: None,
         }
@@ -254,6 +306,25 @@ impl RunSummary {
     /// Embed an operator-declared SUT block (`None` serializes as JSON `null`).
     pub fn with_sut(mut self, sut: Option<Sut>) -> Self {
         self.sut = sut;
+        self
+    }
+
+    /// Apply declared hourly price and derive `cost_per_million_output_tokens`.
+    pub fn with_price(mut self, price: Option<(f64, &'static str)>) -> Self {
+        match price {
+            Some((price_per_hour, provenance)) => {
+                self.price_per_hour = Some(price_per_hour);
+                self.price_provenance = Some(provenance);
+                self.cost_per_million_output_tokens = self
+                    .completion_tokens_per_second
+                    .and_then(|rate| cost_per_million_output_tokens(price_per_hour, rate));
+            }
+            None => {
+                self.price_per_hour = None;
+                self.price_provenance = None;
+                self.cost_per_million_output_tokens = None;
+            }
+        }
         self
     }
 
@@ -435,6 +506,9 @@ fn meets_slos(record: &&RequestRecord, slos: &SloConfig) -> bool {
         && slos
             .tpot_s
             .is_none_or(|limit| record.tpot_s().is_some_and(|value| value <= limit))
+        && slos
+            .user_tps
+            .is_none_or(|min| record.user_tps().is_some_and(|value| value >= min))
 }
 
 fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSummary> {
@@ -573,6 +647,7 @@ mod tests {
             insecure: false,
             ca_cert: None,
             fail_on_error: false,
+            price_per_hour: None,
             sut: None,
             require_sut: false,
             redact_hostname: false,
@@ -750,5 +825,33 @@ mod tests {
             "short-window rps={}, expected 50",
             bins[0]
         );
+    }
+
+    #[test]
+    fn parses_user_tps_slo_and_filters_goodput() {
+        let slo = SloConfig::parse(&["user_tps=25".into()]).unwrap();
+        assert_eq!(slo.user_tps, Some(25.0));
+        // 20 tokens in 0.5s => 40 tok/s (meets); 8 tokens in 0.5s => 16 tok/s (fails).
+        let fast = ok(0, 500, 100, 20, &[20; 19]);
+        let slow = ok(1, 500, 100, 8, &[50; 7]);
+        let summary = RunSummary::from_records_with_options(&[fast, slow], 1.0, false, &slo, 10.0);
+        assert_eq!(summary.goodput.count, 1);
+        assert_eq!(summary.goodput.thresholds_s.get("user_tps"), Some(&25.0));
+    }
+
+    #[test]
+    fn cost_per_million_from_price_and_token_rate() {
+        let expected = 3.6 / (100.0 * 3600.0) * 1_000_000.0;
+        assert!((cost_per_million_output_tokens(3.6, 100.0).unwrap() - expected).abs() < 1e-9);
+        assert!(cost_per_million_output_tokens(3.6, 0.0).is_none());
+        let records = [ok(0, 100, 20, 10, &[])];
+        let summary = RunSummary::from_records(&records, 1.0, false).with_price(Some((3.6, "cli")));
+        assert_eq!(summary.price_provenance, Some("cli"));
+        assert!(summary.cost_per_million_output_tokens.is_some());
+        let value = serde_json::to_value(&summary).unwrap();
+        assert!(value["cost_per_million_output_tokens"].is_number());
+        let null_summary = RunSummary::from_records(&records, 1.0, false).with_price(None);
+        let null_value = serde_json::to_value(&null_summary).unwrap();
+        assert!(null_value["cost_per_million_output_tokens"].is_null());
     }
 }
