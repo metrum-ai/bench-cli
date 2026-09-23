@@ -52,6 +52,63 @@ bundle before unpacking.
 
 ---
 
+## Serving stacks (Docker first)
+
+Bench measures an OpenAI-compatible HTTP endpoint. **Bring up vLLM or SGLang
+with the vendor container images.** Installing server wheels with `pip` on a
+stock cloud GPU image commonly fails on JIT kernel compilation (missing `g++`,
+mismatched CUDA headers, missing prebuilt kernels for new SM versions). That
+path burned hours in field trials and can make a working GPU look broken.
+
+### Preferred: vendor images
+
+```bash
+# vLLM (example). Map host 8000 → container 8000; adjust model and GPUs.
+docker run --gpus all --shm-size=32g -p 8000:8000 \
+  vllm/vllm-openai:latest \
+  --model Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 8000
+
+# SGLang (example).
+docker run --gpus all --shm-size=32g -p 8000:8000 \
+  lmsysorg/sglang \
+  python3 -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 8000
+```
+
+Run **Metrum AI Bench CLI on the same host** (loopback URL). Driving a public
+cloud IP from a laptop puts WAN RTT into TTFT and can invert close comparisons.
+
+Shadeform / cloud helpers in this repository already launch these images via
+`scripts/live/shadeform.sh` (`vllm/vllm-openai:latest`, `lmsysorg/sglang`).
+
+### Advanced: pip on bare metal
+
+Only when you control the CUDA toolkit, compiler, and wheel/SM matrix. Expect
+to install a matching CUDA toolkit, `g++`, and often still hit FlashInfer /
+DeepGEMM JIT failures on newer architectures. Prefer Docker when comparing
+hardware.
+
+### Hardware / server caveats
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| NVIDIA datacenter (Hopper H100 and similar) with vendor Docker | Validated in live smoke paths | Use official vLLM / SGLang images |
+| NVIDIA RTX PRO 6000 Blackwell (`sm_120`) with vendor Docker | Works with caveats | Quantized / FP4 paths need images that ship prebuilt kernels; bare-metal pip + JIT is known-blocked for many users |
+| Bare-metal pip + CUDA 12.8 / 13 + FlashInfer on Blackwell | Known-blocked / fragile | Header and SM detection issues; do not treat as a Bench defect |
+| AMD Instinct | In progress | Smoke matrix in-repo is NVIDIA-first today |
+
+### SGLang and sliding-window models
+
+SGLang pre-allocates a sliding-window attention (SWA) pool sized by
+`--max-running-requests`. On some sliding-window models, high values refuse to
+start or collapse usable KV capacity. In field trials, concurrency **128** was
+a practical ceiling where **256/512** failed on H100 for a SWA model, while
+vLLM admitted higher concurrency on the same card. When comparing vLLM vs
+SGLang, record `--max-running-requests` (and any SWA-related flags) in the SUT
+`runtime.config` field so the matrix is not silently mis-specified.
+
+---
+
 ## Smoke and publication matrix
 
 Smoke results in the repository

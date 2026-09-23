@@ -649,7 +649,17 @@ Options:
       --max-in-flight <MAX_IN_FLIGHT>
           Maximum outstanding requests during a rate sweep [default: 256]
       --prompt <PROMPT>
-          [default: Hello]
+          Single prompt string (ignored when --prompts or --sessions is set) [default: Hello]
+      --prompts <PROMPTS>
+          JSONL prompt file or http(s) URL (objects with "prompt"); cycles across requests
+      --max-tokens <MAX_TOKENS>
+          Max completion tokens for chat bodies; required when --prompts is set, recommended for all chat sweeps
+      --warmup-requests <WARMUP_REQUESTS>
+          Per-stage warmup requests excluded from measured aggregates (cold-start control) [default: 0]
+      --seed <SEED>
+          RNG seed used when --shuffle-prompts is set [default: 0]
+      --shuffle-prompts
+          Shuffle --prompts with --seed before cycling
       --sessions <SESSIONS>
           
       --prefix-control <PREFIX_CONTROL>

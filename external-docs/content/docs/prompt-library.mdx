@@ -11,7 +11,12 @@ sidebar_position: 5
 `metrum-ai-bench-cli-prompts` (also `metrum-ai-bench-cli prompts -- …`) selects a
 reproducible mix from the Hugging Face dataset
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-and writes JSONL that `metrum-ai-bench-cli-llm` can consume with `--prompts`.
+and writes JSONL that `metrum-ai-bench-cli-llm` or
+`metrum-ai-bench-cli-strategic` can consume with `--prompts`.
+
+For strategic sweeps, `--prompts` requires `--max-tokens` (use the extract
+report's `recommended_max_tokens`) and prefer `--warmup-requests` on GPU
+endpoints. See [Strategic benchmarking](./strategic-benchmarking).
 
 Success is **ISL and OSL statistics within absolute CLI tolerances**, not an
 exact row count. `--count` is a preferred size; the selector may return fewer

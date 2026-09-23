@@ -27,11 +27,14 @@
 - **Testing**: Write unit tests for all public functions; use integration tests for tools
 
 ## Running a benchmark (agent notes)
+- Before every benchmark against a real model: **web search online** for the current best-known / vendor-default serving config for that exact model and engine (vLLM, SGLang, etc.). Do not reuse memorized launch flags; record sources and chosen args in the SUT `runtime.config` / `notes`. See docs-site Agent-driven benchmarking.
+- Default publishable prompts: extract from Hugging Face `metrum-ai/prompt-library` (`metrum-ai-bench-cli-prompts`), not a handmade one-liner.
 - `--api-key` is required with `--url`. Pass `dummy` for servers that do not check it.
 - Always pass `--sut <file> --require-sut` for any run whose numbers will be shared. `examples/sut.example.json` is the template.
 - Results go to `--data-log`; one JSONL record per request, final line is the run summary. Schema: `docs/OUTPUT_SCHEMA.md`.
 - Thinking models: read `docs/REASONING_MODELS.md` before choosing `--max-tokens`. `no_output_token` in the summary means the cap was too low.
-- Prompt files are JSONL only.
+- Prompt files are JSONL only. Strategic sweeps: prefer `--prompts` + `--max-tokens` + `--warmup-requests` on GPU.
+- Charts are not a CLI responsibility; analyze CSV/JSON with a separate prompt or script.
 - `docs/CLI.md` is generated; run `scripts/render_cli_help.sh` after any clap change.
 - Header check: `scripts/check_headers.sh`. Every file keeps the Metrum AI copyright and SPDX lines.
 - No em dashes in any docs or user-facing strings.

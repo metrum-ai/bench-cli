@@ -50,6 +50,8 @@ metrum-ai-bench-cli-strategic \
   --sweep 1,2,4,8,16 \
   --sweep-by concurrency \
   --requests-per-stage 100 \
+  --max-tokens 64 \
+  --warmup-requests 4 \
   --metrics-url http://127.0.0.1:8080/metrics \
   --html report.html \
   --csv requests.csv \
@@ -57,7 +59,19 @@ metrum-ai-bench-cli-strategic \
   --mlperf-scenario server
 ```
 
-Each load stage is measured independently. The HTML report plots achieved
+Each load stage is measured independently. `--warmup-requests` are issued at the
+start of every stage and kept in the CSV (`warmup=true`) but excluded from stage
+`n`, latency percentiles, throughput, goodput, and knee detection. Use a
+non-zero warmup on GPU endpoints so cold model-load does not inflate the
+baseline.
+
+To feed a Hugging Face `metrum-ai/prompt-library` mix, extract JSONL with
+`metrum-ai-bench-cli-prompts` / `metrum-ai-bench-cli prompts`, then pass
+`--prompts` and `--max-tokens` (required together; prefer the report's
+`recommended_max_tokens`). Stage `config` stamps `prompts`, `prompt_pool_size`,
+`max_tokens`, and `warmup_requests`.
+
+The HTML report plots achieved
 throughput against p95 latency and marks the unit-normalized Kneedle result.
 The metrics scraper recognizes vLLM, SGLang, and TensorRT-LLM names for
 KV-cache utilization, preemptions, and running/waiting queues.

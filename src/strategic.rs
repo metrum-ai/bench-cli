@@ -39,6 +39,9 @@ pub struct BenchRecord {
     pub session_id: Option<String>,
     pub turn: Option<usize>,
     pub error: Option<String>,
+    /// Warmup requests are retained for audit but excluded from stage aggregates.
+    #[serde(default)]
+    pub warmup: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,23 +91,25 @@ pub fn summarize_stage(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
 ) -> SweepPoint {
-    let success_lats: Vec<f64> = records
+    // Warmup rows stay in the CSV for audit but never enter knee / HTML aggregates.
+    let measured: Vec<&BenchRecord> = records.iter().filter(|record| !record.warmup).collect();
+    let success_lats: Vec<f64> = measured
         .iter()
         .filter(|record| record.success)
         .map(|record| record.latency_s)
         .collect();
     let latency_s = crate::stats::DistSummary::from_values(&success_lats);
     let successes = success_lats.len();
-    let errors = records.len().saturating_sub(successes);
-    let valid = records
+    let errors = measured.len().saturating_sub(successes);
+    let valid = measured
         .iter()
         .filter(|record| record.success && record.valid.unwrap_or(true))
         .count();
-    let validity_count = records
+    let validity_count = measured
         .iter()
         .filter(|record| record.valid.is_some())
         .count();
-    let good = records
+    let good = measured
         .iter()
         .filter(|record| {
             record.success && record.valid.unwrap_or(true) && strategic_meets_slos(record, slos)
@@ -122,7 +127,7 @@ pub fn summarize_stage(
     let no_slos = thresholds.is_empty();
     SweepPoint {
         load,
-        n: records.len(),
+        n: measured.len(),
         errors,
         throughput: successes as f64 / elapsed,
         latency_s: latency_s.clone(),
@@ -130,10 +135,10 @@ pub fn summarize_stage(
         p95_s: latency_s.p95,
         p99_s: latency_s.p99,
         p99_unreliable: latency_s.p99_unreliable,
-        error_rate: if records.is_empty() {
+        error_rate: if measured.is_empty() {
             None
         } else {
-            Some(errors as f64 / records.len() as f64)
+            Some(errors as f64 / measured.len() as f64)
         },
         validity_rate: (validity_count > 0).then_some(valid as f64 / successes.max(1) as f64),
         goodput: good as f64 / elapsed,
@@ -740,6 +745,45 @@ mod tests {
     }
 
     #[test]
+    fn summarize_stage_excludes_warmup_records() {
+        let measured = BenchRecord {
+            seq: 1,
+            stage: 1.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 1,
+            sent_unix_ns: 1,
+            latency_s: 0.5,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.5,
+            first_byte_s: None,
+            ttft_s: None,
+            success: true,
+            valid: None,
+            input_tokens: 1,
+            output_tokens: 1,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+        };
+        let mut cold = measured.clone();
+        cold.seq = 0;
+        cold.latency_s = 50.0;
+        cold.service_latency_s = 50.0;
+        cold.warmup = true;
+        let point = summarize_stage(
+            1.0,
+            &[cold, measured],
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert_eq!(point.n, 1);
+        assert_eq!(point.p50_s, Some(0.5));
+        assert!(point.p95_s.unwrap() < 1.0);
+    }
+
+    #[test]
     fn sweep_uses_type7_and_null_for_undefined_latency() {
         let record = |seq, latency_s| BenchRecord {
             seq,
@@ -759,6 +803,7 @@ mod tests {
             session_id: None,
             turn: None,
             error: None,
+            warmup: false,
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -820,6 +865,7 @@ mod tests {
             session_id: None,
             turn: None,
             error: None,
+            warmup: false,
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -889,6 +935,7 @@ mod tests {
             session_id: None,
             turn: None,
             error: None,
+            warmup: false,
         };
         export_otlp(
             &reqwest::Client::new(),

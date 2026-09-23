@@ -126,6 +126,75 @@ fn strategic_sweep_exports_all_formats() {
             && point["goodput_equals_throughput"] == true));
 }
 
+#[test]
+fn strategic_prompts_and_warmup_exclude_from_aggregates() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
+    let address = listener.local_addr().expect("local address");
+    drop(listener);
+    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
+        .args(["--listen", &address.to_string(), "--latency-ms", "5"])
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("start mock server");
+    let _server = ChildGuard(server);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while TcpStream::connect(address).is_err() {
+        assert!(Instant::now() < deadline, "mock server did not start");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let directory = tempfile::tempdir().expect("temporary output directory");
+    let prompts = directory.path().join("prompts.jsonl");
+    fs::write(
+        &prompts,
+        "{\"prompt\":\"alpha\"}\n{\"prompt\":\"beta\"}\n{\"prompt\":\"gamma\"}\n",
+    )
+    .expect("prompts");
+    let html = directory.path().join("report.html");
+    let csv = directory.path().join("requests.csv");
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{address}/v1/chat/completions"),
+            "--model",
+            "mock",
+            "--prompts",
+            prompts.to_str().expect("utf8"),
+            "--max-tokens",
+            "16",
+            "--warmup-requests",
+            "2",
+            "--requests-per-stage",
+            "4",
+            "--sweep",
+            "1",
+            "--html",
+            html.to_str().expect("utf8"),
+            "--csv",
+            csv.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("run strategic");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    assert_eq!(summary["points"][0]["n"], 4);
+    assert_eq!(summary["points"][0]["config"]["warmup_requests"], 2);
+    assert_eq!(summary["points"][0]["config"]["max_tokens"], 16);
+    assert_eq!(summary["points"][0]["config"]["prompt_pool_size"], 3);
+    let records: Vec<metrum_ai_bench::strategic::BenchRecord> = csv::Reader::from_path(&csv)
+        .expect("CSV reader")
+        .deserialize()
+        .collect::<Result<_, _>>()
+        .expect("CSV records");
+    assert_eq!(records.len(), 6);
+    assert_eq!(records.iter().filter(|r| r.warmup).count(), 2);
+    assert_eq!(records.iter().filter(|r| !r.warmup).count(), 4);
+}
+
 mod common;
 
 #[test]

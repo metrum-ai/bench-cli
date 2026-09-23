@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- `metrum-ai-bench-cli-strategic`: `--prompts` (JSONL / Hub-extractable mix),
+  `--max-tokens` (required with `--prompts`), `--warmup-requests` (per-stage;
+  excluded from aggregates), optional `--shuffle-prompts` / `--seed`. Stage
+  `config` stamps workload fields; CSV rows carry `warmup`.
+- Docs: agent-driven path defaults to Hugging Face `metrum-ai/prompt-library`;
+  agents must web-search current vendor/model serving defaults on every run;
+  platforms page leads with vendor Docker for vLLM/SGLang and notes Blackwell /
+  SGLang SWA caveats.
+
 ## 1.2.0 (2026-09-23)
 
 ### Changed
