@@ -19,6 +19,31 @@ for that distinction.
 
 If you have not installed a binary yet, do the [Quickstart](./quickstart) first.
 
+## Always web-search model and server defaults
+
+**Every time** a coding agent (Claude Code, Codex, OpenCode, or similar) prepares
+or runs a benchmark, it must **web search online** for the current best-known
+or vendor-default serving configuration for that exact model and stack. Do not
+reuse memorized flags from prior chats, training data, or an earlier run in the
+same session without refreshing.
+
+Search and record at least:
+
+- Official model card / Hub README (context length, chat template, quantization)
+- Current vLLM / SGLang / TensorRT-LLM docs for that model family (launch args,
+  dtype, tensor parallel, max model len, tool/structured-output notes)
+- Known-good Docker image tags and any Blackwell / SM-specific caveats
+- Recommended sampling defaults when the operator has not fixed them
+  (temperature, top_p, and whether `ignore_eos` belongs in a throughput study)
+
+Put the chosen values into `sut.json` `runtime.config` / `notes` (and
+`--extra-body-json` when needed) so the run stays self-describing. If search
+results conflict, prefer the **vendor engine docs** over third-party blog
+posts, and state the sources in the run notes.
+
+This rule applies to smoke runs and publishable runs alike. Skipping the search
+is a process failure even if the CLI command succeeds.
+
 ## Default workload: Hugging Face prompt library
 
 **Do not invent a one-line prompt for publishable runs.** The default agent path
@@ -58,6 +83,10 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 
 - Prefer `metrum-ai-bench-cli <modality> -- <flags>` (unified entry).
 - Sweeps need the separate `metrum-ai-bench-cli-strategic` binary.
+- **Before every benchmark:** web search for the current best-known / vendor-default
+  serving config for this exact model + engine (vLLM/SGLang/etc.). Do not reuse
+  memorized launch flags. Record sources and chosen args in `sut.json` notes /
+  `runtime.config`.
 - Default prompts: extract from Hugging Face `metrum-ai/prompt-library` with a
   pinned `--revision`. Do not invent a handmade one-line prompt for shared
   numbers.
@@ -71,7 +100,7 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
   bare metal is advanced and often fails on CUDA/JIT.
 - For any number you might publish: `--sut <file> --require-sut`.
 - Write `--data-log` under `./bench-out/`. Summarize with jq only; never invent
-  metrics.
+  metrics. Charts are outside the CLI; use analysis prompts on CSV/JSON exports.
 ```
 
 ## Sample prompt (llm + prompt library)
@@ -84,6 +113,11 @@ Run a publishable closed-loop LLM measure with Metrum AI Bench CLI using the
 Hugging Face prompt library (not a handmade prompt).
 
 Constraints:
+- FIRST: web search online for the current best-known / vendor-default serving
+  configuration for model <MODEL_ID> on the chosen engine (vLLM or SGLang).
+  Refresh even if you think you already know the flags. Record sources and the
+  chosen launch/runtime args in sut.json (runtime.config + notes). Prefer
+  vendor docs and the model card over third-party posts.
 - Use `metrum-ai-bench-cli prompts --` then `metrum-ai-bench-cli llm --`.
 - Endpoint: $BENCH_URL (OpenAI-compatible chat completions). Prefer loopback on
   the GPU host.
@@ -141,6 +175,8 @@ Run a concurrency sweep with metrum-ai-bench-cli-strategic using the same
 prompt-library mix.
 
 Constraints:
+- FIRST: web search online for current best-known / vendor-default serving
+  flags for this model + engine; refresh every run; record in SUT notes.
 - Reuse bench-out/mix.jsonl from the extract above (or re-extract with the same pin).
 - --prompts bench-out/mix.jsonl
 - --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" (required with --prompts)
@@ -149,6 +185,8 @@ Constraints:
 - --html bench-out/sweep.html --csv bench-out/sweep.csv
 - Do not use the default --prompt Hello for shared numbers.
 - Summarize knee and stage throughput from stdout JSON; do not invent metrics.
+- Do not ask the CLI to render comparison charts; export CSV/JSON and use a
+  separate analysis prompt if charts are needed.
 ```
 
 ```bash
