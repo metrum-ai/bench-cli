@@ -40,7 +40,8 @@
 - No em dashes in any docs or user-facing strings.
 
 ## Available Tools
-- `metrum-ai-bench-cli`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`, `prompts`, and `selftest`.
+- `metrum-ai-bench-cli`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`,
+  `prompts`, `selftest`, `preflight`, `sut`, and `compare`.
 - `metrum-ai-bench-cli-llm`: text chat/completions load measurement.
 - `metrum-ai-bench-cli-vlm`: vision-language chat load measurement.
 - `metrum-ai-bench-cli-asr`: audio transcription load measurement.

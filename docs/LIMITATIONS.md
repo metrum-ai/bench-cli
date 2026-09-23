@@ -18,13 +18,16 @@ except when you optionally scrape a metrics URL from the strategic runner.
 Gateways that synthesize SSE from unary upstream calls report total latency
 as TTFT. This behavior is undetectable client-side.
 
-## SUT is declared, not verified
+## SUT is declared (or locally probed), not remotely verified
 
-`--sut` / `--require-sut` embed an operator-supplied system-under-test
-block into the run summary for publication. They do **not** probe the remote
-host, confirm GPU SKU, driver, or engine version, or prove that the declared
-SUT matches the endpoint you hit. A mismatched or empty declaration is a
-policy/process failure, not something the client can detect.
+`--sut` / `--require-sut` embed a system-under-test block into the run summary
+for publication. `metrum-ai-bench-cli sut init` writes a template;
+`sut init --probe` may fill **local** GPU/OS/CPU/memory via nvidia-smi and
+`/proc`, marking those fields in `field_provenance` as `observed` and setting
+top-level `provenance` to `mixed`. Probing never SSHs to the remote serving
+host, does not confirm that the endpoint matches the declaration, and does not
+replace operator-owned `runtime` / `model` / `vendor` fields. A mismatched or
+empty declaration remains a policy/process failure.
 
 ## Performance, not quality (except ASR)
 

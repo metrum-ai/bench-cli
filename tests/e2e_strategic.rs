@@ -88,6 +88,12 @@ fn strategic_sweep_exports_all_formats() {
     assert!(summary["server_metrics"]["kv_cache_usage"].is_number());
     assert!(fs::read_to_string(&html)
         .expect("HTML report")
+        .contains("Throughput (req/s)"));
+    assert!(fs::read_to_string(&html)
+        .expect("HTML report")
+        .contains("p95 latency (s)"));
+    assert!(fs::read_to_string(&html)
+        .expect("HTML report")
         .contains("<svg"));
     assert_eq!(
         fs::read_to_string(&csv)

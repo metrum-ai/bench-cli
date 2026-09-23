@@ -5,9 +5,10 @@
 //! executable for one compatibility release; this dispatcher keeps their
 //! complete clap surfaces while presenting one stable top-level command.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 #[derive(Debug, Parser)]
@@ -50,6 +51,72 @@ enum Commands {
     },
     /// Print client environment JSON and `selftest: ok` (exit 0 on success).
     Selftest,
+    /// Probe an OpenAI-compatible serving endpoint before a long run.
+    Preflight {
+        /// Endpoint URL (base or full `/v1/chat/completions` path).
+        #[arg(long)]
+        url: String,
+        /// API key sent as a Bearer token (use `dummy` when the server ignores it).
+        #[arg(long)]
+        api_key: String,
+        /// Model id for chat/streaming probes.
+        #[arg(long, default_value = "dummy")]
+        model: String,
+        /// Connect timeout in seconds.
+        #[arg(long, default_value_t = 10)]
+        connect_timeout: u64,
+        /// Request timeout in seconds.
+        #[arg(long, default_value_t = 60)]
+        request_timeout: u64,
+        /// Number of unary latency samples.
+        #[arg(long, default_value_t = 3)]
+        latency_samples: u32,
+        /// Also print the machine-readable JSON report after the table.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Write or probe a system-under-test declaration.
+    Sut {
+        #[command(subcommand)]
+        command: SutCommands,
+    },
+    /// Compare two or more strategic sweep summaries or request CSVs.
+    Compare {
+        /// Strategic stdout JSON files (`points[]`) and/or request CSVs.
+        #[arg(required = true, num_args = 2..)]
+        inputs: Vec<PathBuf>,
+        /// Comma-separated labels matching input order (default: file stems).
+        #[arg(long, value_delimiter = ',')]
+        labels: Option<Vec<String>>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = CompareFormat::Markdown)]
+        format: CompareFormat,
+        /// Optional output path (default: stdout).
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SutCommands {
+    /// Write a SUT JSON template (optionally `--probe` local host facts).
+    Init {
+        /// Output path.
+        #[arg(long, default_value = "sut.json")]
+        output: PathBuf,
+        /// Probe local nvidia-smi / OS / CPU / memory (never remote SSH).
+        #[arg(long, default_value_t = false)]
+        probe: bool,
+        /// Overwrite an existing file.
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CompareFormat {
+    Markdown,
+    Json,
 }
 
 fn sibling_binary(name: &str) -> std::io::Result<std::path::PathBuf> {
@@ -163,35 +230,166 @@ fn dispatch(binary: &str, mut args: Vec<OsString>) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn run_preflight(args: Commands) -> ExitCode {
+    let Commands::Preflight {
+        url,
+        api_key,
+        model,
+        connect_timeout,
+        request_timeout,
+        latency_samples,
+        json,
+    } = args
+    else {
+        unreachable!()
+    };
+    match metrum_ai_bench::preflight::run_preflight_blocking(
+        &url,
+        &api_key,
+        &model,
+        connect_timeout,
+        request_timeout,
+        latency_samples,
+    ) {
+        Ok(report) => {
+            print!("{}", metrum_ai_bench::preflight::format_table(&report));
+            if json {
+                match serde_json::to_string_pretty(&report) {
+                    Ok(body) => println!("{body}"),
+                    Err(error) => {
+                        eprintln!("preflight JSON encode failed: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if metrum_ai_bench::preflight::exit_failure(&report) {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(error) => {
+            eprintln!("preflight failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_sut(command: SutCommands) -> ExitCode {
+    match command {
+        SutCommands::Init {
+            output,
+            probe,
+            force,
+        } => match metrum_ai_bench::sut::init_sut(&output, probe, force) {
+            Ok(result) => {
+                for warning in &result.warnings {
+                    eprintln!("{warning}");
+                }
+                println!(
+                    "sut init: wrote {} (provenance={}, probed={})",
+                    result.path.display(),
+                    result.sut.provenance,
+                    result.probed
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+fn run_compare(
+    inputs: Vec<PathBuf>,
+    labels: Option<Vec<String>>,
+    format: CompareFormat,
+    output: Option<PathBuf>,
+) -> ExitCode {
+    match (|| -> anyhow::Result<()> {
+        let labels = metrum_ai_bench::compare::resolve_labels(&inputs, labels)?;
+        let mut runs = Vec::new();
+        for (path, label) in inputs.iter().zip(labels.iter()) {
+            runs.push(metrum_ai_bench::compare::load_run(path, label)?);
+        }
+        let report = metrum_ai_bench::compare::compare_runs(&runs)?;
+        let body = match format {
+            CompareFormat::Markdown => metrum_ai_bench::compare::format_markdown(&report),
+            CompareFormat::Json => serde_json::to_string_pretty(&report)?,
+        };
+        match output {
+            Some(path) => std::fs::write(path, body)?,
+            None => print!("{body}"),
+        }
+        Ok(())
+    })() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("compare failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if matches!(cli.command, Commands::Selftest) {
-        match serde_json::to_string_pretty(&environment()) {
+    match cli.command {
+        Commands::Selftest => match serde_json::to_string_pretty(&environment()) {
             Ok(value) => {
                 println!("{value}");
                 println!("selftest: ok");
-                return ExitCode::SUCCESS;
+                ExitCode::SUCCESS
             }
             Err(error) => {
                 eprintln!("self-test failed: {error}");
-                return ExitCode::FAILURE;
+                ExitCode::FAILURE
             }
-        }
-    }
-    let (binary, args) = match cli.command {
-        Commands::Llm { args } => ("metrum-ai-bench-cli-llm", args),
-        Commands::Vlm { args } => ("metrum-ai-bench-cli-vlm", args),
-        Commands::Asr { args } => ("metrum-ai-bench-cli-asr", args),
-        Commands::Imagegen { args } => ("metrum-ai-bench-cli-imagegen", args),
-        Commands::Prompts { args } => ("metrum-ai-bench-cli-prompts", args),
-        Commands::Selftest => unreachable!(),
-    };
-    match dispatch(binary, args) {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
-        }
+        },
+        cmd @ Commands::Preflight { .. } => run_preflight(cmd),
+        Commands::Sut { command } => run_sut(command),
+        Commands::Compare {
+            inputs,
+            labels,
+            format,
+            output,
+        } => run_compare(inputs, labels, format, output),
+        Commands::Llm { args } => match dispatch("metrum-ai-bench-cli-llm", args) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+        Commands::Vlm { args } => match dispatch("metrum-ai-bench-cli-vlm", args) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+        Commands::Asr { args } => match dispatch("metrum-ai-bench-cli-asr", args) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+        Commands::Imagegen { args } => match dispatch("metrum-ai-bench-cli-imagegen", args) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+        Commands::Prompts { args } => match dispatch("metrum-ai-bench-cli-prompts", args) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 

@@ -615,6 +615,40 @@ fn escape_html(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn nice_tick(span: f64) -> f64 {
+    if span <= 0.0 || !span.is_finite() {
+        return 1.0;
+    }
+    let exp = span.log10().floor();
+    let base = 10f64.powf(exp);
+    let frac = span / base;
+    let nice = if frac <= 1.5 {
+        1.0
+    } else if frac <= 3.0 {
+        2.0
+    } else if frac <= 7.0 {
+        5.0
+    } else {
+        10.0
+    };
+    nice * base / 4.0
+}
+
+fn format_tick(value: f64) -> String {
+    if value == 0.0 {
+        "0".into()
+    } else if value.abs() >= 100.0 {
+        format!("{value:.0}")
+    } else if value.abs() >= 10.0 {
+        format!("{value:.1}")
+    } else if value.abs() >= 1.0 {
+        format!("{value:.2}")
+    } else {
+        format!("{value:.3}")
+    }
+}
+
+/// Emit a static HTML report with labeled axes, ticks, and a sweep table.
 pub fn export_html(
     path: &Path,
     title: &str,
@@ -624,7 +658,14 @@ pub fn export_html(
     sut: Option<&Value>,
 ) -> Result<()> {
     let width = 760.0;
-    let height = 300.0;
+    let height = 340.0;
+    let margin_left = 64.0;
+    let margin_right = 24.0;
+    let margin_top = 24.0;
+    let margin_bottom = 52.0;
+    let plot_w = width - margin_left - margin_right;
+    let plot_h = height - margin_top - margin_bottom;
+
     let max_x = points
         .iter()
         .map(|point| point.throughput)
@@ -635,12 +676,16 @@ pub fn export_html(
         .filter_map(|point| point.p95_s)
         .fold(0.0_f64, f64::max)
         .max(0.001);
+
+    let map_x = |throughput: f64| margin_left + throughput / max_x * plot_w;
+    let map_y = |p95: f64| margin_top + plot_h - p95 / max_y * plot_h;
+
     let coordinates: Vec<_> = points
         .iter()
         .map(|point| {
             (
-                40.0 + point.throughput / max_x * (width - 60.0),
-                height - 30.0 - point.p95_s.unwrap_or_default() / max_y * (height - 50.0),
+                map_x(point.throughput),
+                map_y(point.p95_s.unwrap_or_default()),
             )
         })
         .collect();
@@ -649,6 +694,79 @@ pub fn export_html(
         .map(|(x, y)| format!("{x:.1},{y:.1}"))
         .collect::<Vec<_>>()
         .join(" ");
+
+    let mut grid = String::new();
+    let x_step = nice_tick(max_x).max(max_x / 5.0);
+    let mut x_tick = 0.0;
+    while x_tick <= max_x + x_step * 0.01 {
+        let x = map_x(x_tick);
+        grid.push_str(&format!(
+            r##"<line x1="{x:.1}" y1="{margin_top}" x2="{x:.1}" y2="{y2:.1}" stroke="#e5e7eb" stroke-width="1"/>"##,
+            y2 = margin_top + plot_h
+        ));
+        grid.push_str(&format!(
+            r##"<text x="{x:.1}" y="{y:.1}" text-anchor="middle" font-size="11" fill="#374151">{label}</text>"##,
+            y = margin_top + plot_h + 16.0,
+            label = escape_html(&format_tick(x_tick))
+        ));
+        x_tick += x_step;
+        if x_step <= f64::EPSILON {
+            break;
+        }
+    }
+    let y_step = nice_tick(max_y).max(max_y / 5.0);
+    let mut y_tick = 0.0;
+    while y_tick <= max_y + y_step * 0.01 {
+        let y = map_y(y_tick);
+        grid.push_str(&format!(
+            r##"<line x1="{margin_left}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="#e5e7eb" stroke-width="1"/>"##,
+            x2 = margin_left + plot_w
+        ));
+        grid.push_str(&format!(
+            r##"<text x="{x:.1}" y="{y:.1}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="#374151">{label}</text>"##,
+            x = margin_left - 8.0,
+            label = escape_html(&format_tick(y_tick))
+        ));
+        y_tick += y_step;
+        if y_step <= f64::EPSILON {
+            break;
+        }
+    }
+
+    let axis = format!(
+        r##"<line x1="{margin_left}" y1="{y0:.1}" x2="{x1:.1}" y2="{y0:.1}" stroke="#111827" stroke-width="1.5"/>
+<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{y0:.1}" stroke="#111827" stroke-width="1.5"/>
+<text x="{cx:.1}" y="{xlabel_y:.1}" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">Throughput (req/s)</text>
+<text x="16" y="{cy:.1}" text-anchor="middle" font-size="13" font-weight="600" fill="#111827" transform="rotate(-90 16 {cy:.1})">p95 latency (s)</text>"##,
+        y0 = margin_top + plot_h,
+        x1 = margin_left + plot_w,
+        cx = margin_left + plot_w / 2.0,
+        xlabel_y = height - 12.0,
+        cy = margin_top + plot_h / 2.0,
+    );
+
+    let dots: String = coordinates
+        .iter()
+        .enumerate()
+        .map(|(index, (x, y))| {
+            let label = points
+                .get(index)
+                .map(|p| {
+                    format!(
+                        "load={:.3} thr={:.2} p95={}",
+                        p.load,
+                        p.throughput,
+                        format_tick(p.p95_s.unwrap_or_default())
+                    )
+                })
+                .unwrap_or_default();
+            format!(
+                r##"<circle cx="{x:.1}" cy="{y:.1}" r="3.5" fill="#2563eb"><title>{}</title></circle>"##,
+                escape_html(&label)
+            )
+        })
+        .collect();
+
     let rows = points
         .iter()
         .enumerate()
@@ -681,7 +799,11 @@ pub fn export_html(
         .collect::<String>();
     let knee_circle = knee
         .and_then(|index| coordinates.get(index))
-        .map(|(x, y)| format!(r##"<circle cx="{x:.1}" cy="{y:.1}" r="7" fill="#ef4444"/>"##))
+        .map(|(x, y)| {
+            format!(
+                r##"<circle cx="{x:.1}" cy="{y:.1}" r="7" fill="#ef4444"><title>knee</title></circle>"##
+            )
+        })
         .unwrap_or_default();
     let sut_block = match sut {
         Some(value) => format!(
@@ -691,16 +813,21 @@ pub fn export_html(
         None => String::new(),
     };
     let html = format!(
-        r##"<!doctype html><html><head><meta charset="utf-8"><title>{}</title>
-<style>body{{font:14px system-ui;margin:2rem;max-width:900px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:.45rem;border-bottom:1px solid #ddd;text-align:right}}th:first-child,td:first-child{{text-align:left}}.knee{{background:#fee2e2}}svg{{border:1px solid #ddd;background:#fafafa}}</style></head>
-<body><h1>{}</h1><p>Latency-throughput curve; red marks the automatically detected knee.</p>
-<svg viewBox="0 0 {width} {height}" role="img" aria-label="p95 latency by throughput"><polyline points="{polyline}" fill="none" stroke="#2563eb" stroke-width="3"/>{knee_circle}</svg>
-<h2>Sweep</h2><table><thead><tr><th>Load</th><th>n</th><th>Throughput</th><th>p95 seconds</th><th>p99 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
+        r##"<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>body{{font:14px system-ui,sans-serif;margin:2rem;max-width:960px;color:#111827}}table{{border-collapse:collapse;width:100%}}th,td{{padding:.45rem;border-bottom:1px solid #ddd;text-align:right}}th:first-child,td:first-child{{text-align:left}}.knee{{background:#fee2e2}}svg{{border:1px solid #d1d5db;background:#fafafa;max-width:100%}}caption{{text-align:left;font-weight:600;margin:.5rem 0}}</style></head>
+<body><h1>{title}</h1>
+<p>Latency-throughput curve with labeled axes. Red marks the automatically detected knee (when present).</p>
+<svg viewBox="0 0 {width} {height}" role="img" aria-label="p95 latency versus throughput with labeled axes">
+{grid}{axis}
+<polyline points="{polyline}" fill="none" stroke="#2563eb" stroke-width="3"/>
+{dots}{knee_circle}
+</svg>
+<h2>Sweep</h2>
+<table><caption>Per-stage load, throughput, latency, and goodput</caption><thead><tr><th>Load</th><th>n</th><th>Throughput (req/s)</th><th>p95 seconds</th><th>p99 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
 {sut_block}
-<h2>Server correlation</h2><pre>{}</pre></body></html>"##,
-        escape_html(title),
-        escape_html(title),
-        escape_html(&serde_json::to_string_pretty(server)?),
+<h2>Server correlation</h2><pre>{server}</pre></body></html>"##,
+        title = escape_html(title),
+        server = escape_html(&serde_json::to_string_pretty(server)?),
     );
     std::fs::write(path, html)?;
     Ok(())
@@ -914,6 +1041,55 @@ mod tests {
             })
             .collect();
         assert_eq!(detect_knee(&points), Some(2));
+    }
+
+    #[test]
+    fn html_report_has_axes_ticks_and_labels() {
+        let latency_s = crate::stats::DistSummary::from_values(&[0.1, 0.2]);
+        let points = vec![SweepPoint {
+            load: 1.0,
+            n: 2,
+            errors: 0,
+            throughput: 10.0,
+            latency_s: latency_s.clone(),
+            p50_s: Some(0.1),
+            p95_s: Some(0.2),
+            p99_s: Some(0.2),
+            p99_unreliable: true,
+            error_rate: Some(0.0),
+            validity_rate: None,
+            goodput: 10.0,
+            goodput_equals_throughput: true,
+            slo_thresholds_s: None,
+            user_tps: crate::stats::DistSummary::from_values(&[]),
+            users_at_slo: None,
+            users_meeting_user_tps: None,
+            completion_tokens_per_second: None,
+            cost_per_million_output_tokens: None,
+            observed_concurrency: None,
+            connect_s: crate::stats::DistSummary::from_values(&[]),
+            prefill_s: crate::stats::DistSummary::from_values(&[]),
+            decode_s: crate::stats::DistSummary::from_values(&[]),
+            decode_tok_s: crate::stats::DistSummary::from_values(&[]),
+            isl_osl: None,
+            config: None,
+        }];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.html");
+        export_html(
+            &path,
+            "unit test",
+            &points,
+            None,
+            &ServerMetrics::default(),
+            None,
+        )
+        .unwrap();
+        let html = std::fs::read_to_string(&path).unwrap();
+        assert!(html.contains("Throughput (req/s)"));
+        assert!(html.contains("p95 latency (s)"));
+        assert!(html.contains("text-anchor"));
+        assert!(html.contains("<polyline"));
     }
 
     #[test]

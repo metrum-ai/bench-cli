@@ -102,10 +102,14 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
   set `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1` only when you intentionally accept
   that contamination.
 - Prefer vendor Docker images for vLLM / SGLang (see Platforms). Pip install on
-  bare metal is advanced and often fails on CUDA/JIT.
+  bare metal is advanced and often fails on CUDA/JIT. Run
+  `metrum-ai-bench-cli preflight --url …` before long GPU sweeps.
+- Scaffold SUT with `metrum-ai-bench-cli sut init --probe` on the measurement
+  host, then fill runtime/model/vendor. Observed fields are local only.
 - For any number you might publish: `--sut <file> --require-sut`.
 - Write `--data-log` under `./bench-out/`. Summarize with jq only; never invent
-  metrics. Charts are outside the CLI; use analysis prompts on CSV/JSON exports.
+  metrics. For multi-run deltas use `metrum-ai-bench-cli compare`; for charts
+  beyond strategic `--html`, use an analysis prompt on CSV/JSON exports.
 ```
 
 ## Sample prompt (llm + prompt library)
@@ -188,8 +192,7 @@ Constraints:
 - --html bench-out/sweep.html --csv bench-out/sweep.csv
 - Do not use the default --prompt Hello for shared numbers.
 - Summarize knee and stage throughput from stdout JSON; do not invent metrics.
-- Do not ask the CLI to render comparison charts; export CSV/JSON and use a
-  separate analysis prompt if charts are needed.
+- Save stdout JSON as bench-out/sweep-summary.json for later compare.
 ```
 
 ```bash
@@ -200,7 +203,32 @@ metrum-ai-bench-cli-strategic \
   --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" \
   --warmup-requests 4 \
   --sweep 1,2,4,8 --requests-per-stage 16 \
-  --html bench-out/sweep.html --csv bench-out/sweep.csv
+  --html bench-out/sweep.html --csv bench-out/sweep.csv \
+  | tee bench-out/sweep-summary.json
+```
+
+## Sample prompt (compare two GPUs + charts)
+
+```text
+Compare two strategic sweeps (for example H100 vs RTX PRO 6000) with Metrum AI
+Bench CLI, then draft labeled charts from the exports.
+
+Constraints:
+- Inputs: bench-out/h100-summary.json and bench-out/pro6000-summary.json
+  (strategic stdout JSON with points[]), or the matching request CSVs.
+- Run:
+  metrum-ai-bench-cli compare \
+    bench-out/h100-summary.json bench-out/pro6000-summary.json \
+    --labels H100,Pro6000 --format markdown
+- Also emit --format json to bench-out/compare.json.
+- Do not invent metrics; only use compare output and the JSON points.
+- For charts (outside the CLI SVG): from the two points[] arrays, plot
+  (1) throughput vs concurrency/load with both series labeled,
+  (2) p95 latency vs throughput frontier with both series labeled,
+  (3) optional user_tps / cost_per_million_output_tokens when present.
+- Each chart needs titled axes, tick marks, a legend with the same labels as
+  --labels, and a one-line caption stating workload ISL/OSL and engine.
+- Single-run strategic --html already has axes/ticks; use compare for deltas.
 ```
 
 ## Entry points
@@ -209,6 +237,9 @@ metrum-ai-bench-cli-strategic \
 | --- | --- |
 | `metrum-ai-bench-cli llm -- …` | Preferred unified modality entry (`--` separates dispatcher args from modality flags) |
 | `metrum-ai-bench-cli prompts -- …` | ISL/OSL mix extract from Hugging Face |
+| `metrum-ai-bench-cli preflight --url …` | Serving endpoint reachability / chat / stream smoke |
+| `metrum-ai-bench-cli sut init [--probe]` | Write SUT template; optional local host probe |
+| `metrum-ai-bench-cli compare a.json b.json` | Labeled delta table across strategic runs |
 | `metrum-ai-bench-cli-llm …` | Same modality binary without the dispatcher |
 | `metrum-ai-bench-cli-strategic …` | Concurrency/rate sweeps, knee, sessions, exports (separate binary) |
 

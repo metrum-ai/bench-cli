@@ -58,8 +58,10 @@ partnership, or support.
 ## 6. Declared vs observed
 
 Where a field is supplied by declaration rather than measured by the harness,
-it must be labeled accordingly (for example, `provenance: "declared"`). Do not
-present declared values as observed measurements.
+it must be labeled accordingly (for example, `provenance: "declared"`, or
+`field_provenance` entries of `"observed"` from `sut init --probe` for local
+host facts only). Do not present declared values as observed measurements, and
+do not treat local probe output as verification of a remote serving host.
 
 ## 7. Reporting incorrect results
 
