@@ -316,7 +316,10 @@ mod tests {
         let stamped: EffectiveCommonArgs = (&args).into();
         assert!(stamped.scenario.is_none());
         assert_eq!(
-            stamped.with_scenario(Some("demo".into())).scenario.as_deref(),
+            stamped
+                .with_scenario(Some("demo".into()))
+                .scenario
+                .as_deref(),
             Some("demo")
         );
         assert_eq!(

@@ -131,9 +131,7 @@ pub fn url_host_is_local(host: &str) -> bool {
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         return match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local()
-            }
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
             std::net::IpAddr::V6(v6) => {
                 v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 /* ULA */
             }
