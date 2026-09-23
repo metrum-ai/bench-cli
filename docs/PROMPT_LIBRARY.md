@@ -3,10 +3,10 @@
 
 # Prompt library extractor
 
-`metrum-ai-bench-prompts` selects a reproducible mix from the Hugging Face
+`metrum-ai-bench-cli-prompts` selects a reproducible mix from the Hugging Face
 dataset
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-and writes JSONL that `metrum-ai-bench-llm` can consume with `--prompts`.
+and writes JSONL that `metrum-ai-bench-cli-llm` can consume with `--prompts`.
 
 Success is **ISL and OSL statistics within absolute CLI tolerances**, not an
 exact row count. `--count` is a preferred size; the selector may return fewer
@@ -55,7 +55,7 @@ Supplied token ISL does **not** include the hint text; word ISL does. Report
 ## CLI knobs
 
 ```bash
-metrum-ai-bench-prompts \
+metrum-ai-bench-cli-prompts \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample \
   --count 64 --count-slack 64 --seed 42 \
@@ -88,9 +88,9 @@ closer to `--count` and with fewer repeats.
   achieved ISL/OSL and gaps, repeat histogram, `recommended_max_tokens`,
   `recommended_num_requests`, schedule SHA-256.
 
-## Feeding `metrum-ai-bench-llm`
+## Feeding `metrum-ai-bench-cli-llm`
 
-`metrum-ai-bench-llm` still uses a **global** `--max-tokens` and cycles a
+`metrum-ai-bench-cli-llm` still uses a **global** `--max-tokens` and cycles a
 shuffled prompt pool. To preserve the selected mix:
 
 1. Set `--num-requests` to `report.selected_count` (not blindly to `--count`).
@@ -101,7 +101,7 @@ shuffled prompt pool. To preserve the selected mix:
 Mean-target example (same dummy-server loop as the README median example):
 
 ```bash
-target/release/metrum-ai-bench-prompts \
+target/release/metrum-ai-bench-cli-prompts \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
   --count 32 --seed 7 \
   --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \

@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # Fake fixtures for gitleaks custom-rule regression tests. Values are not real.
-title = "metrum-ai-bench gitleaks configuration"
+title = "metrum-ai-bench-cli gitleaks configuration"
 
 [extend]
 useDefault = true

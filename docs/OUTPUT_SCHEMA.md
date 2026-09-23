@@ -7,7 +7,7 @@ Each line is a complete JSON object and carries `schema_version`.
 
 ## Request v3
 
-`metrum-ai-bench.request.v3` records are flushed immediately on completion:
+`metrum-ai-bench-cli.request.v3` records are flushed immediately on completion:
 
 - optional `run_id` (same UUID as `summary.config.run_id` when stamped)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
@@ -40,7 +40,7 @@ separate `connect_s` field is deferred (post-v1 / feature-flagged).
 
 ## Summary v3
 
-`metrum-ai-bench.summary.v3` is field-additive over v2. It contains measured
+`metrum-ai-bench-cli.summary.v3` is field-additive over v2. It contains measured
 attempted/success/error counts, rates, type-7 distributions, coordinated-omission-
 corrected latency, throughput-bin dispersion, SLO goodput, `pooled_mixture`,
 full `per_endpoint` distributions, environment metadata, and `partial`.

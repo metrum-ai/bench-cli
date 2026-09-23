@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.1.3** ([CHANGELOG](CHANGELOG.md)).
+release: **1.2.0** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -17,9 +17,9 @@ and attests.
 
 Large prompt corpora for LLM workload mixes are published on Hugging Face as
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-(Apache-2.0). Use `metrum-ai-bench-prompts` to select a mix by ISL/OSL mean or
+(Apache-2.0). Use `metrum-ai-bench-cli-prompts` to select a mix by ISL/OSL mean or
 median within CLI tolerances, then feed the resulting JSONL to
-`metrum-ai-bench-llm` (see [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md) and
+`metrum-ai-bench-cli-llm` (see [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md) and
 [docs/datasets/DATASET_CARD.md](docs/datasets/DATASET_CARD.md)). This repository
 ships only tiny fixtures ([test-data/README.md](test-data/README.md)). VLM, ASR,
 and image-generation still use those local fixtures; they are not on the Hub.
@@ -44,7 +44,7 @@ cargo build --release
 cp examples/sut.example.json sut.json
 
 # 4. Run. --api-key is always required with --url; the dummy server accepts any value.
-target/release/metrum-ai-bench llm -- \
+target/release/metrum-ai-bench-cli llm -- \
   --url http://127.0.0.1:18321/v1/chat/completions --api-key dummy \
   --scenario quickstart --model dummy --mode chat --streaming \
   --prompts test-data/llm-hi.jsonl \
@@ -102,21 +102,23 @@ cargo test --all-targets
 
 | Entry | Measures | When to use |
 |-------|----------|-------------|
-| `metrum-ai-bench llm` / `metrum-ai-bench-llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
-| `metrum-ai-bench vlm` / `metrum-ai-bench-vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
-| `metrum-ai-bench asr` / `metrum-ai-bench-asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
-| `metrum-ai-bench imagegen` / `metrum-ai-bench-imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
-| `metrum-ai-bench prompts` / `metrum-ai-bench-prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
-| `metrum-ai-bench selftest` | Local sanity check of the install | After build or release unpack |
-| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary, not a unified subcommand) |
-| `metrum-ai-bench-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
+| `metrum-ai-bench-cli llm` / `metrum-ai-bench-cli-llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
+| `metrum-ai-bench-cli vlm` / `metrum-ai-bench-cli-vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
+| `metrum-ai-bench-cli asr` / `metrum-ai-bench-cli-asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
+| `metrum-ai-bench-cli imagegen` / `metrum-ai-bench-cli-imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `metrum-ai-bench-cli prompts` / `metrum-ai-bench-cli-prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
+| `metrum-ai-bench-cli selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary, not a unified subcommand) |
+| `metrum-ai-bench-cli-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
 
-The preferred entry point for modalities is `metrum-ai-bench` with those
-subcommands. During the v1.x compatibility period the four modality binaries
-can also be invoked directly; deprecated `metrumbench-*` shims remain (they
-print a 1.3.0 removal notice). `metrum-ai-bench-strategic` is a separate
-binary. Shared load flags live in clap common args; modality-specific flags
-are in [docs/CLI.md](docs/CLI.md) (regenerated from `--help`).
+The preferred entry point for modalities is `metrum-ai-bench-cli` with those
+subcommands. During the v1.x compatibility period the modality binaries can
+also be invoked directly. Deprecated shims remain through **1.3.0** (stderr
+removal notice): pre-1.2.0 `metrum-ai-bench*` names and older `metrumbench-*`.
+`metrum-ai-bench-cli-strategic` is a separate binary. Shared load flags live
+in clap common args; modality-specific flags are in
+[docs/CLI.md](docs/CLI.md) (regenerated from `--help`). Install from crates.io
+with `cargo install metrum-ai-bench-cli`.
 
 ## Reasoning models
 
@@ -132,7 +134,7 @@ A published number that names Metrum AI Bench CLI must carry an unmodified run
 summary with a SUT block. Produce a compliant run with:
 
 ```bash
-metrum-ai-bench llm -- \
+metrum-ai-bench-cli llm -- \
   --url http://127.0.0.1:18321/v1/chat/completions --api-key dummy \
   --scenario publish --model dummy --mode chat --streaming \
   --prompts test-data/llm-hi.jsonl \
@@ -161,7 +163,7 @@ defaulted `provenance` is optional; omit or null what you do not know:
 ```
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
-must trace to a `summary.json` (or the closing `metrum-ai-bench.summary.v3`
+must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v3`
 line in a published results directory); see the
 [results publication policy](docs/RESULTS_PUBLICATION_POLICY.md).
 
@@ -220,19 +222,19 @@ same way; record the dataset name, revision, and row count in the SUT block or
 run notes.
 
 ```bash
-cargo build --release --bin metrum-ai-bench-prompts --bin metrum-ai-bench-llm
+cargo build --release --bin metrum-ai-bench-cli-prompts --bin metrum-ai-bench-cli-llm
 (cd dummy-model-server && go run ./cmd/dummy-model-server \
   -port 18321 -latency 100ms -chunk-interval 20ms) &
 
 # Median targets (sample config; pin a commit SHA)
-target/release/metrum-ai-bench-prompts \
+target/release/metrum-ai-bench-cli-prompts \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
   --count 64 --seed 42 \
   --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
   --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32 \
   --output /tmp/mix.jsonl --report /tmp/mix-report.json
 
-target/release/metrum-ai-bench-llm \
+target/release/metrum-ai-bench-cli-llm \
   --url http://127.0.0.1:18321/v1/chat/completions --api-key dummy \
   --scenario prompt-library-median \
   --num-requests "$(jq .selected_count /tmp/mix-report.json)" \
@@ -245,7 +247,7 @@ target/release/metrum-ai-bench-llm \
 Mean-target extract (same llm/dummy pattern afterward):
 
 ```bash
-target/release/metrum-ai-bench-prompts \
+target/release/metrum-ai-bench-cli-prompts \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
   --count 32 --seed 7 \
   --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \
@@ -254,8 +256,8 @@ target/release/metrum-ai-bench-prompts \
 ```
 
 ```bash
-target/release/metrum-ai-bench selftest
-target/release/metrum-ai-bench llm -- \
+target/release/metrum-ai-bench-cli selftest
+target/release/metrum-ai-bench-cli llm -- \
   --url http://127.0.0.1:8000/v1/chat/completions \
   --api-key dummy --scenario example --num-requests 100 --concurrency 8 \
   --prompts prompts.jsonl --mode chat --streaming --model example \
@@ -268,7 +270,7 @@ Pass `--runs N` among the forwarded modality arguments to the unified entry
 point to execute sequential independent runs and append a seeded bootstrap
 cross-run aggregate to `--data-log`.
 
-The `metrum-ai-bench-strategic` runner adds concurrency/rate sweeps
+The `metrum-ai-bench-cli-strategic` runner adds concurrency/rate sweeps
 (`--sweep`), knee detection, multi-turn sessions, validity rules,
 server-metrics correlation, and CSV, HTML (`--html`), MLPerf-shaped
 (`--mlperf-dir`), and optional OTLP exports. See
@@ -288,23 +290,23 @@ See [docs/REPRODUCING.md](docs/REPRODUCING.md) for the checked-in LLM reference
 and `dummy-model-server/README.md` for flags covering VLM/ASR/imagegen.
 
 For deterministic strategic fixtures, the Rust mock server binary is
-`metrum-ai-bench-mock-server` (see [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md)).
+`metrum-ai-bench-cli-mock-server` (see [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md)).
 
 Compact VLM / ASR / imagegen examples (second shell, after the dummy is up):
 
 ```bash
 printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
-target/release/metrum-ai-bench-vlm --url http://127.0.0.1:18321/v1/chat/completions \
+target/release/metrum-ai-bench-cli-vlm --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy --scenario vlm --num-requests 4 --concurrency 2 \
   --prompts /tmp/vlm.jsonl --model dummy --max-tokens 16 \
   --data-log /tmp/vlm.jsonl.out --streaming
 
 printf '%s\n' '{"id":"a","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}' > /tmp/asr.jsonl
-target/release/metrum-ai-bench-asr --url http://127.0.0.1:18321/v1/audio/transcriptions \
+target/release/metrum-ai-bench-cli-asr --url http://127.0.0.1:18321/v1/audio/transcriptions \
   --api-key dummy --scenario asr --num-requests 4 --concurrency 2 \
   --input /tmp/asr.jsonl --model dummy --data-log /tmp/asr.jsonl.out
 
-target/release/metrum-ai-bench-imagegen --url http://127.0.0.1:18321/v1 \
+target/release/metrum-ai-bench-cli-imagegen --url http://127.0.0.1:18321/v1 \
   --api-key dummy --scenario img --num-requests 2 --concurrency 1 \
   --prompt "a square" --model dummy --size 64x64 --data-log /tmp/img.jsonl
 ```

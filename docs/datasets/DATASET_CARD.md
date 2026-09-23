@@ -20,7 +20,7 @@ size_categories:
 
 # Dataset Card for `metrum-ai/prompt-library`
 
-This is the LLM workload-length corpus used by `metrum-ai-bench-prompts`.
+This is the LLM workload-length corpus used by `metrum-ai-bench-cli-prompts`.
 It is **published** on Hugging Face:
 
 - **Hub:** [huggingface.co/datasets/metrum-ai/prompt-library](https://huggingface.co/datasets/metrum-ai/prompt-library)
@@ -55,8 +55,8 @@ Pinned revision used in README examples:
 
 The `full` config keeps every source record, including repeated prompt text
 with distinct `target_output_length` values. Those variants are intentional:
-`metrum-ai-bench-prompts` appends a word-count hint when it writes JSONL for
-`metrum-ai-bench-llm`. The hint guides generation; it does not guarantee an
+`metrum-ai-bench-cli-prompts` appends a word-count hint when it writes JSONL for
+`metrum-ai-bench-cli-llm`. The hint guides generation; it does not guarantee an
 exact response length.
 
 The `sample` config takes ten rows from each of 296 observed
@@ -97,8 +97,8 @@ Legacy `prompt_length` and `actual_words` are not authoritative. Word ISL is
 
 ## Intended use
 
-- Selecting an ISL/OSL mix with `metrum-ai-bench-prompts`
-- Load generation and performance measurement with `metrum-ai-bench-llm`
+- Selecting an ISL/OSL mix with `metrum-ai-bench-cli-prompts`
+- Load generation and performance measurement with `metrum-ai-bench-cli-llm`
 - Reproducing published cells when the campaign cites a pinned dataset revision
 
 ## Limitations

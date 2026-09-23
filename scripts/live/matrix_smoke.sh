@@ -291,7 +291,7 @@ run_llm_cell() {
   mkdir -p "${out}"
   prompts="${out}/prompts.jsonl"
   write_isl_prompts "${prompts}" "$((nreq + 8))"
-  bin="$(resolve_bin metrum-ai-bench-llm)"
+  bin="$(resolve_bin metrum-ai-bench-cli-llm)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "matrix-llm-${cell}" \
@@ -343,7 +343,7 @@ PY
     jq -nc --arg p "Describe briefly. ${pad} cell=${i}" --arg u "${img}" \
       '{prompt:$p, image_url:$u}' >>"${prompts}"
   done
-  bin="$(resolve_bin metrum-ai-bench-vlm)"
+  bin="$(resolve_bin metrum-ai-bench-cli-vlm)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "matrix-vlm-${cell}" \
@@ -383,7 +383,7 @@ run_asr_cell() {
     jq -nc --arg id "a${i}" --arg p "${audio}" \
       '{id:$id, path:$p, duration_s:1.0}' >>"${input_jsonl}"
   done
-  bin="$(resolve_bin metrum-ai-bench-asr)"
+  bin="$(resolve_bin metrum-ai-bench-cli-asr)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "matrix-asr-${cell}" \
@@ -649,7 +649,7 @@ Raw JSONL under gitignored `live-results/`; this document is the public summary.
 | Field | Value |
 |-------|-------|
 | Campaign ID | `{cid}` |
-| Bench package | `metrum-ai-bench-*` **1.0.0** |
+| Bench package | `metrum-ai-bench-cli-*` **1.0.0** |
 | Date (UTC) | 2026-09-15 |
 | Engine | `{engine}` / `vllm/vllm-openai:latest` |
 | Validation | {len(cells)} result files |

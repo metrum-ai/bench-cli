@@ -59,9 +59,9 @@ before publication.
 
 | Form | Role |
 | --- | --- |
-| `metrum-ai-bench <modality> -- <flags>` | Preferred unified entry. Everything after `--` is forwarded to that modality binary. |
-| `metrum-ai-bench-llm` (and `vlm` / `asr` / `imagegen` / `prompts`) | Same modality without the dispatcher; equivalent flags. |
-| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports. **Separate binary**, not a unified subcommand. |
+| `metrum-ai-bench-cli <modality> -- <flags>` | Preferred unified entry. Everything after `--` is forwarded to that modality binary. |
+| `metrum-ai-bench-cli-llm` (and `vlm` / `asr` / `imagegen` / `prompts`) | Same modality without the dispatcher; equivalent flags. |
+| `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports. **Separate binary**, not a unified subcommand. |
 | `metrumbench-*` | Deprecated shims; stderr warns; removed in **1.3.0**. |
 
 Flag maps: [CLI Reference](./cli-reference). Agent-oriented copy-paste:
@@ -73,17 +73,17 @@ Flag maps: [CLI Reference](./cli-reference). Agent-oriented copy-paste:
 
 | Entry | Measures | When to use |
 | --- | --- | --- |
-| `metrum-ai-bench llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
-| `metrum-ai-bench vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
-| `metrum-ai-bench asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
-| `metrum-ai-bench imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
-| `metrum-ai-bench prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
-| `metrum-ai-bench selftest` | Local sanity check of the install | After build or release unpack |
-| `metrum-ai-bench-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary) |
+| `metrum-ai-bench-cli llm` | Chat/completion latency, TTFT, ITL/TPOT, token throughput | Text OpenAI-compatible `/v1/chat/completions` or completions |
+| `metrum-ai-bench-cli vlm` | Same as LLM plus image payload size | Vision models with `image_url` / `image_urls` prompts |
+| `metrum-ai-bench-cli asr` | Transcription latency, RTFx, optional WER/CER | `/v1/audio/transcriptions` |
+| `metrum-ai-bench-cli imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
+| `metrum-ai-bench-cli prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
+| `metrum-ai-bench-cli selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary) |
 
-The preferred entry point for modalities and helpers is `metrum-ai-bench` with
+The preferred entry point for modalities and helpers is `metrum-ai-bench-cli` with
 those subcommands. Sweeps and exports use the separate
-`metrum-ai-bench-strategic` binary (not a unified subcommand).
+`metrum-ai-bench-cli-strategic` binary (not a unified subcommand).
 
 ---
 
@@ -126,9 +126,9 @@ endpoint files.
 
 Each line in `--data-log` is a complete JSON object with `schema_version`.
 
-- **Request records** (`metrum-ai-bench.request.v3`) flush on completion with
+- **Request records** (`metrum-ai-bench-cli.request.v3`) flush on completion with
   latency, optional TTFT / first-byte / ITL, errors, and modality metrics.
-- **Summary** (`metrum-ai-bench.summary.v3`) carries counts, rates,
+- **Summary** (`metrum-ai-bench-cli.summary.v3`) carries counts, rates,
   distributions, goodput, environment metadata, optional `sut`, and `partial`.
 
 Printed end-of-run statistics come from the same summary values written to
@@ -157,7 +157,7 @@ interval.
 Include the unmodified run summary with its SUT block:
 
 ```bash
-metrum-ai-bench llm -- \
+metrum-ai-bench-cli llm -- \
   ... \
   --sut sut.json --require-sut
 ```

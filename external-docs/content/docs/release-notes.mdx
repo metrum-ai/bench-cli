@@ -17,6 +17,22 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.2.0
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.2.0 |
+| **Previous version** | 1.1.3 |
+| **Release Date** | September 23, 2026 |
+
+Crate, binaries, release tarball prefix, and Homebrew formula are now
+**`metrum-ai-bench-cli`**. Install with `cargo install metrum-ai-bench-cli`.
+Old `metrum-ai-bench*` binary names remain as deprecated shims through 1.3.0.
+The crates.io crate `metrum-ai-bench` (1.1.2 / 1.1.3) is yanked.
+
+---
+
 ## Metrum AI Bench CLI 1.1.3
 
 | | |
@@ -37,13 +53,13 @@ what the README already told tarball users.
   verify, and unpack + `PATH` commands.
 - Agent-driven benchmarking guide (Claude Code / Codex / OpenCode) with a
   sample prompt.
-- `metrum-ai-bench selftest` prints a final `selftest: ok` line (exit 0 =
+- `metrum-ai-bench-cli selftest` prints a final `selftest: ok` line (exit 0 =
   success).
 
 ### Changed
 
 - Deprecated `metrumbench-*` aliases remain in the archive through **1.3.0**
-  (stderr removal notice). They are back-compat only; prefer `metrum-ai-bench-*`.
+  (stderr removal notice). They are back-compat only; prefer `metrum-ai-bench-cli-*`.
 - Homebrew formula is generated for tap publish when configured; it is no
   longer attached as a free-floating GitHub Release asset.
 - Comparison docs no longer claim multi-modality as the differentiator over
@@ -111,7 +127,7 @@ required to run the quickstart against an unpacked tarball.
 
 ### Dummy server in release archives (Added)
 
-- Each `metrum-ai-bench` archive for Linux and macOS (`x86_64` and `aarch64`)
+- Each `metrum-ai-bench-cli` archive for Linux and macOS (`x86_64` and `aarch64`)
   includes a static `bin/dummy-model-server`.
 - Linux and macOS release smoke checks, and the Homebrew formula test, cover
   that binary.
@@ -164,7 +180,7 @@ bundles rather than any earlier `v1.0.0` archive.
 
 ### CLI and release docs (Fixed)
 
-- `metrum-ai-bench-prompts` and `metrum-ai-bench-strategic` expose `-V` /
+- `metrum-ai-bench-cli-prompts` and `metrum-ai-bench-cli-strategic` expose `-V` /
   `--version`; strategic also has `--version-only`.
 - Release verification examples use the v-prefixed archive names that ships
   attach.
@@ -200,13 +216,13 @@ Release candidate: prompt-library mix extractor and a `rand` soundness bump.
 
 ### Prompt library extractor (New)
 
-- `metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`) selects a
+- `metrum-ai-bench-cli-prompts` (also `metrum-ai-bench-cli prompts -- …`) selects a
   reproducible ISL/OSL mix from
   [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
   by mean or median within absolute tolerances.
 - Preferred `--count` may vary within `--count-slack`; source rows may repeat
   when needed to land both axes.
-- Writes JSONL for `metrum-ai-bench-llm` plus a selection report with
+- Writes JSONL for `metrum-ai-bench-cli-llm` plus a selection report with
   recommended `--num-requests` / `--max-tokens`.
 
 ### Dependencies (Changed)
@@ -238,7 +254,7 @@ Release candidate: naming alignment, publication SUT block, and policy documents
 
 ### Naming (Changed)
 
-- Crate and binaries aligned on `metrum-ai-bench` (mock server renamed
+- Crate and binaries aligned on `metrum-ai-bench-cli` (mock server renamed
   likewise). MLPerf export SUT name label updated to "Metrum AI Bench".
 - Summary schema v3: optional `sut`; nullable `environment.hostname`.
 
@@ -274,7 +290,7 @@ dependency and Actions maintenance. `1.0.0` remains reserved for eventual GA.
 
 Cross-platform release binaries via cargo-zigbuild for Linux glibc and macOS
 Darwin targets. Compile-free smoke jobs unpack each archive and run
-`metrum-ai-bench --help` / `selftest` before publish.
+`metrum-ai-bench-cli --help` / `selftest` before publish.
 
 ---
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Product-naming allowlist (shim paths only). Format: path-glob<TAB>regex
 # Approved customer-facing name: Metrum AI Bench CLI.
-# Binary/crate names remain metrum-ai-bench. Exceptions below cover legacy shims.
+# Binary/crate names remain metrum-ai-bench-cli. Exceptions below cover legacy shims.
 Cargo.toml	name = "metrumbench|path = "src/bin/metrumbench
 src/bin/metrumbench*	.
 README.md	metrumbench-\*|deprecated `metrumbench|shim will be removed|removed in 1\.3\.0
@@ -12,4 +12,12 @@ external-docs/**	metrumbench-\*|shim will be removed|removed in 1\.3\.0|deprecat
 scripts/live/**	metrumbench
 TRADEMARKS.md	^\*\*Forbidden\*\* \(non-exhaustive\): `MetrumBench`, `Insights CLI`, `Bench by Metrum`\.$
 docs/NAMING.md	^\| Formal \| `Metrum AI Bench CLI` \| `MetrumBench`, `Insights CLI`, `Bench by Metrum` \|$
-docs/NAMING.md	^\| Binary \| `metrum-ai-bench` \| `metrumbench` as the primary product binary name in new docs \|$
+docs/NAMING.md	^\| Binary \| `metrum-ai-bench-cli` \| `metrumbench` as the primary product binary name in new docs \|$
+Cargo.toml	name = "metrum-ai-bench"|path = "src/bin/metrum-ai-bench
+src/bin/metrum-ai-bench.rs	.
+src/bin/metrum-ai-bench-*.rs	.
+src/record.rs	metrum-ai-bench\.(request|summary)\.v
+README.md	deprecated `metrum-ai-bench|metrum-ai-bench\*` binary|removed in 1\.3\.0
+docs/**	metrum-ai-bench\*|pre-1\.2\.0|yanked|incorrectly named
+external-docs/**	metrum-ai-bench\*|yanked|pre-1\.2\.0|deprecated shims keep
+CHANGELOG.md	metrum-ai-bench

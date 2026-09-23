@@ -11,7 +11,7 @@ use std::io::Write;
 use std::process::Command;
 
 fn asr_bin() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-asr"))
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-asr"))
 }
 
 /// The dummy server always answers with this text.

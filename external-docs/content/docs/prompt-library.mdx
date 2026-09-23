@@ -8,10 +8,10 @@ sidebar_position: 5
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prompt library
 
-`metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`) selects a
+`metrum-ai-bench-cli-prompts` (also `metrum-ai-bench-cli prompts -- …`) selects a
 reproducible mix from the Hugging Face dataset
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-and writes JSONL that `metrum-ai-bench-llm` can consume with `--prompts`.
+and writes JSONL that `metrum-ai-bench-cli-llm` can consume with `--prompts`.
 
 Success is **ISL and OSL statistics within absolute CLI tolerances**, not an
 exact row count. `--count` is a preferred size; the selector may return fewer
@@ -64,7 +64,7 @@ selection report records `isl.counting_scope`.
 ## Extract a mix
 
 ```bash
-metrum-ai-bench-prompts \
+metrum-ai-bench-cli-prompts \
   --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample \
   --count 64 --count-slack 64 --seed 42 \
@@ -110,7 +110,7 @@ Keep `--warmup-requests 0` so llm does not drop measured mix slots. llm still
 uses one global `--max-tokens`.
 
 ```bash
-metrum-ai-bench-llm \
+metrum-ai-bench-cli-llm \
   --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy \
   --scenario prompt-library-median \

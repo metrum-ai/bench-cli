@@ -20,25 +20,25 @@ trust `--help`. Strategic, mock-server, unified dispatcher, and selftest are
 
 | Binary / subcommand | Role |
 | --- | --- |
-| `metrum-ai-bench` | Unified dispatcher (`llm`, `vlm`, `asr`, `imagegen`, `prompts`, `selftest`) |
-| `metrum-ai-bench-llm` | LLM modality client |
-| `metrum-ai-bench-vlm` | VLM modality client |
-| `metrum-ai-bench-asr` | ASR modality client |
-| `metrum-ai-bench-imagegen` | Image generation client |
-| `metrum-ai-bench-prompts` | Prompt-library mix extractor |
-| `metrum-ai-bench-strategic` | Sweeps, sessions, exports (**separate binary**, not a unified subcommand) |
-| `metrum-ai-bench-mock-server` | Deterministic local mock for strategic fixtures |
+| `metrum-ai-bench-cli` | Unified dispatcher (`llm`, `vlm`, `asr`, `imagegen`, `prompts`, `selftest`) |
+| `metrum-ai-bench-cli-llm` | LLM modality client |
+| `metrum-ai-bench-cli-vlm` | VLM modality client |
+| `metrum-ai-bench-cli-asr` | ASR modality client |
+| `metrum-ai-bench-cli-imagegen` | Image generation client |
+| `metrum-ai-bench-cli-prompts` | Prompt-library mix extractor |
+| `metrum-ai-bench-cli-strategic` | Sweeps, sessions, exports (**separate binary**, not a unified subcommand) |
+| `metrum-ai-bench-cli-mock-server` | Deterministic local mock for strategic fixtures |
 
 ```bash
-metrum-ai-bench --help
-metrum-ai-bench-llm --help
-metrum-ai-bench-strategic --help
+metrum-ai-bench-cli --help
+metrum-ai-bench-cli-llm --help
+metrum-ai-bench-cli-strategic --help
 ```
 
 Print version only (where supported):
 
 ```bash
-metrum-ai-bench-llm --version-only
+metrum-ai-bench-cli-llm --version-only
 ```
 
 ---
@@ -46,7 +46,7 @@ metrum-ai-bench-llm --version-only
 ## LLM required options (typical)
 
 ```text
-metrum-ai-bench-llm
+metrum-ai-bench-cli-llm
   --scenario <SCENARIO>
   --num-requests <N>
   --concurrency <N>
@@ -124,9 +124,9 @@ API-key pair patterns described in `--help`).
 Live `--help` on each binary is always authoritative.
 
 `scripts/render_cli_help.sh` regenerates `docs/CLI.md` for **modality and
-prompts binaries only** (`metrum-ai-bench-llm`, `-vlm`, `-asr`, `-imagegen`,
-`-prompts`). It does **not** dump `metrum-ai-bench` (unified), `selftest`,
-`metrum-ai-bench-strategic`, or `metrum-ai-bench-mock-server` - use those
+prompts binaries only** (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`,
+`-prompts`). It does **not** dump `metrum-ai-bench-cli` (unified), `selftest`,
+`metrum-ai-bench-cli-strategic`, or `metrum-ai-bench-cli-mock-server` - use those
 binaries' `--help` (and [Strategic benchmarking](./strategic-benchmarking))
 for their full surfaces.
 

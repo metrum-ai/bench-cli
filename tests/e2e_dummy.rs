@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn llm_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-llm"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
 }
 
 fn run_llm_against(url: &str) {

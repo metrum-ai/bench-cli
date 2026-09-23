@@ -3,14 +3,14 @@
 
 # CLI reference
 
-Generated from `metrum-ai-bench*` `--help`. Re-run
+Generated from `metrum-ai-bench-cli*` `--help`. Re-run
 `scripts/render_cli_help.sh` after flag changes. Live `--help` is
 authoritative if this file drifts.
 
-## `metrum-ai-bench`
+## `metrum-ai-bench-cli`
 
 ```text
-Usage: metrum-ai-bench <COMMAND>
+Usage: metrum-ai-bench-cli <COMMAND>
 
 Commands:
   llm       Text chat/completions benchmark
@@ -26,10 +26,10 @@ Options:
   -V, --version  Print version
 ```
 
-## `metrum-ai-bench-llm`
+## `metrum-ai-bench-cli-llm`
 
 ```text
-Usage: metrum-ai-bench-llm [OPTIONS] --scenario <SCENARIO> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --prompts <PROMPTS> --mode <MODE> --model <MODEL> --data-log <DATA_LOG> --max-tokens <MAX_TOKENS>
+Usage: metrum-ai-bench-cli-llm [OPTIONS] --scenario <SCENARIO> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --prompts <PROMPTS> --mode <MODE> --model <MODEL> --data-log <DATA_LOG> --max-tokens <MAX_TOKENS>
 
 Options:
       --version-only
@@ -128,10 +128,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-vlm`
+## `metrum-ai-bench-cli-vlm`
 
 ```text
-Usage: metrum-ai-bench-vlm [OPTIONS] --scenario <SCENARIO> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --prompts <PROMPTS> --model <MODEL> --data-log <DATA_LOG> --max-tokens <MAX_TOKENS>
+Usage: metrum-ai-bench-cli-vlm [OPTIONS] --scenario <SCENARIO> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --prompts <PROMPTS> --model <MODEL> --data-log <DATA_LOG> --max-tokens <MAX_TOKENS>
 
 Options:
       --version-only
@@ -240,10 +240,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-asr`
+## `metrum-ai-bench-cli-asr`
 
 ```text
-Usage: metrum-ai-bench-asr [OPTIONS]
+Usage: metrum-ai-bench-cli-asr [OPTIONS]
 
 Options:
       --version-only
@@ -428,10 +428,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-imagegen`
+## `metrum-ai-bench-cli-imagegen`
 
 ```text
-Usage: metrum-ai-bench-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --data-log <DATA_LOG>
+Usage: metrum-ai-bench-cli-imagegen [OPTIONS] --scenario <SCENARIO> --model <MODEL> --num-requests <NUM_REQUESTS> --concurrency <CONCURRENCY> --data-log <DATA_LOG>
 
 Options:
       --version-only
@@ -521,7 +521,7 @@ Options:
       --insecure
           Disable TLS certificate verification (opt-in; stamped into config)
       --artifact-dir <ARTIFACT_DIR>
-          [default: metrum-ai-bench-imagegen-artifacts]
+          [default: metrum-ai-bench-cli-imagegen-artifacts]
       --data-log <DATA_LOG>
           
       --summary-json <SUMMARY_JSON>
@@ -550,10 +550,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-prompts`
+## `metrum-ai-bench-cli-prompts`
 
 ```text
-Usage: metrum-ai-bench-prompts [OPTIONS]
+Usage: metrum-ai-bench-cli-prompts [OPTIONS]
 
 Options:
       --version-only
@@ -613,7 +613,7 @@ Options:
       --select-work-limit <SELECT_WORK_LIMIT>
           Selector work / iteration budget [default: 50000]
       --output <OUTPUT>
-          Write selected prompts as JSONL for metrum-ai-bench-llm
+          Write selected prompts as JSONL for metrum-ai-bench-cli-llm
       --report <REPORT>
           Write selection report JSON
   -h, --help
@@ -622,10 +622,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-strategic`
+## `metrum-ai-bench-cli-strategic`
 
 ```text
-Usage: metrum-ai-bench-strategic [OPTIONS]
+Usage: metrum-ai-bench-cli-strategic [OPTIONS]
 
 Options:
       --version-only
@@ -665,9 +665,9 @@ Options:
       --metrics-interval-ms <METRICS_INTERVAL_MS>
           [default: 250]
       --html <HTML>
-          [default: metrum-ai-bench-report.html]
+          [default: metrum-ai-bench-cli-report.html]
       --csv <CSV>
-          [default: metrum-ai-bench-requests.csv]
+          [default: metrum-ai-bench-cli-requests.csv]
       --mlperf-dir <MLPERF_DIR>
           
       --mlperf-scenario <MLPERF_SCENARIO>
@@ -675,7 +675,7 @@ Options:
       --otlp-endpoint <OTLP_ENDPOINT>
           
       --otlp-service-name <OTLP_SERVICE_NAME>
-          [default: metrum-ai-bench]
+          [default: metrum-ai-bench-cli]
       --timeout-seconds <TIMEOUT_SECONDS>
           [default: 300]
       --slo <METRIC=SECONDS>
@@ -686,10 +686,10 @@ Options:
           Print version
 ```
 
-## `metrum-ai-bench-mock-server`
+## `metrum-ai-bench-cli-mock-server`
 
 ```text
-Usage: metrum-ai-bench-mock-server [OPTIONS]
+Usage: metrum-ai-bench-cli-mock-server [OPTIONS]
 
 Options:
       --listen <LISTEN>          [default: 127.0.0.1:8080]

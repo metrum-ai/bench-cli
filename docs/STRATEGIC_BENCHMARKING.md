@@ -11,15 +11,15 @@ Streaming is off by default. Embeddings and rerank remain JSON, and `--tools`
 cannot be combined with `--streaming`.
 
 
-`metrum-ai-bench-strategic` is the runner for concurrency/rate sweeps, chat
+`metrum-ai-bench-cli-strategic` is the runner for concurrency/rate sweeps, chat
 sessions, structured output, embeddings, reranking, server correlation and
 portable exports. Existing modality-specific binaries remain supported.
 
 ## Sweep and server correlation
 
 ```bash
-metrum-ai-bench-mock-server --listen 127.0.0.1:8080 &
-metrum-ai-bench-strategic \
+metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 &
+metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8080/v1/chat/completions \
   --model mock --sweep 1,2,4,8,16 --sweep-by concurrency \
   --requests-per-stage 100 \
@@ -91,7 +91,7 @@ OTLP export is opt-in at build and runtime:
 ```bash
 cargo build --release --features otlp
 OTEL_EXPORTER_OTLP_HEADERS='authorization=Bearer token' \
-metrum-ai-bench-strategic ... --otlp-endpoint https://collector.example.com
+metrum-ai-bench-cli-strategic ... --otlp-endpoint https://collector.example.com
 ```
 
 The exporter emits standard OTLP/HTTP JSON spans to `/v1/traces` and summary
@@ -101,7 +101,7 @@ No network telemetry occurs unless `--otlp-endpoint` is supplied.
 
 ## Mock server
 
-`metrum-ai-bench-mock-server` is a deterministic Rust fixture supporting health,
+`metrum-ai-bench-cli-mock-server` is a deterministic Rust fixture supporting health,
 Prometheus metrics, chat/completions, embeddings, reranking, tool calls and
 JSON-schema-shaped output. `--latency-ms` controls delay and `--fail-every N`
 injects reproducible HTTP 503 responses. The existing Go dummy server remains
@@ -110,7 +110,7 @@ the deeper compatibility fixture.
 It is shipped as a binary target in the published crate:
 
 ```bash
-cargo install metrum-ai-bench --bin metrum-ai-bench-mock-server
+cargo install metrum-ai-bench-cli --bin metrum-ai-bench-cli-mock-server
 ```
 
 ## Distribution
@@ -124,5 +124,5 @@ runner, then create the GitHub Release. The crates.io upload runs only when the
 only when `HOMEBREW_TAP_REPOSITORY` and `HOMEBREW_TAP_TOKEN` are configured;
 both are skipped with a warning otherwise, so the release itself still succeeds.
 Manual dispatch requires a version-matching release tag and has separate
-publication switches. `packaging/homebrew/metrum-ai-bench.rb` is the formula
+publication switches. `packaging/homebrew/metrum-ai-bench-cli.rb` is the formula
 template; release automation fills all platform checksums.

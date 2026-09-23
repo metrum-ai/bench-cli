@@ -1,6 +1,6 @@
 ---
 title: Feature Reference
-description: Per-feature configuration lookup for Metrum AI Bench CLI 1.1.3.
+description: Per-feature configuration lookup for Metrum AI Bench CLI 1.2.0.
 sidebar_label: Feature Reference
 sidebar_position: 3
 ---
@@ -11,7 +11,7 @@ sidebar_position: 3
 # Feature Reference
 
 This page is a configuration reference for features shipping in Metrum AI Bench CLI
-**1.1.3**. Each section covers purpose, key parameters, and where to go
+**1.2.0**. Each section covers purpose, key parameters, and where to go
 next. Live `--help` remains authoritative for the full flag set.
 
 If you are new to a feature, the [User Guide](./user-guide) covers the workflow
@@ -30,16 +30,16 @@ Features documented here:
 
 ## Unified entry point {#unified-entry-point}
 
-`metrum-ai-bench` dispatches to modality and helper tools. Forward tool-specific
+`metrum-ai-bench-cli` dispatches to modality and helper tools. Forward tool-specific
 flags after `--`:
 
 ```bash
-metrum-ai-bench llm -- --url ... --scenario ... --data-log ...
-metrum-ai-bench prompts -- --revision ... --output mix.jsonl
-metrum-ai-bench selftest
+metrum-ai-bench-cli llm -- --url ... --scenario ... --data-log ...
+metrum-ai-bench-cli prompts -- --revision ... --output mix.jsonl
+metrum-ai-bench-cli selftest
 ```
 
-During v1.x, modality binaries (`metrum-ai-bench-llm`, …) remain callable
+During v1.x, modality binaries (`metrum-ai-bench-cli-llm`, …) remain callable
 directly. Deprecated legacy shims print a v2.0 removal notice.
 
 ---
@@ -48,10 +48,10 @@ directly. Deprecated legacy shims print a v2.0 removal notice.
 
 | Tool | Endpoint family | Required clap inputs (typical) |
 | --- | --- | --- |
-| `metrum-ai-bench-llm` | Chat / completions | `--scenario`, `--num-requests`, `--concurrency`, `--prompts`, `--mode`, `--model`, `--data-log`, `--max-tokens` (+ `--url` or `--endpoints-file`) |
-| `metrum-ai-bench-vlm` | Vision chat | Same family as LLM plus image fields in prompts |
-| `metrum-ai-bench-asr` | `/v1/audio/transcriptions` | Runtime-required: `--scenario`, `--num-requests`, `--input`, `--model` (+ `--url` or `--endpoints-file`); `--concurrency` / `--data-log` have defaults; optional `--ground-truth`, `--normalizer` |
-| `metrum-ai-bench-imagegen` | `/v1/images/generations` | `--scenario`, `--model`, `--num-requests`, `--concurrency`, `--data-log` (+ `--url` or endpoints); plus `--prompt` or `--prompts` (and size/model as needed) |
+| `metrum-ai-bench-cli-llm` | Chat / completions | `--scenario`, `--num-requests`, `--concurrency`, `--prompts`, `--mode`, `--model`, `--data-log`, `--max-tokens` (+ `--url` or `--endpoints-file`) |
+| `metrum-ai-bench-cli-vlm` | Vision chat | Same family as LLM plus image fields in prompts |
+| `metrum-ai-bench-cli-asr` | `/v1/audio/transcriptions` | Runtime-required: `--scenario`, `--num-requests`, `--input`, `--model` (+ `--url` or `--endpoints-file`); `--concurrency` / `--data-log` have defaults; optional `--ground-truth`, `--normalizer` |
+| `metrum-ai-bench-cli-imagegen` | `/v1/images/generations` | `--scenario`, `--model`, `--num-requests`, `--concurrency`, `--data-log` (+ `--url` or endpoints); plus `--prompt` or `--prompts` (and size/model as needed) |
 
 Shared load parameters (non-exhaustive): `--url` / `--endpoints-file`,
 `--warmup-requests`, `--seed`, `--request-rate`, `--arrival`,
@@ -97,8 +97,8 @@ Success = statistics within tolerance, not exact `--count`. Details:
 | Embeddings / rerank | `--kind embeddings` / `--kind rerank` |
 | OTLP (optional) | `--otlp-endpoint` (release binaries include `otlp`; see strategic docs) |
 
-`metrum-ai-bench-strategic` is a **separate binary**, not
-`metrum-ai-bench strategic`. Details: [Strategic benchmarking](./strategic-benchmarking).
+`metrum-ai-bench-cli-strategic` is a **separate binary**, not
+`metrum-ai-bench-cli strategic`. Details: [Strategic benchmarking](./strategic-benchmarking).
 
 ---
 
@@ -117,7 +117,7 @@ For publication requirements, see [Publishing-oriented runs](./user-guide#publis
 ## Selftest {#selftest}
 
 ```bash
-metrum-ai-bench selftest
+metrum-ai-bench-cli selftest
 ```
 
 Local sanity check after install or unpack. Prints a JSON environment object,

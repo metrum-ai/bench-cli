@@ -22,7 +22,7 @@ is not enough.
 
 ## Release archives
 
-Each signed `metrum-ai-bench-v<version>-<target>.tar.gz` contains the Rust
+Each signed `metrum-ai-bench-cli-v<version>-<target>.tar.gz` contains the Rust
 binaries, `bin/dummy-model-server`, `examples/` (including
 `sut.example.json`), and `test-data/` (fixtures such as `llm-hi.jsonl` used by
 the README quickstart). The dummy is a static Go binary cross-compiled with
@@ -81,7 +81,7 @@ Example verify (replace tag and target):
 ```bash
 TAG=v1.0.0
 TARGET=x86_64-unknown-linux-gnu
-ARCHIVE="metrum-ai-bench-${TAG}-${TARGET}.tar.gz"
+ARCHIVE="metrum-ai-bench-cli-${TAG}-${TARGET}.tar.gz"
 
 gh release download "$TAG" --pattern "${ARCHIVE}*"
 cosign verify-blob \

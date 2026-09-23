@@ -10,7 +10,7 @@ use std::io::Write;
 use std::process::Command;
 
 fn vlm_bin() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-vlm"))
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-vlm"))
 }
 
 struct Fixture {

@@ -1,5 +1,5 @@
 {
-  "schema_version": "metrum-ai-bench.reference.v1",
+  "schema_version": "metrum-ai-bench-cli.reference.v1",
   "workload": {
     "requests": 16,
     "concurrency": 4,

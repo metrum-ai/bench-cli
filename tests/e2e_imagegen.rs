@@ -16,13 +16,13 @@ fn shared_request_records(data_log: &std::path::Path) -> Vec<Value> {
         .filter(|v| {
             v.get("schema_version")
                 .and_then(Value::as_str)
-                .is_some_and(|s| s.starts_with("metrum-ai-bench.request."))
+                .is_some_and(|s| s.starts_with("metrum-ai-bench-cli.request."))
         })
         .collect()
 }
 
 fn imagegen_bin() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-imagegen"))
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-imagegen"))
 }
 
 struct Fixture {

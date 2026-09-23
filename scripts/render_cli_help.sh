@@ -14,14 +14,14 @@ BIN_DIR="${ROOT}/target/debug"
 die() { echo "error: $*" >&2; exit 1; }
 
 BINS=(
-  metrum-ai-bench
-  metrum-ai-bench-llm
-  metrum-ai-bench-vlm
-  metrum-ai-bench-asr
-  metrum-ai-bench-imagegen
-  metrum-ai-bench-prompts
-  metrum-ai-bench-strategic
-  metrum-ai-bench-mock-server
+  metrum-ai-bench-cli
+  metrum-ai-bench-cli-llm
+  metrum-ai-bench-cli-vlm
+  metrum-ai-bench-cli-asr
+  metrum-ai-bench-cli-imagegen
+  metrum-ai-bench-cli-prompts
+  metrum-ai-bench-cli-strategic
+  metrum-ai-bench-cli-mock-server
 )
 
 for bin in "${BINS[@]}"; do
@@ -42,7 +42,7 @@ render_help() {
   echo
   echo '# CLI reference'
   echo
-  echo 'Generated from `metrum-ai-bench*` `--help`. Re-run'
+  echo 'Generated from `metrum-ai-bench-cli*` `--help`. Re-run'
   echo '`scripts/render_cli_help.sh` after flag changes. Live `--help` is'
   echo 'authoritative if this file drifts.'
   echo
