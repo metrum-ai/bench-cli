@@ -19,7 +19,7 @@ this page and that file ever disagree, prefer the repository file and live
 
 ## Request v3
 
-`metrum-ai-bench.request.v3` records are flushed immediately on completion:
+`metrum-ai-bench-cli.request.v3` records are flushed immediately on completion:
 
 - optional `run_id` (same UUID as `summary.config.run_id` when stamped)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
@@ -51,7 +51,7 @@ on `request.v3`.
 
 ## Summary v3
 
-`metrum-ai-bench.summary.v3` is field-additive over v2. It contains measured
+`metrum-ai-bench-cli.summary.v3` is field-additive over v2. It contains measured
 attempted/success/error counts, rates, type-7 distributions,
 coordinated-omission-corrected latency, throughput-bin dispersion, SLO goodput,
 `pooled_mixture`, full `per_endpoint` distributions, environment metadata, and
@@ -95,7 +95,7 @@ measurements. For publication runs use `--sut <file> --require-sut` (implies
 
 When the unified entry point runs with `--runs N` (`N` &gt; 1), a seeded
 bootstrap aggregate is appended with schema version
-`metrum-ai-bench.cross-run.v1`.
+`metrum-ai-bench-cli.cross-run.v1`.
 
 ---
 

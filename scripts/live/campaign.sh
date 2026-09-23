@@ -212,14 +212,14 @@ cmd_demo() {
   cat <<'EOF'
 # After a campaign directory exists (gitignored live-results/):
 
-metrum-ai-bench-llm \
+metrum-ai-bench-cli-llm \
   --url http://HOST/v1/chat/completions --api-key dummy \
   --scenario demo-llm --num-requests 64 --concurrency 4 \
   --warmup-requests 8 --seed 7 --streaming --mode chat \
   --prompts prompts.jsonl --model Qwen/Qwen2.5-7B-Instruct \
   --max-tokens 128 --data-log demo-llm.jsonl
 
-metrum-ai-bench-vlm \
+metrum-ai-bench-cli-vlm \
   --url http://HOST/v1/chat/completions --api-key dummy \
   --scenario demo-vlm --num-requests 32 --concurrency 2 \
   --warmup-requests 8 --seed 7 --streaming \
@@ -227,7 +227,7 @@ metrum-ai-bench-vlm \
   --max-tokens 64 --data-log demo-vlm.jsonl
 
 # Open-loop LLM:
-metrum-ai-bench-llm ... --request-rate 8 --arrival constant --max-concurrency 8
+metrum-ai-bench-cli-llm ... --request-rate 8 --arrival constant --max-concurrency 8
 EOF
 }
 
@@ -438,7 +438,7 @@ lines = [
     "| Field | Value |",
     "|-------|-------|",
     f"| Campaign ID | `{campaign_id}` |",
-    f"| Bench package | `metrum-ai-bench-*` **{bench_ver}** |",
+    f"| Bench package | `metrum-ai-bench-cli-*` **{bench_ver}** |",
     f"| Date (UTC) | {now} |",
     f"| Validation | {cells} result files, {request_lines} measured request lines |",
     f"| Modalities | {', '.join(manifest.get('modalities_complete') or sorted({r['modality'] for r in rows}))} |",
@@ -551,7 +551,7 @@ run_llm_cell() {
   local prompts="${out}/prompts.jsonl"
   write_llm_prompts "${prompts}" "$((nreq + 16))"
   local bin
-  bin="$(resolve_bin metrum-ai-bench-llm)"
+  bin="$(resolve_bin metrum-ai-bench-cli-llm)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "campaign-llm-${cell}" \
@@ -597,7 +597,7 @@ PY
   local prompts="${out}/prompts.jsonl"
   write_vlm_prompts "${prompts}" "${img}" "$((nreq + 8))"
   local bin
-  bin="$(resolve_bin metrum-ai-bench-vlm)"
+  bin="$(resolve_bin metrum-ai-bench-cli-vlm)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "campaign-vlm-${cell}" \

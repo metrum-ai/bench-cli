@@ -12,8 +12,8 @@ Helpers for optional GPU smoke runs against real vLLM / SGLang on Shadeform.
 ## Prerequisites
 
 - `curl`, `jq`, and a Shadeform API key
-- Built binaries on `PATH` (after the rename): `metrum-ai-bench-llm`,
-  `metrum-ai-bench-vlm`, and `wait_for_vllm`
+- Built binaries on `PATH` (after the rename): `metrum-ai-bench-cli-llm`,
+  `metrum-ai-bench-cli-vlm`, and `wait_for_vllm`
 - `env.json` at the repo root (gitignored) **or** `SHADEFORM_API_KEY` in the
   environment. Never commit `env.json` or paste key values into PRs/logs.
 - Optional `SHADEFORM_SSH_KEY_ID` selects an uploaded key for diagnostic SSH.

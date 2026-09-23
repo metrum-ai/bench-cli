@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared JSONL prompt input loaders for metrum-ai-bench-llm and metrum-ai-bench-vlm.
+//! Shared JSONL prompt input loaders for metrum-ai-bench-cli-llm and metrum-ai-bench-cli-vlm.
 //! One JSON object per line; fail fast with file/line errors.
 //! Rejects .csv with a migration hint.
 //! Metrum AI Bench LLM supports local paths and HTTP(S) URLs for the prompts source.
-//! `read_utf8_from_path_or_url` is shared with metrum-ai-bench-asr JSONL manifests and optional ground-truth files.
+//! `read_utf8_from_path_or_url` is shared with metrum-ai-bench-cli-asr JSONL manifests and optional ground-truth files.
 
 use std::error::Error;
 use std::fs::File;
@@ -18,8 +18,8 @@ fn reject_csv(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     if lower.ends_with(".csv") {
         return Err(format!(
             "Prompt input must be JSONL, not CSV. File '{}' has a .csv extension. \
-             Migrate to JSONL: one JSON object per line with a \"prompt\" field (metrum-ai-bench-llm) \
-             or \"prompt\" and \"image_urls\" (metrum-ai-bench-vlm). Example: {{\"prompt\":\"Your prompt here\"}}",
+             Migrate to JSONL: one JSON object per line with a \"prompt\" field (metrum-ai-bench-cli-llm) \
+             or \"prompt\" and \"image_urls\" (metrum-ai-bench-cli-vlm). Example: {{\"prompt\":\"Your prompt here\"}}",
             path
         )
         .into());
@@ -34,7 +34,7 @@ pub fn is_http_url(path: &str) -> bool {
 }
 
 /// Read full UTF-8 text from a local file path or HTTP(S) URL (blocking GET).
-/// Used for metrum-ai-bench-llm/metrum-ai-bench-vlm-style JSONL sources, metrum-ai-bench-asr input manifests, ground-truth JSONL, etc.
+/// Used for metrum-ai-bench-cli-llm/metrum-ai-bench-cli-vlm-style JSONL sources, metrum-ai-bench-cli-asr input manifests, ground-truth JSONL, etc.
 pub fn read_utf8_from_path_or_url(source: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     let source = source.trim();
     if is_http_url(source) {
@@ -115,7 +115,7 @@ fn parse_metrum_ai_bench_llm_jsonl_content(
     Ok(prompts)
 }
 
-/// Load metrum-ai-bench-llm prompts from a JSONL file or HTTP(S) URL.
+/// Load metrum-ai-bench-cli-llm prompts from a JSONL file or HTTP(S) URL.
 /// Path may be a local file path or an http:// / https:// URL; content must be JSONL.
 /// Minimum contract: one object per line with "prompt" (string).
 /// Preserves embedded newlines in prompt text. Fails fast with file/line or URL/status errors.
@@ -127,7 +127,7 @@ pub fn load_metrum_ai_bench_llm_prompts(
     parse_metrum_ai_bench_llm_jsonl_content(&content, path)
 }
 
-/// Normalize an image reference for metrum-ai-bench-vlm: strip file:// to a path; leave http(s) and plain paths as-is.
+/// Normalize an image reference for metrum-ai-bench-cli-vlm: strip file:// to a path; leave http(s) and plain paths as-is.
 /// file:///path/to/file -> /path/to/file (Unix); file:///C:/foo -> /C:/foo (Windows).
 pub fn normalize_image_ref(s: &str) -> String {
     let s = s.trim();
@@ -138,7 +138,7 @@ pub fn normalize_image_ref(s: &str) -> String {
     }
 }
 
-/// Load metrum-ai-bench-vlm records from a JSONL file.
+/// Load metrum-ai-bench-cli-vlm records from a JSONL file.
 /// Minimum contract: one object per line with "prompt" (string) and "image_urls" (array of strings).
 /// Accepts optional "image_url" (string) for single-image rows and normalizes to image_urls internally.
 /// Image entries support HTTP(S) URLs, file:// URIs, and plain local paths; file:// is normalized to a path.

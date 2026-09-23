@@ -15,7 +15,7 @@ In a second shell:
 
 ```bash
 printf '%s\n' '{"prompt":"Hi"}' > /tmp/metrum-prompts.jsonl
-target/release/metrum-ai-bench-llm \
+target/release/metrum-ai-bench-cli-llm \
   --url http://127.0.0.1:18321/v1/chat/completions --api-key dummy \
   --scenario reference --num-requests 16 --concurrency 4 \
   --prompts /tmp/metrum-prompts.jsonl --mode chat --streaming \

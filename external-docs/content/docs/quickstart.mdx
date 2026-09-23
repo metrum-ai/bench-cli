@@ -17,13 +17,13 @@ toolchain is installed, the loop usually takes under ten minutes.
 1. Install a release binary or build from source
 2. Start the dummy OpenAI-compatible server
 3. Write a tiny JSONL prompt file
-4. Run `metrum-ai-bench-llm` (or the unified `metrum-ai-bench llm` entry)
+4. Run `metrum-ai-bench-cli-llm` (or the unified `metrum-ai-bench-cli llm` entry)
 5. Inspect the JSONL data log and end-of-run summary
 
 If you already have a binary and only need a smoke check:
 
 ```bash
-metrum-ai-bench selftest
+metrum-ai-bench-cli selftest
 ```
 
 ## Before you start
@@ -52,24 +52,24 @@ You'll need:
 
 ```bash
 # SHA-256 of the tarball (file next to the archive on the release)
-shasum -a 256 -c metrum-ai-bench-vVERSION-TARGET.tar.gz.sha256
+shasum -a 256 -c metrum-ai-bench-cli-vVERSION-TARGET.tar.gz.sha256
 
 # Optional: Sigstore keyless verify (requires cosign)
 cosign verify-blob \
-  --bundle metrum-ai-bench-vVERSION-TARGET.tar.gz.sigstore.json \
-  metrum-ai-bench-vVERSION-TARGET.tar.gz
+  --bundle metrum-ai-bench-cli-vVERSION-TARGET.tar.gz.sigstore.json \
+  metrum-ai-bench-cli-vVERSION-TARGET.tar.gz
 ```
 
 Each target also publishes a CycloneDX SBOM as
-`metrum-ai-bench-TARGET.cdx.json` on the same release.
+`metrum-ai-bench-cli-TARGET.cdx.json` on the same release.
 
 3. Unpack so the binaries are on your `PATH`. The archive has a versioned root
    with `bin/` inside it; do not strip that layout into `~/.local/bin` directly:
 
 ```bash
 mkdir -p ~/.local/opt ~/.local/bin
-tar -xzf metrum-ai-bench-vVERSION-TARGET.tar.gz -C ~/.local/opt
-ln -sf ~/.local/opt/metrum-ai-bench-vVERSION-TARGET/bin/* ~/.local/bin/
+tar -xzf metrum-ai-bench-cli-vVERSION-TARGET.tar.gz -C ~/.local/opt
+ln -sf ~/.local/opt/metrum-ai-bench-cli-vVERSION-TARGET/bin/* ~/.local/bin/
 ```
 
 Release archives are cross-built with cargo-zigbuild for:
@@ -129,7 +129,7 @@ modality tools. Use `--api-key dummy` on the client.
 
 This is the **Go dummy model server** (modality compatibility). For strategic
 sweeps, embeddings, and rerank fixtures, use the separate Rust
-`metrum-ai-bench-mock-server` instead - see
+`metrum-ai-bench-cli-mock-server` instead - see
 [Strategic benchmarking](./strategic-benchmarking).
 
 ---
@@ -147,7 +147,7 @@ printf '%s\n' '{"prompt":"Hi"}' > /tmp/metrum-prompts.jsonl
 ## 4. Run the LLM client
 
 ```bash
-metrum-ai-bench-llm \
+metrum-ai-bench-cli-llm \
   --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy \
   --scenario reference \
@@ -167,7 +167,7 @@ metrum-ai-bench-llm \
 Or through the unified entry point (forward modality flags after `--`):
 
 ```bash
-metrum-ai-bench llm -- \
+metrum-ai-bench-cli llm -- \
   --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy \
   --scenario reference \

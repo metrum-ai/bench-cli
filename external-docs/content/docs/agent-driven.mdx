@@ -36,10 +36,10 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 ```markdown
 # Metrum AI Bench CLI (agent notes)
 
-- Prefer `metrum-ai-bench <modality> -- <flags>` (unified entry). Standalone
-  binaries such as `metrum-ai-bench-llm` are equivalent for that modality.
+- Prefer `metrum-ai-bench-cli <modality> -- <flags>` (unified entry). Standalone
+  binaries such as `metrum-ai-bench-cli-llm` are equivalent for that modality.
 - Sweeps, knee, and session exports need the separate
-  `metrum-ai-bench-strategic` binary (not a unified subcommand).
+  `metrum-ai-bench-cli-strategic` binary (not a unified subcommand).
 - Endpoint: set URL via flags or env; never commit API keys.
   Example env: `BENCH_URL`, `BENCH_API_KEY`.
 - For any number you might publish or share: pass `--sut <file> --require-sut`.
@@ -61,7 +61,7 @@ agent execute the shell commands.
 Run a closed-loop LLM measure with Metrum AI Bench CLI.
 
 Constraints:
-- Use `metrum-ai-bench llm --` (unified entry). Do not invent interactive flags.
+- Use `metrum-ai-bench-cli llm --` (unified entry). Do not invent interactive flags.
 - Endpoint: $BENCH_URL (OpenAI-compatible chat completions URL).
 - API key: $BENCH_API_KEY (pass as --api-key; do not print the secret).
 - Model id: <MODEL_ID>
@@ -96,7 +96,7 @@ A concrete shell skeleton the agent should converge on (values are examples):
 mkdir -p bench-out
 # prompts.jsonl and sut.json created or edited by the agent as instructed
 
-metrum-ai-bench llm -- \
+metrum-ai-bench-cli llm -- \
   --url "$BENCH_URL" --api-key "$BENCH_API_KEY" \
   --scenario agent-smoke --model "$MODEL_ID" --mode chat --streaming \
   --prompts prompts.jsonl \
@@ -112,9 +112,9 @@ tail -n 1 bench-out/results.jsonl | jq \
 
 | Form | Role |
 | --- | --- |
-| `metrum-ai-bench llm -- …` | Preferred unified modality entry (`--` separates dispatcher args from modality flags) |
-| `metrum-ai-bench-llm …` | Same modality binary without the dispatcher |
-| `metrum-ai-bench-strategic …` | Concurrency/rate sweeps, knee, sessions, exports (separate binary) |
+| `metrum-ai-bench-cli llm -- …` | Preferred unified modality entry (`--` separates dispatcher args from modality flags) |
+| `metrum-ai-bench-cli-llm …` | Same modality binary without the dispatcher |
+| `metrum-ai-bench-cli-strategic …` | Concurrency/rate sweeps, knee, sessions, exports (separate binary) |
 
 Day-to-day concepts: [User Guide](./user-guide). Publishing rules:
 [Publishing-oriented runs](./user-guide#publishing-oriented-runs). Sweeps:

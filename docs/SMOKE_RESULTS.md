@@ -15,7 +15,7 @@ under gitignored `live-results/`. To re-run on a current release with
 | Field | Value |
 |-------|-------|
 | Campaign ID | `matrix-20260915-195537` |
-| Bench package | `metrum-ai-bench-*` **1.0.0-rc.1** (campaign `matrix-20260915`; see also RTX PRO 6000 campaign `v1rc1-20260915-190838` in CHANGELOG) |
+| Bench package | `metrum-ai-bench-cli-*` **1.0.0-rc.1** (campaign `matrix-20260915`; see also RTX PRO 6000 campaign `v1rc1-20260915-190838` in CHANGELOG) |
 | Date (UTC) | 2026-09-15 |
 | Engine | `vllm` / `vllm/vllm-openai:latest` |
 | Validation | 15 result files |

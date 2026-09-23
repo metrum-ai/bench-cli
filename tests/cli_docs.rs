@@ -6,7 +6,7 @@
 use std::process::Command;
 
 fn help_llm() -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-llm"))
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
         .arg("--help")
         .output()
         .expect("llm --help");
@@ -14,7 +14,7 @@ fn help_llm() -> String {
 }
 
 fn help_vlm() -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-vlm"))
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-vlm"))
         .arg("--help")
         .output()
         .expect("vlm --help");
@@ -22,7 +22,7 @@ fn help_vlm() -> String {
 }
 
 fn help_asr() -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-asr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-asr"))
         .arg("--help")
         .output()
         .expect("asr --help");

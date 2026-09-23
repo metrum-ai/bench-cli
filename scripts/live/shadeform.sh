@@ -6,7 +6,7 @@
 # create is dry-run by default; pass --execute to POST.
 # Always trap DELETE on exit when holding a real instance (see README).
 #
-# Binary names (after hygiene rename): metrum-ai-bench-llm, metrum-ai-bench-vlm
+# Binary names (after hygiene rename): metrum-ai-bench-cli-llm, metrum-ai-bench-cli-vlm
 
 set -euo pipefail
 
@@ -42,8 +42,8 @@ Subcommands:
   create             Build create payload (dry-run unless --execute)
   wait <id>          Poll until instance is active; print IP
   delete <id>        Delete instance (POST .../delete)
-  run-llm            Run metrum-ai-bench-llm (modest request count)
-  run-vlm            Run metrum-ai-bench-vlm (modest request count)
+  run-llm            Run metrum-ai-bench-cli-llm (modest request count)
+  run-vlm            Run metrum-ai-bench-cli-vlm (modest request count)
 
 create options:
   --engine vllm|sglang   Docker engine (default: vllm)
@@ -377,8 +377,8 @@ cmd_delete() {
 }
 
 resolve_bench_bin() {
-  local want="$1" # metrum-ai-bench-llm | metrum-ai-bench-vlm
-  local legacy="${want/metrum-ai-bench/metrumbench}"
+  local want="$1" # metrum-ai-bench-cli-llm | metrum-ai-bench-cli-vlm
+  local legacy="${want/metrum-ai-bench-cli/metrumbench}"
   if command -v "${want}" >/dev/null 2>&1; then
     echo "${want}"
     return 0
@@ -432,7 +432,7 @@ cmd_run_llm() {
   fi
 
   local bin
-  bin="$(resolve_bench_bin metrum-ai-bench-llm)"
+  bin="$(resolve_bench_bin metrum-ai-bench-cli-llm)"
   echo "# running ${bin} → ${out_dir}" >&2
   "${bin}" \
     --url "${url}" \
@@ -476,7 +476,7 @@ cmd_run_vlm() {
 
   mkdir -p "${out_dir}"
   local bin
-  bin="$(resolve_bench_bin metrum-ai-bench-vlm)"
+  bin="$(resolve_bench_bin metrum-ai-bench-cli-vlm)"
   echo "# running ${bin} → ${out_dir}" >&2
   "${bin}" \
     --url "${url}" \

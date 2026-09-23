@@ -22,7 +22,7 @@ fn strategic_sweep_exports_all_formats() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
     let address = listener.local_addr().expect("local address");
     drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-mock-server"))
+    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
         .args(["--listen", &address.to_string(), "--latency-ms", "10"])
         .stdout(Stdio::null())
         .spawn()
@@ -44,7 +44,7 @@ fn strategic_sweep_exports_all_formats() {
         r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}"#,
     )
     .expect("write schema");
-    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"))
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
         .args([
             "--url",
             &format!("http://{address}/v1/chat/completions"),
@@ -139,7 +139,7 @@ fn strategic_sessions_measure_ttft_only_when_streaming() {
     fs::write(&sessions, r#"{"session_id":"s1","messages":[{"role":"user","content":"Hello"},{"role":"user","content":"Again"}]}"#).expect("sessions");
     for streaming in [false, true] {
         let csv = directory.path().join("records.csv");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"));
         command
             .args([
                 "--url",
@@ -197,7 +197,7 @@ fn strategic_sessions_measure_ttft_only_when_streaming() {
 
 #[test]
 fn strategic_streaming_rejects_tools_clearly() {
-    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"))
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
         .args([
             "--url",
             "http://127.0.0.1:1",

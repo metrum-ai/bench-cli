@@ -25,7 +25,7 @@ grep -v "scripts/tests/gitleaks" .gitleaks.toml > "$TMP_CFG" || true
 cat > "$TMP_CFG" <<'EOF'
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-title = "metrum-ai-bench gitleaks fixture runner"
+title = "metrum-ai-bench-cli gitleaks fixture runner"
 [extend]
 useDefault = true
 [[rules]]

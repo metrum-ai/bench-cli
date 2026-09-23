@@ -29,7 +29,7 @@ throughput against `/v1/chat/completions` or completions.
 ```
 
 ```bash
-metrum-ai-bench-llm \
+metrum-ai-bench-cli-llm \
   --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy \
   --scenario example \
@@ -79,7 +79,7 @@ GitHub Release archives - see [Platforms](./platforms)).
 
 ```bash
 printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
-metrum-ai-bench-vlm \
+metrum-ai-bench-cli-vlm \
   --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy \
   --scenario vlm \
@@ -124,7 +124,7 @@ whole-run aggregates are not emitted.
 
 ```bash
 printf '%s\n' '{"id":"a","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}' > /tmp/asr.jsonl
-metrum-ai-bench-asr \
+metrum-ai-bench-cli-asr \
   --url http://127.0.0.1:18321/v1/audio/transcriptions \
   --api-key dummy \
   --scenario asr \
@@ -153,7 +153,7 @@ artifact writes happen after the timer stops. Artifact SHA-256 digests appear in
 `modality_labels.artifact_N_sha256` on request records.
 
 ```bash
-metrum-ai-bench-imagegen \
+metrum-ai-bench-cli-imagegen \
   --url http://127.0.0.1:18321/v1 \
   --api-key dummy \
   --scenario img \
@@ -174,5 +174,5 @@ imagegen without a real model. See the repository `dummy-model-server/README.md`
 for modality-specific flags beyond the Quickstart defaults.
 
 For strategic sweeps, embeddings, and rerank, use the Rust
-`metrum-ai-bench-mock-server` instead - see
+`metrum-ai-bench-cli-mock-server` instead - see
 [Strategic benchmarking](./strategic-benchmarking).

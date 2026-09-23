@@ -12,7 +12,7 @@ use std::io::Write;
 use std::process::Command;
 
 fn llm_bin() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-llm"))
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
 }
 
 struct Run {

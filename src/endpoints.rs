@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared endpoint resolution for metrum-ai-bench-llm, metrum-ai-bench-vlm, and metrum-ai-bench-asr.
+//! Shared endpoint resolution for metrum-ai-bench-cli-llm, metrum-ai-bench-cli-vlm, and metrum-ai-bench-cli-asr.
 //! Supports single (--url + --api-key) or multi (--endpoints-file YAML) with weighted round-robin.
 
 use serde::Deserialize;

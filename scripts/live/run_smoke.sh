@@ -2,11 +2,11 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Orchestrate wait_for_vllm + metrum-ai-bench-llm against an already-running
+# Orchestrate wait_for_vllm + metrum-ai-bench-cli-llm against an already-running
 # OpenAI-compatible endpoint (vLLM / SGLang). Does NOT create Shadeform
 # instances — point --host at a live IP (or localhost).
 #
-# Requires: wait_for_vllm and metrum-ai-bench-llm on PATH (or built under
+# Requires: wait_for_vllm and metrum-ai-bench-cli-llm on PATH (or built under
 # target/{debug,release}/). Results land in live-results/ (gitignored).
 
 set -euo pipefail
@@ -21,7 +21,7 @@ usage() {
 Usage: run_smoke.sh --host HOST [--port 8000]
 
 Requires a running instance (Shadeform or local docker). Modest load:
-  wait_for_vllm, then metrum-ai-bench-llm with 4 requests / concurrency 1.
+  wait_for_vllm, then metrum-ai-bench-cli-llm with 4 requests / concurrency 1.
 
 Does not create or delete Shadeform VMs. If you created a GPU with
 shadeform.sh create --execute, keep a trap DELETE around your session:

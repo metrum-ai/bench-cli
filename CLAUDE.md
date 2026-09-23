@@ -37,12 +37,12 @@
 - No em dashes in any docs or user-facing strings.
 
 ## Available Tools
-- `metrum-ai-bench`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`, `prompts`, and `selftest`.
-- `metrum-ai-bench-llm`: text chat/completions load measurement.
-- `metrum-ai-bench-vlm`: vision-language chat load measurement.
-- `metrum-ai-bench-asr`: audio transcription load measurement.
-- `metrum-ai-bench-imagegen`: image generation load measurement.
-- `metrum-ai-bench-prompts`: ISL/OSL mix selection from `metrum-ai/prompt-library`.
-- `metrum-ai-bench-strategic`: concurrency/rate sweeps, knee, sessions, and exports (separate binary).
-- `metrum-ai-bench-mock-server`: deterministic OpenAI-compatible mock for strategic fixtures.
+- `metrum-ai-bench-cli`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`, `prompts`, and `selftest`.
+- `metrum-ai-bench-cli-llm`: text chat/completions load measurement.
+- `metrum-ai-bench-cli-vlm`: vision-language chat load measurement.
+- `metrum-ai-bench-cli-asr`: audio transcription load measurement.
+- `metrum-ai-bench-cli-imagegen`: image generation load measurement.
+- `metrum-ai-bench-cli-prompts`: ISL/OSL mix selection from `metrum-ai/prompt-library`.
+- `metrum-ai-bench-cli-strategic`: concurrency/rate sweeps, knee, sessions, and exports (separate binary).
+- `metrum-ai-bench-cli-mock-server`: deterministic OpenAI-compatible mock for strategic fixtures.
 - Deprecated legacy modality shims remain through 1.2.x (removed in 1.3.0); do not document new usage against them.

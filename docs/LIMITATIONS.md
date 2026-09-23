@@ -95,9 +95,9 @@ counts.
 
 ## Prompt-library mixes vs llm scheduling
 
-`metrum-ai-bench-prompts` can solve for ISL/OSL mean or median within
+`metrum-ai-bench-cli-prompts` can solve for ISL/OSL mean or median within
 tolerances, including by repeating rows or leaving the preferred `--count`.
-`metrum-ai-bench-llm` still shuffles `--prompts` and cycles with modulo
+`metrum-ai-bench-cli-llm` still shuffles `--prompts` and cycles with modulo
 indexing under a **global** `--max-tokens`. The selected mix is preserved only
 when `--num-requests` equals the extractor's `selected_count` and
 `--warmup-requests` is `0`. Warmup or a mismatched request count changes the

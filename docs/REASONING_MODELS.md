@@ -48,7 +48,7 @@ the merged keys also appear in `config.body_template`. Set the value
 explicitly on every run, including when you intend the model default, so the
 manifest carries it.
 
-`--extra-body-file` exists on `metrum-ai-bench-imagegen` (JSON object from a
+`--extra-body-file` exists on `metrum-ai-bench-cli-imagegen` (JSON object from a
 file). LLM/VLM use `--extra-body-json` only. Strategic has neither flag.
 
 ## `--max-tokens` for thinking models
@@ -81,7 +81,7 @@ only in `reasoning_effort`, each with its own `--data-log` and the same
 
 ```bash
 for effort in xhigh medium low; do
-  target/release/metrum-ai-bench llm -- \
+  target/release/metrum-ai-bench-cli llm -- \
     --url "$URL" --api-key "$KEY" --model "$MODEL" --mode chat --streaming \
     --scenario "effort-${effort}" \
     --prompts prompts.jsonl --num-requests 64 --concurrency 32 --seed 7 \

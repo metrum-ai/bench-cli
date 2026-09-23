@@ -23,7 +23,7 @@ use std::path::{Component, Path, PathBuf};
 
 pub const HINT_TEMPLATE: &str =
     "\n\nPlease aim for approximately {target_output_length} words in your response.";
-pub const REPORT_SCHEMA_VERSION: &str = "metrum-ai-bench.prompt-mix.v1";
+pub const REPORT_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.prompt-mix.v1";
 pub const DEFAULT_DATASET: &str = "metrum-ai/prompt-library";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
@@ -861,7 +861,7 @@ pub fn default_cache_dir() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("metrum-ai-bench")
+        .join("metrum-ai-bench-cli")
         .join("prompt-library")
 }
 
@@ -889,7 +889,7 @@ fn hf_headers() -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("metrum-ai-bench-prompts"),
+        reqwest::header::HeaderValue::from_static("metrum-ai-bench-cli-prompts"),
     );
     if let Ok(token) = std::env::var("HF_TOKEN") {
         if !token.is_empty() {

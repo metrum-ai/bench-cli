@@ -7,12 +7,18 @@ use serde::Serialize;
 use std::time::Duration;
 
 /// Request record schema (field-additive: config stamps, first_byte_s).
-pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench.request.v3";
-pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench.summary.v3";
+pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench-cli.request.v3";
+pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench-cli.summary.v3";
 
 /// Historical schemas still accepted when auditing 0.1.82 JSONL (read-only).
-pub const SCHEMA_VERSION_REQUEST_V2: &str = "metrum-ai-bench.request.v2";
-pub const SCHEMA_VERSION_SUMMARY_V2: &str = "metrum-ai-bench.summary.v2";
+pub const SCHEMA_VERSION_REQUEST_V2: &str = "metrum-ai-bench-cli.request.v2";
+pub const SCHEMA_VERSION_SUMMARY_V2: &str = "metrum-ai-bench-cli.summary.v2";
+
+/// Pre-1.2.0 schema ids (crate was `metrum-ai-bench`). Still accepted for audit.
+pub const SCHEMA_VERSION_REQUEST_LEGACY: &str = "metrum-ai-bench.request.v3";
+pub const SCHEMA_VERSION_SUMMARY_LEGACY: &str = "metrum-ai-bench.summary.v3";
+pub const SCHEMA_VERSION_REQUEST_V2_LEGACY: &str = "metrum-ai-bench.request.v2";
+pub const SCHEMA_VERSION_SUMMARY_V2_LEGACY: &str = "metrum-ai-bench.summary.v2";
 
 /// Returns true for schema versions consumers may still parse for regression audit.
 pub fn accepts_audit_schema(schema_version: &str) -> bool {
@@ -22,6 +28,10 @@ pub fn accepts_audit_schema(schema_version: &str) -> bool {
             | SCHEMA_VERSION_SUMMARY
             | SCHEMA_VERSION_REQUEST_V2
             | SCHEMA_VERSION_SUMMARY_V2
+            | SCHEMA_VERSION_REQUEST_LEGACY
+            | SCHEMA_VERSION_SUMMARY_LEGACY
+            | SCHEMA_VERSION_REQUEST_V2_LEGACY
+            | SCHEMA_VERSION_SUMMARY_V2_LEGACY
     ) || schema_version.contains("imagegen.request")
         || schema_version.contains("imagegen.summary")
 }

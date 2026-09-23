@@ -8,10 +8,10 @@ sidebar_position: 4
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Strategic benchmarking
 
-`metrum-ai-bench-strategic` is the runner for concurrency/rate sweeps, chat
+`metrum-ai-bench-cli-strategic` is the runner for concurrency/rate sweeps, chat
 sessions, structured output, embeddings, reranking, optional server-metrics
 correlation, and portable exports. It is a **separate binary** (not
-`metrum-ai-bench strategic`). Existing modality-specific binaries remain
+`metrum-ai-bench-cli strategic`). Existing modality-specific binaries remain
 supported for single-cell runs.
 
 ### Which local server to use
@@ -19,20 +19,20 @@ supported for single-cell runs.
 | Fixture | Binary | Typical use |
 | --- | --- | --- |
 | Go dummy model server | `go run ./dummy-model-server/cmd/dummy-model-server` | LLM/VLM/ASR/imagegen compatibility (Quickstart uses port **18321**) |
-| Rust mock server | `metrum-ai-bench-mock-server` | Deterministic strategic fixtures (health, Prometheus metrics, chat, embeddings, rerank, tools, JSON schema); examples often use **8080** |
+| Rust mock server | `metrum-ai-bench-cli-mock-server` | Deterministic strategic fixtures (health, Prometheus metrics, chat, embeddings, rerank, tools, JSON schema); examples often use **8080** |
 
 Do not mix them casually: the Go dummy is the deeper modality compatibility
 stub; the Rust mock is the strategic/embeddings/rerank fixture.
 
 ### Obtaining the mock server
 
-`metrum-ai-bench-mock-server` ships in GitHub Release archives alongside the
+`metrum-ai-bench-cli-mock-server` ships in GitHub Release archives alongside the
 other binaries. From a checkout:
 
 ```bash
-cargo build --release --bin metrum-ai-bench-mock-server
+cargo build --release --bin metrum-ai-bench-cli-mock-server
 # or, when the crate is published:
-cargo install metrum-ai-bench --bin metrum-ai-bench-mock-server
+cargo install metrum-ai-bench-cli --bin metrum-ai-bench-cli-mock-server
 ```
 
 Useful flags: `--listen` (default `127.0.0.1:8080`), `--latency-ms`,
@@ -43,8 +43,8 @@ Useful flags: `--listen` (default `127.0.0.1:8080`), `--latency-ms`,
 ## Sweep and server correlation
 
 ```bash
-metrum-ai-bench-mock-server --listen 127.0.0.1:8080 &
-metrum-ai-bench-strategic \
+metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 &
+metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8080/v1/chat/completions \
   --model mock \
   --sweep 1,2,4,8,16 \
@@ -109,7 +109,7 @@ occurs unless `--otlp-endpoint` is supplied:
 ```bash
 cargo build --release --features otlp
 OTEL_EXPORTER_OTLP_HEADERS='authorization=Bearer token' \
-metrum-ai-bench-strategic ... --otlp-endpoint https://collector.example.com
+metrum-ai-bench-cli-strategic ... --otlp-endpoint https://collector.example.com
 ```
 
 The exporter emits OTLP/HTTP JSON spans to `/v1/traces` and summary request

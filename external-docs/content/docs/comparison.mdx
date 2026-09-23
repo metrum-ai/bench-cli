@@ -23,7 +23,7 @@ exists.
 
 | Capability | Where |
 | --- | --- |
-| Four OpenAI-compatible modalities: LLM, VLM, ASR, imagegen | `metrum-ai-bench {llm,vlm,asr,imagegen}` |
+| Four OpenAI-compatible modalities: LLM, VLM, ASR, imagegen | `metrum-ai-bench-cli {llm,vlm,asr,imagegen}` |
 | Open-loop scheduling with seeded Poisson (or constant) arrivals | `--request-rate`, `--arrival`, `--seed` |
 | Pooled multi-endpoint distribution | `--endpoints-file`; aggregates labeled `pooled_mixture` |
 | TTFT = first **visible** output token (not first-byte headers) | `ttft_s`; headers are `first_byte_s` |
@@ -52,7 +52,7 @@ exists.
 
 ## MLPerf export disclaimer
 
-`metrum-ai-bench-strategic --mlperf-dir …` writes LoadGen-shaped text for
+`metrum-ai-bench-cli-strategic --mlperf-dir …` writes LoadGen-shaped text for
 parser-oriented interoperability. It is **not** an audited submission. Exports
 begin with an **UNOFFICIAL** disclaimer and refuse the official LoadGen
 substring `Result is : VALID`.

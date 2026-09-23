@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.2.0 (2026-09-23)
+
+### Changed
+- Crate, binaries, release archives, and Homebrew formula rename to
+  **`metrum-ai-bench-cli`** (was `metrum-ai-bench`) to match the formal product
+  name. JSONL schema ids are now `metrum-ai-bench-cli.*.v3`; pre-1.2.0
+  `metrum-ai-bench.*.v*` ids remain readable for audit.
+- Deprecated shims keep the old `metrum-ai-bench*` binary names through
+  **1.3.0** (stderr removal notice), in addition to `metrumbench-*`.
+- crates.io publishes **`metrum-ai-bench-cli`**. The incorrectly named
+  `metrum-ai-bench` 1.1.2 / 1.1.3 crates are yanked.
+
 ## 1.1.3 (2026-09-23)
 
 ### Added
@@ -12,7 +24,7 @@
   `sut.example.json` and `llm-hi.jsonl`).
 - Docs quickstart: tarball `bin/dummy-model-server`, SHA-256 / Sigstore verify,
   unpack + `PATH` commands; `/docs` client redirect to quickstart.
-- `metrum-ai-bench selftest` prints a final `selftest: ok` line after the
+- `metrum-ai-bench-cli selftest` prints a final `selftest: ok` line after the
   environment JSON (exit 0 = success).
 
 ### Changed
@@ -104,19 +116,19 @@ rewritten commit.
 - `--quiet` and `NO_BANNER=1`: suppress ASCII banner art; one-line identity
   remains. Documented in README Install and regenerated `docs/CLI.md`.
 - Shared `chat_stream` consumer for LLM, VLM, and strategic chat streaming.
-- `metrum-ai-bench-strategic --streaming`: opt-in SSE for chat turns with
+- `metrum-ai-bench-cli-strategic --streaming`: opt-in SSE for chat turns with
   per-turn `first_byte_s` / `ttft_s` and TTFT SLO enforcement.
 - Known limitation: gateways that synthesize SSE from unary upstream calls
   report total latency as TTFT (undetectable client-side).
 
 ### Fixed
-- `metrum-ai-bench-prompts` Hub checksum verification is scoped to the
+- `metrum-ai-bench-cli-prompts` Hub checksum verification is scoped to the
   requested dataset config so `full` and `sample` no longer collide on shared
   parquet basenames (#101).
 - Prompt mix selection prefers a unique draw from an exact ISL/OSL cell before
   the sparse hill-climber, so `--count-slack 0` and `--no-repeats` succeed when
   the target bucket is fully populated (#102).
-- `metrum-ai-bench-prompts` and `metrum-ai-bench-strategic` expose clap
+- `metrum-ai-bench-cli-prompts` and `metrum-ai-bench-cli-strategic` expose clap
   `-V` / `--version`; strategic also supports `--version-only` (#99).
 - `docs/RELEASING.md` cosign verify example uses the v-prefixed archive names
   that the release workflow actually attaches (#100).
@@ -152,12 +164,12 @@ rewritten commit.
 Release candidate: `rand` 0.10.2 (soundness) and prompt-library mix extractor.
 
 ### Added
-- `metrum-ai-bench-prompts` (also `metrum-ai-bench prompts -- …`): select a
+- `metrum-ai-bench-cli-prompts` (also `metrum-ai-bench-cli prompts -- …`): select a
   reproducible ISL/OSL mix from
   [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
   by mean or median within absolute tolerances; preferred `--count` may vary
   within `--count-slack` and source rows may repeat. Writes JSONL for
-  `metrum-ai-bench-llm` plus a selection report with recommended
+  `metrum-ai-bench-cli-llm` plus a selection report with recommended
   `--num-requests` / `--max-tokens`. Docs: `docs/PROMPT_LIBRARY.md`.
 
 ### Changed
@@ -178,8 +190,8 @@ Release candidate: naming alignment, publication SUT block, policy drafts, and C
 - docs/RELEASING.md (publish variables and cosign notes).
 
 ### Changed
-- Crate renamed `metrumbench` → `metrum-ai-bench` to match the `metrum-ai-bench` binary. Not yet published to crates.io; no migration needed.
-- Mock server binary renamed `metrumbench-mock-server` → `metrum-ai-bench-mock-server`.
+- Crate renamed `metrumbench` → `metrum-ai-bench-cli` to match the `metrum-ai-bench-cli` binary. Not yet published to crates.io; no migration needed.
+- Mock server binary renamed `metrumbench-mock-server` → `metrum-ai-bench-cli-mock-server`.
 - MLPerf interoperability export: SUT name field `"MetrumBench"` → `"Metrum AI Bench"` (label only; no metric or schema change).
 - Tarball prefix and Homebrew formula follow the crate name.
 - Summary schema v3: optional `sut` field added; `environment.hostname` is now nullable. Additive; readers must treat both as optional.
@@ -215,7 +227,7 @@ Release candidate: cross-platform release binaries via cargo-zigbuild.
   2.17 floor) and `*-apple-darwin`. Not musl; TLS remains rustls.
 - Binary identity differs from rc.2 (Zig linker / glibc floor / Darwin SDK in
   the zigbuild image). Compile-free smoke jobs unpack each archive and run
-  `metrum-ai-bench --help` / `selftest` on matching Linux and macOS runners
+  `metrum-ai-bench-cli --help` / `selftest` on matching Linux and macOS runners
   before GitHub Release, crates.io, and Homebrew publish.
 
 ## 1.0.0-rc.2 (2026-09-16)
@@ -287,7 +299,7 @@ Breaking / schema notes:
 
 ## v0.1.80 (2026-09-14)
 
-- Measurement core: complete-line SSE parser, Hyndman–Fan type 7 percentiles, ITL vs N−1 TPOT, per-request JSONL (`metrum-ai-bench.request.v2`), Ctrl-C partial summaries, `--warmup-requests`, `--seed`, `--request-rate` / `--arrival`, `--ignore-eos`, `--extra-body-json`, `--unique-prompts`.
+- Measurement core: complete-line SSE parser, Hyndman–Fan type 7 percentiles, ITL vs N−1 TPOT, per-request JSONL (`metrum-ai-bench-cli.request.v2`), Ctrl-C partial summaries, `--warmup-requests`, `--seed`, `--request-rate` / `--arrival`, `--ignore-eos`, `--extra-body-json`, `--unique-prompts`.
 - VLM: optional `--streaming` TTFT (non-streaming no longer fabricates TTFT); images preloaded before the measurement window.
 - ASR: Whisper-like text normalization for WER; request clock starts after audio is read; `throughput.rtfx` = total audio seconds / wall time.
 - Imagegen: monotonic `Instant` latency; seeded prompt shuffle; `--warmup-requests`.

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "metrum-ai-bench"
-version = "1.1.3"
+name = "metrum-ai-bench-cli"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Metrum AI Bench CLI: load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
@@ -27,6 +27,10 @@ exclude = [
     "test-data/endpoints-4servers.yaml",
 ]
 
+[lib]
+name = "metrum_ai_bench"
+path = "src/lib.rs"
+
 [features]
 default = []
 tokenizer = ["dep:tokenizers"]
@@ -34,32 +38,32 @@ otlp = []
 
 # Primary binary names (preferred).
 [[bin]]
-name = "metrum-ai-bench-llm"
-path = "src/bin/metrum-ai-bench-llm.rs"
+name = "metrum-ai-bench-cli-llm"
+path = "src/bin/metrum-ai-bench-cli-llm.rs"
 
 [[bin]]
-name = "metrum-ai-bench-vlm"
-path = "src/bin/metrum-ai-bench-vlm.rs"
+name = "metrum-ai-bench-cli-vlm"
+path = "src/bin/metrum-ai-bench-cli-vlm.rs"
 
 [[bin]]
-name = "metrum-ai-bench-asr"
-path = "src/bin/metrum-ai-bench-asr.rs"
+name = "metrum-ai-bench-cli-asr"
+path = "src/bin/metrum-ai-bench-cli-asr.rs"
 
 [[bin]]
-name = "metrum-ai-bench-imagegen"
-path = "src/bin/metrum-ai-bench-imagegen.rs"
+name = "metrum-ai-bench-cli-imagegen"
+path = "src/bin/metrum-ai-bench-cli-imagegen.rs"
 
 [[bin]]
-name = "metrum-ai-bench"
-path = "src/bin/metrum-ai-bench.rs"
+name = "metrum-ai-bench-cli"
+path = "src/bin/metrum-ai-bench-cli.rs"
 
 [[bin]]
-name = "metrum-ai-bench-prompts"
-path = "src/bin/metrum-ai-bench-prompts.rs"
+name = "metrum-ai-bench-cli-prompts"
+path = "src/bin/metrum-ai-bench-cli-prompts.rs"
 
 [[bin]]
-name = "metrum-ai-bench-strategic"
-path = "src/bin/metrum-ai-bench-strategic.rs"
+name = "metrum-ai-bench-cli-strategic"
+path = "src/bin/metrum-ai-bench-cli-strategic.rs"
 
 # Deprecated shim binaries (thin re-exec wrappers).
 [[bin]]
@@ -77,6 +81,40 @@ path = "src/bin/metrumbench-asr.rs"
 [[bin]]
 name = "metrumbench-imagegen"
 path = "src/bin/metrumbench-imagegen.rs"
+
+[[bin]]
+name = "metrum-ai-bench-cli-mock-server"
+path = "src/bin/metrum-ai-bench-cli-mock-server.rs"
+
+
+# Deprecated pre-1.2.0 binary names (thin re-exec wrappers; removed in 1.3.0).
+[[bin]]
+name = "metrum-ai-bench"
+path = "src/bin/metrum-ai-bench.rs"
+
+[[bin]]
+name = "metrum-ai-bench-llm"
+path = "src/bin/metrum-ai-bench-llm.rs"
+
+[[bin]]
+name = "metrum-ai-bench-vlm"
+path = "src/bin/metrum-ai-bench-vlm.rs"
+
+[[bin]]
+name = "metrum-ai-bench-asr"
+path = "src/bin/metrum-ai-bench-asr.rs"
+
+[[bin]]
+name = "metrum-ai-bench-imagegen"
+path = "src/bin/metrum-ai-bench-imagegen.rs"
+
+[[bin]]
+name = "metrum-ai-bench-prompts"
+path = "src/bin/metrum-ai-bench-prompts.rs"
+
+[[bin]]
+name = "metrum-ai-bench-strategic"
+path = "src/bin/metrum-ai-bench-strategic.rs"
 
 [[bin]]
 name = "metrum-ai-bench-mock-server"

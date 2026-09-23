@@ -13,27 +13,27 @@ use std::process::Command;
 // CARGO_TARGET_DIR. The previous lookup uppercased the name and silently fell
 // back to target/debug, which only exists in the default layout.
 fn metrum_ai_bench_llm_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-llm"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
 }
 
 fn metrum_ai_bench_vlm_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-vlm"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-vlm"))
 }
 
 fn metrum_ai_bench_asr_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-asr"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-asr"))
 }
 
 fn metrum_ai_bench_prompts_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-prompts"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-prompts"))
 }
 
 fn metrum_ai_bench_strategic_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-strategic"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
 }
 
 fn metrum_ai_bench_imagegen_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-imagegen"))
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-imagegen"))
 }
 
 fn combined_output(out: &std::process::Output) -> String {
@@ -49,10 +49,10 @@ fn metrum_ai_bench_llm_requires_api_key_with_url() {
     let out = Command::new(metrum_ai_bench_llm_bin())
         .args(["--url", "http://127.0.0.1:9/v1"])
         .output()
-        .expect("run metrum-ai-bench-llm");
+        .expect("run metrum-ai-bench-cli-llm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-llm --url without --api-key must fail at parse time"
+        "metrum-ai-bench-cli-llm --url without --api-key must fail at parse time"
     );
     let text = combined_output(&out);
     assert!(
@@ -70,10 +70,10 @@ fn metrum_ai_bench_vlm_requires_api_key_with_url() {
     let out = Command::new(metrum_ai_bench_vlm_bin())
         .args(["--url", "http://127.0.0.1:9/v1"])
         .output()
-        .expect("run metrum-ai-bench-vlm");
+        .expect("run metrum-ai-bench-cli-vlm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-vlm --url without --api-key must fail at parse time"
+        "metrum-ai-bench-cli-vlm --url without --api-key must fail at parse time"
     );
     let text = combined_output(&out);
     assert!(
@@ -91,10 +91,10 @@ fn metrum_ai_bench_asr_requires_api_key_with_url() {
     let out = Command::new(metrum_ai_bench_asr_bin())
         .args(["--url", "http://127.0.0.1:9/v1"])
         .output()
-        .expect("run metrum-ai-bench-asr");
+        .expect("run metrum-ai-bench-cli-asr");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-asr --url without --api-key must fail at parse time"
+        "metrum-ai-bench-cli-asr --url without --api-key must fail at parse time"
     );
     let text = combined_output(&out);
     assert!(
@@ -112,10 +112,10 @@ fn metrum_ai_bench_imagegen_requires_api_key_with_url() {
     let out = Command::new(metrum_ai_bench_imagegen_bin())
         .args(["--url", "http://127.0.0.1:9/v1"])
         .output()
-        .expect("run metrum-ai-bench-imagegen");
+        .expect("run metrum-ai-bench-cli-imagegen");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-imagegen --url without --api-key must fail at parse time"
+        "metrum-ai-bench-cli-imagegen --url without --api-key must fail at parse time"
     );
     let text = combined_output(&out);
     assert!(
@@ -165,7 +165,7 @@ fn metrum_ai_bench_llm_endpoints_file_does_not_require_url_or_api_key() {
             "1",
         ])
         .output()
-        .expect("run metrum-ai-bench-llm with endpoints-file");
+        .expect("run metrum-ai-bench-cli-llm with endpoints-file");
     let text = combined_output(&out);
     assert!(
         !text.contains("required arguments were not provided"),
@@ -201,7 +201,7 @@ fn metrum_ai_bench_llm_quiet_prints_one_line_identity() {
         ])
         .env_remove("NO_BANNER")
         .output()
-        .expect("run metrum-ai-bench-llm --quiet");
+        .expect("run metrum-ai-bench-cli-llm --quiet");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         !stdout.contains("@@@"),
@@ -210,7 +210,7 @@ fn metrum_ai_bench_llm_quiet_prints_one_line_identity() {
     assert!(
         stdout
             .lines()
-            .any(|l| l.starts_with("Metrum AI Bench metrum-ai-bench-llm ")),
+            .any(|l| l.starts_with("Metrum AI Bench metrum-ai-bench-cli-llm ")),
         "quiet must print one-line identity:\n{stdout}"
     );
 }
@@ -245,7 +245,7 @@ fn version_only_works_without_skip_env_vars() {
         .env_clear()
         .envs(&scrubbed)
         .output()
-        .expect("run metrum-ai-bench-asr --version-only");
+        .expect("run metrum-ai-bench-cli-asr --version-only");
 
     assert!(
         out.status.success(),
@@ -255,7 +255,7 @@ fn version_only_works_without_skip_env_vars() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("metrum-ai-bench-asr version"),
+        stdout.contains("metrum-ai-bench-cli-asr version"),
         "unexpected version output: {}",
         stdout
     );
@@ -287,10 +287,10 @@ fn metrum_ai_bench_llm_rejects_concurrency_zero() {
             "16",
         ])
         .output()
-        .expect("run metrum-ai-bench-llm");
+        .expect("run metrum-ai-bench-cli-llm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-llm must reject --concurrency 0"
+        "metrum-ai-bench-cli-llm must reject --concurrency 0"
     );
 }
 
@@ -320,10 +320,10 @@ fn metrum_ai_bench_llm_rejects_invalid_mode() {
             "16",
         ])
         .output()
-        .expect("run metrum-ai-bench-llm");
+        .expect("run metrum-ai-bench-cli-llm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-llm must reject invalid --mode"
+        "metrum-ai-bench-cli-llm must reject invalid --mode"
     );
 }
 
@@ -353,10 +353,10 @@ fn metrum_ai_bench_llm_rejects_num_requests_zero() {
             "16",
         ])
         .output()
-        .expect("run metrum-ai-bench-llm");
+        .expect("run metrum-ai-bench-cli-llm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-llm must reject --num-requests 0"
+        "metrum-ai-bench-cli-llm must reject --num-requests 0"
     );
 }
 
@@ -384,10 +384,10 @@ fn metrum_ai_bench_vlm_rejects_concurrency_zero() {
             "16",
         ])
         .output()
-        .expect("run metrum-ai-bench-vlm");
+        .expect("run metrum-ai-bench-cli-vlm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-vlm must reject --concurrency 0"
+        "metrum-ai-bench-cli-vlm must reject --concurrency 0"
     );
 }
 
@@ -417,10 +417,10 @@ fn metrum_ai_bench_vlm_rejects_image_cache_size_zero() {
             "0",
         ])
         .output()
-        .expect("run metrum-ai-bench-vlm");
+        .expect("run metrum-ai-bench-cli-vlm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-vlm must reject --image-cache-size 0"
+        "metrum-ai-bench-cli-vlm must reject --image-cache-size 0"
     );
 }
 
@@ -450,10 +450,10 @@ fn metrum_ai_bench_vlm_rejects_invalid_image_detail() {
             "not-a-detail",
         ])
         .output()
-        .expect("run metrum-ai-bench-vlm");
+        .expect("run metrum-ai-bench-cli-vlm");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-vlm must reject invalid --image-detail"
+        "metrum-ai-bench-cli-vlm must reject invalid --image-detail"
     );
 }
 
@@ -477,10 +477,10 @@ fn metrum_ai_bench_asr_rejects_concurrency_zero() {
             "whisper-1",
         ])
         .output()
-        .expect("run metrum-ai-bench-asr");
+        .expect("run metrum-ai-bench-cli-asr");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-asr must reject --concurrency 0"
+        "metrum-ai-bench-cli-asr must reject --concurrency 0"
     );
 }
 
@@ -504,10 +504,10 @@ fn metrum_ai_bench_asr_rejects_num_requests_zero() {
             "whisper-1",
         ])
         .output()
-        .expect("run metrum-ai-bench-asr");
+        .expect("run metrum-ai-bench-cli-asr");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-asr must reject --num-requests 0"
+        "metrum-ai-bench-cli-asr must reject --num-requests 0"
     );
 }
 
@@ -533,10 +533,10 @@ fn metrum_ai_bench_asr_rejects_invalid_response_format() {
             "not-a-format",
         ])
         .output()
-        .expect("run metrum-ai-bench-asr");
+        .expect("run metrum-ai-bench-cli-asr");
     assert!(
         !out.status.success(),
-        "metrum-ai-bench-asr must reject invalid --response-format"
+        "metrum-ai-bench-cli-asr must reject invalid --response-format"
     );
 }
 
@@ -545,7 +545,7 @@ fn metrum_ai_bench_prompts_version_only() {
     let out = Command::new(metrum_ai_bench_prompts_bin())
         .args(["--version-only"])
         .output()
-        .expect("run metrum-ai-bench-prompts --version-only");
+        .expect("run metrum-ai-bench-cli-prompts --version-only");
     assert!(
         out.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -553,7 +553,7 @@ fn metrum_ai_bench_prompts_version_only() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("metrum-ai-bench-prompts version"));
+    assert!(stdout.contains("metrum-ai-bench-cli-prompts version"));
 }
 
 #[test]
@@ -561,7 +561,7 @@ fn metrum_ai_bench_prompts_version_flag() {
     let out = Command::new(metrum_ai_bench_prompts_bin())
         .args(["--version"])
         .output()
-        .expect("run metrum-ai-bench-prompts --version");
+        .expect("run metrum-ai-bench-cli-prompts --version");
     assert!(
         out.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -581,7 +581,7 @@ fn metrum_ai_bench_strategic_version_flags() {
         let out = Command::new(metrum_ai_bench_strategic_bin())
             .args([flag])
             .output()
-            .unwrap_or_else(|_| panic!("run metrum-ai-bench-strategic {flag}"));
+            .unwrap_or_else(|_| panic!("run metrum-ai-bench-cli-strategic {flag}"));
         assert!(
             out.status.success(),
             "{flag} stdout:\n{}\nstderr:\n{}",
@@ -599,7 +599,7 @@ fn metrum_ai_bench_strategic_version_flags() {
         .output()
         .expect("strategic --version-only");
     let stdout = String::from_utf8_lossy(&only.stdout);
-    assert!(stdout.contains("metrum-ai-bench-strategic version"));
+    assert!(stdout.contains("metrum-ai-bench-cli-strategic version"));
 }
 
 #[test]
@@ -650,7 +650,7 @@ fn metrum_ai_bench_prompts_selects_from_local_jsonl() {
             report.to_str().unwrap(),
         ])
         .output()
-        .expect("run metrum-ai-bench-prompts");
+        .expect("run metrum-ai-bench-cli-prompts");
     assert!(
         out.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -705,7 +705,7 @@ fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
             report.to_str().unwrap(),
         ])
         .output()
-        .expect("run metrum-ai-bench-prompts");
+        .expect("run metrum-ai-bench-cli-prompts");
     assert!(!out.status.success());
     assert!(!output.exists(), "must not write JSONL on failure");
     assert!(!report.exists(), "must not write report on failure");

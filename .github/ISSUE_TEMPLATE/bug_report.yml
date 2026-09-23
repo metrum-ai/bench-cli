@@ -21,7 +21,7 @@ body:
       label: Steps to reproduce
       description: Minimal commands and config (redact API keys).
       placeholder: |
-        metrum-ai-bench llm --url ... --model ...
+        metrum-ai-bench-cli llm --url ... --model ...
     validations:
       required: true
   - type: textarea
@@ -40,7 +40,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `metrum-ai-bench --version` (or crate version).
+      description: Output of `metrum-ai-bench-cli --version` (or crate version).
     validations:
       required: true
   - type: textarea

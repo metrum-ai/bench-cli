@@ -16,12 +16,12 @@ exists.
 
 ## 2. What Metrum AI Bench CLI ships
 
-One client process (`metrum-ai-bench` with modality subcommands; see
+One client process (`metrum-ai-bench-cli` with modality subcommands; see
 [CLI.md](CLI.md) and [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md)):
 
 | Capability | Where |
 |------------|--------|
-| Four OpenAI-compatible modalities: LLM, VLM, ASR, imagegen | `metrum-ai-bench {llm,vlm,asr,imagegen}` |
+| Four OpenAI-compatible modalities: LLM, VLM, ASR, imagegen | `metrum-ai-bench-cli {llm,vlm,asr,imagegen}` |
 | Open-loop scheduling with seeded Poisson (or constant) arrivals | `--request-rate`, `--arrival poisson\|constant`, `--seed` |
 | Pooled multi-endpoint distribution | `--endpoints-file` / multi-URL; aggregates labeled `pooled_mixture` ([METRICS.md](METRICS.md)) |
 | TTFT = first **visible** output token (not first-byte headers) | `ttft_s`; headers are `first_byte_s` ([METRICS.md](METRICS.md)) |
@@ -46,7 +46,7 @@ One client process (`metrum-ai-bench` with modality subcommands; see
 
 ## 4. MLPerf export
 
-`metrum-ai-bench-strategic --mlperf-dir …` writes LoadGen-shaped text for
+`metrum-ai-bench-cli-strategic --mlperf-dir …` writes LoadGen-shaped text for
 parser-oriented interoperability. It is **not** an audited submission and is
 **not** MLPerf-compatible in the compliance sense.
 
