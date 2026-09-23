@@ -1311,6 +1311,7 @@ dependencies = [
  "jsonschema",
  "log",
  "parquet",
+ "pin-project-lite",
  "rand 0.10.2",
  "reqwest",
  "serde",

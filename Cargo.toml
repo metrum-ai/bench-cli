@@ -145,6 +145,7 @@ parquet = { version = "59.3.0", default-features = false, features = ["zstd", "s
 tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
+pin-project-lite = "0.2"
 
 [profile.release]
 lto = "thin"

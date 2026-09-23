@@ -8,6 +8,7 @@
 //! the full connector duration (DNS is inside the connector; TLS is included
 //! for HTTPS).
 
+use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -99,12 +100,15 @@ where
     }
 }
 
-/// Future that records connector elapsed time into the task-local slot on success.
-pub struct ConnectTimingFuture<F> {
-    inner: F,
-    start: Instant,
-    slot: Option<Arc<ConnectSlot>>,
-    recorded: bool,
+pin_project! {
+    /// Future that records connector elapsed time into the task-local slot on success.
+    pub struct ConnectTimingFuture<F> {
+        #[pin]
+        inner: F,
+        start: Instant,
+        slot: Option<Arc<ConnectSlot>>,
+        recorded: bool,
+    }
 }
 
 impl<F, T, E> Future for ConnectTimingFuture<F>
@@ -114,22 +118,13 @@ where
     type Output = Result<T, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Safety: we never move `inner` after pinning; only other fields are plain data.
-        let (inner, start, slot, recorded) = unsafe {
-            let this = self.get_unchecked_mut();
-            (
-                Pin::new_unchecked(&mut this.inner),
-                this.start,
-                &this.slot,
-                &mut this.recorded,
-            )
-        };
-        match inner.poll(cx) {
+        let this = self.project();
+        match this.inner.poll(cx) {
             Poll::Ready(Ok(value)) => {
-                if !*recorded {
-                    *recorded = true;
-                    if let Some(slot) = slot {
-                        slot.record(start.elapsed());
+                if !*this.recorded {
+                    *this.recorded = true;
+                    if let Some(slot) = this.slot {
+                        slot.record(this.start.elapsed());
                     }
                 }
                 Poll::Ready(Ok(value))
