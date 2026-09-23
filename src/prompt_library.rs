@@ -939,18 +939,37 @@ pub fn apply_sample_index(rows: &mut [LibraryRow], index: &[u64]) -> Result<()> 
     Ok(())
 }
 
+fn sample_index_entries(items: Vec<Value>) -> Result<Vec<u64>> {
+    items
+        .into_iter()
+        .map(|item| {
+            item.as_u64()
+                .or_else(|| item.get("source_line").and_then(Value::as_u64))
+                .ok_or_else(|| anyhow!("sample-index.json entries must be integers"))
+        })
+        .collect()
+}
+
+/// Parse Hub `sample-index.json`.
+///
+/// Accepts a bare JSON array of one-based source lines (or `{ "source_line": N }`
+/// objects), or the Hub object form with a `source_lines` array plus metadata
+/// (`seed`, `per_group`, `algorithm`, …).
 pub fn parse_sample_index(text: &str) -> Result<Vec<u64>> {
     let value: Value = serde_json::from_str(text)?;
     match value {
-        Value::Array(items) => items
-            .into_iter()
-            .map(|item| {
-                item.as_u64()
-                    .or_else(|| item.get("source_line").and_then(Value::as_u64))
-                    .ok_or_else(|| anyhow!("sample-index.json entries must be integers"))
-            })
-            .collect(),
-        _ => bail!("sample-index.json must be a JSON array"),
+        Value::Array(items) => sample_index_entries(items),
+        Value::Object(map) => {
+            let lines = map
+                .get("source_lines")
+                .ok_or_else(|| anyhow!("sample-index.json object must contain source_lines"))?;
+            let items = lines
+                .as_array()
+                .cloned()
+                .ok_or_else(|| anyhow!("sample-index.json source_lines must be a JSON array"))?;
+            sample_index_entries(items)
+        }
+        _ => bail!("sample-index.json must be a JSON array or object with source_lines"),
     }
 }
 
@@ -1245,6 +1264,36 @@ mod tests {
             work_limit: 20_000,
             osl_tokens_per_word: None,
         }
+    }
+
+    #[test]
+    fn parse_sample_index_accepts_bare_array() {
+        let idx = parse_sample_index("[1, 2, 3]").expect("array");
+        assert_eq!(idx, vec![1, 2, 3]);
+        let idx = parse_sample_index(r#"[{"source_line": 10}, {"source_line": 20}]"#)
+            .expect("object entries");
+        assert_eq!(idx, vec![10, 20]);
+    }
+
+    #[test]
+    fn parse_sample_index_accepts_hub_object_with_source_lines() {
+        let text = r#"{
+            "seed": 42,
+            "per_group": 10,
+            "algorithm": "test",
+            "source_lines": [88, 191, 266]
+        }"#;
+        let idx = parse_sample_index(text).expect("hub object");
+        assert_eq!(idx, vec![88, 191, 266]);
+    }
+
+    #[test]
+    fn parse_sample_index_rejects_object_without_source_lines() {
+        let err = parse_sample_index(r#"{"seed": 42}"#).expect_err("missing key");
+        assert!(
+            err.to_string().contains("source_lines"),
+            "unexpected err: {err}"
+        );
     }
 
     #[test]
