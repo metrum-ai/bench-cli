@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.1.2** ([CHANGELOG](CHANGELOG.md)).
+release: **1.1.3** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -90,9 +90,9 @@ Quickstart and the examples requires Go when built from source; a release
 tarball already includes it. The benchmark binaries do not need Go. Pass
 `--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
 identity still prints).
-Optional Homebrew formula is attached to each GitHub Release
-(`metrum-ai-bench.rb`); a tap publish runs when the release workflow is
-configured with a Homebrew tap repository.
+A Homebrew formula is generated during the release workflow for tap publish
+when `HOMEBREW_TAP_REPOSITORY` and `HOMEBREW_PUBLISH` are configured; it is
+not attached as a free-floating GitHub Release asset.
 
 ```bash
 cargo test --all-targets

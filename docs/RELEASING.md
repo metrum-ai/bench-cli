@@ -23,9 +23,11 @@ is not enough.
 ## Release archives
 
 Each signed `metrum-ai-bench-v<version>-<target>.tar.gz` contains the Rust
-binaries plus `bin/dummy-model-server`. The dummy is a static Go binary
-cross-compiled with `CGO_ENABLED=0` for the same four targets (Linux and
-macOS, `x86_64` and `aarch64`). It is not published to crates.io.
+binaries, `bin/dummy-model-server`, `examples/` (including
+`sut.example.json`), and `test-data/` (fixtures such as `llm-hi.jsonl` used by
+the README quickstart). The dummy is a static Go binary cross-compiled with
+`CGO_ENABLED=0` for the same four targets (Linux and macOS, `x86_64` and
+`aarch64`). It is not published to crates.io.
 
 ## Never publish an rc
 
