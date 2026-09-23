@@ -5,6 +5,11 @@
 
 All intervals use `std::time::Instant`. ISO timestamps are metadata only.
 
+Workload (prompt source, ISL/OSL, profiles, warmup, client headroom) is defined
+in the live docs
+[Performance Methodology](../external-docs/content/docs/performance-methodology.mdx)
+Workload section. This page focuses on measured fields.
+
 - **E2E latency**: response body completion minus actual send. Successful
   measure-phase requests only.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled

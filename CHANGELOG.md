@@ -2,12 +2,30 @@
 
 ## Unreleased
 
+## 1.3.1 (2026-09-23)
+
+### Fixed
+- `metrum-ai-bench-cli-prompts --config sample`: accept Hub object-shaped
+  `sample-index.json` with a `source_lines` array (bare JSON arrays still work).
+
+### Added
+- Performance methodology **Workload** section: prompt source, ISL/OSL,
+  named profiles, warmup, client headroom (live docs).
+- Expanded on-host LLM vs AIPerf bake-off report
+  (`docs/reviews/BAKEOFF_LLM_AIPERF.md`) with stage latency tables.
+
+### Changed
+- Performance methodology: document recorded `connect_s` / prefill proxy
+  (no longer "deferred post-v1").
+
+## 1.3.0 (2026-09-23)
+
 ### Removed
-- Homebrew packaging and release automation (upcoming **1.3.0**): deleted
+- Homebrew packaging and release automation deleted
   `packaging/homebrew/`, `scripts/render_homebrew_formula.sh`, and the
   release workflow `homebrew` job / `publish_homebrew` input. Install from
   GitHub Release tarballs, crates.io, or source.
-- Deprecated shim binaries (upcoming **1.3.0**): `metrumbench-*` and
+- Deprecated shim binaries `metrumbench-*` and
   pre-1.2.0 `metrum-ai-bench*` names. Only `metrum-ai-bench-cli*` binaries
   remain.
 
