@@ -15,11 +15,39 @@ in the repository `CHANGELOG.md`.
 
 ## Unreleased
 
+---
+
+## Metrum AI Bench CLI 1.5.1
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.5.1 |
+| **Previous version** | 1.5.0 |
+| **Release Date** | September 24, 2026 |
+
+- `metrum-ai-bench-cli-prompts` defaults to Hub revision `main` (latest);
+  resolved SHA is recorded in the mix report. Use an explicit SHA /
+  `--require-pinned-revision` only when freezing a publishable compare.
+
+---
+
+## Metrum AI Bench CLI 1.5.0
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.5.0 |
+| **Previous version** | 1.4.0 |
+| **Release Date** | September 24, 2026 |
+
 - Strategic telemetry NDJSON (`--ndjson`) with multi-source Prometheus scrapes
   (`--telemetry` YAML, `--require-telemetry`). Default smoke exporter: Metrum
   all-smi fork on `/metric`. Offline analysis recipes in `docs/queries/` (no
   in-binary SQL).
 - Mock server `--telemetry-fixture` for CI without a GPU.
+- Shadeform e2e requires a pinned Hugging Face `metrum-ai/prompt-library` mix
+  (no synthetic prompt fallback).
 
 ---
 

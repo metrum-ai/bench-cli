@@ -1,0 +1,9 @@
+{
+  "tool": "metrum-ai-bench-cli-strategic",
+  "phase": "closed-loop",
+  "setup_seconds": null,
+  "run_seconds": 508,
+  "total_seconds": 508,
+  "notes": "closed-loop wall time only (excludes cargo/scp/sut-setup); see cost.txt for full driver elapsed",
+  "finished_utc": "2026-09-24T18:05:14Z"
+}

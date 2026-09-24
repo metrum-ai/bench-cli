@@ -1,0 +1,40 @@
+Cache is disabled.
+Starting evaluation eval-ubx-2026-09-24T18:27:23
+Running 3 test cases (up to 4 at a time)...
+
+┌────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────┐
+│ question                                                   │ [sut] {{question}}                                         │
+├────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
+│ What is the capital of France? Answer with the city name   │ [PASS] Paris                                               │
+│ only.                                                      │                                                            │
+├────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
+│ A store sells pens for $2 each and notebooks for $5 each.  │ [FAIL] 11                                                  │
+│ You buy 3 pens and 2 notebooks, then use a $4 coupon.      │                                                            │
+│ How much do you pay? Reply with the final dollar amount    │                                                            │
+│ only.                                                      │                                                            │
+├────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
+│ Ice melts when heated. Which statement is the best causal  │ [PASS] B                                                   │
+│ explanation?                                               │                                                            │
+│ A) Ice is white                                            │                                                            │
+│ B) Heat increases molecular motion until the solid lattice │                                                            │
+│ breaks                                                     │                                                            │
+│ C) Melting is called fusion                                │                                                            │
+│ D) Water freezes at 0C                                     │                                                            │
+│ Reply with the letter only.                                │                                                            │
+└────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────┘
+✓ Eval complete (ID: eval-ubx-2026-09-24T18:27:23)
+
+» View results: promptfoo view
+» Share with your team: https://promptfoo.app
+» Feedback: https://promptfoo.dev/feedback
+
+Total Tokens: 160
+  Eval: 160 (153 prompt, 7 completion)
+
+Results:
+  ✓ 2 passed (66.67%)
+  ✗ 1 failed (33.33%)
+  0 errors (0%)
+Duration: 0s (concurrency: 4)
+
+Writing output to /tmp/metrum-e2e/promptfoo-general.json

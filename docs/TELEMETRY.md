@@ -27,7 +27,10 @@ Example:
 
 ```bash
 # Default smoke: Metrum all-smi fork on loopback /metric
-cargo install --git https://github.com/chetan-metrum-ai/all-smi --locked
+# Prefer a release binary (x86_64 example):
+curl -fsSL -o /tmp/all-smi.tgz \
+  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
 all-smi api --port 9090
 
 metrum-ai-bench-cli-strategic \
@@ -162,3 +165,12 @@ time-weighted means, trapezoid energy, and counter deltas over a stage window.
 Durable `kind: telemetry` rows plus stage windows preserve the full series so
 offline recipes (DuckDB, `analyze.py`, or an agent) can recompute power, energy,
 J/token, and KV at the knee without inventing samples.
+
+## Shadeform e2e prompts
+
+`scripts/e2e/run-shadeform.sh` must extract prompts from Hugging Face
+[`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+(default revision `main` = latest; resolved SHA is recorded in
+`mix-report.json`). Use `--config sample` and a named `--profile` (default
+`rag-medium`). It fails closed on extract errors: do not add a synthetic
+prompt fallback. See `docs/PROMPT_LIBRARY.md`.

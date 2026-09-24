@@ -48,10 +48,10 @@ reasoning labels. There are **no reference answers**.
 |------|-------|
 | Configs | `full` (default, 593,730 rows) and `sample` (2,960 rows) |
 | Split | `train` (loading convention only; not a training recommendation) |
-| Pin | Pass a 40-character commit SHA via `--revision` |
+| Pin | Default `--revision main` (latest). Pass a 40-character commit SHA to freeze |
 
-Pinned revision used in README examples:
-`0666f62e581b482838ae2e17b333ee36ff3d01b0`.
+Resolved SHAs are always written to the mix `--report`. An example pin used in
+older docs: `0666f62e581b482838ae2e17b333ee36ff3d01b0`.
 
 The `full` config keeps every source record, including repeated prompt text
 with distinct `target_output_length` values. Those variants are intentional:

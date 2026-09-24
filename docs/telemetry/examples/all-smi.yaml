@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Default smoke/E2E telemetry: Metrum all-smi fork (/metric) plus engine metrics.
-# Install: https://github.com/chetan-metrum-ai/all-smi
-#   cargo install --git https://github.com/chetan-metrum-ai/all-smi --locked
+# Install: https://github.com/chetan-metrum-ai/all-smi/releases
+#   curl -fsSL -o /tmp/all-smi.tgz \
+#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+#   tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
+#   all-smi api --port 9090
 #   all-smi api --port 9090
 # Bind exporters to 127.0.0.1. Prefer /metric (fork); /metrics also works on upstream.
 

@@ -1,0 +1,60 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Coding smoke: generate Python solutions and grade with contains + python assert.
+# Keep this suite small: wall-clock budget is shared with general (~30 min total).
+
+description: "Qwen coding smoke (fast)"
+
+prompts:
+  - |
+    Write a complete Python 3 solution for the following problem.
+    Return ONLY valid Python source code. No markdown fences, no commentary.
+    Problem: {{problem}}
+
+providers:
+  - id: openai:chat:sut
+    label: sut
+    config:
+      apiBaseUrl: http://127.0.0.1:8000/v1
+      apiKey: dummy
+      temperature: 0
+      max_tokens: 512
+      showThinking: false
+      passthrough:
+        chat_template_kwargs:
+          enable_thinking: false
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: |
+        let out = output || '';
+        out = out.replace(/^```(?:python)?\s*/i, '').replace(/\s*```$/i, '');
+        return out.trim().length > 20;
+
+tests:
+  - description: two_sum_indices
+    vars:
+      problem: |
+        Implement a function two_sum(nums, target) that returns a list of two
+        distinct indices i,j such that nums[i] + nums[j] == target.
+        Assume exactly one solution exists. Example: nums=[2,7,11,15], target=9
+        returns [0,1].
+    assert:
+      - type: contains
+        value: "def two_sum"
+      - type: python
+        value: file://grade_coding.py
+
+  - description: reverse_words
+    vars:
+      problem: |
+        Implement a function reverse_words(s: str) -> str that reverses the
+        order of whitespace-separated words in s while preserving single spaces
+        between words. Example: 'the sky is blue' -> 'blue is sky the'.
+    assert:
+      - type: contains
+        value: "def reverse_words"
+      - type: python
+        value: file://grade_coding.py

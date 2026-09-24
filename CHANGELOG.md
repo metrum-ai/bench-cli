@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.1 (2026-09-24)
+
+### Changed
+- `metrum-ai-bench-cli-prompts` defaults to Hub revision `main` (latest) and
+  always resolves floating refs to a commit SHA recorded in `--report`. Pass an
+  explicit 40-character SHA to pin; use `--require-pinned-revision` for
+  publication gates. `--allow-moving-revision` is a deprecated no-op.
+- Shadeform e2e defaults to `PROMPT_LIBRARY_REVISION=main` (no hardcoded SHA).
+
+## 1.5.0 (2026-09-24)
+
 ### Added
 - Strategic telemetry NDJSON (`--ndjson`) with tagged `run`/`stage`/`request`/
   `telemetry`/`scrape_error`/`summary` rows on a shared monotonic epoch.
@@ -11,6 +22,19 @@
   on `/metrics` and `/metric`.
 - Docs: `docs/TELEMETRY.md`, exporter examples (default: Metrum all-smi fork
   `/metric`), offline analysis recipes under `docs/queries/` (no in-binary SQL).
+- Shadeform e2e helper scripts: Hub-pinned prompt-library extract, promptfoo
+  general/coding suites, interrupt/resume helpers, and optional on-host AIPerf
+  bake-off driver. Redacted run evidence under `artifacts/e2e/`.
+
+### Fixed
+- Shadeform e2e no longer falls back to synthetic prompts when Hub extract
+  fails. `scripts/e2e/run-shadeform.sh` requires pinned
+  `metrum-ai/prompt-library` (`--revision`, `--config sample`, `--profile`
+  `rag-medium`, `--output`) and asserts `mix-report.json`.
+
+### Changed
+- Prefer published Metrum all-smi release binaries in telemetry install docs
+  (instead of `cargo install --git` only).
 
 ## 1.4.0 (2026-09-24)
 

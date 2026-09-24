@@ -1,0 +1,54 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# General-intelligence smoke against the local OpenAI-compatible SUT.
+# Keep this suite small: wall-clock budget is shared with coding (~30 min total).
+
+description: "Qwen general intelligence smoke (fast)"
+
+prompts:
+  - "{{question}}"
+
+providers:
+  - id: openai:chat:sut
+    label: sut
+    config:
+      apiBaseUrl: http://127.0.0.1:8000/v1
+      apiKey: dummy
+      temperature: 0
+      max_tokens: 256
+      showThinking: false
+      passthrough:
+        chat_template_kwargs:
+          enable_thinking: false
+
+tests:
+  - description: capital_of_france
+    vars:
+      question: "What is the capital of France? Answer with the city name only."
+    assert:
+      - type: contains
+        value: Paris
+
+  - description: multi_step_arithmetic
+    vars:
+      question: |
+        A store sells pens for $2 each and notebooks for $5 each.
+        You buy 3 pens and 2 notebooks, then use a $4 coupon.
+        How much do you pay? Reply with the final dollar amount only.
+    assert:
+      - type: contains
+        value: "12"
+
+  - description: causal_reasoning
+    vars:
+      question: |
+        Ice melts when heated. Which statement is the best causal explanation?
+        A) Ice is white
+        B) Heat increases molecular motion until the solid lattice breaks
+        C) Melting is called fusion
+        D) Water freezes at 0C
+        Reply with the letter only.
+    assert:
+      - type: contains
+        value: "B"

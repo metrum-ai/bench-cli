@@ -34,10 +34,10 @@ This repository ships only tiny fixtures. Large corpora live on Hugging Face.
 | Repository | `metrum-ai/prompt-library` |
 | Configs | `sample` (smoke; default in docs) or `full` |
 | Split | `train` |
-| Pin | Pass a 40-character commit SHA via `--revision` (or `--allow-moving-revision` for floating refs) |
+| Pin | Default `--revision main` (latest). Pass a 40-character commit SHA to freeze |
 
-Pinned revision used in product examples:
-`0666f62e581b482838ae2e17b333ee36ff3d01b0`.
+Resolved SHAs are always written to the mix `--report`. An example pin from
+older docs: `0666f62e581b482838ae2e17b333ee36ff3d01b0`.
 
 ### Fields used for selection
 
@@ -81,7 +81,6 @@ explicit `--isl-target` / `--osl-target`):
 
 ```bash
 metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample --count 64 --seed 42 \
   --profile chat-medium \
   --output /tmp/mix.jsonl --report /tmp/mix-report.json
@@ -93,7 +92,6 @@ metrum-ai-bench-cli-prompts \
 
 ```bash
 metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample \
   --count 64 --count-slack 64 --seed 42 \
   --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
@@ -104,6 +102,8 @@ metrum-ai-bench-cli-prompts \
 
 | Flag | Meaning |
 | --- | --- |
+| `--revision` | Hub ref (default `main` = latest). Pass a 40-char SHA to pin |
+| `--require-pinned-revision` | Fail unless `--revision` is a 40-char SHA |
 | `--count` | Preferred mix size (soft) |
 | `--count-slack` | Max \|actual − preferred\| (default `max(count, 32)`) |
 | `--isl-stat` / `--osl-stat` | `mean` or `median` (even-*n* median = mean of two central values) |
@@ -123,7 +123,7 @@ closer to `--count` and with fewer repeats.
 - **JSONL** (`--output`): one object per selected slot, including intentional
   repeats. `prompt` already includes the word-count hint. Extra fields
   (`source_ordinal`, `target_output_tokens`, …) are ignored by llm today.
-- **Report** (`--report`): pinned revision, preferred vs `selected_count`,
+- **Report** (`--report`): resolved Hub revision SHA, preferred vs `selected_count`,
   achieved ISL/OSL and gaps, repeat histogram, `recommended_max_tokens`,
   `recommended_num_requests`, and schedule SHA-256.
 

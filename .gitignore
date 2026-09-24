@@ -1,4 +1,5 @@
 target/
+target-e2e/
 *.csv
 *.jsonl
 *.md5

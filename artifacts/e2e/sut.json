@@ -1,0 +1,21 @@
+{
+  "provenance": "declared",
+  "name": "shadeform-e2e / NVIDIA RTX PRO 6000 Blackwell Server Edition x1",
+  "gpu": {
+    "model": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "count": 1
+  },
+  "driver_version": "580.126.09",
+  "runtime": {
+    "name": "vllm",
+    "version": "vllm/vllm-openai:latest",
+    "config": "docker run --gpus all -p 8000:8000 vllm/vllm-openai:latest --model Qwen/Qwen3.8-27B --served-model-name sut --dtype auto --max-model-len 16384 --gpu-memory-utilization 0.90 --max-num-seqs 128 --enforce-eager --host 0.0.0.0 --port 8000"
+  },
+  "model": {
+    "id": "Qwen/Qwen3.8-27B",
+    "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+    "quantization": null
+  },
+  "host_os": "Linux 6.8.0-90-generic x86_64",
+  "notes": "Shadeform e2e; all-smi from https://github.com/chetan-metrum-ai/all-smi path /metrics; enforce_eager=1"
+}

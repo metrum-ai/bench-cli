@@ -990,6 +990,13 @@ pub fn default_cache_dir() -> PathBuf {
         .join("prompt-library")
 }
 
+/// Resolve a Hub dataset revision to a commit SHA.
+///
+/// A 40-character hex string is treated as an already-pinned SHA. Any other
+/// ref (default `main`, tags, branches) is looked up on the Hub. `allow_moving`
+/// is retained for callers; when false, floating refs are rejected (use for
+/// `--require-pinned-revision` style gates in libraries). CLI default is to
+/// always allow floating so "latest" works without extra flags.
 pub fn resolve_revision(repo: &str, revision: &str, allow_moving: bool) -> Result<String> {
     let trimmed = revision.trim();
     if trimmed.len() == 40 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -997,7 +1004,8 @@ pub fn resolve_revision(repo: &str, revision: &str, allow_moving: bool) -> Resul
     }
     if !allow_moving {
         bail!(
-            "refusing moving revision `{trimmed}`; pass a 40-character commit SHA or --allow-moving-revision"
+            "refusing moving revision `{trimmed}`; pass a 40-character commit SHA \
+             or omit --require-pinned-revision / pass allow_moving=true"
         );
     }
     let url = format!("https://huggingface.co/api/datasets/{repo}/revision/{trimmed}");
