@@ -109,7 +109,10 @@ API-key pair patterns described in `--help`).
 | --- | --- |
 | `--sweep` / `--sweep-by` | Stage list and axis (`concurrency` / `rate`) |
 | `--requests-per-stage` | Requests per sweep stage |
-| `--metrics-url` | Optional server metrics scrape |
+| `--ndjson` | Tagged telemetry NDJSON path |
+| `--telemetry` | Prometheus scrape YAML |
+| `--require-telemetry` | Abort after consecutive scrape failures |
+| `--metrics-url` | Legacy engine metrics scrape (desugars when `--ndjson` is set) |
 | `--html` / `--csv` / `--mlperf-dir` | Exports |
 | `--mlperf-scenario` | `server` or offline-style scenario name per `--help` |
 | `--kind` | Chat default, or `embeddings` / `rerank` |
@@ -123,17 +126,13 @@ API-key pair patterns described in `--help`).
 
 Live `--help` on each binary is always authoritative.
 
-`scripts/render_cli_help.sh` regenerates `docs/CLI.md` for **modality and
-prompts binaries only** (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`,
-`-prompts`). It does **not** dump `metrum-ai-bench-cli` (unified), `selftest`,
-`metrum-ai-bench-cli-strategic`, or `metrum-ai-bench-cli-mock-server` - use those
-binaries' `--help` (and [Strategic benchmarking](./strategic-benchmarking))
-for their full surfaces.
+`scripts/render_cli_help.sh` regenerates `docs/CLI.md` for the unified
+dispatcher, modality binaries, prompts, strategic, and mock-server. Live
+`--help` on each binary remains authoritative.
 
 ```bash
 # from a checkout (after cargo build --bins)
 ./scripts/render_cli_help.sh
 ```
 
-Or inspect `docs/CLI.md` in the repository for the last generated modality /
-prompts text dump.
+Or inspect `docs/CLI.md` in the repository for the last generated dump.

@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# SGLang server (opt-in: --enable-metrics).
+# scrape: http://127.0.0.1:30000/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: sglang
+    url: http://127.0.0.1:30000/metrics
+    interval_ms: 1000
+    include:
+      - "^sglang:(token_usage|num_running_reqs|num_queue_reqs|cache_hit_rate|num_preemptions_total|num_used_tokens)$"

@@ -101,6 +101,27 @@ Workload section. This page focuses on measured fields.
 Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 [REASONING_MODELS.md](REASONING_MODELS.md).
 
+## Strategic telemetry (NDJSON)
+
+Scraped Prometheus gauges/counters land in a separate `--ndjson` file, not
+inside modality `--data-log` request rows.
+
+- **Shared epoch**: every `*_ns` field is nanoseconds from one run-start
+  `Instant`. `run.t0_wall` is ISO 8601 UTC metadata.
+- **Power / energy (offline)**: prefer DCGM `DCGM_FI_DEV_POWER_USAGE` and
+  `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION` (mJ, often scaled to J at ingest), else
+  `all_smi_gpu_power_consumption_watts`. Energy is counter Δ in a measured
+  stage window, else trapezoid ∫ power. `j_per_output_token` divides that
+  energy by successful output tokens in the stage.
+- **KV / queue**: `vllm:gpu_cache_usage_perc` (or kv alias),
+  `vllm:num_requests_{running,waiting}`, `vllm:num_preemptions_total` (Δ).
+- **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-
+  weighted math must join long-format `telemetry` rows to `stage` windows.
+
+Default smoke exporter: Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
+fork on `http://127.0.0.1:9090/metric`. Full join rules and recipes:
+[TELEMETRY.md](TELEMETRY.md), [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
+
 Distributions report `n`, min, max, arithmetic mean, sample standard
 deviation, median absolute deviation, and Hyndman-Fan type 7 p50/p90/p95/p99.
 Undefined values serialize as null/absent, never measured zero. P99 is marked

@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Intel xpumd Prometheus (OTel hw_*). scrape: http://127.0.0.1:8080/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: xpum
+    url: http://127.0.0.1:8080/metrics
+    interval_ms: 1000
+    include:
+      - "^hw_(power|power_limit|energy|gpu_utilization|temperature)$"
+      - "^hw_memory_(usage|utilization|size|free)$"
+    units:
+      hw_power:
+        scale: 1
+        unit: W
+      hw_energy:
+        scale: 1
+        unit: J

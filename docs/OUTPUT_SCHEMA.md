@@ -122,3 +122,26 @@ rejects any JSONL line without `schema_version`.
 `field_provenance` while `runtime` / `model` / `vendor` stay declared. For
 publication runs use `--sut <file> --require-sut` (implies `--redact-hostname`).
 See [Publishing a result](../README.md#publishing-a-result).
+
+## Strategic telemetry NDJSON (`metrum-ai-bench-cli.telemetry.v1`)
+
+`metrum-ai-bench-cli-strategic --ndjson PATH` writes one tagged JSON object per
+line. Rows are discriminated by `kind`. All `*_ns` fields are nanoseconds from
+a single run-wide monotonic epoch; `run.t0_wall` is the ISO 8601 UTC wall
+anchor for that Instant. See [TELEMETRY.md](TELEMETRY.md) and
+[telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
+
+| `kind` | Required fields | Optional |
+|--------|-----------------|----------|
+| `run` | `run_id`, `t0_wall`, `tool_version`, `schema_version` (`metrum-ai-bench-cli.telemetry.v1`), `config` | `sut`, `telemetry_sources` (`name`, `url`, `interval_ms`, `clock_offset_ms`, `matched_series`) |
+| `stage` | `run_id`, `stage`, `load`, `phase` (`warmup` \| `measure`), `t_start_ns`, `t_end_ns` | |
+| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`) |
+| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `telemetry_at_done` (last-seen map; sugar, not truth) |
+| `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status` |
+| `summary` | `run_id`, `partial`, `dropped_telemetry_rows`, `request_rows`, `telemetry_rows`, `scrape_error_rows`, `stage_rows` | |
+
+`mtype` is `counter`, `gauge`, `histogram_bucket`, `summary`, or `unknown`.
+Telemetry rows may be dropped under writer backpressure; `summary.dropped_telemetry_rows`
+counts those drops. Request, stage, run, scrape_error, and summary rows are
+awaited and are not dropped. This file is separate from modality `--data-log`
+JSONL.

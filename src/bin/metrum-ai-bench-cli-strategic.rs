@@ -130,6 +130,30 @@ struct Args {
     metrics_url: Option<String>,
     #[arg(long, default_value_t = 250)]
     metrics_interval_ms: u64,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Tagged NDJSON run log (run/stage/request/telemetry/summary rows)"
+    )]
+    ndjson: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Telemetry scrape YAML (Prometheus /metrics or /metric sources)"
+    )]
+    telemetry: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Abort after N consecutive scrape failures on any source (default N=3)"
+    )]
+    require_telemetry: bool,
+    #[arg(
+        long,
+        default_value_t = metrum_ai_bench::telemetry::DEFAULT_REQUIRE_FAILURES,
+        help = "Consecutive scrape failures before --require-telemetry aborts"
+    )]
+    require_telemetry_failures: u32,
     #[arg(long, default_value = "metrum-ai-bench-cli-report.html")]
     html: PathBuf,
     #[arg(long, default_value = "metrum-ai-bench-cli-requests.csv")]
@@ -525,8 +549,11 @@ fn spawn_one_request(
     client: &reqwest::Client,
     semaphore: Arc<Semaphore>,
     inflight_tracker: Arc<metrum_ai_bench::concurrency::InFlightTracker>,
-    epoch: Instant,
-    epoch_unix_ns: u128,
+    schedule_epoch: Instant,
+    schedule_epoch_unix_ns: u128,
+    run_epoch: Arc<metrum_ai_bench::telemetry::RunEpoch>,
+    run_id: Arc<String>,
+    ndjson: Option<metrum_ai_bench::telemetry::NdjsonWriter>,
     scheduled_offset: Option<Duration>,
     warmup: bool,
 ) -> tokio::task::JoinHandle<BenchRecord> {
@@ -547,11 +574,19 @@ fn spawn_one_request(
         let inflight_guard = inflight_tracker.guard();
         let in_flight_at_send = inflight_guard.in_flight;
         let sent = Instant::now();
+        let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
-        let (scheduled, scheduled_unix_ns) = scheduled_offset
-            .map_or((sent, sent_unix_ns), |offset| {
-                (epoch + offset, epoch_unix_ns + offset.as_nanos())
+        let (scheduled, scheduled_unix_ns) =
+            scheduled_offset.map_or((sent, sent_unix_ns), |offset| {
+                (
+                    schedule_epoch + offset,
+                    schedule_epoch_unix_ns + offset.as_nanos(),
+                )
             });
+        let t_sched_ns = scheduled
+            .checked_duration_since(run_epoch.mono())
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(t_sent_ns);
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
         let result = metrum_ai_bench::connect_timing::with_connect_slot(
             Arc::clone(&connect_slot),
@@ -564,11 +599,13 @@ fn spawn_one_request(
         .await;
         let connect_s = connect_slot.take();
         let mut first_byte_s = None;
+        let mut t_first_ns = None;
         let mut ttft_s = None;
         let mut itl_s = Vec::new();
         let result: Result<Value> = async {
             let response = result?;
-            first_byte_s = Some(sent.elapsed().as_secs_f64());
+            first_byte_s.replace(sent.elapsed().as_secs_f64());
+            t_first_ns.replace(run_epoch.elapsed_ns());
             let response = response.error_for_status()?;
             if streaming {
                 let stream =
@@ -585,6 +622,7 @@ fn spawn_one_request(
         }
         .await;
         let completed = Instant::now();
+        let t_done_ns = run_epoch.elapsed_ns();
         let (success, valid, input_tokens, output_tokens, error) = match result {
             Ok(value) => {
                 let (input_tokens, output_tokens) = response_tokens(kind, &value);
@@ -600,7 +638,7 @@ fn spawn_one_request(
         };
         drop(permit);
         drop(inflight_guard);
-        BenchRecord {
+        let record = BenchRecord {
             seq: sequence,
             stage,
             endpoint: url,
@@ -623,13 +661,40 @@ fn spawn_one_request(
             output_tokens,
             session_id: input.session_id,
             turn: input.turn,
-            error,
+            error: error.clone(),
             warmup,
         }
-        .with_phase_metrics()
+        .with_phase_metrics();
+        if let Some(writer) = ndjson {
+            let _ = writer
+                .send_priority(metrum_ai_bench::telemetry::Row::Request(
+                    metrum_ai_bench::telemetry::RequestRow {
+                        run_id: (*run_id).clone(),
+                        seq: sequence,
+                        stage,
+                        warmup,
+                        t_sched_ns,
+                        t_sent_ns,
+                        t_first_ns,
+                        t_done_ns,
+                        success,
+                        input_tokens,
+                        output_tokens,
+                        latency_s: record.latency_s,
+                        queue_delay_s: record.queue_delay_s,
+                        service_latency_s: record.service_latency_s,
+                        ttft_s: record.ttft_s,
+                        error,
+                        telemetry_at_done: None,
+                    },
+                ))
+                .await;
+        }
+        record
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_stage(
     args: &Args,
     url: &str,
@@ -638,6 +703,10 @@ async fn run_stage(
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
     client: &reqwest::Client,
+    run_epoch: Arc<metrum_ai_bench::telemetry::RunEpoch>,
+    run_id: Arc<String>,
+    ndjson: Option<metrum_ai_bench::telemetry::NdjsonWriter>,
+    stop: &metrum_ai_bench::runner::StopFlag,
 ) -> Result<(
     Vec<BenchRecord>,
     f64,
@@ -656,11 +725,15 @@ async fn run_stage(
         Vec::with_capacity(args.warmup_requests.saturating_add(args.requests_per_stage) as usize);
 
     // Phase 1: fully complete warmup before measurement begins.
-    if args.warmup_requests > 0 {
+    if args.warmup_requests > 0 && !stop.is_stopped() {
         let warmup_epoch = Instant::now();
         let warmup_unix_ns = now_unix_ns();
+        let t_start_ns = run_epoch.elapsed_ns();
         let mut warmup_handles = Vec::with_capacity(args.warmup_requests as usize);
         for index in 0..args.warmup_requests {
+            if stop.is_stopped() {
+                break;
+            }
             let input = inputs[index as usize % inputs.len()].clone();
             warmup_handles.push(spawn_one_request(
                 args,
@@ -674,6 +747,9 @@ async fn run_stage(
                 Arc::clone(&inflight_tracker),
                 warmup_epoch,
                 warmup_unix_ns,
+                Arc::clone(&run_epoch),
+                Arc::clone(&run_id),
+                ndjson.clone(),
                 None,
                 true,
             ));
@@ -681,13 +757,32 @@ async fn run_stage(
         for handle in warmup_handles {
             records.push(handle.await.context("warmup request task failed")?);
         }
+        let t_end_ns = run_epoch.elapsed_ns();
+        if let Some(writer) = &ndjson {
+            writer
+                .send_priority(metrum_ai_bench::telemetry::Row::Stage(
+                    metrum_ai_bench::telemetry::StageRow {
+                        run_id: (*run_id).clone(),
+                        stage,
+                        load: stage,
+                        phase: metrum_ai_bench::telemetry::PhaseKind::Warmup,
+                        t_start_ns,
+                        t_end_ns,
+                    },
+                ))
+                .await?;
+        }
     }
 
     // Phase 2: reset measurement epoch; measured prompts restart at index 0.
     let measure_epoch = Instant::now();
     let measure_unix_ns = now_unix_ns();
+    let t_start_ns = run_epoch.elapsed_ns();
     let mut measure_handles = Vec::with_capacity(args.requests_per_stage as usize);
     for index in 0..args.requests_per_stage {
+        if stop.is_stopped() {
+            break;
+        }
         let scheduled_offset = matches!(args.sweep_by, SweepBy::Rate)
             .then(|| Duration::from_secs_f64(index as f64 / stage));
         if let Some(offset) = scheduled_offset {
@@ -706,12 +801,30 @@ async fn run_stage(
             Arc::clone(&inflight_tracker),
             measure_epoch,
             measure_unix_ns,
+            Arc::clone(&run_epoch),
+            Arc::clone(&run_id),
+            ndjson.clone(),
             scheduled_offset,
             false,
         ));
     }
     for handle in measure_handles {
         records.push(handle.await.context("request task failed")?);
+    }
+    let t_end_ns = run_epoch.elapsed_ns();
+    if let Some(writer) = &ndjson {
+        writer
+            .send_priority(metrum_ai_bench::telemetry::Row::Stage(
+                metrum_ai_bench::telemetry::StageRow {
+                    run_id: (*run_id).clone(),
+                    stage,
+                    load: stage,
+                    phase: metrum_ai_bench::telemetry::PhaseKind::Measure,
+                    t_start_ns,
+                    t_end_ns,
+                },
+            ))
+            .await?;
     }
 
     let measured_seconds = {
@@ -781,21 +894,109 @@ async fn main() -> Result<()> {
         _ => None,
     };
     let inputs = make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?;
-    let stop_scraper = Arc::new(AtomicBool::new(false));
+    let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
+    let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
+    let stop = metrum_ai_bench::runner::StopFlag::new();
+    metrum_ai_bench::runner::install_stop_handlers(stop.clone());
+
+    let telemetry_cfg = match (&args.telemetry, &args.metrics_url) {
+        (Some(path), _) => Some(metrum_ai_bench::telemetry::TelemetryConfig::load(path)?),
+        (None, Some(url)) if args.ndjson.is_some() || args.require_telemetry => Some(
+            metrum_ai_bench::telemetry::TelemetryConfig::from_metrics_url(
+                url,
+                args.metrics_interval_ms,
+            ),
+        ),
+        _ => None,
+    };
+    if args.require_telemetry && telemetry_cfg.is_none() {
+        bail!("--require-telemetry needs --telemetry YAML or --metrics-url");
+    }
+    if telemetry_cfg.is_some() && args.ndjson.is_none() {
+        bail!("--telemetry / telemetry via --metrics-url requires --ndjson PATH");
+    }
+
+    let (ndjson_writer, ndjson_handle) = match &args.ndjson {
+        Some(path) => {
+            let (writer, handle) = metrum_ai_bench::telemetry::NdjsonWriter::spawn(path.clone())?;
+            (Some(writer), Some(handle))
+        }
+        None => (None, None),
+    };
+
+    let mut telemetry_source_stamps = Vec::new();
+    let mut scrape_handles: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+    let stop_scrapers = Arc::new(AtomicBool::new(false));
+    if let Some(cfg) = &telemetry_cfg {
+        cfg.warn_fast_sources();
+        let sources = cfg.compile()?;
+        let insecure = sources.iter().any(|s| s.insecure_tls);
+        let client = metrum_ai_bench::telemetry::build_telemetry_client(insecure, true)?;
+        let probes = metrum_ai_bench::telemetry::probe_sources(&client, cfg, &sources).await?;
+        telemetry_source_stamps = probes.into_iter().map(|p| p.stamp).collect();
+        if let Some(writer) = &ndjson_writer {
+            scrape_handles = metrum_ai_bench::telemetry::spawn_scrapers(
+                client,
+                cfg.clone(),
+                sources,
+                Arc::clone(&run_epoch),
+                Arc::clone(&run_id),
+                writer.clone(),
+                Arc::clone(&stop_scrapers),
+                args.require_telemetry,
+                args.require_telemetry_failures,
+            );
+        }
+    }
+
+    if let Some(writer) = &ndjson_writer {
+        writer
+            .send_priority(metrum_ai_bench::telemetry::Row::Run(
+                metrum_ai_bench::telemetry::RunRow {
+                    run_id: (*run_id).clone(),
+                    t0_wall: run_epoch.t0_wall_iso(),
+                    tool_version: VERSION.to_string(),
+                    schema_version: metrum_ai_bench::telemetry::TELEMETRY_SCHEMA_VERSION
+                        .to_string(),
+                    sut: sut_json.clone(),
+                    config: json!({
+                        "url": url,
+                        "model": model,
+                        "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
+                        "sweep": args.sweep,
+                        "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
+                        "requests_per_stage": args.requests_per_stage,
+                        "warmup_requests": args.warmup_requests,
+                        "streaming": args.streaming,
+                        "telemetry": args.telemetry,
+                        "metrics_url": args.metrics_url,
+                    }),
+                    telemetry_sources: telemetry_source_stamps,
+                },
+            ))
+            .await?;
+    }
+
+    // Legacy whole-run aggregate for stdout when --metrics-url is set without NDJSON scrapers.
+    let stop_legacy = Arc::new(AtomicBool::new(false));
     let server_samples = Arc::new(Mutex::new(Vec::new()));
-    let scraper = if let Some(metrics_url) = args.metrics_url.clone() {
-        let stop = stop_scraper.clone();
-        let samples = server_samples.clone();
-        let interval = Duration::from_millis(args.metrics_interval_ms.max(50));
-        Some(tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            while !stop.load(Ordering::Relaxed) {
-                if let Ok(sample) = scrape_metrics(&client, &metrics_url).await {
-                    samples.lock().await.push(sample);
+    let legacy_scraper = if telemetry_cfg.is_none() {
+        if let Some(metrics_url) = args.metrics_url.clone() {
+            let stop_flag = stop_legacy.clone();
+            let samples = server_samples.clone();
+            let interval = Duration::from_millis(args.metrics_interval_ms.max(50));
+            Some(tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                while !stop_flag.load(Ordering::Relaxed) {
+                    if let Ok(sample) = scrape_metrics(&client, &metrics_url).await {
+                        samples.lock().await.push(sample);
+                    }
+                    tokio::time::sleep(interval).await;
                 }
-                tokio::time::sleep(interval).await;
-            }
-        }))
+            }))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -830,6 +1031,7 @@ async fn main() -> Result<()> {
         "streaming": args.streaming,
         "sut": sut_json,
         "require_sut": args.require_sut,
+        "ndjson": args.ndjson,
         // Secrets intentionally omitted (api_key never stamped).
     });
     let redact_hostname = args.redact_hostname || args.require_sut;
@@ -858,7 +1060,13 @@ async fn main() -> Result<()> {
     let mut all_records = Vec::new();
     let mut points = Vec::new();
     let mut any_osl_validation = None;
+    let mut partial = false;
     for stage in stages {
+        if stop.is_stopped() {
+            partial = true;
+            stop_scrapers.store(true, Ordering::Relaxed);
+            break;
+        }
         let (records, seconds, observed) = run_stage(
             &args,
             &url,
@@ -867,8 +1075,15 @@ async fn main() -> Result<()> {
             validator.as_ref(),
             sequence.clone(),
             &client,
+            Arc::clone(&run_epoch),
+            Arc::clone(&run_id),
+            ndjson_writer.clone(),
+            &stop,
         )
         .await?;
+        if stop.is_stopped() {
+            partial = true;
+        }
         let token_rows: Vec<(u64, u64)> = records
             .iter()
             .filter(|r| !r.warmup && r.success)
@@ -891,8 +1106,21 @@ async fn main() -> Result<()> {
         ));
         all_records.extend(records);
     }
-    stop_scraper.store(true, Ordering::Relaxed);
-    if let Some(scraper) = scraper {
+    stop_scrapers.store(true, Ordering::Relaxed);
+    stop_legacy.store(true, Ordering::Relaxed);
+    for handle in scrape_handles {
+        match handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                if args.require_telemetry {
+                    return Err(err);
+                }
+                eprintln!("warning: telemetry scraper exited: {err:#}");
+            }
+            Err(err) => eprintln!("warning: telemetry scraper join failed: {err}"),
+        }
+    }
+    if let Some(scraper) = legacy_scraper {
         scraper.await?;
     }
     let duration_s = started.elapsed().as_secs_f64();
@@ -935,6 +1163,29 @@ async fn main() -> Result<()> {
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
     }
+    let mut ndjson_stats = metrum_ai_bench::telemetry::WriterStats::default();
+    if let (Some(writer), Some(handle)) = (ndjson_writer, ndjson_handle) {
+        // Drain pending rows so snapshot reflects request/stage counts, then
+        // write summary before closing the channel.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let snap = writer.stats_snapshot();
+        let dropped = writer.dropped_telemetry_rows();
+        writer
+            .send_priority(metrum_ai_bench::telemetry::Row::Summary(
+                metrum_ai_bench::telemetry::SummaryRow {
+                    run_id: (*run_id).clone(),
+                    partial,
+                    dropped_telemetry_rows: dropped,
+                    request_rows: snap.request_rows,
+                    telemetry_rows: snap.telemetry_rows,
+                    scrape_error_rows: snap.scrape_error_rows,
+                    stage_rows: snap.stage_rows,
+                },
+            ))
+            .await?;
+        drop(writer);
+        ndjson_stats = handle.shutdown().await?;
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -948,6 +1199,9 @@ async fn main() -> Result<()> {
             "sut": sut_json,
             "records_csv": args.csv,
             "html_report": args.html,
+            "partial": partial,
+            "ndjson": args.ndjson,
+            "dropped_telemetry_rows": ndjson_stats.dropped_telemetry_rows,
         }))?
     );
     if let Some(ref validation) = any_osl_validation {

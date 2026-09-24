@@ -34,7 +34,8 @@
 - Results go to `--data-log`; one JSONL record per request, final line is the run summary. Schema: `docs/OUTPUT_SCHEMA.md`.
 - Thinking models: read `docs/REASONING_MODELS.md` before choosing `--max-tokens`. `no_output_token` in the summary means the cap was too low.
 - Prompt files are JSONL only. Strategic sweeps: prefer `--prompts` + `--max-tokens` + `--warmup-requests` on GPU.
-- Charts are not a CLI responsibility; analyze CSV/JSON with a separate prompt or script.
+- Strategic telemetry: `--ndjson` + `--telemetry` YAML (Prometheus GET only). Default smoke uses Metrum all-smi fork `http://127.0.0.1:9090/metric`. Offline analysis: `docs/TELEMETRY.md`, `docs/queries/analyze.py`. No in-binary SQL/`correlate`.
+- Charts are not a CLI responsibility; analyze CSV/JSON/NDJSON with a separate prompt or script.
 - `docs/CLI.md` is generated; run `scripts/render_cli_help.sh` after any clap change.
 - Header check: `scripts/check_headers.sh`. Every file keeps the Metrum AI copyright and SPDX lines.
 - No em dashes in any docs or user-facing strings.
@@ -47,5 +48,5 @@
 - `metrum-ai-bench-cli-asr`: audio transcription load measurement.
 - `metrum-ai-bench-cli-imagegen`: image generation load measurement.
 - `metrum-ai-bench-cli-prompts`: ISL/OSL mix selection from `metrum-ai/prompt-library`.
-- `metrum-ai-bench-cli-strategic`: concurrency/rate sweeps, knee, sessions, and exports (separate binary).
-- `metrum-ai-bench-cli-mock-server`: deterministic OpenAI-compatible mock for strategic fixtures.
+- `metrum-ai-bench-cli-strategic`: concurrency/rate sweeps, knee, sessions, telemetry NDJSON, and exports (separate binary).
+- `metrum-ai-bench-cli-mock-server`: deterministic OpenAI-compatible mock for strategic fixtures (`--telemetry-fixture`).

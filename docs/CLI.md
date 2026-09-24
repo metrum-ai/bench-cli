@@ -797,6 +797,14 @@ Options:
           
       --metrics-interval-ms <METRICS_INTERVAL_MS>
           [default: 250]
+      --ndjson <PATH>
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows)
+      --telemetry <PATH>
+          Telemetry scrape YAML (Prometheus /metrics or /metric sources)
+      --require-telemetry
+          Abort after N consecutive scrape failures on any source (default N=3)
+      --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
+          Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --html <HTML>
           [default: metrum-ai-bench-cli-report.html]
       --csv <CSV>
@@ -848,6 +856,7 @@ Options:
       --listen <LISTEN>          [default: 127.0.0.1:8080]
       --latency-ms <LATENCY_MS>  [default: 0]
       --fail-every <FAIL_EVERY>  [default: 0]
+      --telemetry-fixture        Serve canned DCGM and all-smi Prometheus fixtures on /metrics and /metric
   -h, --help                     Print help
   -V, --version                  Print version
 ```

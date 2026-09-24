@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ROCm device-metrics-exporter. scrape: http://127.0.0.1:5000/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: rocm
+    url: http://127.0.0.1:5000/metrics
+    interval_ms: 1000
+    include:
+      - "^gpu_(package_power|power_usage|gfx_activity|umc_activity)$"
+      - "^gpu_(edge|junction|memory|hbm)_temperature$"
+      - "^gpu_(total|used|free)_vram$"
+      - "^gpu_energy_consumed$"
+    units:
+      gpu_power_usage:
+        scale: 1
+        unit: W
+      gpu_package_power:
+        scale: 1
+        unit: W

@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# jenningsloy318/redfish_exporter (multi-target).
+# scrape: http://127.0.0.1:9610/redfish?target=<bmc>
+
+default_interval_ms: 1000
+timeout_ms: 2000
+sources:
+  - name: redfish
+    url: http://127.0.0.1:9610/redfish?target=192.168.0.100
+    interval_ms: 5000
+    include:
+      - "^redfish_chassis_temperature_celsius$"
+      - "^redfish_chassis_power_average_consumed_watts$"
+      - "^redfish_chassis_power_powersupply_power_(input|output|capacity)_watts$"
+    units:
+      redfish_chassis_power_average_consumed_watts:
+        scale: 1
+        unit: W

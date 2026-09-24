@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- Strategic telemetry NDJSON (`--ndjson`) with tagged `run`/`stage`/`request`/
+  `telemetry`/`scrape_error`/`summary` rows on a shared monotonic epoch.
+- Multi-source Prometheus scrape config (`--telemetry` YAML), startup probes,
+  `--require-telemetry`, and `--metrics-url` desugaring into the same writer.
+- Mock server `--telemetry-fixture` serving canned DCGM/all-smi/vLLM exposition
+  on `/metrics` and `/metric`.
+- Docs: `docs/TELEMETRY.md`, exporter examples (default: Metrum all-smi fork
+  `/metric`), offline analysis recipes under `docs/queries/` (no in-binary SQL).
+
 ## 1.4.0 (2026-09-24)
 
 ### Removed

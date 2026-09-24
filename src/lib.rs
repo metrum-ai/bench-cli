@@ -24,6 +24,7 @@ pub mod stats;
 pub mod strategic;
 pub mod summary;
 pub mod sut;
+pub mod telemetry;
 pub mod tokenizer;
 
 pub mod banner {

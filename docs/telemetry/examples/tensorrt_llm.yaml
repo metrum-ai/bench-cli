@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM OpenAI-style server. Path is /prometheus/metrics.
+# scrape: http://127.0.0.1:8000/prometheus/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: tensorrt_llm
+    url: http://127.0.0.1:8000/prometheus/metrics
+    interval_ms: 1000
+    include:
+      - "^trtllm_(kv_cache_utilization|kv_cache_hit_rate|prompt_cached_tokens_total)$"
+      - "^trtllm_request_(preemptions|metrics_(active|queued))$"
+      - "^nv_trt_llm_(kv_cache_block_metrics|request_metrics)$"

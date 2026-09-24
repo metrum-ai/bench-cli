@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# google/cadvisor. scrape: http://127.0.0.1:8080/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: cadvisor
+    url: http://127.0.0.1:8080/metrics
+    interval_ms: 2000
+    include:
+      - "^container_cpu_usage_seconds_total$"
+      - "^container_memory_(usage|working_set|cache)_bytes$"
+      - "^container_network_(receive|transmit)_bytes_total$"
+      - "^container_cpu_schedstat_runqueue_seconds_total$"

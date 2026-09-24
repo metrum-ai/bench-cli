@@ -18,14 +18,16 @@ portable exports. Existing modality-specific binaries remain supported.
 ## Sweep and server correlation
 
 ```bash
-metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 &
+metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 --telemetry-fixture &
 metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8080/v1/chat/completions \
-  --model mock --sweep 1,2,4,8,16 --sweep-by concurrency \
+  --model mock --api-key dummy --sweep 1,2,4,8,16 --sweep-by concurrency \
   --requests-per-stage 100 \
   --max-tokens 64 \
   --warmup-requests 4 \
   --sut examples/sut.example.json --require-sut \
+  --ndjson run.ndjson \
+  --telemetry docs/telemetry/examples/all-smi.yaml \
   --metrics-url http://127.0.0.1:8080/metrics \
   --html report.html --csv requests.csv \
   --mlperf-dir mlperf --mlperf-scenario server
@@ -139,6 +141,15 @@ and JSON arguments. Valid responses determine `validity_rate` and feed goodput
 Use `--kind embeddings` with `--prompt TEXT` against `/v1/embeddings`.
 Use `--kind rerank` with `--prompt 'query|document one|document two'` against
 Jina/Cohere-style `/v1/rerank` endpoints.
+
+## Prometheus telemetry NDJSON
+
+For durable hardware and engine time series during a sweep, pass `--ndjson`
+with `--telemetry` (YAML Prometheus sources) or legacy `--metrics-url`. Optional
+`--require-telemetry` aborts after consecutive scrape failures. The default
+smoke source is the Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
+fork at `http://127.0.0.1:9090/metric`. Scope, units, join model, and recipes:
+[TELEMETRY.md](TELEMETRY.md). Analysis formulas: [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
 
 ## OpenTelemetry
 

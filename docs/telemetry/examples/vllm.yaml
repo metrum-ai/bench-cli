@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM OpenAI server metrics (on by default).
+# scrape: http://127.0.0.1:8000/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: vllm
+    url: http://127.0.0.1:8000/metrics
+    interval_ms: 1000
+    include:
+      - "^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$"
