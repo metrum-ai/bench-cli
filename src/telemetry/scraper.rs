@@ -8,6 +8,7 @@ use super::epoch::RunEpoch;
 use super::parser::parse_exposition;
 use super::row::{MetricType, Row, ScrapeErrorRow, TelemetryRow, TelemetrySourceStamp};
 use super::writer::NdjsonWriter;
+use crate::http_client::{build_http_client, HttpClientOptions};
 use anyhow::{bail, Context, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, DATE};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -21,16 +22,34 @@ pub struct ProbeResult {
 }
 
 /// Build a shared reqwest client for telemetry scrapes.
+///
+/// `insecure_tls` is honored via the shared [`build_http_client`] path (the
+/// only approved `danger_accept_invalid_certs` call site). Gzip is enabled
+/// only when TLS verification stays on, which matches the common local
+/// exporter case (`http://127.0.0.1/...`).
 pub fn build_telemetry_client(insecure_tls: bool, accept_gzip: bool) -> Result<reqwest::Client> {
+    if insecure_tls {
+        if accept_gzip {
+            eprintln!(
+                "telemetry: insecure_tls requested; using shared TLS client without gzip decode"
+            );
+        }
+        return build_http_client(HttpClientOptions {
+            request_timeout: Some(Duration::from_secs(30)),
+            connect_timeout: Duration::from_secs(10),
+            pool_max_idle_per_host: 8,
+            pool_idle_timeout: Duration::from_secs(30),
+            tcp_keepalive: Duration::from_secs(30),
+            ca_cert: None,
+            insecure: true,
+        });
+    }
     let mut builder = reqwest::Client::builder()
         .pool_max_idle_per_host(8)
         .tcp_keepalive(Duration::from_secs(30))
         .timeout(Duration::from_secs(30));
     if accept_gzip {
         builder = builder.gzip(true);
-    }
-    if insecure_tls {
-        builder = builder.danger_accept_invalid_certs(true);
     }
     builder.build().context("build telemetry HTTP client")
 }
