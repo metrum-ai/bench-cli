@@ -92,7 +92,8 @@ Success = statistics within tolerance, not exact `--count`. Details:
 | --- | --- |
 | Concurrency sweep | `--sweep`, `--sweep-by concurrency`, `--requests-per-stage` |
 | Rate sweep | `--sweep-by rate`, `--max-in-flight` |
-| Server metrics | `--metrics-url` |
+| Server metrics (legacy aggregate) | `--metrics-url` |
+| Telemetry NDJSON | `--ndjson`, `--telemetry`, `--require-telemetry` |
 | Exports | `--html`, `--csv`, `--mlperf-dir`, `--mlperf-scenario` |
 | Sessions / validity | session JSONL, `--json-schema`, `--tools`, `--shared-prefix` |
 | Embeddings / rerank | `--kind embeddings` / `--kind rerank` |
@@ -100,7 +101,8 @@ Success = statistics within tolerance, not exact `--count`. Details:
 
 `metrum-ai-bench-cli-strategic` is a **separate binary**, not
 `metrum-ai-bench-cli strategic`. Details: [Strategic benchmarking](./strategic-benchmarking).
-
+Default GPU exporter for smoke: Metrum all-smi fork on `/metric` (see
+repository `docs/TELEMETRY.md`).
 ---
 
 ## SUT and redaction {#sut-and-redaction}

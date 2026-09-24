@@ -36,22 +36,26 @@ cargo install metrum-ai-bench-cli --bin metrum-ai-bench-cli-mock-server
 ```
 
 Useful flags: `--listen` (default `127.0.0.1:8080`), `--latency-ms`,
-`--fail-every N` (inject reproducible HTTP 503 responses).
+`--fail-every N` (inject reproducible HTTP 503 responses),
+`--telemetry-fixture` (canned DCGM/all-smi/vLLM exposition on `/metrics` and
+`/metric` for CI).
 
 ---
 
 ## Sweep and server correlation
 
 ```bash
-metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 &
+metrum-ai-bench-cli-mock-server --listen 127.0.0.1:8080 --telemetry-fixture &
 metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8080/v1/chat/completions \
-  --model mock \
+  --model mock --api-key dummy \
   --sweep 1,2,4,8,16 \
   --sweep-by concurrency \
   --requests-per-stage 100 \
   --max-tokens 64 \
   --warmup-requests 4 \
+  --ndjson run.ndjson \
+  --telemetry docs/telemetry/examples/all-smi.yaml \
   --metrics-url http://127.0.0.1:8080/metrics \
   --html report.html \
   --csv requests.csv \
@@ -81,9 +85,11 @@ To feed a Hugging Face `metrum-ai/prompt-library` mix, extract JSONL with
 The HTML report plots achieved throughput against p95 latency with **labeled
 axes, ticks, and a grid**, and marks the unit-normalized Kneedle result. Use
 `metrum-ai-bench-cli compare` on two of our own stdout JSON summaries (or
-request CSVs). The metrics scraper recognizes vLLM, SGLang, and
-TensorRT-LLM names for KV-cache utilization, preemptions, and running/waiting
-queues.
+request CSVs). Legacy `--metrics-url` still aggregates engine KV/queue gauges
+into stdout. For durable GPU/host timeseries, pass `--ndjson` with
+`--telemetry` (Prometheus text). Default smoke uses the Metrum
+[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on
+`http://127.0.0.1:9090/metric`. See repository `docs/TELEMETRY.md`.
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages. Rate
 requests retain their intended schedule while waiting for an in-flight slot.

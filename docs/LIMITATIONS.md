@@ -11,7 +11,10 @@ Honest scope for Metrum AI Bench at the 1.0 line. See also
 Bench is a load-generation **client**. It measures what the client observes
 (send, first byte, first visible token, body complete, errors). It cannot
 observe GPU utilization, KV-cache state, or scheduler internals on the server
-except when you optionally scrape a metrics URL from the strategic runner.
+except when you optionally scrape Prometheus endpoints from the strategic
+runner (`--metrics-url` and/or `--telemetry` YAML into `--ndjson`). Those
+series come from exporters on the host (default: Metrum all-smi fork `/metric`),
+not from an in-process NVML binding.
 
 ## Gateways that synthesize streaming
 

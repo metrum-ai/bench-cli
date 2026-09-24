@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.3.0** ([CHANGELOG](CHANGELOG.md)).
+release: **1.4.0** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -284,9 +284,12 @@ cross-run aggregate to `--data-log`.
 
 The `metrum-ai-bench-cli-strategic` runner adds concurrency/rate sweeps
 (`--sweep`), knee detection, multi-turn sessions, validity rules,
-server-metrics correlation, and CSV, HTML (`--html`), MLPerf-shaped
-(`--mlperf-dir`), and optional OTLP exports. See
-[strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md).
+server-metrics correlation, tagged telemetry NDJSON (`--ndjson` with
+`--telemetry` Prometheus scrapes; default exporter is the Metrum
+[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metric`), and
+CSV, HTML (`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP
+exports. See [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md) and
+[telemetry](docs/TELEMETRY.md).
 
 ## Dummy server
 
@@ -341,9 +344,9 @@ distributions.
 
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
-[prompt library](docs/PROMPT_LIBRARY.md), [reproduction](docs/REPRODUCING.md),
-[reasoning models](docs/REASONING_MODELS.md), and
-[known limitations](docs/LIMITATIONS.md).
+[strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
+[reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
+and [known limitations](docs/LIMITATIONS.md).
 
 ## Security and provenance
 

@@ -15,6 +15,12 @@ in the repository `CHANGELOG.md`.
 
 ## Unreleased
 
+- Strategic telemetry NDJSON (`--ndjson`) with multi-source Prometheus scrapes
+  (`--telemetry` YAML, `--require-telemetry`). Default smoke exporter: Metrum
+  all-smi fork on `/metric`. Offline analysis recipes in `docs/queries/` (no
+  in-binary SQL).
+- Mock server `--telemetry-fixture` for CI without a GPU.
+
 ---
 
 ## Metrum AI Bench CLI 1.4.0
