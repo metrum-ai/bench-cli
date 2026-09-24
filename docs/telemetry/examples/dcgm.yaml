@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: dcgm
+    url: http://127.0.0.1:9400/metrics
+    interval_ms: TOTAL_ENERGY_CONSUMPTION|GPU_UTIL|FB_USED|SM_CLOCK|GPU_TEMP)|PROF_(SM_ACTIVE|PIPE_TENSOR_ACTIVE|DRAM_ACTIVE))$|250
+    include:
+      - "^DCGM_FI_(DEV_(POWER_USAGE"

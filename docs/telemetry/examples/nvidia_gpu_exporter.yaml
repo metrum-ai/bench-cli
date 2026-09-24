@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: nvidia_gpu_exporter
+    url: http://127.0.0.1:9835/metrics
+    interval_ms: utilization_gpu_ratio|clocks_current_sm_clock_hz)$|1000
+    include:
+      - "^nvidia_smi_(power_draw_watts"

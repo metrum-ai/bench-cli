@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Triton Inference Server metrics port.
+# scrape: http://127.0.0.1:8002/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: triton
+    url: http://127.0.0.1:8002/metrics
+    interval_ms: 1000
+    include:
+      - "^nv_gpu_(power_usage|utilization)$"
+      - "^nv_gpu_memory_(used|total)_bytes$"
+      - "^nv_energy_consumption$"
+      - "^nv_inference_(pending_request_count|queue_duration_us)$"
+      - "^nv_cache_num_(hits|misses)_per_model$"
+    units:
+      nv_gpu_power_usage:
+        scale: 1
+        unit: W
+      nv_energy_consumption:
+        scale: 1
+        unit: J

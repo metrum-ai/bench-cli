@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Intel pcm-sensor-server. scrape: http://127.0.0.1:9738/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: pcm
+    url: http://127.0.0.1:9738/metrics
+    interval_ms: 1000
+    include:
+      - "^(L3_Cache_Misses|L3_Cache_Hits|L2_Cache_Misses|L2_Cache_Hits|L3_Cache_Occupancy)$"
+      - "^(DRAM_Reads|DRAM_Writes|Package_Energy|Thermal_Headroom)$"
+    units:
+      Package_Energy:
+        scale: 1
+        unit: J

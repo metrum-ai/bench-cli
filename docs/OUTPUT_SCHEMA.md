@@ -122,3 +122,22 @@ rejects any JSONL line without `schema_version`.
 `field_provenance` while `runtime` / `model` / `vendor` stay declared. For
 publication runs use `--sut <file> --require-sut` (implies `--redact-hostname`).
 See [Publishing a result](../README.md#publishing-a-result).
+
+## Strategic telemetry NDJSON (`metrum-ai-bench-cli.telemetry.v1`)
+
+Written by `metrum-ai-bench-cli-strategic --ndjson`. Each line is one tagged
+object (`kind`). All `*_ns` fields are nanoseconds from a shared monotonic
+epoch; `run.t0_wall` is ISO 8601 UTC.
+
+| kind | Required fields |
+|------|-----------------|
+| `run` | `run_id`, `t0_wall`, `tool_version`, `schema_version`, `config`, optional `sut`, `telemetry_sources[]` |
+| `stage` | `run_id`, `stage`, `load`, `phase` (`warmup`\|`measure`), `t_start_ns`, `t_end_ns` |
+| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `labels`, `value`, `unit`, `mtype`, `scrape_ms`, optional `raw` |
+| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, token/latency fields, optional `t_first_ns`, `telemetry_at_done` |
+| `scrape_error` | `run_id`, `t_ns`, `src`, `error`, optional `http_status` |
+| `summary` | `run_id`, `partial`, `dropped_telemetry_rows`, row counts |
+
+`mtype` is `counter` \| `gauge` \| `histogram_bucket` \| `summary` \| `unknown`.
+This file is separate from modality `--data-log` JSONL. Offline analysis:
+[TELEMETRY.md](TELEMETRY.md), [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).

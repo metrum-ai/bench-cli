@@ -81,7 +81,11 @@ and token throughput is not comparable across configs. Stage `config` stamps
 The report plots achieved
 throughput against p95 latency and marks the unit-normalized Kneedle result.
 The metrics scraper recognizes vLLM, SGLang and TensorRT-LLM names for
-KV-cache utilization, preemptions, and running/waiting queues.
+KV-cache utilization, preemptions, and running/waiting queues. For durable
+GPU/host timeseries, pass `--ndjson` with `--telemetry` (Prometheus text
+scrapes). Default smoke uses the Metrum
+[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on
+`http://127.0.0.1:9090/metric`. See [TELEMETRY.md](TELEMETRY.md).
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages.
 Rate requests retain their intended schedule while waiting for an in-flight

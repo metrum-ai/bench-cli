@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# prometheus/node_exporter. scrape: http://127.0.0.1:9100/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: node_exporter
+    url: http://127.0.0.1:9100/metrics
+    interval_ms: 2000
+    include:
+      - "^node_cpu_seconds_total$"
+      - "^node_memory_MemAvailable_bytes$"
+      - "^node_rapl_.*joules_total$"
+      - "^node_hwmon_(temp_celsius|power_average_watt)$"
+      - "^node_network_transmit_bytes_total$"
+    units:
+      node_hwmon_power_average_watt:
+        scale: 1
+        unit: W

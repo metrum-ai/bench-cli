@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# prometheus-community/ipmi_exporter. scrape: http://127.0.0.1:9290/metrics
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: ipmi
+    url: http://127.0.0.1:9290/metrics
+    interval_ms: 2000
+    include:
+      - "^ipmi_dcmi_power_consumption_current_watts$"
+      - "^ipmi_power_watts$"
+      - "^ipmi_temperature_celsius$"
+      - "^ipmi_fan_speed_rpm$"
+      - "^ipmi_chassis_power_state$"
+    units:
+      ipmi_dcmi_power_consumption_current_watts:
+        scale: 1
+        unit: W
+      ipmi_power_watts:
+        scale: 1
+        unit: W

@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: rocm
+    url: http://127.0.0.1:5000/metrics
+    interval_ms: package_power|gfx_activity|umc_activity|edge_temperature|total_vram|used_vram)$|1000
+    include:
+      - "^gpu_(power_usage"
