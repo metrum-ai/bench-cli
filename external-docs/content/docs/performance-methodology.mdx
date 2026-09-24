@@ -42,7 +42,7 @@ measured.
 | Term | Definition |
 | --- | --- |
 | **Prompt set** | A JSONL file, one request per line, produced by `metrum-ai-bench-cli-prompts` from the Hugging Face `metrum-ai/prompt-library` dataset. Prompts are real text, not synthetic filler. |
-| **Revision** | The dataset commit SHA. A floating revision such as `main` requires `--allow-moving-revision` and is not publication-compliant. Pin a SHA for publishable runs. |
+| **Revision** | Default Hub ref is `main` (latest); the mix report stores the resolved commit SHA. For publishable runs, pass that SHA (optionally with `--require-pinned-revision`) so the workload cannot drift. |
 | **Selection seed** | `--seed`, stamped in the mix report and run summary. The same revision, seed, count, and targets must reproduce the same prompt set. |
 | **Config** | `sample` or `full`. `sample` is a smoke-test subset and must not be used for published results. `full` is the publishable corpus. |
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.5.1 (2026-09-24)
+
+### Changed
+- `metrum-ai-bench-cli-prompts` defaults to Hub revision `main` (latest) and
+  always resolves floating refs to a commit SHA recorded in `--report`. Pass an
+  explicit 40-character SHA to pin; use `--require-pinned-revision` for
+  publication gates. `--allow-moving-revision` is a deprecated no-op.
+- Shadeform e2e defaults to `PROMPT_LIBRARY_REVISION=main` (no hardcoded SHA).
+
 ## 1.5.0 (2026-09-24)
 
 ### Added

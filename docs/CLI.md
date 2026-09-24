@@ -624,7 +624,9 @@ Options:
           [default: metrum-ai/prompt-library]
 
       --revision <REVISION>
-          Pinned dataset revision (40-char commit SHA unless --allow-moving-revision)
+          Dataset revision (default: main = latest). Pass a 40-char commit SHA to pin. Branch/tag names resolve to the current commit.
+          
+          [default: main]
 
       --config <CONFIG>
           Dataset config: sample|full
@@ -635,7 +637,10 @@ Options:
           [default: train]
 
       --allow-moving-revision
-          Allow floating revisions such as main (resolves to a commit)
+          Deprecated no-op: floating refs (including default main) always resolve. Kept for CLI compatibility.
+
+      --require-pinned-revision
+          Fail unless --revision is a 40-character commit SHA (publication pin)
 
       --cache-dir <CACHE_DIR>
           Cache directory for Hub downloads

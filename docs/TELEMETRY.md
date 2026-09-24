@@ -170,7 +170,7 @@ J/token, and KV at the knee without inventing samples.
 
 `scripts/e2e/run-shadeform.sh` must extract prompts from Hugging Face
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-with a pinned `--revision`, `--config sample`, and a named `--profile` (default
+(default revision `main` = latest; resolved SHA is recorded in
+`mix-report.json`). Use `--config sample` and a named `--profile` (default
 `rag-medium`). It fails closed on extract errors: do not add a synthetic
-prompt fallback. See `docs/PROMPT_LIBRARY.md` and `artifacts/e2e/mix-report.json`
-from a successful run.
+prompt fallback. See `docs/PROMPT_LIBRARY.md`.

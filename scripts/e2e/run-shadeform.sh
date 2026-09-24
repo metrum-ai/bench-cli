@@ -258,9 +258,10 @@ log "running sut-setup"
 remote "export HF_TOKEN=$(printf '%q' "${HF_TOKEN}"); export MODEL=$(printf '%q' "${MODEL}"); ${RESULTS_REMOTE}/bin/sut-setup.sh"
 
 # Prompts: required Hub mix from https://huggingface.co/datasets/metrum-ai/prompt-library
-# Pin the published revision (override with PROMPT_LIBRARY_REVISION). No synthetic fallback.
+# Default: latest `main` (resolved SHA recorded in mix-report). Override with
+# PROMPT_LIBRARY_REVISION=<40-char sha> to pin. No synthetic fallback.
 PROMPT_LIBRARY_DATASET="${PROMPT_LIBRARY_DATASET:-metrum-ai/prompt-library}"
-PROMPT_LIBRARY_REVISION="${PROMPT_LIBRARY_REVISION:-0666f62e581b482838ae2e17b333ee36ff3d01b0}"
+PROMPT_LIBRARY_REVISION="${PROMPT_LIBRARY_REVISION:-main}"
 PROMPT_LIBRARY_CONFIG="${PROMPT_LIBRARY_CONFIG:-sample}"
 PROMPT_LIBRARY_PROFILE="${PROMPT_LIBRARY_PROFILE:-rag-medium}"
 log "extracting prompts from https://huggingface.co/datasets/${PROMPT_LIBRARY_DATASET} revision=${PROMPT_LIBRARY_REVISION} config=${PROMPT_LIBRARY_CONFIG} profile=${PROMPT_LIBRARY_PROFILE}"
@@ -274,21 +275,24 @@ remote "export HF_TOKEN=$(printf '%q' "${HF_TOKEN}"); \
   --output ${RESULTS_REMOTE}/prompts/mix.jsonl \
   --report ${RESULTS_REMOTE}/prompts/mix-report.json"
 remote "python3 - <<'PY'
-import json, sys
+import json, sys, re
 report=json.load(open('${RESULTS_REMOTE}/prompts/mix-report.json',encoding='utf-8'))
 ds=str(report.get('dataset') or '')
 rev=str(report.get('revision') or '')
 n=report.get('selected_count')
+want='${PROMPT_LIBRARY_REVISION}'
 print('prompt-library report dataset=%s revision=%s config=%s profile=%s selected=%s' % (
   ds, rev, report.get('config'), report.get('profile'), n))
 if ds != 'metrum-ai/prompt-library':
   sys.exit('expected dataset metrum-ai/prompt-library, got %r' % ds)
-if rev != '${PROMPT_LIBRARY_REVISION}':
-  sys.exit('expected revision ${PROMPT_LIBRARY_REVISION}, got %r' % rev)
+if not re.fullmatch(r'[0-9a-f]{40}', rev):
+  sys.exit('expected resolved 40-char sha in mix-report, got %r' % rev)
+if re.fullmatch(r'[0-9a-f]{40}', want) and rev != want:
+  sys.exit('expected pinned revision %s, got %r' % (want, rev))
 mix=open('${RESULTS_REMOTE}/prompts/mix.jsonl',encoding='utf-8').read().strip().splitlines()
 if len(mix) < 8:
   sys.exit('prompt-library mix too small: %d rows' % len(mix))
-print('prompt-library mix ok rows=%d' % len(mix))
+print('prompt-library mix ok rows=%d resolved_revision=%s' % (len(mix), rev))
 PY"
 
 # Jarvis-style closed-loop sweep: 1,2,4,8,16,32,64 concurrency; streaming
