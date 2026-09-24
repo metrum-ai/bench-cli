@@ -53,7 +53,7 @@ check_headers() {
       continue
     fi
     case "$rel" in
-      target/*|.git/*|scripts/live/*|dummy-model-server/*)
+      target/*|target-e2e/*|.git/*|scripts/live/*|dummy-model-server/*)
         continue
         ;;
     esac
@@ -69,7 +69,7 @@ check_headers() {
     fi
   done < <(find . -type f \( \
     -name '*.rs' -o -name '*.py' -o -name '*.sh' -o -name '*.yml' \
-  \) ! -path './target/*' ! -path './.git/*' -print0)
+  \) ! -path './target/*' ! -path './target-e2e/*' ! -path './.git/*' -print0)
 
   if [[ "$missing" -ne 0 ]]; then
     echo "scripts/check_headers.sh failed: authored files must include Copyright (c) 2026 and SPDX-License-Identifier: Apache-2.0" >&2

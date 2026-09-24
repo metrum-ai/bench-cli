@@ -1,0 +1,12 @@
+{
+  "general": {
+    "cases": 3,
+    "passed": 2,
+    "pass_rate": 0.6666666666666666
+  },
+  "coding": {
+    "cases": 2,
+    "passed": 2,
+    "pass_rate": 1.0
+  }
+}

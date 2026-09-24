@@ -1,0 +1,44 @@
+{
+  "id": "5f51464b-7d79-4a36-b955-f137c12ab926",
+  "cloud": "massedcompute",
+  "region": "kansascity-usa-6",
+  "shade_instance_type": "RTXPro6000",
+  "cloud_instance_type": "gpu_1x_pro_6000_blackwell",
+  "cloud_assigned_id": "da1c7e75-7d95-4e34-9bbf-88a923059565",
+  "shade_cloud": true,
+  "name": "metrum-telemetry-20260924-174704",
+  "configuration": {
+    "memory_in_gb": 192,
+    "storage_in_gb": 750,
+    "vcpus": 16,
+    "num_gpus": 1,
+    "gpu_type": "RTXPro6000",
+    "interconnect": "pcie",
+    "nvlink": false,
+    "os": "ubuntu22.04_cuda13.0_shade_os",
+    "vram_per_gpu_in_gb": 96,
+    "gpu_manufacturer": "nvidia",
+    "ssh": null
+  },
+  "ip": "REDACTED",
+  "ssh_user": "shadeform",
+  "ssh_port": 22,
+  "status": "active",
+  "status_details": "",
+  "cost_estimate": "0",
+  "hourly_price": 219,
+  "rental_terms": {
+    "rental_type": "on_demand",
+    "hourly_price": "2.19",
+    "ending_at": null
+  },
+  "active_at": "2026-09-24T17:49:37.533254Z",
+  "created_at": "2026-09-24T17:47:04.207379Z",
+  "deleted_at": null,
+  "ssh_key_id": "REDACTED",
+  "boot_time": {
+    "min_boot_in_sec": 300,
+    "max_boot_in_sec": 480
+  },
+  "hostname": "REDACTED"
+}

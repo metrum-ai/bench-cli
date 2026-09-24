@@ -1,0 +1,573 @@
+{
+  "evalId": "eval-ubx-2026-09-24T18:27:23",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-09-24T18:27:23.491Z",
+    "prompts": [
+      {
+        "id": "d3bcaf71c11c2678899be04d872718325f0916b3b0705e805ee29930663a42e2",
+        "raw": "{{question}}",
+        "label": "{{question}}",
+        "provider": "sut",
+        "metrics": {
+          "score": 2,
+          "testPassCount": 2,
+          "testFailCount": 1,
+          "testErrorCount": 0,
+          "assertPassCount": 2,
+          "assertFailCount": 1,
+          "totalLatencyMs": 545,
+          "tokenUsage": {
+            "prompt": 153,
+            "completion": 7,
+            "cached": 0,
+            "total": 160,
+            "numRequests": 3,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "namedScoreWeights": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "contains",
+                "value": "Paris"
+              }
+            }
+          ]
+        },
+        "id": "c47c2b87-0203-49f4-a2b6-10809155e6fe",
+        "latencyMs": 152,
+        "namedScores": {},
+        "prompt": {
+          "raw": "What is the capital of France? Answer with the city name only.",
+          "label": "{{question}}",
+          "config": {}
+        },
+        "promptId": "d3bcaf71c11c2678899be04d872718325f0916b3b0705e805ee29930663a42e2",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:chat:sut",
+          "label": "sut"
+        },
+        "response": {
+          "output": "Paris",
+          "tokenUsage": {
+            "total": 28,
+            "prompt": 26,
+            "completion": 2,
+            "numRequests": 1
+          },
+          "cached": false,
+          "latencyMs": 152,
+          "finishReason": "stop",
+          "guardrails": {
+            "flagged": false
+          },
+          "metadata": {
+            "http": {
+              "status": 200,
+              "statusText": "OK",
+              "headers": {
+                "content-length": "679",
+                "content-type": "application/json",
+                "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+                "server": "uvicorn"
+              }
+            }
+          }
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "description": "capital_of_france",
+          "vars": {
+            "question": "What is the capital of France? Answer with the city name only."
+          },
+          "assert": [
+            {
+              "type": "contains",
+              "value": "Paris"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "tokenUsage": {
+          "prompt": 26,
+          "completion": 2,
+          "cached": 0,
+          "total": 28,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "question": "What is the capital of France? Answer with the city name only."
+        },
+        "metadata": {
+          "http": {
+            "status": 200,
+            "statusText": "OK",
+            "headers": {
+              "content-length": "679",
+              "content-type": "application/json",
+              "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+              "server": "uvicorn"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "error": "Expected output to contain \"12\"",
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "Expected output to contain \"12\"",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": false,
+              "score": 0,
+              "reason": "Expected output to contain \"12\"",
+              "assertion": {
+                "type": "contains",
+                "value": "12"
+              }
+            }
+          ]
+        },
+        "id": "028b608a-ba55-44b1-a671-54eeeb596306",
+        "latencyMs": 199,
+        "namedScores": {},
+        "prompt": {
+          "raw": "A store sells pens for $2 each and notebooks for $5 each.\nYou buy 3 pens and 2 notebooks, then use a $4 coupon.\nHow much do you pay? Reply with the final dollar amount only.",
+          "label": "{{question}}",
+          "config": {}
+        },
+        "promptId": "d3bcaf71c11c2678899be04d872718325f0916b3b0705e805ee29930663a42e2",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:chat:sut",
+          "label": "sut"
+        },
+        "response": {
+          "output": "11",
+          "tokenUsage": {
+            "total": 63,
+            "prompt": 60,
+            "completion": 3,
+            "numRequests": 1
+          },
+          "cached": false,
+          "latencyMs": 199,
+          "finishReason": "stop",
+          "guardrails": {
+            "flagged": false
+          },
+          "metadata": {
+            "http": {
+              "status": 200,
+              "statusText": "OK",
+              "headers": {
+                "content-length": "676",
+                "content-type": "application/json",
+                "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+                "server": "uvicorn"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "description": "multi_step_arithmetic",
+          "vars": {
+            "question": "A store sells pens for $2 each and notebooks for $5 each.\nYou buy 3 pens and 2 notebooks, then use a $4 coupon.\nHow much do you pay? Reply with the final dollar amount only.\n"
+          },
+          "assert": [
+            {
+              "type": "contains",
+              "value": "12"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "tokenUsage": {
+          "prompt": 60,
+          "completion": 3,
+          "cached": 0,
+          "total": 63,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "question": "A store sells pens for $2 each and notebooks for $5 each.\nYou buy 3 pens and 2 notebooks, then use a $4 coupon.\nHow much do you pay? Reply with the final dollar amount only.\n"
+        },
+        "metadata": {
+          "http": {
+            "status": 200,
+            "statusText": "OK",
+            "headers": {
+              "content-length": "676",
+              "content-type": "application/json",
+              "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+              "server": "uvicorn"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 1
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "contains",
+                "value": "B"
+              }
+            }
+          ]
+        },
+        "id": "62546462-4b76-4d79-a5b5-70089f73c4fb",
+        "latencyMs": 194,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Ice melts when heated. Which statement is the best causal explanation?\nA) Ice is white\nB) Heat increases molecular motion until the solid lattice breaks\nC) Melting is called fusion\nD) Water freezes at 0C\nReply with the letter only.",
+          "label": "{{question}}",
+          "config": {}
+        },
+        "promptId": "d3bcaf71c11c2678899be04d872718325f0916b3b0705e805ee29930663a42e2",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:chat:sut",
+          "label": "sut"
+        },
+        "response": {
+          "output": "B",
+          "tokenUsage": {
+            "total": 69,
+            "prompt": 67,
+            "completion": 2,
+            "numRequests": 1
+          },
+          "cached": false,
+          "latencyMs": 194,
+          "finishReason": "stop",
+          "guardrails": {
+            "flagged": false
+          },
+          "metadata": {
+            "http": {
+              "status": 200,
+              "statusText": "OK",
+              "headers": {
+                "content-length": "675",
+                "content-type": "application/json",
+                "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+                "server": "uvicorn"
+              }
+            }
+          }
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "description": "causal_reasoning",
+          "vars": {
+            "question": "Ice melts when heated. Which statement is the best causal explanation?\nA) Ice is white\nB) Heat increases molecular motion until the solid lattice breaks\nC) Melting is called fusion\nD) Water freezes at 0C\nReply with the letter only.\n"
+          },
+          "assert": [
+            {
+              "type": "contains",
+              "value": "B"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "tokenUsage": {
+          "prompt": 67,
+          "completion": 2,
+          "cached": 0,
+          "total": 69,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "question": "Ice melts when heated. Which statement is the best causal explanation?\nA) Ice is white\nB) Heat increases molecular motion until the solid lattice breaks\nC) Melting is called fusion\nD) Water freezes at 0C\nReply with the letter only.\n"
+        },
+        "metadata": {
+          "http": {
+            "status": 200,
+            "statusText": "OK",
+            "headers": {
+              "content-length": "675",
+              "content-type": "application/json",
+              "date": "Thu, 24 Sep 2026 18:27:22 GMT",
+              "server": "uvicorn"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 2,
+      "failures": 1,
+      "errors": 0,
+      "tokenUsage": {
+        "prompt": 153,
+        "completion": 7,
+        "cached": 0,
+        "total": 160,
+        "numRequests": 3,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 0,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 218,
+      "evaluationDurationMs": 218
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "Qwen general intelligence smoke (fast)",
+    "prompts": [
+      "{{question}}"
+    ],
+    "providers": [
+      {
+        "id": "openai:chat:sut",
+        "label": "sut",
+        "config": {
+          "apiBaseUrl": "http://127.0.0.1:8000/v1",
+          "apiKey": "[REDACTED]",
+          "temperature": 0,
+          "max_tokens": 256,
+          "showThinking": false,
+          "passthrough": {
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        }
+      }
+    ],
+    "tests": [
+      {
+        "description": "capital_of_france",
+        "vars": {
+          "question": "What is the capital of France? Answer with the city name only."
+        },
+        "assert": [
+          {
+            "type": "contains",
+            "value": "Paris"
+          }
+        ]
+      },
+      {
+        "description": "multi_step_arithmetic",
+        "vars": {
+          "question": "A store sells pens for $2 each and notebooks for $5 each.\nYou buy 3 pens and 2 notebooks, then use a $4 coupon.\nHow much do you pay? Reply with the final dollar amount only.\n"
+        },
+        "assert": [
+          {
+            "type": "contains",
+            "value": "12"
+          }
+        ]
+      },
+      {
+        "description": "causal_reasoning",
+        "vars": {
+          "question": "Ice melts when heated. Which statement is the best causal explanation?\nA) Ice is white\nB) Heat increases molecular motion until the solid lattice breaks\nC) Melting is called fusion\nD) Water freezes at 0C\nReply with the letter only.\n"
+        },
+        "assert": [
+          {
+            "type": "contains",
+            "value": "B"
+          }
+        ]
+      }
+    ],
+    "env": {},
+    "outputPath": [
+      "/tmp/metrum-e2e/promptfoo-general.json"
+    ],
+    "extensions": [],
+    "metadata": {},
+    "evaluateOptions": {}
+  },
+  "shareableUrl": null,
+  "metadata": {
+    "promptfooVersion": "0.121.20",
+    "nodeVersion": "v20.20.2",
+    "platform": "linux",
+    "arch": "x64",
+    "exportedAt": "2026-09-24T18:27:23.747Z",
+    "evaluationCreatedAt": "2026-09-24T18:27:23.491Z"
+  },
+  "vars": [
+    "question"
+  ],
+  "runtimeOptions": {
+    "eventSource": "cli",
+    "showProgressBar": true,
+    "repeat": 1,
+    "maxConcurrency": 4,
+    "cache": false
+  }
+}

@@ -1,0 +1,45 @@
+Cache is disabled.
+Starting evaluation eval-Cub-2026-09-24T18:27:24
+Running 2 test cases (up to 4 at a time)...
+
+┌────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────┐
+│ problem                                                    │ [sut] Write a complete Python 3 solution for the following │
+│                                                            │ problem.                                                   │
+│                                                            │ Return ONLY valid Python source code. No markdown fences,  │
+│                                                            │ no commentary.                                             │
+│                                                            │ Problem: {{problem}}                                       │
+├────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
+│ Implement a function two_sum(nums, target) that returns a  │ [PASS] ```python                                           │
+│ list of two                                                │ def two_sum(nums, target):                                 │
+│ distinct indices i,j such that nums[i] + nums[j] ==        │     seen = {}                                              │
+│ target.                                                    │     for i, num in enumerate(nums):                         │
+│ Assume exactly one solution exists. Example:               │         complement = target - num                          │
+│ nums=[2,7,11,15], target=9                                 │         if complement in seen:                             │
+│ returns [0,1].                                             │             return [seen[complement], i]                   │
+│                                                            │         seen[num] = i                                      │
+│                                                            │     return []                                              │
+│                                                            │ ```                                                        │
+├────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────┤
+│ Implement a function reverse_words(s: str) -> str that     │ [PASS] ```python                                           │
+│ reverses the                                               │ def reverse_words(s: str) -> str:                          │
+│ order of whitespace-separated words in s while preserving  │     words = s.split()                                      │
+│ single spaces                                              │     return ' '.join(reversed(words))                       │
+│ between words. Example: 'the sky is blue' -> 'blue is sky  │ ```                                                        │
+│ the'.                                                      │                                                            │
+└────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────┘
+✓ Eval complete (ID: eval-Cub-2026-09-24T18:27:24)
+
+» View results: promptfoo view
+» Share with your team: https://promptfoo.app
+» Feedback: https://promptfoo.dev/feedback
+
+Total Tokens: 291
+  Eval: 291 (194 prompt, 97 completion)
+
+Results:
+  ✓ 2 passed (100%)
+  0 failed (0%)
+  0 errors (0%)
+Duration: 3s (concurrency: 4)
+
+Writing output to /tmp/metrum-e2e/promptfoo-coding.json

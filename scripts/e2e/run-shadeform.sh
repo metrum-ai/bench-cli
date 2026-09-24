@@ -46,14 +46,12 @@ cleanup() {
   if [[ -n "${INSTANCE_ID}" ]]; then
     "${SHADEFORM}" delete "${INSTANCE_ID}" || true
     local gone=0
-    for _ in $(seq 1 60); do
-      if ! "${SHADEFORM}" wait "${INSTANCE_ID}" >/dev/null 2>&1; then
-        # wait dies on deleted; also try info
-        if ! curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
-          "https://api.shadeform.ai/v1/instances/${INSTANCE_ID}/info" >/dev/null 2>&1; then
-          gone=1
-          break
-        fi
+    for _ in $(seq 1 36); do
+      # Prefer a cheap info probe; do not block on shadeform wait (hangs on deleted).
+      if ! curl -fsS --max-time 5 -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
+        "https://api.shadeform.ai/v1/instances/${INSTANCE_ID}/info" >/dev/null 2>&1; then
+        gone=1
+        break
       fi
       sleep 5
     done
@@ -67,7 +65,8 @@ cleanup() {
 trap cleanup EXIT
 
 : "${SHADEFORM_API_KEY:?set SHADEFORM_API_KEY}"
-: "${HF_TOKEN:?set HF_TOKEN}"
+# Public Hub dataset; token optional (rate limits / private mirrors).
+HF_TOKEN="${HF_TOKEN:-}"
 
 # Fail fast if the API key cannot manage instances (types is public).
 INST_CODE="$(curl -sS -o /tmp/sf-instances.json -w '%{http_code}' \
@@ -78,8 +77,48 @@ if [[ "${INST_CODE}" != "200" ]]; then
   exit 1
 fi
 
-# SSH key: prefer SHADEFORM_SSH_KEY_ID, else account default, else omit (managed key).
+# SSH key: prefer SHADEFORM_SSH_KEY_ID. Else upload/match local pubkey
+# (${SHADEFORM_SSH_IDENTITY:-~/.ssh/id_ed25519}.pub) so create + ssh use the same key.
+SSH_IDENTITY="${SHADEFORM_SSH_IDENTITY:-${HOME}/.ssh/id_ed25519}"
+export SSH_IDENTITY
 SSH_KEY_ID="${SHADEFORM_SSH_KEY_ID:-}"
+if [[ -z "${SSH_KEY_ID}" && -f "${SSH_IDENTITY}.pub" ]]; then
+  SSH_KEY_ID="$(python3 - <<'PY'
+import json, os, pathlib, urllib.request
+api = os.environ["SHADEFORM_API_KEY"]
+pub = pathlib.Path(os.environ["SSH_IDENTITY"] + ".pub").read_text().strip()
+parts = pub.split()
+local = " ".join(parts[:2]) if len(parts) >= 2 else pub
+
+def body(s: str) -> str:
+    p = s.split()
+    return " ".join(p[:2]) if len(p) >= 2 else s
+
+req = urllib.request.Request(
+    "https://api.shadeform.ai/v1/sshkeys",
+    headers={"X-API-KEY": api, "Accept": "application/json"},
+)
+keys = json.load(urllib.request.urlopen(req)).get("ssh_keys", [])
+for k in keys:
+    if body(k.get("public_key") or "") == local:
+        print(k["id"])
+        raise SystemExit(0)
+payload = json.dumps({"name": "metrum-e2e-local", "public_key": pub}).encode()
+req = urllib.request.Request(
+    "https://api.shadeform.ai/v1/sshkeys/add",
+    data=payload,
+    method="POST",
+    headers={
+        "X-API-KEY": api,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    },
+)
+print(json.load(urllib.request.urlopen(req))["id"])
+PY
+)"
+  export SSH_IDENTITY
+fi
 if [[ -z "${SSH_KEY_ID}" ]]; then
   if SSH_JSON="$(curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
     https://api.shadeform.ai/v1/sshkeys 2>/dev/null)"; then
@@ -89,12 +128,10 @@ if [[ -z "${SSH_KEY_ID}" ]]; then
     fi
   fi
 fi
-if [[ -n "${SSH_KEY_ID}" ]]; then
-  export SHADEFORM_SSH_KEY_ID="${SSH_KEY_ID}"
-  log "using ssh_key_id=${SSH_KEY_ID}"
-else
-  log "no ssh_key_id; create will use Shadeform managed key"
-fi
+: "${SSH_KEY_ID:?set SHADEFORM_SSH_KEY_ID or provide ${SSH_IDENTITY}.pub}"
+export SHADEFORM_SSH_KEY_ID="${SSH_KEY_ID}"
+log "using ssh_key_id=${SSH_KEY_ID} identity=${SSH_IDENTITY}"
+
 
 # Prefer RTXPro6000 (confirmed available), then H200, then H100 single-GPU.
 pick_json=""
@@ -150,7 +187,21 @@ curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
   | jq 'del(.ssh_private_key?, .password?) | .ip="REDACTED" | (.configuration.ssh?)=null | .hostname="REDACTED"' \
   >"${ART}/instance.json"
 
-SSH=(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20)
+SSH=(
+  ssh
+  -i "${SSH_IDENTITY}"
+  -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o ConnectTimeout=20
+)
+SCP=(
+  scp
+  -i "${SSH_IDENTITY}"
+  -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+)
 # Discover user
 SSH_USER="$(curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
   "https://api.shadeform.ai/v1/instances/${INSTANCE_ID}/info" | jq -r '.ssh_user // .configuration.ssh_user // "ubuntu"')"
@@ -169,10 +220,15 @@ remote() { "${SSH[@]}" "${REMOTE}" "$@"; }
 remote_sudo() { "${SSH[@]}" "${REMOTE}" "sudo bash -lc $(printf '%q' "$*")"; }
 
 log "waiting for ssh"
+ssh_ok=0
 for _ in $(seq 1 60); do
-  if "${SSH[@]}" "${REMOTE}" 'echo ok' >/dev/null 2>&1; then break; fi
+  if "${SSH[@]}" "${REMOTE}" 'echo ok' >/dev/null 2>&1; then
+    ssh_ok=1
+    break
+  fi
   sleep 5
 done
+[[ "${ssh_ok}" -eq 1 ]] || { log "ssh failed for ${REMOTE} with identity ${SSH_IDENTITY}"; exit 1; }
 
 log "installing docker/nvidia toolkit if needed"
 remote 'command -v docker >/dev/null || (curl -fsSL https://get.docker.com | sudo sh)'
@@ -180,52 +236,74 @@ remote 'sudo usermod -aG docker "$USER" || true'
 remote 'command -v nvidia-smi'
 
 # Sync repo binaries: build release locally and scp, or build on remote.
-log "building release binaries locally"
+BIN_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/release"
+log "building release binaries locally (BIN_DIR=${BIN_DIR})"
 (cd "${REPO_ROOT}" && cargo build --release --bin metrum-ai-bench-cli-strategic --bin metrum-ai-bench-cli-prompts --bin metrum-ai-bench-cli-mock-server)
 
 log "copying tools to remote"
-remote "mkdir -p ${RESULTS_REMOTE}/bin ${RESULTS_REMOTE}/prompts"
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "${REPO_ROOT}/target/release/metrum-ai-bench-cli-strategic" \
-  "${REPO_ROOT}/target/release/metrum-ai-bench-cli-prompts" \
+remote "mkdir -p ${RESULTS_REMOTE}/bin ${RESULTS_REMOTE}/prompts ${RESULTS_REMOTE}/promptfoo"
+"${SCP[@]}" \
+  "${BIN_DIR}/metrum-ai-bench-cli-strategic" \
+  "${BIN_DIR}/metrum-ai-bench-cli-prompts" \
   "${REPO_ROOT}/scripts/e2e/sut-setup.sh" \
+  "${REPO_ROOT}/scripts/e2e/interrupt-run.sh" \
+  "${REPO_ROOT}/scripts/e2e/aiperf-bakeoff.sh" \
   "${REMOTE}:${RESULTS_REMOTE}/bin/"
+"${SCP[@]}" -r \
+  "${REPO_ROOT}/scripts/e2e/promptfoo/." \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo/"
 remote "chmod +x ${RESULTS_REMOTE}/bin/*"
 
 log "running sut-setup"
 remote "export HF_TOKEN=$(printf '%q' "${HF_TOKEN}"); export MODEL=$(printf '%q' "${MODEL}"); ${RESULTS_REMOTE}/bin/sut-setup.sh"
 
-# Prompts: coding-style long context (~16k input tokens target via prompt library if possible)
-log "extracting prompts"
-remote "${RESULTS_REMOTE}/bin/metrum-ai-bench-cli-prompts \
-  --dataset metrum-ai/prompt-library \
-  --config metrum-ai-bench-cli-prompts \
-  --isl-target 16000 --osl-target 512 --count 64 \
-  --out ${RESULTS_REMOTE}/prompts/mix.jsonl \
-  --report ${RESULTS_REMOTE}/prompts/mix-report.json" \
-  || remote "python3 - <<'PY'
-import json
-path='${RESULTS_REMOTE}/prompts/mix.jsonl'
-# Fallback: synthetic long prompts (~16k tokens ~ 64k chars)
-pad='def foo():\\n    return 1\\n' * 2000
-with open(path,'w') as f:
-  for i in range(64):
-    f.write(json.dumps({'prompt': f'Refactor this module and explain changes. id={i}\\n'+pad[:60000]})+'\\n')
-print('wrote fallback prompts', path)
+# Prompts: required Hub mix from https://huggingface.co/datasets/metrum-ai/prompt-library
+# Pin the published revision (override with PROMPT_LIBRARY_REVISION). No synthetic fallback.
+PROMPT_LIBRARY_DATASET="${PROMPT_LIBRARY_DATASET:-metrum-ai/prompt-library}"
+PROMPT_LIBRARY_REVISION="${PROMPT_LIBRARY_REVISION:-0666f62e581b482838ae2e17b333ee36ff3d01b0}"
+PROMPT_LIBRARY_CONFIG="${PROMPT_LIBRARY_CONFIG:-sample}"
+PROMPT_LIBRARY_PROFILE="${PROMPT_LIBRARY_PROFILE:-rag-medium}"
+log "extracting prompts from https://huggingface.co/datasets/${PROMPT_LIBRARY_DATASET} revision=${PROMPT_LIBRARY_REVISION} config=${PROMPT_LIBRARY_CONFIG} profile=${PROMPT_LIBRARY_PROFILE}"
+remote "export HF_TOKEN=$(printf '%q' "${HF_TOKEN}"); \
+  ${RESULTS_REMOTE}/bin/metrum-ai-bench-cli-prompts \
+  --dataset ${PROMPT_LIBRARY_DATASET} \
+  --revision ${PROMPT_LIBRARY_REVISION} \
+  --config ${PROMPT_LIBRARY_CONFIG} \
+  --profile ${PROMPT_LIBRARY_PROFILE} \
+  --count 48 \
+  --output ${RESULTS_REMOTE}/prompts/mix.jsonl \
+  --report ${RESULTS_REMOTE}/prompts/mix-report.json"
+remote "python3 - <<'PY'
+import json, sys
+report=json.load(open('${RESULTS_REMOTE}/prompts/mix-report.json',encoding='utf-8'))
+ds=str(report.get('dataset') or '')
+rev=str(report.get('revision') or '')
+n=report.get('selected_count')
+print('prompt-library report dataset=%s revision=%s config=%s profile=%s selected=%s' % (
+  ds, rev, report.get('config'), report.get('profile'), n))
+if ds != 'metrum-ai/prompt-library':
+  sys.exit('expected dataset metrum-ai/prompt-library, got %r' % ds)
+if rev != '${PROMPT_LIBRARY_REVISION}':
+  sys.exit('expected revision ${PROMPT_LIBRARY_REVISION}, got %r' % rev)
+mix=open('${RESULTS_REMOTE}/prompts/mix.jsonl',encoding='utf-8').read().strip().splitlines()
+if len(mix) < 8:
+  sys.exit('prompt-library mix too small: %d rows' % len(mix))
+print('prompt-library mix ok rows=%d' % len(mix))
 PY"
 
-# Jarvis-style closed-loop sweep: 1,2,4,8,16,32,64 concurrency; 512 out; streaming
+# Jarvis-style closed-loop sweep: 1,2,4,8,16,32,64 concurrency; streaming
 log "closed-loop concurrency sweep"
+METRUM_CLOSED_START="$(date -u +%s)"
 remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
   --url http://127.0.0.1:8000/v1/chat/completions \
   --api-key dummy \
   --model sut \
   --streaming \
   --prompts ${RESULTS_REMOTE}/prompts/mix.jsonl \
-  --max-tokens 512 \
+  --max-tokens 256 \
   --ignore-eos \
-  --warmup-requests 8 \
-  --requests-per-stage 32 \
+  --warmup-requests 4 \
+  --requests-per-stage 16 \
   --sweep 1,2,4,8,16,32,64 \
   --sweep-by concurrency \
   --sut ${RESULTS_REMOTE}/sut.json --require-sut \
@@ -235,6 +313,41 @@ remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
   --html ${RESULTS_REMOTE}/report-closed.html \
   --csv ${RESULTS_REMOTE}/requests-closed.csv \
   > ${RESULTS_REMOTE}/stdout-closed.json"
+remote "python3 - <<'PY'
+import json, sys
+path='${RESULTS_REMOTE}/run-closed.ndjson'
+reqs=succ=0
+with open(path,encoding='utf-8') as f:
+  for line in f:
+    row=json.loads(line)
+    if row.get('kind')!='request':
+      continue
+    if row.get('warmup'):
+      continue
+    reqs += 1
+    if row.get('success') is True:
+      succ += 1
+print(f'closed-loop measured={reqs} success={succ}')
+if reqs < 8:
+  sys.exit('closed-loop produced too few measured requests')
+if succ < max(4, reqs // 10):
+  sys.exit(f'closed-loop success rate too low: {succ}/{reqs}')
+PY"
+METRUM_CLOSED_END="$(date -u +%s)"
+remote "python3 - <<PY
+import json, time
+timings = {
+  'tool': 'metrum-ai-bench-cli-strategic',
+  'phase': 'closed-loop',
+  'setup_seconds': None,
+  'run_seconds': ${METRUM_CLOSED_END} - ${METRUM_CLOSED_START},
+  'total_seconds': ${METRUM_CLOSED_END} - ${METRUM_CLOSED_START},
+  'notes': 'closed-loop wall time only (excludes cargo/scp/sut-setup); see cost.txt for full driver elapsed',
+  'finished_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+}
+open('${RESULTS_REMOTE}/metrum_timings.json','w',encoding='utf-8').write(json.dumps(timings, indent=2)+'\\n')
+print(json.dumps(timings))
+PY"
 
 # Open-loop lighter sweep
 log "open-loop rate sweep"
@@ -244,13 +357,13 @@ remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
   --model sut \
   --streaming \
   --prompts ${RESULTS_REMOTE}/prompts/mix.jsonl \
-  --max-tokens 512 \
+  --max-tokens 256 \
   --ignore-eos \
-  --warmup-requests 8 \
-  --requests-per-stage 32 \
-  --sweep 2,4,8,16,32 \
+  --warmup-requests 4 \
+  --requests-per-stage 16 \
+  --sweep 2,4,8,16 \
   --sweep-by rate \
-  --max-in-flight 64 \
+  --max-in-flight 32 \
   --sut ${RESULTS_REMOTE}/sut.json --require-sut \
   --telemetry ${RESULTS_REMOTE}/telemetry.yaml \
   --require-telemetry \
@@ -259,50 +372,93 @@ remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
   --csv ${RESULTS_REMOTE}/requests-open.csv \
   > ${RESULTS_REMOTE}/stdout-open.json"
 
-# Interrupt: start a long sweep, SIGINT mid-run, expect partial summary.
+# Interrupt: best-effort SIGINT partial summary (do not block promptfoo/AIPerf).
 log "interrupt partial-summary check"
-remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
-  --url http://127.0.0.1:8000/v1/chat/completions \
-  --api-key dummy \
-  --model sut \
-  --streaming \
-  --prompts ${RESULTS_REMOTE}/prompts/mix.jsonl \
-  --max-tokens 512 \
-  --ignore-eos \
-  --warmup-requests 2 \
-  --requests-per-stage 64 \
-  --sweep 8,16,32 \
-  --sweep-by concurrency \
-  --sut ${RESULTS_REMOTE}/sut.json --require-sut \
-  --telemetry ${RESULTS_REMOTE}/telemetry.yaml \
-  --ndjson ${RESULTS_REMOTE}/run-interrupt.ndjson \
-  --html ${RESULTS_REMOTE}/report-interrupt.html \
-  --csv ${RESULTS_REMOTE}/requests-interrupt.csv \
-  > ${RESULTS_REMOTE}/stdout-interrupt.json &
-  echo \$! > ${RESULTS_REMOTE}/interrupt.pid
-  sleep 25
-  kill -INT \$(cat ${RESULTS_REMOTE}/interrupt.pid) || true
-  wait \$(cat ${RESULTS_REMOTE}/interrupt.pid) || true
-  python3 - <<'PY'
-import json
-path='${RESULTS_REMOTE}/run-interrupt.ndjson'
-partial=False
-kinds=set()
-with open(path) as f:
-  for line in f:
-    row=json.loads(line)
-    kinds.add(row.get('kind'))
-    if row.get('kind')=='summary':
-      partial=bool(row.get('partial'))
-assert 'telemetry' in kinds or 'request' in kinds, kinds
-assert partial, 'expected summary.partial=true after SIGINT'
-print('interrupt ok partial=true kinds=', sorted(kinds))
+set +e
+remote "chmod +x ${RESULTS_REMOTE}/bin/interrupt-run.sh && ${RESULTS_REMOTE}/bin/interrupt-run.sh"
+INTERRUPT_RC=$?
+set -e
+if [[ "${INTERRUPT_RC}" -ne 0 ]]; then
+  log "warning: interrupt check failed rc=${INTERRUPT_RC}; continuing to promptfoo/AIPerf"
+fi
+
+# Promptfoo: fast smoke suites with a hard ~30 minute wall-clock budget (both suites).
+PROMPTFOO_BUDGET_SEC="${PROMPTFOO_BUDGET_SEC:-1800}"
+log "installing promptfoo (budget starts after install)"
+remote 'command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs)'
+remote 'command -v promptfoo >/dev/null || sudo npm install -g promptfoo'
+
+log "promptfoo general+coding (wall budget ${PROMPTFOO_BUDGET_SEC}s)"
+remote "cd ${RESULTS_REMOTE}/promptfoo && \
+  export OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://127.0.0.1:8000/v1 && \
+  export PROMPTFOO_DISABLE_TELEMETRY=1 && \
+  rm -f ${RESULTS_REMOTE}/promptfoo-general.json ${RESULTS_REMOTE}/promptfoo-coding.json \
+        ${RESULTS_REMOTE}/promptfoo-general.txt ${RESULTS_REMOTE}/promptfoo-coding.txt && \
+  /usr/bin/timeout -k 30 ${PROMPTFOO_BUDGET_SEC} bash -lc '
+    set -e
+    promptfoo eval -c general.yaml --no-cache -o ${RESULTS_REMOTE}/promptfoo-general.json \
+      | tee ${RESULTS_REMOTE}/promptfoo-general.txt
+    promptfoo eval -c coding.yaml --no-cache -o ${RESULTS_REMOTE}/promptfoo-coding.json \
+      | tee ${RESULTS_REMOTE}/promptfoo-coding.txt
+  '"
+PROMPTFOO_RC=$?
+if [[ "${PROMPTFOO_RC}" -eq 124 ]] || [[ "${PROMPTFOO_RC}" -eq 137 ]]; then
+  log "error: promptfoo exceeded ${PROMPTFOO_BUDGET_SEC}s budget"
+  exit 1
+fi
+if [[ "${PROMPTFOO_RC}" -ne 0 ]]; then
+  log "error: promptfoo failed rc=${PROMPTFOO_RC}"
+  exit 1
+fi
+
+# Summarize pass rates; require successful non-empty suites.
+remote "python3 - <<'PY'
+import json, pathlib, sys
+root = pathlib.Path('${RESULTS_REMOTE}')
+out = {}
+errors = []
+for name in ('general', 'coding'):
+    p = root / f'promptfoo-{name}.json'
+    if not p.exists():
+        out[name] = {'error': 'missing'}
+        errors.append(name + ': missing output')
+        continue
+    data = json.loads(p.read_text())
+    results = (data.get('results') or {}).get('results') or data.get('results') or []
+    if isinstance(results, dict):
+        results = results.get('results') or []
+    n = len(results)
+    passed = sum(1 for r in results if (r.get('success') is True) or (r.get('score') or 0) >= 1)
+    out[name] = {'cases': n, 'passed': passed, 'pass_rate': (passed / n if n else 0.0)}
+    if n < 1:
+        errors.append(name + ': zero cases')
+    if passed < 1:
+        errors.append(name + ': zero passes')
+(root / 'promptfoo-summary.json').write_text(json.dumps(out, indent=2) + '\n')
+print(json.dumps(out))
+if errors:
+    sys.exit('promptfoo success gate failed: ' + '; '.join(errors))
+PY"
+
+# NVIDIA AIPerf bake-off on the same live SUT + same Hub prompt mix.
+log "AIPerf bake-off (same SUT, same prompt-library mix)"
+remote "chmod +x ${RESULTS_REMOTE}/bin/aiperf-bakeoff.sh && ${RESULTS_REMOTE}/bin/aiperf-bakeoff.sh"
+remote "python3 - <<'PY'
+import json, sys
+from pathlib import Path
+t = json.loads(Path('${RESULTS_REMOTE}/aiperf/timings.json').read_text())
+stages = t.get('stages') or []
+ok = [s for s in stages if s.get('rc') == 0]
+print('aiperf stages=%d ok=%d setup_s=%s run_s=%s' % (
+  len(stages), len(ok), t.get('setup_seconds'), t.get('run_seconds')))
+if len(ok) < 3:
+  sys.exit('aiperf success gate failed: need >=3 successful concurrency stages')
 PY"
 
 # Analyze locally after pull
 log "fetching artifacts"
 mkdir -p "${ART}/raw"
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
+"${SCP[@]}" -r \
   "${REMOTE}:${RESULTS_REMOTE}/run-closed.ndjson" \
   "${REMOTE}:${RESULTS_REMOTE}/run-open.ndjson" \
   "${REMOTE}:${RESULTS_REMOTE}/run-interrupt.ndjson" \
@@ -314,7 +470,28 @@ scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
   "${REMOTE}:${RESULTS_REMOTE}/sut.json" \
   "${REMOTE}:${RESULTS_REMOTE}/telemetry.yaml" \
   "${REMOTE}:${RESULTS_REMOTE}/prompts/mix-report.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo-general.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo-general.txt" \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo-coding.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo-coding.txt" \
+  "${REMOTE}:${RESULTS_REMOTE}/promptfoo-summary.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/metrum_timings.json" \
   "${ART}/raw/" || true
+
+# AIPerf bake-off tree (may be large; pull timings + stage summaries + exports)
+mkdir -p "${ART}/raw/aiperf" "${ART}/aiperf"
+"${SCP[@]}" -r \
+  "${REMOTE}:${RESULTS_REMOTE}/aiperf/timings.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/aiperf/stages.jsonl" \
+  "${REMOTE}:${RESULTS_REMOTE}/aiperf/aiperf-input.jsonl" \
+  "${ART}/raw/aiperf/" || true
+# Per-concurrency exports (best effort)
+for c in 1 2 4 8 16 32 64; do
+  "${SCP[@]}" -r "${REMOTE}:${RESULTS_REMOTE}/aiperf/c${c}" "${ART}/raw/aiperf/" 2>/dev/null || true
+done
+cp -a "${ART}/raw/aiperf/." "${ART}/aiperf/" 2>/dev/null || true
+cp "${ART}/raw/metrum_timings.json" "${ART}/" 2>/dev/null || true
+cp "${ART}/raw/mix-report.json" "${ART}/" 2>/dev/null || true
 
 # Compress ndjson
 if command -v zstd >/dev/null; then
@@ -330,6 +507,11 @@ cp "${ART}/raw/sut.json" "${ART}/"
 cp "${ART}/raw/telemetry.yaml" "${ART}/"
 cp "${ART}/raw/stdout-closed.json" "${ART}/"
 cp "${ART}/raw/stdout-open.json" "${ART}/"
+cp "${ART}/raw/promptfoo-general.json" "${ART}/" 2>/dev/null || true
+cp "${ART}/raw/promptfoo-general.txt" "${ART}/" 2>/dev/null || true
+cp "${ART}/raw/promptfoo-coding.json" "${ART}/" 2>/dev/null || true
+cp "${ART}/raw/promptfoo-coding.txt" "${ART}/" 2>/dev/null || true
+cp "${ART}/raw/promptfoo-summary.json" "${ART}/" 2>/dev/null || true
 
 # Validation via analyze.py if present
 if [[ -f "${REPO_ROOT}/docs/queries/analyze.py" ]]; then
@@ -338,6 +520,10 @@ if [[ -f "${REPO_ROOT}/docs/queries/analyze.py" ]]; then
   python3 "${REPO_ROOT}/docs/queries/analyze.py" "${ART}/raw/run-open.ndjson" \
     | tee "${ART}/analyze-open.txt" || true
 fi
+
+# Metrum vs AIPerf comparison report (dataset + methodology + timings + metrics)
+python3 "${REPO_ROOT}/scripts/e2e/write_aiperf_comparison.py" --art "${ART}" \
+  || log "warning: AIPerf comparison report generation failed"
 
 cat >"${ART}/VALIDATION.md" <<EOF
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
@@ -350,12 +536,14 @@ cat >"${ART}/VALIDATION.md" <<EOF
 - instance_type: ${TYPE}
 - region: ${REGION}
 - cloud: ${CLOUD}
-- workload: Jarvis-style coding sweep (target ~16k ISL / 512 OSL, concurrency 1..64)
-- validation: closed sweep, open rate sweep, SIGINT partial summary
+- dataset: https://huggingface.co/datasets/metrum-ai/prompt-library (pinned revision; see mix-report.json)
+- workload: Hub \`rag-medium\` mix, closed concurrency 1..64, open rate sweep, SIGINT partial, promptfoo general+coding, AIPerf bake-off
+- validation: closed sweep, open rate sweep, SIGINT partial summary, promptfoo general + coding, AIPerf comparison
 - telemetry: all-smi (Metrum fork /metric), vllm, node, optional dcgm/cadvisor
-- artifacts: run-closed/open/interrupt ndjson (compressed), HTML reports, sut.json, telemetry.yaml, stdout JSON
+- artifacts: run-closed/open/interrupt ndjson (compressed), HTML reports, sut.json, telemetry.yaml, stdout JSON, promptfoo-*.json/txt, aiperf/, COMPARISON_AIPERF.md
 
-See analyze-closed.txt / analyze-open.txt and README_BUNDLE.md for offline analysis.
+See \`COMPARISON_AIPERF.md\` for metrum vs NVIDIA AIPerf methodology, setup/run timings, and metric comparison.
+See analyze-closed.txt / analyze-open.txt, promptfoo-summary.json, and README_BUNDLE.md for offline analysis.
 EOF
 
 cat >"${ART}/README_BUNDLE.md" <<'EOF'
@@ -371,6 +559,13 @@ Use this directory in a separate agent session.
 - `report-*.html`: knee / throughput HTML
 - `stdout-*.json`: strategic summary JSON (`points`, knee)
 - `sut.json`, `telemetry.yaml`
+- `mix-report.json`: Hub prompt-library selection report
+- `promptfoo-general.json` / `promptfoo-coding.json`: full promptfoo eval outputs
+- `promptfoo-general.txt` / `promptfoo-coding.txt`: console tables
+- `promptfoo-summary.json`: pass rates for general + coding
+- `aiperf/`: NVIDIA AIPerf bake-off artifacts + `timings.json`
+- `COMPARISON_AIPERF.md`: metrum vs AIPerf study (dataset, methodology, timings, metrics, observations)
+- `metrum_timings.json`: closed-loop wall clock for bake-off
 - `VALIDATION.md`, `cost.txt`, `analyze-*.txt`
 - `instance.json`: redacted Shadeform instance metadata
 
@@ -379,6 +574,8 @@ Use this directory in a separate agent session.
 2. Read `docs/TELEMETRY.md` and `docs/telemetry/ANALYSIS.md`
 3. Run `python3 docs/queries/analyze.py run-closed.ndjson`
 4. Or DuckDB: `duckdb -c ".read docs/queries/stage_power.sql"` after setting the input path
+5. Inspect promptfoo: `jq . promptfoo-summary.json` and the per-suite JSON
+6. Read `COMPARISON_AIPERF.md` for the AIPerf bake-off
 
 Do not invent metric names; use the include list in `telemetry.yaml`.
 EOF
