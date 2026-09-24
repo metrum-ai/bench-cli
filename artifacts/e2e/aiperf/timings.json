@@ -1,0 +1,55 @@
+{
+  "tool": "aiperf",
+  "version": "0.11.0",
+  "setup_seconds": 0,
+  "run_seconds": 334,
+  "total_seconds": 334,
+  "sweep": "1,2,4,8,16,32,64",
+  "requests_per_stage": 16,
+  "max_tokens": 256,
+  "model": "sut",
+  "url": "http://127.0.0.1:8000",
+  "dataset": {
+    "source_mix": "/tmp/metrum-e2e/prompts/mix.jsonl",
+    "aiperf_input": "/tmp/metrum-e2e/aiperf/aiperf-input.jsonl",
+    "hub": "https://huggingface.co/datasets/metrum-ai/prompt-library"
+  },
+  "stages": [
+    {
+      "concurrency": 1,
+      "seconds": 142,
+      "rc": 0
+    },
+    {
+      "concurrency": 2,
+      "seconds": 78,
+      "rc": 0
+    },
+    {
+      "concurrency": 4,
+      "seconds": 42,
+      "rc": 0
+    },
+    {
+      "concurrency": 8,
+      "seconds": 24,
+      "rc": 0
+    },
+    {
+      "concurrency": 16,
+      "seconds": 17,
+      "rc": 0
+    },
+    {
+      "concurrency": 32,
+      "seconds": 15,
+      "rc": 0
+    },
+    {
+      "concurrency": 64,
+      "seconds": 16,
+      "rc": 0
+    }
+  ],
+  "finished_utc": "2026-09-24T19:04:24Z"
+}

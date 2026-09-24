@@ -1,0 +1,501 @@
+{
+  "evalId": "eval-Cub-2026-09-24T18:27:24",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-09-24T18:27:24.681Z",
+    "prompts": [
+      {
+        "id": "a0350d1a340cdc8b26987d5c362afc88c5b1bd00e6dd3fd2d9029c84cb692d7e",
+        "raw": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: {{problem}}\n",
+        "label": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: {{problem}}\n",
+        "provider": "sut",
+        "metrics": {
+          "score": 2,
+          "testPassCount": 2,
+          "testFailCount": 0,
+          "testErrorCount": 0,
+          "assertPassCount": 6,
+          "assertFailCount": 0,
+          "totalLatencyMs": 4389,
+          "tokenUsage": {
+            "prompt": 194,
+            "completion": 97,
+            "cached": 0,
+            "total": 291,
+            "numRequests": 2,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "namedScoreWeights": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "let out = output || '';\nout = out.replace(/^```(?:python)?\\s*/i, '').replace(/\\s*```$/i, '');\nreturn out.trim().length > 20;\n"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "contains",
+                "value": "def two_sum"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "two_sum([2,7,11,15],9) -> [0, 1]",
+              "assertion": {
+                "type": "python",
+                "value": "file://grade_coding.py"
+              }
+            }
+          ]
+        },
+        "id": "a25d4916-86f4-4aa8-a2d8-65f0ff877e66",
+        "latencyMs": 2855,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: Implement a function two_sum(nums, target) that returns a list of two\ndistinct indices i,j such that nums[i] + nums[j] == target.\nAssume exactly one solution exists. Example: nums=[2,7,11,15], target=9\nreturns [0,1].\n",
+          "label": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: {{problem}}\n",
+          "config": {}
+        },
+        "promptId": "a0350d1a340cdc8b26987d5c362afc88c5b1bd00e6dd3fd2d9029c84cb692d7e",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:chat:sut",
+          "label": "sut"
+        },
+        "response": {
+          "output": "```python\ndef two_sum(nums, target):\n    seen = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in seen:\n            return [seen[complement], i]\n        seen[num] = i\n    return []\n```",
+          "tokenUsage": {
+            "total": 170,
+            "prompt": 106,
+            "completion": 64,
+            "numRequests": 1
+          },
+          "cached": false,
+          "latencyMs": 2855,
+          "finishReason": "stop",
+          "guardrails": {
+            "flagged": false
+          },
+          "metadata": {
+            "http": {
+              "status": 200,
+              "statusText": "OK",
+              "headers": {
+                "content-length": "917",
+                "content-type": "application/json",
+                "date": "Thu, 24 Sep 2026 18:27:23 GMT",
+                "server": "uvicorn"
+              }
+            }
+          }
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "description": "two_sum_indices",
+          "vars": {
+            "problem": "Implement a function two_sum(nums, target) that returns a list of two\ndistinct indices i,j such that nums[i] + nums[j] == target.\nAssume exactly one solution exists. Example: nums=[2,7,11,15], target=9\nreturns [0,1].\n"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "let out = output || '';\nout = out.replace(/^```(?:python)?\\s*/i, '').replace(/\\s*```$/i, '');\nreturn out.trim().length > 20;\n"
+            },
+            {
+              "type": "contains",
+              "value": "def two_sum"
+            },
+            {
+              "type": "python",
+              "value": "file://grade_coding.py"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "tokenUsage": {
+          "prompt": 106,
+          "completion": 64,
+          "cached": 0,
+          "total": 170,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "problem": "Implement a function two_sum(nums, target) that returns a list of two\ndistinct indices i,j such that nums[i] + nums[j] == target.\nAssume exactly one solution exists. Example: nums=[2,7,11,15], target=9\nreturns [0,1].\n"
+        },
+        "metadata": {
+          "http": {
+            "status": 200,
+            "statusText": "OK",
+            "headers": {
+              "content-length": "917",
+              "content-type": "application/json",
+              "date": "Thu, 24 Sep 2026 18:27:23 GMT",
+              "server": "uvicorn"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 0
+      },
+      {
+        "cost": 0,
+        "gradingResult": {
+          "pass": true,
+          "score": 1,
+          "reason": "All assertions passed",
+          "namedScores": {},
+          "tokensUsed": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "let out = output || '';\nout = out.replace(/^```(?:python)?\\s*/i, '').replace(/\\s*```$/i, '');\nreturn out.trim().length > 20;\n"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "contains",
+                "value": "def reverse_words"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "reverse_words(...) -> 'blue is sky the'",
+              "assertion": {
+                "type": "python",
+                "value": "file://grade_coding.py"
+              }
+            }
+          ]
+        },
+        "id": "adc9889c-9027-4bd0-a9b4-ce2cc48d4585",
+        "latencyMs": 1534,
+        "namedScores": {},
+        "prompt": {
+          "raw": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: Implement a function reverse_words(s: str) -> str that reverses the\norder of whitespace-separated words in s while preserving single spaces\nbetween words. Example: 'the sky is blue' -> 'blue is sky the'.\n",
+          "label": "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: {{problem}}\n",
+          "config": {}
+        },
+        "promptId": "a0350d1a340cdc8b26987d5c362afc88c5b1bd00e6dd3fd2d9029c84cb692d7e",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:chat:sut",
+          "label": "sut"
+        },
+        "response": {
+          "output": "```python\ndef reverse_words(s: str) -> str:\n    words = s.split()\n    return ' '.join(reversed(words))\n```",
+          "tokenUsage": {
+            "total": 121,
+            "prompt": 88,
+            "completion": 33,
+            "numRequests": 1
+          },
+          "cached": false,
+          "latencyMs": 1534,
+          "finishReason": "stop",
+          "guardrails": {
+            "flagged": false
+          },
+          "metadata": {
+            "http": {
+              "status": 200,
+              "statusText": "OK",
+              "headers": {
+                "content-length": "786",
+                "content-type": "application/json",
+                "date": "Thu, 24 Sep 2026 18:27:23 GMT",
+                "server": "uvicorn"
+              }
+            }
+          }
+        },
+        "score": 1,
+        "success": true,
+        "testCase": {
+          "description": "reverse_words",
+          "vars": {
+            "problem": "Implement a function reverse_words(s: str) -> str that reverses the\norder of whitespace-separated words in s while preserving single spaces\nbetween words. Example: 'the sky is blue' -> 'blue is sky the'.\n"
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "let out = output || '';\nout = out.replace(/^```(?:python)?\\s*/i, '').replace(/\\s*```$/i, '');\nreturn out.trim().length > 20;\n"
+            },
+            {
+              "type": "contains",
+              "value": "def reverse_words"
+            },
+            {
+              "type": "python",
+              "value": "file://grade_coding.py"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "tokenUsage": {
+          "prompt": 88,
+          "completion": 33,
+          "cached": 0,
+          "total": 121,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "problem": "Implement a function reverse_words(s: str) -> str that reverses the\norder of whitespace-separated words in s while preserving single spaces\nbetween words. Example: 'the sky is blue' -> 'blue is sky the'.\n"
+        },
+        "metadata": {
+          "http": {
+            "status": 200,
+            "statusText": "OK",
+            "headers": {
+              "content-length": "786",
+              "content-type": "application/json",
+              "date": "Thu, 24 Sep 2026 18:27:23 GMT",
+              "server": "uvicorn"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 2,
+      "failures": 0,
+      "errors": 0,
+      "tokenUsage": {
+        "prompt": 194,
+        "completion": 97,
+        "cached": 0,
+        "total": 291,
+        "numRequests": 2,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 0,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 2911,
+      "evaluationDurationMs": 2911
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "Qwen coding smoke (fast)",
+    "prompts": [
+      "Write a complete Python 3 solution for the following problem.\nReturn ONLY valid Python source code. No markdown fences, no commentary.\nProblem: {{problem}}\n"
+    ],
+    "providers": [
+      {
+        "id": "openai:chat:sut",
+        "label": "sut",
+        "config": {
+          "apiBaseUrl": "http://127.0.0.1:8000/v1",
+          "apiKey": "[REDACTED]",
+          "temperature": 0,
+          "max_tokens": 512,
+          "showThinking": false,
+          "passthrough": {
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        }
+      }
+    ],
+    "tests": [
+      {
+        "description": "two_sum_indices",
+        "vars": {
+          "problem": "Implement a function two_sum(nums, target) that returns a list of two\ndistinct indices i,j such that nums[i] + nums[j] == target.\nAssume exactly one solution exists. Example: nums=[2,7,11,15], target=9\nreturns [0,1].\n"
+        },
+        "assert": [
+          {
+            "type": "contains",
+            "value": "def two_sum"
+          },
+          {
+            "type": "python",
+            "value": "file://grade_coding.py"
+          }
+        ]
+      },
+      {
+        "description": "reverse_words",
+        "vars": {
+          "problem": "Implement a function reverse_words(s: str) -> str that reverses the\norder of whitespace-separated words in s while preserving single spaces\nbetween words. Example: 'the sky is blue' -> 'blue is sky the'.\n"
+        },
+        "assert": [
+          {
+            "type": "contains",
+            "value": "def reverse_words"
+          },
+          {
+            "type": "python",
+            "value": "file://grade_coding.py"
+          }
+        ]
+      }
+    ],
+    "env": {},
+    "defaultTest": {
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "let out = output || '';\nout = out.replace(/^```(?:python)?\\s*/i, '').replace(/\\s*```$/i, '');\nreturn out.trim().length > 20;\n"
+        }
+      ],
+      "vars": {},
+      "options": {},
+      "metadata": {}
+    },
+    "outputPath": [
+      "/tmp/metrum-e2e/promptfoo-coding.json"
+    ],
+    "extensions": [],
+    "metadata": {},
+    "evaluateOptions": {}
+  },
+  "shareableUrl": null,
+  "metadata": {
+    "promptfooVersion": "0.121.20",
+    "nodeVersion": "v20.20.2",
+    "platform": "linux",
+    "arch": "x64",
+    "exportedAt": "2026-09-24T18:27:27.650Z",
+    "evaluationCreatedAt": "2026-09-24T18:27:24.681Z"
+  },
+  "vars": [
+    "problem"
+  ],
+  "runtimeOptions": {
+    "eventSource": "cli",
+    "showProgressBar": true,
+    "repeat": 1,
+    "maxConcurrency": 4,
+    "cache": false
+  }
+}

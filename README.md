@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.4.0** ([CHANGELOG](CHANGELOG.md)).
+release: **1.5.0** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,

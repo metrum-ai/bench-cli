@@ -1,0 +1,149 @@
+[e2e 2026-09-24T14:55:37Z] using ssh_key_id=ecf3e187-82e6-4ca2-8075-5f37f1792c28
+[e2e 2026-09-24T14:55:37Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T14:55:37Z] creating instance
+[e2e 2026-09-24T14:55:37Z] instance_id=1bac444b-cfcb-4027-a845-ca8dce2a2aee
+[e2e 2026-09-24T14:59:11Z] instance active ip=REDACTED
+[e2e 2026-09-24T14:59:11Z] waiting for ssh
+[e2e 2026-09-24T15:04:37Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T15:04:37Z] cleanup rc=255
+[e2e 2026-09-24T15:08:11Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T15:08:11Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T15:08:11Z] creating instance
+[e2e 2026-09-24T15:08:12Z] instance_id=9f1119d1-c180-4d53-8829-bfba9862aa28
+[e2e 2026-09-24T15:11:05Z] instance active ip=REDACTED
+[e2e 2026-09-24T15:11:05Z] waiting for ssh
+[e2e 2026-09-24T15:11:06Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T15:11:08Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T15:11:08Z] copying tools to remote
+[e2e 2026-09-24T15:11:12Z] running sut-setup
+[e2e 2026-09-24T15:11:13Z] cleanup rc=1
+[e2e 2026-09-24T15:11:37Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T15:11:37Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T15:11:38Z] creating instance
+[e2e 2026-09-24T15:11:38Z] instance_id=2fddc029-1c26-4d96-a44c-5206bb9d84f9
+[e2e 2026-09-24T15:13:50Z] instance active ip=REDACTED
+[e2e 2026-09-24T15:13:50Z] waiting for ssh
+[e2e 2026-09-24T15:13:51Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T15:13:53Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T15:13:53Z] copying tools to remote
+[e2e 2026-09-24T15:13:57Z] running sut-setup
+[e2e 2026-09-24T15:14:45Z] cleanup rc=101
+[e2e 2026-09-24T15:15:24Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T15:15:24Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T15:15:24Z] creating instance
+[e2e 2026-09-24T15:15:24Z] instance_id=9a073da9-5d23-4ddf-bd41-c7fe9413a8fb
+[e2e 2026-09-24T15:19:18Z] instance active ip=REDACTED
+[e2e 2026-09-24T15:19:19Z] waiting for ssh
+[e2e 2026-09-24T15:19:19Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T15:19:21Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T15:19:21Z] copying tools to remote
+[e2e 2026-09-24T15:19:26Z] running sut-setup
+[e2e 2026-09-24T15:29:19Z] cost estimate: elapsed_h=0.232 hourly=$2.19 est_usd=0.51
+[e2e 2026-09-24T15:43:38Z] cleanup rc=1
+[e2e 2026-09-24T15:49:09Z] deletion_timestamp=2026-09-24T15:49:09Z gone=0
+[e2e 2026-09-24T15:49:09Z] cost estimate: elapsed_h=0.563 hourly=$2.19 est_usd=1.23
+[e2e 2026-09-24T15:54:30Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T15:54:30Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T15:54:30Z] creating instance
+[e2e 2026-09-24T15:54:31Z] instance_id=0f289e1f-a4eb-4186-8864-24fea439fe3a
+[e2e 2026-09-24T15:57:34Z] instance active ip=REDACTED
+[e2e 2026-09-24T15:57:34Z] waiting for ssh
+[e2e 2026-09-24T15:57:35Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T15:57:37Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T15:57:37Z] copying tools to remote
+[e2e 2026-09-24T15:57:41Z] running sut-setup
+[e2e 2026-09-24T16:00:06Z] cleanup rc=0
+[e2e 2026-09-24T16:00:19Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T16:00:19Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T16:00:19Z] creating instance
+[e2e 2026-09-24T16:00:19Z] instance_id=ad782ba1-969a-4675-8343-061116f9eb62
+[e2e 2026-09-24T16:04:03Z] instance active ip=REDACTED
+[e2e 2026-09-24T16:04:03Z] waiting for ssh
+[e2e 2026-09-24T16:04:04Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T16:04:06Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T16:04:06Z] copying tools to remote
+[e2e 2026-09-24T16:04:10Z] running sut-setup
+[e2e 2026-09-24T16:05:42Z] deletion_timestamp=2026-09-24T16:05:42Z gone=0
+[e2e 2026-09-24T16:05:42Z] cost estimate: elapsed_h=0.187 hourly=$2.19 est_usd=0.41
+[e2e 2026-09-24T16:07:34Z] cost estimate: elapsed_h=0.218 hourly=$2.19 est_usd=0.48
+[e2e 2026-09-24T16:10:38Z] cleanup rc=1
+[e2e 2026-09-24T16:11:44Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T16:11:44Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T16:11:44Z] creating instance
+[e2e 2026-09-24T16:11:45Z] instance_id=78d9653c-9dad-4754-bac2-5af16ebf03b4
+[e2e 2026-09-24T16:14:03Z] cost estimate: elapsed_h=0.229 hourly=$2.19 est_usd=0.50
+[e2e 2026-09-24T16:15:08Z] instance active ip=REDACTED
+[e2e 2026-09-24T16:15:09Z] waiting for ssh
+[e2e 2026-09-24T16:15:09Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T16:15:11Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T16:15:11Z] copying tools to remote
+[e2e 2026-09-24T16:15:16Z] running sut-setup
+[e2e 2026-09-24T16:22:07Z] extracting prompts
+[e2e 2026-09-24T16:22:09Z] closed-loop concurrency sweep
+[e2e 2026-09-24T16:22:09Z] cleanup rc=1
+[e2e 2026-09-24T16:23:49Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T16:23:49Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T16:23:49Z] creating instance
+[e2e 2026-09-24T16:23:49Z] instance_id=1e3dd9a7-4218-477c-90a9-c7f02616f2a0
+[e2e 2026-09-24T16:27:13Z] instance active ip=REDACTED
+[e2e 2026-09-24T16:27:14Z] waiting for ssh
+[e2e 2026-09-24T16:27:14Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T16:27:16Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T16:27:17Z] copying tools to remote
+[e2e 2026-09-24T16:27:40Z] running sut-setup
+[e2e 2026-09-24T16:34:06Z] extracting prompts
+[e2e 2026-09-24T16:34:07Z] closed-loop concurrency sweep
+[e2e 2026-09-24T16:34:11Z] open-loop rate sweep
+[e2e 2026-09-24T16:34:43Z] interrupt partial-summary check
+[e2e 2026-09-24T16:35:09Z] cleanup rc=1
+[e2e 2026-09-24T16:37:14Z] cost estimate: elapsed_h=0.224 hourly=$2.19 est_usd=0.49
+[e2e 2026-09-24T16:37:20Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T16:37:21Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T16:37:21Z] creating instance
+[e2e 2026-09-24T16:37:21Z] instance_id=1e1bc62c-47d9-486c-8170-10bf86bb0c61
+[e2e 2026-09-24T16:40:55Z] instance active ip=REDACTED
+[e2e 2026-09-24T16:40:55Z] waiting for ssh
+[e2e 2026-09-24T16:40:56Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T16:40:58Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T16:40:58Z] copying tools to remote
+[e2e 2026-09-24T16:41:03Z] running sut-setup
+[e2e 2026-09-24T16:47:09Z] extracting prompts
+[e2e 2026-09-24T16:47:10Z] closed-loop concurrency sweep
+[e2e 2026-09-24T16:50:55Z] cost estimate: elapsed_h=0.226 hourly=$2.19 est_usd=0.49
+[e2e 2026-09-24T16:56:11Z] open-loop rate sweep
+[e2e 2026-09-24T16:58:09Z] interrupt partial-summary check
+[e2e 2026-09-24T17:06:41Z] cleanup rc=0
+[e2e 2026-09-24T17:06:44Z] cleanup rc=1
+[e2e 2026-09-24T17:06:44Z] elapsed_h=0.000 (hourly unknown)
+[e2e 2026-09-24T17:07:28Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T17:07:28Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T17:07:28Z] creating instance
+[e2e 2026-09-24T17:07:28Z] instance_id=01750a58-3b51-48e6-8624-1d100e4bb20f
+[e2e 2026-09-24T17:11:02Z] instance active ip=REDACTED
+[e2e 2026-09-24T17:11:03Z] waiting for ssh
+[e2e 2026-09-24T17:11:03Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T17:11:05Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T17:11:06Z] copying tools to remote
+[e2e 2026-09-24T17:12:26Z] running sut-setup
+[e2e 2026-09-24T17:19:42Z] extracting prompts from https://huggingface.co/datasets/metrum-ai/prompt-library revision=0666f62e581b482838ae2e17b333ee36ff3d01b0 config=sample profile=rag-medium
+[e2e 2026-09-24T17:19:46Z] closed-loop concurrency sweep
+[e2e 2026-09-24T17:21:03Z] cost estimate: elapsed_h=0.227 hourly=$2.19 est_usd=0.50
+[e2e 2026-09-24T17:28:14Z] open-loop rate sweep
+[e2e 2026-09-24T17:30:05Z] interrupt partial-summary check
+[e2e 2026-09-24T17:46:19Z] cleanup rc=1
+[e2e 2026-09-24T17:47:03Z] using ssh_key_id=87d184bc-a08e-4ffe-97f3-0a411a57b6ba identity=/home/cgadgil/.ssh/id_ed25519
+[e2e 2026-09-24T17:47:03Z] picked RTXPro6000: {"cloud":"massedcompute","shade_instance_type":"RTXPro6000","region":"kansascity-usa-6","gpu_type":"RTXPro6000","num_gpus":1,"hourly_price":219}
+[e2e 2026-09-24T17:47:04Z] creating instance
+[e2e 2026-09-24T17:47:04Z] instance_id=5f51464b-7d79-4a36-b955-f137c12ab926
+[e2e 2026-09-24T17:49:47Z] instance active ip=REDACTED
+[e2e 2026-09-24T17:49:48Z] waiting for ssh
+[e2e 2026-09-24T17:49:48Z] installing docker/nvidia toolkit if needed
+[e2e 2026-09-24T17:49:50Z] building release binaries locally (BIN_DIR=/home/cgadgil/src/bench-cli/target-e2e/release)
+[e2e 2026-09-24T17:49:50Z] copying tools to remote
+[e2e 2026-09-24T17:49:55Z] running sut-setup
+[e2e 2026-09-24T17:56:43Z] extracting prompts from https://huggingface.co/datasets/metrum-ai/prompt-library revision=0666f62e581b482838ae2e17b333ee36ff3d01b0 config=sample profile=rag-medium
+[e2e 2026-09-24T17:56:46Z] closed-loop concurrency sweep
+[e2e 2026-09-24T17:59:48Z] cost estimate: elapsed_h=0.212 hourly=$2.19 est_usd=0.46
+[e2e 2026-09-24T18:05:14Z] open-loop rate sweep
+[e2e 2026-09-24T18:07:06Z] interrupt partial-summary check
+[e2e 2026-09-24T19:06:13Z] cleanup rc=0
