@@ -192,9 +192,9 @@ jobs:
           path: cargo-udeps-report.txt
           if-no-files-found: warn
 
-  # Runs cargo test on the org self-hosted runner labelled bench-cli.
-  # Fork pull requests are skipped: untrusted code must not execute on
-  # a machine that also holds org credentials. Do not add this job as a
+  # Runs cargo test and docs packaging on the org self-hosted runner labelled
+  # bench-cli. Fork pull requests are skipped: untrusted code must not execute
+  # on a machine that also holds org credentials. Do not add this job as a
   # required status check until that runner is confirmed online; a missing
   # self-hosted runner queues indefinitely.
   self-hosted:
@@ -210,6 +210,8 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -220,27 +222,37 @@ jobs:
         run: cargo test --all-targets --all-features
         env:
           METRUM_BENCH_REQUIRE_DUMMY: "1"
-
-  external-docs:
-    name: external-docs build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: external-docs
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: external-docs/package-lock.json
-      - name: npm ci
-        run: npm ci
-      - name: npm run build
-        run: npm run build
-        env:
-          # Match production path so absolute links resolve under baseUrl.
-          DOCS_BASE_URL: /metrum-ai-bench-cli/
+      # Validates the same Makefile package path release.yml docs-bundle uses.
+      - name: package docs bundle
+        working-directory: external-docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="v0.0.0-ci"
+          all_tags="$(git tag --list 'v*' --sort=-v:refname | tr '\n' ' ')"
+          npm ci
+          make build VERSION="${version}"
+          make build-latest VERSION="${version}"
+          make package VERSION="${version}" \
+            DOCS_LATEST_VERSION="${version}" \
+            DOCS_RELEASE_VERSIONS="${all_tags} ${version}"
+          archive="dist/metrum-ai-bench-cli-docs-${version}.tar.gz"
+          checksum="${archive}.sha256"
+          manifest="dist/metrum-ai-bench-cli-docs-versions.json"
+          test -f "${archive}"
+          test -f "${checksum}"
+          test -f "${manifest}"
+          (cd dist && sha256sum -c "metrum-ai-bench-cli-docs-${version}.tar.gz.sha256")
+          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/${version}/"
+          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/latest/"
+          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/versions.json"
+          python3 -c "import json,sys; json.load(open(sys.argv[1]))" "${manifest}"
+          ls -l dist/
 
   # Hub dataset must stay public and license-aligned with docs/datasets/DATASET_CARD.md.
   # Manual confirmation that upstream prompt sources permit Apache-2.0 remains a
