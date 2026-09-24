@@ -45,16 +45,17 @@ Each versioned tree is published under a distinct `DOCS_BASE_URL` (for example
 alongside them so the navbar selector can switch trees.
 
 This is automated end to end by `Makefile` (`make build`, `make build-latest`,
-`make package`) and `.github/workflows/deploy-docs.yml`:
+`make package`) and the `docs-bundle` job in `.github/workflows/release.yml`:
 
-- A push to `main` builds and publishes a dev preview to Restic. It is never
-  restored to the live site.
-- A push of a final `v*` tag (no `-rc.` / `-alpha.` / `-beta.`) builds,
-  publishes, and restores to `docs.metrum.ai`, promoting `/latest/` to this
-  version.
-- A push of a prerelease tag (`-rc.` / `-alpha.` / `-beta.`, matching the
-  prerelease convention in `release.yml` and `docs/RELEASING.md`) publishes
-  and restores to its own versioned path only. `/latest/` is left untouched.
+- Every GitHub Release carries the docs bundle as release assets
+  (`metrum-ai-bench-cli-docs-<tag>.tar.gz`, `.sha256`, and
+  `metrum-ai-bench-cli-docs-versions.json`).
+- The docs web host pulls the newest Release bundle and publishes it to
+  `docs.metrum.ai`. A final tag (no `-rc.` / `-alpha.` / `-beta.`) promotes
+  `/latest/`; a prerelease tag only gets its own versioned path.
+- `.github/workflows/deploy-docs.yml` additionally archives each build to
+  Restic (a push to `main` as a dev preview, a tag as a release). It does not
+  deploy anything.
 
 The `versions.json` manifest always lists every tagged version, not only the
 one just published, so earlier releases stay visible in the version picker.

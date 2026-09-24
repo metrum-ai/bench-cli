@@ -40,9 +40,13 @@ Prefer leaving `CRATES_IO_PUBLISH` unset for every `-rc.` tag.
 
 ## Docs deploy (docs.metrum.ai)
 
-`.github/workflows/deploy-docs.yml` publishes `external-docs/` to
-`https://docs.metrum.ai/metrum-ai-bench-cli/` on every push to `main` (dev
-preview, never restored to the live site) and every `v*` tag push.
+`release.yml` (job `docs-bundle`) builds `external-docs/` and attaches it to
+every GitHub Release as `metrum-ai-bench-cli-docs-<tag>.tar.gz`, its
+`.sha256`, and `metrum-ai-bench-cli-docs-versions.json`. The docs web host
+pulls the newest Release bundle on its own schedule and publishes it to
+`https://docs.metrum.ai/metrum-ai-bench-cli/`. Nothing in this repo deploys to
+a specific host. `.github/workflows/deploy-docs.yml` only archives docs builds
+to Restic (every push to `main` and every `v*` tag).
 
 Same rule as crates.io above: **an rc must never become the published
 latest.** A tag containing `-rc.`, `-alpha.`, or `-beta.` still publishes and
@@ -50,11 +54,9 @@ deploys to its own versioned path (so it can be previewed at
 `/metrum-ai-bench-cli/<tag>/`), but the workflow does not move the
 `/latest/` alias for it. Only a final `vX.Y.Z` tag promotes `/latest/`.
 
-Platform-side pieces this workflow depends on (S3 bucket, Restic
-credentials, the `bench-cli-docs-deploy` self-hosted runner, the Caddy
-route) live in `metrum-internal-infra-admin`, not this repo. Do not push a
-release tag until those are confirmed live, or `restore-docs` queues
-indefinitely waiting for a runner that does not exist.
+The pull job on the web host and the Caddy route live in
+`metrum-internal-infra-admin` (`newsite/scripts/sync-metrum-ai-bench-cli-docs.sh`),
+not this repo.
 
 ## Build provenance
 

@@ -288,11 +288,67 @@ jobs:
           dummy_help="$("${root}/bin/dummy-model-server" -h 2>&1 || true)"
           printf '%s\n' "${dummy_help}" | grep -qi 'Listen port'
 
+  docs-bundle:
+    # docs.metrum.ai content ships as a Release asset next to the binaries.
+    # The docs web host pulls the newest Release bundle on its own schedule
+    # (metrum-internal-infra-admin: newsite/scripts/sync-metrum-ai-bench-cli-docs.sh),
+    # so no self-hosted runner, host path, or Docker access is needed here.
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: external-docs/package-lock.json
+      - name: Build and package docs
+        working-directory: external-docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same prerelease test as github-release below: an rc never
+          # promotes /latest/, it only gets its own versioned path.
+          is_prerelease() {
+            case "$1" in
+              *-rc.*|*-alpha.*|*-beta.*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          all_tags="$(git tag --list 'v*' --sort=-v:refname | tr '\n' ' ')"
+          npm ci
+          make build VERSION="${RELEASE_TAG}"
+          if is_prerelease "${RELEASE_TAG}"; then
+            latest=""
+            for t in ${all_tags}; do
+              if ! is_prerelease "${t}"; then latest="${t}"; break; fi
+            done
+            latest="${latest:-${RELEASE_TAG}-fallback}"
+          else
+            latest="${RELEASE_TAG}"
+            make build-latest VERSION="${RELEASE_TAG}"
+          fi
+          make package VERSION="${RELEASE_TAG}" \
+            DOCS_LATEST_VERSION="${latest}" \
+            DOCS_RELEASE_VERSIONS="${all_tags}"
+          ls -l dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-docs
+          path: |
+            external-docs/dist/metrum-ai-bench-cli-docs-*.tar.gz
+            external-docs/dist/metrum-ai-bench-cli-docs-*.tar.gz.sha256
+            external-docs/dist/metrum-ai-bench-cli-docs-versions.json
+          if-no-files-found: error
+
   github-release:
     if: >-
       github.event_name == 'push' ||
       inputs.publish_release == true
-    needs: [artifact-sign, smoke-linux, smoke-macos]
+    needs: [artifact-sign, smoke-linux, smoke-macos, docs-bundle]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -300,6 +356,9 @@ jobs:
         with:
           pattern: release-signed-*
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-docs
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -311,6 +370,7 @@ jobs:
             *.sha256
             *.sigstore.json
             *.cdx.json
+            metrum-ai-bench-cli-docs-versions.json
 
   crates-io:
     # Deliberate gate: never publish -rc. tags; require CRATES_IO_PUBLISH=true.
