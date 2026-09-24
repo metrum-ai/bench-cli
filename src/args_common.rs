@@ -181,7 +181,7 @@ pub struct CommonBenchArgs {
         long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REQUIRE_SUT",
-        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+        help = "Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname"
     )]
     pub require_sut: bool,
 

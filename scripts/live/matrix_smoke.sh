@@ -261,6 +261,7 @@ cmd_launch() {
   "driver_version": "not captured",
   "runtime": {"name": "vllm", "version": "${VLLM_IMAGE}", "config": "tensor_parallel_size=2"},
   "model": {"id": "${first_llm}", "revision": null, "quantization": null},
+  "host_os": "$(uname -s) $(uname -r)",
   "notes": "Matrix PERFORMANCE TESTS; see extra for campaign metadata",
   "extra": {
     "campaign_id": "${campaign_id}",

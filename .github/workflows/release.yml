@@ -160,7 +160,7 @@ jobs:
           cp LICENSE README.md TRADEMARKS.md "${root}/"
           mkdir -p "${root}/docs"
           cp docs/RESULTS_PUBLICATION_POLICY.md docs/CLAIMS_LEDGER.md \
-             docs/NAMING.md docs/COMPARISON.md "${root}/docs/"
+             docs/NAMING.md "${root}/docs/"
           cp -a examples "${root}/"
           cp -a test-data "${root}/"
           tar -czf "${root}.tar.gz" "${root}"

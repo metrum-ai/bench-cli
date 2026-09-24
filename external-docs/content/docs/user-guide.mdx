@@ -161,11 +161,13 @@ metrum-ai-bench-cli llm -- \
   --sut sut.json --require-sut
 ```
 
-`--require-sut` refuses to run without a valid SUT block and implies
+`--require-sut` refuses to run without a complete SUT block
+(`gpu.model`, `gpu.count`, `driver_version`, `runtime.name` /
+`runtime.version` / `runtime.config`, `host_os`) and implies
 `--redact-hostname`. Example files ship as `examples/sut.example.json` and
 `examples/sut.example.yaml`.
 
-The SUT is **declared**, not probed. See [Known limitations](./limitations).
+The SUT is **declared**, not remotely verified. See [Known limitations](./limitations).
 The approved [results-publication policy](./results-publication) defines when
 a published number may be described as a Metrum AI Bench CLI result.
 

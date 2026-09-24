@@ -41,7 +41,6 @@ const sidebars: SidebarsConfig = {
         'docs/feature-reference',
         'docs/cli-reference',
         'docs/output-schema',
-        'docs/comparison',
         'docs/limitations',
         'docs/release-notes',
       ],

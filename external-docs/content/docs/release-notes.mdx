@@ -17,6 +17,24 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.4.0
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.4.0 |
+| **Previous version** | 1.3.1 |
+| **Release Date** | September 24, 2026 |
+
+- Removed Comparison page and vs-other-tools bake-off artifacts. `compare`
+  remains for diffing two of our own strategic summaries.
+- **Breaking under `--require-sut`:** incomplete SUT declarations (missing gpu,
+  driver, runtime, or host_os) are rejected before any request.
+- Strategic: phased warmup, `--ignore-eos` / `--min-tokens` /
+  `--extra-body-json`, and publication metadata on stdout JSON.
+
+---
+
 ## Metrum AI Bench CLI 1.3.1
 
 | | |

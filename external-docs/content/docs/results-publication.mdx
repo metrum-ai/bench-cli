@@ -33,7 +33,9 @@ contains at least:
 - Tool version
 - Workload identification
 - Client environment
-- **SUT block**
+- **SUT block** with publication inventory: `gpu.model`, `gpu.count` (>0),
+  `driver_version`, `runtime.name`, `runtime.version`, `runtime.config`, and
+  `host_os`
 - Full configuration used for the run
 
 Produce a compliant run with:
@@ -45,6 +47,8 @@ metrum-ai-bench-cli llm -- \
   --require-sut
 ```
 
+`--require-sut` refuses incomplete SUT declarations before any request is sent.
+
 A claim that omits this manifest, including the SUT block, is **not** a Metrum
 AI Bench CLI result under the publication policy, even if the software was
 used.
@@ -52,7 +56,7 @@ used.
 `--sut` embeds an operator-declared system-under-test block (JSON or YAML) into
 the summary as `sut`, labelled `provenance: "declared"`. An absent SUT yields
 `"sut": null` plus a stderr notice. `--require-sut` (or
-`METRUM_AI_BENCH_REQUIRE_SUT=1`) refuses to run without a valid block and
+`METRUM_AI_BENCH_REQUIRE_SUT=1`) refuses to run without a complete block and
 implies `--redact-hostname`.
 
 Example templates are available as `examples/sut.example.json` and

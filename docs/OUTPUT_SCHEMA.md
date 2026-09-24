@@ -58,7 +58,10 @@ Additional v3 fields:
   `--sut` was not provided. Top-level `provenance` is usually `"declared"`;
   `sut init --probe` may write `"mixed"` with `field_provenance` marking local
   observed fields. The client still does not verify the remote serving host.
-  See `--sut`, `--require-sut`, `--redact-hostname`, and `sut init`.
+  Readers must treat `sut` as optional for historical summaries. Producers that
+  pass `--require-sut` must supply `gpu.model`, `gpu.count` (>0),
+  `driver_version`, `runtime.name`, `runtime.version`, `runtime.config`, and
+  `host_os`. See `--sut`, `--require-sut`, `--redact-hostname`, and `sut init`.
 - `environment.hostname` - may be `null` when `--redact-hostname` (or `--require-sut`, which implies redaction) is set (rc.5). Readers must treat `sut` and `hostname` as optional.
 - `config` - effective run configuration:
   - `run_id` - UUID generated once per run

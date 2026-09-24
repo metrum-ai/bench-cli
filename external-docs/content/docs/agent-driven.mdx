@@ -93,10 +93,13 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 - Default prompts: extract from Hugging Face `metrum-ai/prompt-library` with a
   pinned `--revision`. Do not invent a handmade one-line prompt for shared
   numbers.
-- After extract: set `--num-requests` to `report.selected_count`,
-  `--max-tokens` to `report.recommended_max_tokens`, and
-  `--warmup-requests 0` on llm so the mix is preserved. For GPU cold-start,
-  run a separate short warmup or use strategic `--warmup-requests` on sweeps.
+- After extract: set `--num-requests` to `report.selected_count` and
+  `--max-tokens` to `report.recommended_max_tokens`. On modality `llm`,
+  `--warmup-requests 0` preserves mix slots; for GPU cold-start prefer
+  strategic sweeps with `--warmup-requests` at least as large as stage
+  concurrency (warmup completes before measurement and does not shift the mix).
+  For fixed-length throughput studies, add strategic `--ignore-eos` with
+  `--max-tokens`.
 - Run the load generator on the serving host (loopback / same private network).
   WAN RTT lands in TTFT. The CLI warns on public/non-RFC1918 `--url` hosts;
   set `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1` only when you intentionally accept

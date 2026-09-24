@@ -106,7 +106,10 @@ pub fn template_sut() -> Sut {
         runtime: Some(SutRuntime {
             name: Some("vllm".into()),
             version: Some("latest".into()),
-            config: Some("TP=1".into()),
+            config: Some(
+                "vllm serve example/model --tensor-parallel-size 1 --dtype auto (replace with exact launch)"
+                    .into(),
+            ),
         }),
         model: Some(SutModel {
             id: Some("example/model".into()),
@@ -362,9 +365,60 @@ pub fn load_sut(path: &Path) -> anyhow::Result<Sut> {
     Ok(sut)
 }
 
+/// Validate that a SUT declaration carries the inventory required for publication.
+///
+/// Called only when `--require-sut` is set. Plain `--sut` remains permissive.
+pub fn validate_publishable_sut(sut: &Sut) -> anyhow::Result<()> {
+    let mut missing: Vec<&str> = Vec::new();
+    match sut.gpu.as_ref() {
+        None => missing.push("gpu"),
+        Some(gpu) => {
+            if !nonblank(gpu.model.as_deref()) {
+                missing.push("gpu.model");
+            }
+            match gpu.count {
+                Some(c) if c > 0 => {}
+                _ => missing.push("gpu.count"),
+            }
+        }
+    }
+    if !nonblank(sut.driver_version.as_deref()) {
+        missing.push("driver_version");
+    }
+    match sut.runtime.as_ref() {
+        None => missing.push("runtime"),
+        Some(rt) => {
+            if !nonblank(rt.name.as_deref()) {
+                missing.push("runtime.name");
+            }
+            if !nonblank(rt.version.as_deref()) {
+                missing.push("runtime.version");
+            }
+            if !nonblank(rt.config.as_deref()) {
+                missing.push("runtime.config");
+            }
+        }
+    }
+    if !nonblank(sut.host_os.as_deref()) {
+        missing.push("host_os");
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "--require-sut: incomplete SUT declaration: missing {}",
+        missing.join(", ")
+    )
+}
+
+fn nonblank(value: Option<&str>) -> bool {
+    value.map(str::trim).is_some_and(|s| !s.is_empty())
+}
+
 /// Resolve SUT flags before any request is sent.
 ///
-/// Returns `(sut, redact_hostname)`. `--require-sut` implies hostname redaction.
+/// Returns `(sut, redact_hostname)`. `--require-sut` implies hostname redaction
+/// and rejects declarations missing publication inventory fields.
 /// When `sut` is absent and not required, prints a one-line stderr notice.
 pub fn resolve_sut_flags(
     sut_path: Option<&Path>,
@@ -375,6 +429,9 @@ pub fn resolve_sut_flags(
     match sut_path {
         Some(path) => {
             let sut = load_sut(path)?;
+            if require_sut {
+                validate_publishable_sut(&sut)?;
+            }
             warn_quantization(&sut);
             Ok((Some(sut), redact))
         }
@@ -515,9 +572,66 @@ mod tests {
     #[test]
     fn require_sut_implies_redact() {
         let path = std::env::temp_dir().join("sut_req.json");
-        std::fs::write(&path, r#"{"name":"n"}"#).unwrap();
+        let complete = r#"{
+            "name":"n",
+            "gpu":{"model":"L40S","count":1},
+            "driver_version":"NVIDIA 580.xx",
+            "runtime":{"name":"vllm","version":"0.10.0","config":"vllm serve example --tensor-parallel-size 1"},
+            "host_os":"Ubuntu 22.04"
+        }"#;
+        std::fs::write(&path, complete).unwrap();
         let (_, redact) = resolve_sut_flags(Some(&path), true, false).unwrap();
         assert!(redact);
+    }
+
+    #[test]
+    fn require_sut_rejects_incomplete_declaration() {
+        let path = std::env::temp_dir().join("sut_incomplete.json");
+        std::fs::write(&path, r#"{}"#).unwrap();
+        let err = resolve_sut_flags(Some(&path), true, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--require-sut"), "{err}");
+        assert!(err.contains("gpu"), "{err}");
+        assert!(err.contains("driver_version"), "{err}");
+        assert!(err.contains("runtime"), "{err}");
+        assert!(err.contains("host_os"), "{err}");
+        // Without --require-sut, incomplete declarations still load.
+        let (sut, _) = resolve_sut_flags(Some(&path), false, false).unwrap();
+        assert!(sut.is_some());
+    }
+
+    #[test]
+    fn require_sut_rejects_blank_and_zero_count() {
+        let path = std::env::temp_dir().join("sut_blank.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "gpu":{"model":"  ","count":0},
+                "driver_version":"",
+                "runtime":{"name":"vllm","version":" ","config":""},
+                "host_os":"   "
+            }"#,
+        )
+        .unwrap();
+        let err = resolve_sut_flags(Some(&path), true, false)
+            .unwrap_err()
+            .to_string();
+        for field in [
+            "gpu.model",
+            "gpu.count",
+            "driver_version",
+            "runtime.version",
+            "runtime.config",
+            "host_os",
+        ] {
+            assert!(err.contains(field), "missing {field} in {err}");
+        }
+    }
+
+    #[test]
+    fn template_satisfies_publishable_validation() {
+        validate_publishable_sut(&template_sut()).unwrap();
     }
 
     #[test]

@@ -272,7 +272,7 @@ struct Args {
         long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REQUIRE_SUT",
-        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+        help = "Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname"
     )]
     require_sut: bool,
 
@@ -391,13 +391,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
     validate_args(&args)?;
-    prepare_artifacts(&args)?;
-
     let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
     )?;
+    prepare_artifacts(&args)?;
 
     let endpoints = resolve_endpoints(&args)?;
     metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));

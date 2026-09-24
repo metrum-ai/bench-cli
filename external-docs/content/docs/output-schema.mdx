@@ -84,9 +84,10 @@ Readers must treat `sut` and `hostname` as optional.
 
 `environment` is client-observed (OS, architecture, optional hostname). The
 `sut` block is **declared by the operator**, not measured by the client -
-`provenance` is always `"declared"`. Do not present declared values as observed
-measurements. For publication runs use `--sut <file> --require-sut` (implies
-`--redact-hostname`). See the
+`provenance` is usually `"declared"` (or `"mixed"` after local `sut init --probe`).
+Do not present declared values as observed measurements. For publication runs
+use `--sut <file> --require-sut` (implies `--redact-hostname`); that flag
+rejects incomplete inventory (gpu, driver, runtime, host_os). See the
 [results-publication policy](./results-publication).
 
 ---

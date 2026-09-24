@@ -59,22 +59,29 @@ metrum-ai-bench-cli-strategic \
   --mlperf-scenario server
 ```
 
-Each load stage is measured independently. `--warmup-requests` are issued at the
-start of every stage and kept in the CSV (`warmup=true`) but excluded from stage
-`n`, latency percentiles, throughput, goodput, and knee detection. Use a
-non-zero warmup on GPU endpoints so cold model-load does not inflate the
-baseline.
+Each load stage is measured independently. `--warmup-requests` are issued and
+fully completed at the start of every stage, then the measurement epoch resets.
+Warmup rows stay in the CSV (`warmup=true`) but are excluded from stage `n`,
+latency percentiles, throughput, goodput, and knee detection. Measured prompt
+indexing restarts at zero after warmup. Prefer a warmup count at least as large
+as stage concurrency on GPU endpoints. `--warmup-requests 0` is for
+mock/determinism only.
+
+For fixed-length throughput studies, chat sweeps accept `--ignore-eos` and
+optional `--min-tokens` with `--max-tokens` (engine extensions). Stdout JSON
+adds `schema_version`, `tool_version`, `environment`, and `config` while
+keeping `points` for `metrum-ai-bench-cli compare`.
 
 To feed a Hugging Face `metrum-ai/prompt-library` mix, extract JSONL with
 `metrum-ai-bench-cli-prompts` / `metrum-ai-bench-cli prompts`, then pass
 `--prompts` and `--max-tokens` (required together; prefer the report's
 `recommended_max_tokens`). Stage `config` stamps `prompts`, `prompt_pool_size`,
-`max_tokens`, and `warmup_requests`.
+`max_tokens`, `ignore_eos`, `min_tokens`, and `warmup_requests`.
 
 The HTML report plots achieved throughput against p95 latency with **labeled
-axes, ticks, and a grid**, and marks the unit-normalized Kneedle result. For
-side-by-side GPU deltas use `metrum-ai-bench-cli compare` on two stdout JSON
-summaries (or request CSVs). The metrics scraper recognizes vLLM, SGLang, and
+axes, ticks, and a grid**, and marks the unit-normalized Kneedle result. Use
+`metrum-ai-bench-cli compare` on two of our own stdout JSON summaries (or
+request CSVs). The metrics scraper recognizes vLLM, SGLang, and
 TensorRT-LLM names for KV-cache utilization, preemptions, and running/waiting
 queues.
 

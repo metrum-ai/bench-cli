@@ -112,7 +112,7 @@ Options:
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
-          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --quiet
@@ -224,7 +224,7 @@ Options:
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
-          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --quiet
@@ -402,7 +402,7 @@ Options:
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
 
       --require-sut
-          Refuse to run without a valid --sut block; implies --redact-hostname
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
           
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
 
@@ -599,7 +599,7 @@ Options:
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
       --require-sut
-          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
   -h, --help
@@ -771,6 +771,12 @@ Options:
           JSONL prompt file or http(s) URL (objects with "prompt"); cycles across requests
       --max-tokens <MAX_TOKENS>
           Max completion tokens for chat bodies; required when --prompts is set, recommended for all chat sweeps
+      --ignore-eos
+          Send ignore_eos=true in chat request bodies (engine extension; for fixed-length throughput studies)
+      --min-tokens <N>
+          Send min_tokens=N in chat request bodies (engine extension; must be <= --max-tokens)
+      --extra-body-json <JSON>
+          Merge extra JSON object fields into chat request bodies
       --warmup-requests <WARMUP_REQUESTS>
           Per-stage warmup requests excluded from measured aggregates (cold-start control) [default: 0]
       --seed <SEED>
@@ -824,7 +830,7 @@ Options:
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML
       --require-sut
-          Refuse to run without a valid --sut block; implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
       --redact-hostname
           Reserved for parity with modality binaries (strategic stamps SUT only) [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
   -h, --help

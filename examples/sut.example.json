@@ -6,7 +6,11 @@
   "cpu": "Example CPU",
   "memory_gb": 256,
   "driver_version": "NVIDIA 580.xx",
-  "runtime": { "name": "vllm", "version": "latest", "config": "TP=1" },
+  "runtime": {
+    "name": "vllm",
+    "version": "0.10.0",
+    "config": "vllm serve example/model --tensor-parallel-size 1 --dtype auto (replace with exact launch)"
+  },
   "model": { "id": "example/model", "revision": null, "quantization": null },
   "host_os": "Ubuntu 22.04",
   "cost": { "price_per_hour": 3.6, "currency": "USD" },

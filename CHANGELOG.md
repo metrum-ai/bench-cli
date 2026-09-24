@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.4.0 (2026-09-24)
+
+### Removed
+- `docs/COMPARISON.md`, docs-site Comparison page, and vs-other-tools bake-off
+  artifacts (`docs/reviews/BAKEOFF_LLM_AIPERF.md`, `docs/reviews/bakeoff/`,
+  `scripts/live/bakeoff/`). This repository does not retain comparison against
+  other measurement tools. `metrum-ai-bench-cli compare` remains a helper that
+  diffs two of our own strategic run summaries.
+
+### Changed
+- **Breaking (publication gate):** `--require-sut` rejects incomplete SUT
+  declarations before any request: requires `gpu.model`, `gpu.count` (>0),
+  `driver_version`, `runtime.name`, `runtime.version`, `runtime.config`, and
+  `host_os`. Plain `--sut` stays permissive for partial manifests.
+- Strategic warmup is a hard barrier: warmups fully complete, then the
+  measurement epoch resets and measured prompt indexing restarts at zero.
+- Strategic stdout adds `schema_version`, `tool_version`, `environment`, and
+  `config` for publication-policy manifests (keeps `points` for compare).
+
+### Added
+- Strategic chat: `--ignore-eos`, `--min-tokens`, and `--extra-body-json` for
+  fixed-length throughput studies (engine extensions; stamped in stage config).
+
 ## 1.3.1 (2026-09-23)
 
 ### Fixed

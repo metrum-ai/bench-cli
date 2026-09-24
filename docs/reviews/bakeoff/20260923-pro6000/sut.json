@@ -1,1 +1,0 @@
-{"name":"shadeform-pro6000-bakeoff","provenance":"declared","gpu":{"model":"NVIDIA RTX PRO 6000 Blackwell Server Edition","count":1},"runtime":{"name":"vllm","config":"vendor docker loopback :80"},"model":{"id":"Qwen/Qwen2.5-7B-Instruct"},"notes":"LLM bake-off vs aiperf; on-host; prompt-library rev 0666f62e581b482838ae2e17b333ee36ff3d01b0"}

@@ -86,6 +86,24 @@ struct Args {
     max_tokens: Option<u32>,
     #[arg(
         long,
+        default_value_t = false,
+        help = "Send ignore_eos=true in chat request bodies (engine extension; for fixed-length throughput studies)"
+    )]
+    ignore_eos: bool,
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Send min_tokens=N in chat request bodies (engine extension; must be <= --max-tokens)"
+    )]
+    min_tokens: Option<u32>,
+    #[arg(
+        long,
+        value_name = "JSON",
+        help = "Merge extra JSON object fields into chat request bodies"
+    )]
+    extra_body_json: Option<String>,
+    #[arg(
+        long,
         default_value_t = 0,
         help = "Per-stage warmup requests excluded from measured aggregates (cold-start control)"
     )]
@@ -184,7 +202,7 @@ struct Args {
         long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REQUIRE_SUT",
-        help = "Refuse to run without a valid --sut block; implies --redact-hostname"
+        help = "Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname"
     )]
     require_sut: bool,
     #[arg(
@@ -244,6 +262,9 @@ struct ChatBodyOpts<'a> {
     prompt: &'a str,
     streaming: bool,
     max_tokens: Option<u32>,
+    ignore_eos: bool,
+    min_tokens: Option<u32>,
+    extra_body: Option<&'a Value>,
     shared_prefix: Option<&'a str>,
     prefix_control: PrefixControl,
     session_key: &'a str,
@@ -251,7 +272,37 @@ struct ChatBodyOpts<'a> {
     tools: Option<&'a Value>,
 }
 
-fn chat_body(opts: ChatBodyOpts<'_>) -> Value {
+fn apply_chat_controls(
+    body: &mut Value,
+    max_tokens: Option<u32>,
+    ignore_eos: bool,
+    min_tokens: Option<u32>,
+    extra_body: Option<&Value>,
+) -> Result<()> {
+    if let Some(max_tokens) = max_tokens {
+        body["max_tokens"] = json!(max_tokens);
+    }
+    if ignore_eos {
+        body["ignore_eos"] = json!(true);
+    }
+    if let Some(min_tokens) = min_tokens {
+        body["min_tokens"] = json!(min_tokens);
+    }
+    if let Some(extra) = extra_body {
+        let Some(dst) = body.as_object_mut() else {
+            bail!("chat body must be a JSON object");
+        };
+        let Some(src) = extra.as_object() else {
+            bail!("--extra-body-json must be a JSON object");
+        };
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(())
+}
+
+fn chat_body(opts: ChatBodyOpts<'_>) -> Result<Value> {
     let messages = controlled_messages(
         &[json!({"role":"user","content":opts.prompt})],
         opts.shared_prefix,
@@ -262,11 +313,46 @@ fn chat_body(opts: ChatBodyOpts<'_>) -> Value {
     if opts.streaming {
         body["stream_options"] = json!({"include_usage": true});
     }
-    if let Some(max_tokens) = opts.max_tokens {
-        body["max_tokens"] = json!(max_tokens);
-    }
+    apply_chat_controls(
+        &mut body,
+        opts.max_tokens,
+        opts.ignore_eos,
+        opts.min_tokens,
+        opts.extra_body,
+    )?;
     add_structured(&mut body, opts.schema, opts.tools);
-    body
+    Ok(body)
+}
+
+fn parse_extra_body(raw: Option<&str>) -> Result<Option<Value>> {
+    match raw {
+        None => Ok(None),
+        Some(text) => {
+            let value: Value =
+                serde_json::from_str(text).context("--extra-body-json must be valid JSON")?;
+            if !value.is_object() {
+                bail!("--extra-body-json must be a JSON object");
+            }
+            Ok(Some(value))
+        }
+    }
+}
+
+fn validate_chat_controls(args: &Args) -> Result<()> {
+    if (args.ignore_eos || args.min_tokens.is_some() || args.extra_body_json.is_some())
+        && !matches!(args.kind, EndpointKind::Chat)
+    {
+        bail!("--ignore-eos, --min-tokens, and --extra-body-json are only valid for --kind chat");
+    }
+    if let (Some(min_tokens), Some(max_tokens)) = (args.min_tokens, args.max_tokens) {
+        if min_tokens > max_tokens {
+            bail!("--min-tokens ({min_tokens}) must be <= --max-tokens ({max_tokens})");
+        }
+    }
+    if args.min_tokens.is_some() && args.max_tokens.is_none() {
+        bail!("--min-tokens requires --max-tokens");
+    }
+    Ok(())
 }
 
 fn make_inputs(
@@ -275,6 +361,8 @@ fn make_inputs(
     schema: Option<&Value>,
     tools: Option<&Value>,
 ) -> Result<Vec<Input>> {
+    validate_chat_controls(args)?;
+    let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
     if args.prompts.is_some() && args.max_tokens.is_none() {
         bail!("--max-tokens is required when --prompts is set (bounds OSL for comparable sweeps)");
     }
@@ -304,9 +392,13 @@ fn make_inputs(
                 if args.streaming {
                     body["stream_options"] = json!({"include_usage": true});
                 }
-                if let Some(max_tokens) = args.max_tokens {
-                    body["max_tokens"] = json!(max_tokens);
-                }
+                apply_chat_controls(
+                    &mut body,
+                    args.max_tokens,
+                    args.ignore_eos,
+                    args.min_tokens,
+                    extra_body.as_ref(),
+                )?;
                 add_structured(&mut body, schema, tools);
                 inputs.push(Input {
                     body,
@@ -337,12 +429,15 @@ fn make_inputs(
                     prompt,
                     streaming: args.streaming,
                     max_tokens: args.max_tokens,
+                    ignore_eos: args.ignore_eos,
+                    min_tokens: args.min_tokens,
+                    extra_body: extra_body.as_ref(),
                     shared_prefix: args.shared_prefix.as_deref(),
                     prefix_control: args.prefix_control,
                     session_key: &session_key,
                     schema,
                     tools,
-                }),
+                })?,
                 session_id: None,
                 turn: None,
             });
@@ -355,12 +450,15 @@ fn make_inputs(
             prompt: &args.prompt,
             streaming: args.streaming,
             max_tokens: args.max_tokens,
+            ignore_eos: args.ignore_eos,
+            min_tokens: args.min_tokens,
+            extra_body: extra_body.as_ref(),
             shared_prefix: args.shared_prefix.as_deref(),
             prefix_control: args.prefix_control,
             session_key: "default",
             schema,
             tools,
-        }),
+        })?,
         EndpointKind::Embeddings => json!({"model":model,"input":args.prompt}),
         EndpointKind::Rerank => {
             let documents: Vec<_> = args.prompt.split('|').map(str::trim).collect();
@@ -416,6 +514,122 @@ fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn spawn_one_request(
+    args: &Args,
+    url: &str,
+    stage: f64,
+    input: Input,
+    validator: Option<&Validity>,
+    seq: Arc<AtomicU64>,
+    client: &reqwest::Client,
+    semaphore: Arc<Semaphore>,
+    inflight_tracker: Arc<metrum_ai_bench::concurrency::InFlightTracker>,
+    epoch: Instant,
+    epoch_unix_ns: u128,
+    scheduled_offset: Option<Duration>,
+    warmup: bool,
+) -> tokio::task::JoinHandle<BenchRecord> {
+    let client = client.clone();
+    let url = url.to_string();
+    let api_key = args.api_key.clone();
+    let validator = validator.cloned();
+    let kind = args.kind;
+    let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
+    let sequence = seq.fetch_add(1, Ordering::Relaxed);
+    tokio::spawn(async move {
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            Arc::clone(&semaphore),
+            &inflight_tracker,
+        )
+        .await
+        .expect("semaphore closed");
+        let inflight_guard = inflight_tracker.guard();
+        let in_flight_at_send = inflight_guard.in_flight;
+        let sent = Instant::now();
+        let sent_unix_ns = now_unix_ns();
+        let (scheduled, scheduled_unix_ns) = scheduled_offset
+            .map_or((sent, sent_unix_ns), |offset| {
+                (epoch + offset, epoch_unix_ns + offset.as_nanos())
+            });
+        let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+        let result = metrum_ai_bench::connect_timing::with_connect_slot(
+            Arc::clone(&connect_slot),
+            client
+                .post(&url)
+                .bearer_auth(api_key)
+                .json(&input.body)
+                .send(),
+        )
+        .await;
+        let connect_s = connect_slot.take();
+        let mut first_byte_s = None;
+        let mut ttft_s = None;
+        let mut itl_s = Vec::new();
+        let result: Result<Value> = async {
+            let response = result?;
+            first_byte_s = Some(sent.elapsed().as_secs_f64());
+            let response = response.error_for_status()?;
+            if streaming {
+                let stream =
+                    metrum_ai_bench::chat_stream::consume(response.bytes_stream(), sent).await?;
+                ttft_s = Some(stream.ttft.as_secs_f64());
+                itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
+                Ok(json!({
+                    "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
+                    "usage": {"prompt_tokens": stream.prompt_tokens, "completion_tokens": stream.completion_tokens}
+                }))
+            } else {
+                Ok(response.json::<Value>().await?)
+            }
+        }
+        .await;
+        let completed = Instant::now();
+        let (success, valid, input_tokens, output_tokens, error) = match result {
+            Ok(value) => {
+                let (input_tokens, output_tokens) = response_tokens(kind, &value);
+                (
+                    true,
+                    validator.as_ref().map(|check| check.validate(&value)),
+                    input_tokens,
+                    output_tokens,
+                    None,
+                )
+            }
+            Err(error) => (false, None, 0, 0, Some(error.to_string())),
+        };
+        drop(permit);
+        drop(inflight_guard);
+        BenchRecord {
+            seq: sequence,
+            stage,
+            endpoint: url,
+            scheduled_unix_ns,
+            sent_unix_ns,
+            latency_s: completed.saturating_duration_since(scheduled).as_secs_f64(),
+            queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
+            service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
+            first_byte_s,
+            connect_s: Some(connect_s),
+            ttft_s,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s,
+            in_flight_at_send: Some(in_flight_at_send),
+            success,
+            valid,
+            input_tokens,
+            output_tokens,
+            session_id: input.session_id,
+            turn: input.turn,
+            error,
+            warmup,
+        }
+        .with_phase_metrics()
+    })
+}
+
 async fn run_stage(
     args: &Args,
     url: &str,
@@ -438,122 +652,68 @@ async fn run_stage(
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency as u32,
     ));
-    let kind = args.kind;
-    let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
-    let start = Instant::now();
-    let stage_unix_ns = now_unix_ns();
-    let total_requests = args.warmup_requests.saturating_add(args.requests_per_stage);
-    let mut handles = Vec::with_capacity(total_requests as usize);
-    for index in 0..total_requests {
-        let warmup = index < args.warmup_requests;
-        // Rate pacing applies only to measured requests so warmup does not skew the open-loop schedule.
-        let measured_index = index.saturating_sub(args.warmup_requests);
-        let scheduled_offset = matches!(args.sweep_by, SweepBy::Rate).then(|| {
-            if warmup {
-                Duration::ZERO
-            } else {
-                Duration::from_secs_f64(measured_index as f64 / stage)
-            }
-        });
-        if let Some(offset) = scheduled_offset {
-            if !warmup {
-                tokio::time::sleep(offset.saturating_sub(start.elapsed())).await;
-            }
-        }
-        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
-            Arc::clone(&semaphore),
-            &inflight_tracker,
-        )
-        .await?;
-        let inflight_guard = inflight_tracker.guard();
-        let in_flight_at_send = inflight_guard.in_flight;
-        let sent = Instant::now();
-        let sent_unix_ns = now_unix_ns();
-        let (scheduled, scheduled_unix_ns) = scheduled_offset
-            .map_or((sent, sent_unix_ns), |offset| {
-                (start + offset, stage_unix_ns + offset.as_nanos())
-            });
-        let client = client.clone();
-        let input = inputs[index as usize % inputs.len()].clone();
-        let url = url.to_string();
-        let api_key = args.api_key.clone();
-        let validator = validator.cloned();
-        let sequence = seq.fetch_add(1, Ordering::Relaxed);
-        handles.push(tokio::spawn(async move {
-            let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
-            let result = metrum_ai_bench::connect_timing::with_connect_slot(
-                Arc::clone(&connect_slot),
-                client
-                    .post(&url)
-                    .bearer_auth(api_key)
-                    .json(&input.body)
-                    .send(),
-            )
-            .await;
-            let connect_s = connect_slot.take();
-            let mut first_byte_s = None;
-            let mut ttft_s = None;
-            let mut itl_s = Vec::new();
-            let result: Result<Value> = async {
-                let response = result?;
-                first_byte_s = Some(sent.elapsed().as_secs_f64());
-                let response = response.error_for_status()?;
-                if streaming {
-                    let stream = metrum_ai_bench::chat_stream::consume(response.bytes_stream(), sent).await?;
-                    ttft_s = Some(stream.ttft.as_secs_f64());
-                    itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
-                    Ok(json!({
-                        "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
-                        "usage": {"prompt_tokens": stream.prompt_tokens, "completion_tokens": stream.completion_tokens}
-                    }))
-                } else {
-                    Ok(response.json::<Value>().await?)
-                }
-            }.await;
-            let completed = Instant::now();
-            let (success, valid, input_tokens, output_tokens, error) = match result {
-                Ok(value) => {
-                    let (input_tokens, output_tokens) = response_tokens(kind, &value);
-                    (true, validator.as_ref().map(|check| check.validate(&value)), input_tokens, output_tokens, None)
-                }
-                Err(error) => (false, None, 0, 0, Some(error.to_string())),
-            };
-            drop(permit);
-            drop(inflight_guard);
-            BenchRecord {
-                seq: sequence,
+    let mut records =
+        Vec::with_capacity(args.warmup_requests.saturating_add(args.requests_per_stage) as usize);
+
+    // Phase 1: fully complete warmup before measurement begins.
+    if args.warmup_requests > 0 {
+        let warmup_epoch = Instant::now();
+        let warmup_unix_ns = now_unix_ns();
+        let mut warmup_handles = Vec::with_capacity(args.warmup_requests as usize);
+        for index in 0..args.warmup_requests {
+            let input = inputs[index as usize % inputs.len()].clone();
+            warmup_handles.push(spawn_one_request(
+                args,
+                url,
                 stage,
-                endpoint: url,
-                scheduled_unix_ns,
-                sent_unix_ns,
-                latency_s: completed.saturating_duration_since(scheduled).as_secs_f64(),
-                queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
-                service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
-                first_byte_s,
-                connect_s: Some(connect_s),
-                ttft_s,
-                prefill_s: None,
-                decode_s: None,
-                decode_tok_s: None,
-                itl_s,
-                in_flight_at_send: Some(in_flight_at_send),
-                success,
-                valid,
-                input_tokens,
-                output_tokens,
-                session_id: input.session_id,
-                turn: input.turn,
-                error,
-                warmup,
-            }
-            .with_phase_metrics()
-        }));
+                input,
+                validator,
+                Arc::clone(&seq),
+                client,
+                Arc::clone(&semaphore),
+                Arc::clone(&inflight_tracker),
+                warmup_epoch,
+                warmup_unix_ns,
+                None,
+                true,
+            ));
+        }
+        for handle in warmup_handles {
+            records.push(handle.await.context("warmup request task failed")?);
+        }
     }
-    let mut records = Vec::with_capacity(handles.len());
-    for handle in handles {
+
+    // Phase 2: reset measurement epoch; measured prompts restart at index 0.
+    let measure_epoch = Instant::now();
+    let measure_unix_ns = now_unix_ns();
+    let mut measure_handles = Vec::with_capacity(args.requests_per_stage as usize);
+    for index in 0..args.requests_per_stage {
+        let scheduled_offset = matches!(args.sweep_by, SweepBy::Rate)
+            .then(|| Duration::from_secs_f64(index as f64 / stage));
+        if let Some(offset) = scheduled_offset {
+            tokio::time::sleep(offset.saturating_sub(measure_epoch.elapsed())).await;
+        }
+        let input = inputs[index as usize % inputs.len()].clone();
+        measure_handles.push(spawn_one_request(
+            args,
+            url,
+            stage,
+            input,
+            validator,
+            Arc::clone(&seq),
+            client,
+            Arc::clone(&semaphore),
+            Arc::clone(&inflight_tracker),
+            measure_epoch,
+            measure_unix_ns,
+            scheduled_offset,
+            false,
+        ));
+    }
+    for handle in measure_handles {
         records.push(handle.await.context("request task failed")?);
     }
-    // Window for throughput is measured-request span only (exclude warmup wall time when possible).
+
     let measured_seconds = {
         let measured: Vec<_> = records.iter().filter(|r| !r.warmup).collect();
         if let (Some(first), Some(last)) = (measured.first(), measured.last()) {
@@ -561,7 +721,7 @@ async fn run_stage(
             let end_ns = last.sent_unix_ns + ((last.service_latency_s * 1e9) as u128);
             ((end_ns.saturating_sub(start_ns)) as f64 / 1e9).max(f64::EPSILON)
         } else {
-            start.elapsed().as_secs_f64()
+            measure_epoch.elapsed().as_secs_f64()
         }
     };
     Ok((records, measured_seconds, inflight_tracker.snapshot()))
@@ -653,6 +813,9 @@ async fn main() -> Result<()> {
         "warmup_requests": args.warmup_requests,
         "max_in_flight": args.max_in_flight,
         "max_tokens": args.max_tokens,
+        "ignore_eos": args.ignore_eos,
+        "min_tokens": args.min_tokens,
+        "extra_body_json": args.extra_body_json,
         "prompts": args.prompts,
         "prompt_pool_size": inputs.len(),
         "seed": args.seed,
@@ -669,6 +832,9 @@ async fn main() -> Result<()> {
         "require_sut": args.require_sut,
         // Secrets intentionally omitted (api_key never stamped).
     });
+    let redact_hostname = args.redact_hostname || args.require_sut;
+    let environment =
+        metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
     // Warm connection pool across stages (single shared client with connect timing).
     let client = metrum_ai_bench::http_client::build_http_client(
         metrum_ai_bench::http_client::HttpClientOptions {
@@ -772,6 +938,10 @@ async fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
+            "schema_version": "metrum-ai-bench-cli.strategic.v1",
+            "tool_version": VERSION,
+            "environment": environment,
+            "config": redacted_config,
             "points": points,
             "knee": knee.map(|index| &points[index]),
             "server_metrics": server,
@@ -822,6 +992,64 @@ mod tests {
         let inputs = make_inputs(&args, "dummy", None, None).expect("inputs");
         assert_eq!(inputs[0].body["max_tokens"], 32);
         assert_eq!(inputs[0].body["stream"], true);
+    }
+
+    #[test]
+    fn chat_body_includes_ignore_eos_and_min_tokens() {
+        let args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://localhost",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "64",
+            "--ignore-eos",
+            "--min-tokens",
+            "64",
+            "--extra-body-json",
+            r#"{"temperature":0.0}"#,
+        ])
+        .expect("args");
+        let inputs = make_inputs(&args, "dummy", None, None).expect("inputs");
+        assert_eq!(inputs[0].body["ignore_eos"], true);
+        assert_eq!(inputs[0].body["min_tokens"], 64);
+        assert_eq!(inputs[0].body["temperature"], 0.0);
+    }
+
+    #[test]
+    fn min_tokens_must_not_exceed_max_tokens() {
+        let args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://localhost",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "16",
+            "--min-tokens",
+            "32",
+        ])
+        .expect("args");
+        let err = make_inputs(&args, "dummy", None, None).expect_err("min>max");
+        assert!(err.to_string().contains("--min-tokens"));
+    }
+
+    #[test]
+    fn ignore_eos_rejected_for_embeddings() {
+        let args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://localhost",
+            "--model",
+            "dummy",
+            "--kind",
+            "embeddings",
+            "--ignore-eos",
+        ])
+        .expect("args");
+        let err = make_inputs(&args, "dummy", None, None).expect_err("chat-only");
+        assert!(err.to_string().contains("chat"));
     }
 
     #[test]

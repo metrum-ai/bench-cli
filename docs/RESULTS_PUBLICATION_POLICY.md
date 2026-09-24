@@ -23,7 +23,9 @@ contains at least:
 - Tool version
 - Workload identification
 - Client environment
-- **SUT block**
+- **SUT block** with publication inventory: `gpu.model`, `gpu.count` (>0),
+  `driver_version`, `runtime.name`, `runtime.version`, `runtime.config`
+  (exact launch command or serving flags), and `host_os`
 - Full configuration used for the run
 
 Produce a compliant run with:
@@ -31,6 +33,8 @@ Produce a compliant run with:
 ```text
 --sut <file> --require-sut
 ```
+
+`--require-sut` refuses incomplete SUT declarations before any request is sent.
 
 For token-length-matched compares, also set `--isl-target` / `--osl-target`
 (or `--prompt-mix-report`) with `--fail-on-osl-mismatch` and a bounding
