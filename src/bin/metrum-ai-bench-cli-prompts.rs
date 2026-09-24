@@ -288,8 +288,8 @@ fn run(args: Args) -> anyhow::Result<()> {
     } else {
         let revision_arg = args.revision.trim();
         if args.require_pinned_revision {
-            let pinned = revision_arg.len() == 40
-                && revision_arg.bytes().all(|b| b.is_ascii_hexdigit());
+            let pinned =
+                revision_arg.len() == 40 && revision_arg.bytes().all(|b| b.is_ascii_hexdigit());
             if !pinned {
                 anyhow::bail!(
                     "--require-pinned-revision needs a 40-character commit SHA; got `{revision_arg}`"
