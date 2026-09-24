@@ -2,16 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Strategic-run telemetry: tagged NDJSON rows, shared monotonic epoch, and
-//! (in later modules) Prometheus exposition scraping.
+//! Prometheus exposition scraping.
 
+mod config;
 mod epoch;
+mod parser;
 mod row;
+mod scraper;
 mod writer;
 
+pub use config::{
+    TelemetryConfig, TelemetrySource, UnitScale, DEFAULT_INTERVAL_MS, DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_REQUIRE_FAILURES, DEFAULT_TIMEOUT_MS, MIN_INTERVAL_MS,
+};
 pub use epoch::RunEpoch;
+pub use parser::{engine_include_patterns, parse_exposition, ParseResult, ParsedSample};
 pub use row::{
     MetricType, PhaseKind, RequestRow, Row, RunRow, ScrapeErrorRow, StageRow, SummaryRow,
-    TelemetryRow, TELEMETRY_SCHEMA_VERSION,
+    TelemetryRow, TelemetrySourceStamp, TELEMETRY_SCHEMA_VERSION,
+};
+pub use scraper::{
+    build_telemetry_client, default_require_failures, new_last_seen, probe_sources, spawn_scrapers,
+    LastSeenMap, ProbeResult,
 };
 pub use writer::{NdjsonWriter, WriterStats, TELEMETRY_CHANNEL_CAPACITY};
 
@@ -96,8 +108,6 @@ mod tests {
     async fn telemetry_rows_drop_under_backpressure() {
         let file = NamedTempFile::new().expect("temp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
-        // Saturate the bounded channel with telemetry without consuming.
-        // The writer task may drain some rows; keep sending until drops occur.
         let mut drops = 0u64;
         for i in 0..20_000 {
             let dropped = writer.try_send_telemetry(Row::Telemetry(TelemetryRow {

@@ -136,6 +136,24 @@ struct Args {
         help = "Tagged NDJSON run log (run/stage/request/telemetry/summary rows)"
     )]
     ndjson: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Telemetry scrape YAML (Prometheus /metrics or /metric sources)"
+    )]
+    telemetry: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Abort after N consecutive scrape failures on any source (default N=3)"
+    )]
+    require_telemetry: bool,
+    #[arg(
+        long,
+        default_value_t = metrum_ai_bench::telemetry::DEFAULT_REQUIRE_FAILURES,
+        help = "Consecutive scrape failures before --require-telemetry aborts"
+    )]
+    require_telemetry_failures: u32,
     #[arg(long, default_value = "metrum-ai-bench-cli-report.html")]
     html: PathBuf,
     #[arg(long, default_value = "metrum-ai-bench-cli-requests.csv")]
@@ -880,6 +898,24 @@ async fn main() -> Result<()> {
     let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
+
+    let telemetry_cfg = match (&args.telemetry, &args.metrics_url) {
+        (Some(path), _) => Some(metrum_ai_bench::telemetry::TelemetryConfig::load(path)?),
+        (None, Some(url)) if args.ndjson.is_some() || args.require_telemetry => Some(
+            metrum_ai_bench::telemetry::TelemetryConfig::from_metrics_url(
+                url,
+                args.metrics_interval_ms,
+            ),
+        ),
+        _ => None,
+    };
+    if args.require_telemetry && telemetry_cfg.is_none() {
+        bail!("--require-telemetry needs --telemetry YAML or --metrics-url");
+    }
+    if telemetry_cfg.is_some() && args.ndjson.is_none() {
+        bail!("--telemetry / telemetry via --metrics-url requires --ndjson PATH");
+    }
+
     let (ndjson_writer, ndjson_handle) = match &args.ndjson {
         Some(path) => {
             let (writer, handle) = metrum_ai_bench::telemetry::NdjsonWriter::spawn(path.clone())?;
@@ -887,6 +923,32 @@ async fn main() -> Result<()> {
         }
         None => (None, None),
     };
+
+    let mut telemetry_source_stamps = Vec::new();
+    let mut scrape_handles: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+    let stop_scrapers = Arc::new(AtomicBool::new(false));
+    if let Some(cfg) = &telemetry_cfg {
+        cfg.warn_fast_sources();
+        let sources = cfg.compile()?;
+        let insecure = sources.iter().any(|s| s.insecure_tls);
+        let client = metrum_ai_bench::telemetry::build_telemetry_client(insecure, true)?;
+        let probes = metrum_ai_bench::telemetry::probe_sources(&client, cfg, &sources).await?;
+        telemetry_source_stamps = probes.into_iter().map(|p| p.stamp).collect();
+        if let Some(writer) = &ndjson_writer {
+            scrape_handles = metrum_ai_bench::telemetry::spawn_scrapers(
+                client,
+                cfg.clone(),
+                sources,
+                Arc::clone(&run_epoch),
+                Arc::clone(&run_id),
+                writer.clone(),
+                Arc::clone(&stop_scrapers),
+                args.require_telemetry,
+                args.require_telemetry_failures,
+            );
+        }
+    }
+
     if let Some(writer) = &ndjson_writer {
         writer
             .send_priority(metrum_ai_bench::telemetry::Row::Run(
@@ -906,27 +968,35 @@ async fn main() -> Result<()> {
                         "requests_per_stage": args.requests_per_stage,
                         "warmup_requests": args.warmup_requests,
                         "streaming": args.streaming,
+                        "telemetry": args.telemetry,
+                        "metrics_url": args.metrics_url,
                     }),
-                    telemetry_sources: vec![],
+                    telemetry_sources: telemetry_source_stamps,
                 },
             ))
             .await?;
     }
-    let stop_scraper = Arc::new(AtomicBool::new(false));
+
+    // Legacy whole-run aggregate for stdout when --metrics-url is set without NDJSON scrapers.
+    let stop_legacy = Arc::new(AtomicBool::new(false));
     let server_samples = Arc::new(Mutex::new(Vec::new()));
-    let scraper = if let Some(metrics_url) = args.metrics_url.clone() {
-        let stop_flag = stop_scraper.clone();
-        let samples = server_samples.clone();
-        let interval = Duration::from_millis(args.metrics_interval_ms.max(50));
-        Some(tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            while !stop_flag.load(Ordering::Relaxed) {
-                if let Ok(sample) = scrape_metrics(&client, &metrics_url).await {
-                    samples.lock().await.push(sample);
+    let legacy_scraper = if telemetry_cfg.is_none() {
+        if let Some(metrics_url) = args.metrics_url.clone() {
+            let stop_flag = stop_legacy.clone();
+            let samples = server_samples.clone();
+            let interval = Duration::from_millis(args.metrics_interval_ms.max(50));
+            Some(tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                while !stop_flag.load(Ordering::Relaxed) {
+                    if let Ok(sample) = scrape_metrics(&client, &metrics_url).await {
+                        samples.lock().await.push(sample);
+                    }
+                    tokio::time::sleep(interval).await;
                 }
-                tokio::time::sleep(interval).await;
-            }
-        }))
+            }))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -994,6 +1064,7 @@ async fn main() -> Result<()> {
     for stage in stages {
         if stop.is_stopped() {
             partial = true;
+            stop_scrapers.store(true, Ordering::Relaxed);
             break;
         }
         let (records, seconds, observed) = run_stage(
@@ -1035,8 +1106,21 @@ async fn main() -> Result<()> {
         ));
         all_records.extend(records);
     }
-    stop_scraper.store(true, Ordering::Relaxed);
-    if let Some(scraper) = scraper {
+    stop_scrapers.store(true, Ordering::Relaxed);
+    stop_legacy.store(true, Ordering::Relaxed);
+    for handle in scrape_handles {
+        match handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                if args.require_telemetry {
+                    return Err(err);
+                }
+                eprintln!("warning: telemetry scraper exited: {err:#}");
+            }
+            Err(err) => eprintln!("warning: telemetry scraper join failed: {err}"),
+        }
+    }
+    if let Some(scraper) = legacy_scraper {
         scraper.await?;
     }
     let duration_s = started.elapsed().as_secs_f64();
