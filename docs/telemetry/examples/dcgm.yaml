@@ -1,10 +1,22 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
+#
+# NVIDIA dcgm-exporter. Install: see docs/telemetry/exporters.md
+# scrape: http://127.0.0.1:9400/metrics
+
 default_interval_ms: 1000
 timeout_ms: 800
 sources:
   - name: dcgm
     url: http://127.0.0.1:9400/metrics
-    interval_ms: TOTAL_ENERGY_CONSUMPTION|GPU_UTIL|FB_USED|SM_CLOCK|GPU_TEMP)|PROF_(SM_ACTIVE|PIPE_TENSOR_ACTIVE|DRAM_ACTIVE))$|250
+    interval_ms: 500
     include:
-      - "^DCGM_FI_(DEV_(POWER_USAGE"
+      - "^DCGM_FI_DEV_(POWER_USAGE|GPU_UTIL|MEM_COPY_UTIL|GPU_TEMP|MEMORY_TEMP|FB_USED|FB_FREE|SM_CLOCK|TOTAL_ENERGY_CONSUMPTION)$"
+      - "^DCGM_FI_PROF_(SM_ACTIVE|PIPE_TENSOR_ACTIVE|DRAM_ACTIVE)$"
+    units:
+      DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION:
+        scale: 0.001
+        unit: J
+      DCGM_FI_DEV_POWER_USAGE:
+        scale: 1
+        unit: W
