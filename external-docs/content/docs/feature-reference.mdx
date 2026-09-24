@@ -108,7 +108,7 @@ Success = statistics within tolerance, not exact `--count`. Details:
 | Flag / env | Behavior |
 | --- | --- |
 | `--sut <PATH>` | Embed declared SUT JSON/YAML into summary (`provenance: "declared"`) |
-| `--require-sut` / `METRUM_AI_BENCH_REQUIRE_SUT=1` | Refuse to run without SUT; implies hostname redaction |
+| `--require-sut` / `METRUM_AI_BENCH_REQUIRE_SUT=1` | Refuse incomplete SUT (gpu, driver, runtime, host_os); implies hostname redaction |
 | `--redact-hostname` / `METRUM_AI_BENCH_REDACT_HOSTNAME=1` | Write `environment.hostname: null` |
 
 For publication requirements, see [Publishing-oriented runs](./user-guide#publishing-oriented-runs).

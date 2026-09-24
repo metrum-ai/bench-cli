@@ -80,9 +80,10 @@ in the mix report (`profile.name` / `profile.version`).
 
 | Term | Definition |
 | --- | --- |
-| **Warmup requests** | Issued before measurement (`--warmup-requests`), excluded from every measured distribution and from the throughput window. |
-| **Real endpoints** | Use enough warmup to cover model load, CUDA graph capture, and JIT kernel compilation. |
+| **Warmup requests** | Issued and fully completed before measurement (`--warmup-requests`), then the measurement epoch resets. Excluded from every measured distribution and from the throughput window. On strategic, measured prompt indexing restarts at zero so warmup does not shift the mix. |
+| **Real endpoints** | Use enough warmup to cover model load, CUDA graph capture, and JIT kernel compilation. Prefer a warmup count at least as large as stage concurrency. |
 | **Dummy only** | `--warmup-requests 0` is valid for determinism checks against the mock/dummy server, where no weights are loaded. Do not use zero warmup against a real GPU endpoint for publishable numbers. |
+| **Exact output length** | For fixed-length throughput studies, modality and strategic chat paths support `--ignore-eos` and optional `--min-tokens` with `--max-tokens` (engine extensions). Pair with `--fail-on-osl-mismatch` for publishable gates. Not a default for natural-EOS or reasoning workloads. |
 
 ### Repetition and significance
 

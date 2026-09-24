@@ -79,6 +79,13 @@ fn strategic_sweep_exports_all_formats() {
         String::from_utf8_lossy(&output.stderr)
     );
     let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    assert_eq!(
+        summary["schema_version"],
+        "metrum-ai-bench-cli.strategic.v1"
+    );
+    assert!(summary["tool_version"].as_str().is_some());
+    assert!(summary["environment"]["package_version"].is_string());
+    assert!(summary["config"]["model"].is_string());
     assert_eq!(summary["points"].as_array().map(Vec::len), Some(3));
     assert!(summary["points"]
         .as_array()
@@ -199,6 +206,75 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
     assert_eq!(records.len(), 6);
     assert_eq!(records.iter().filter(|r| r.warmup).count(), 2);
     assert_eq!(records.iter().filter(|r| !r.warmup).count(), 4);
+    let max_warmup_sent = records
+        .iter()
+        .filter(|r| r.warmup)
+        .map(|r| r.sent_unix_ns)
+        .max()
+        .expect("warmup");
+    let min_measured_sent = records
+        .iter()
+        .filter(|r| !r.warmup)
+        .map(|r| r.sent_unix_ns)
+        .min()
+        .expect("measured");
+    assert!(
+        max_warmup_sent <= min_measured_sent,
+        "warmup must finish before measurement epoch: warmup_max={max_warmup_sent} measured_min={min_measured_sent}"
+    );
+}
+
+#[test]
+fn strategic_ignore_eos_stamped_in_config() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
+    let address = listener.local_addr().expect("local address");
+    drop(listener);
+    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
+        .args(["--listen", &address.to_string(), "--latency-ms", "5"])
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("start mock server");
+    let _server = ChildGuard(server);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while TcpStream::connect(address).is_err() {
+        assert!(Instant::now() < deadline, "mock server did not start");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let directory = tempfile::tempdir().expect("temporary output directory");
+    let html = directory.path().join("report.html");
+    let csv = directory.path().join("requests.csv");
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{address}/v1/chat/completions"),
+            "--model",
+            "mock",
+            "--max-tokens",
+            "16",
+            "--ignore-eos",
+            "--min-tokens",
+            "16",
+            "--requests-per-stage",
+            "2",
+            "--sweep",
+            "1",
+            "--html",
+            html.to_str().expect("utf8"),
+            "--csv",
+            csv.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("run strategic");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    assert_eq!(summary["config"]["ignore_eos"], true);
+    assert_eq!(summary["config"]["min_tokens"], 16);
+    assert_eq!(summary["points"][0]["config"]["ignore_eos"], true);
 }
 
 mod common;

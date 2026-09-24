@@ -4,7 +4,7 @@
 # Known limitations (1.0)
 
 Honest scope for Metrum AI Bench at the 1.0 line. See also
-[COMPARISON.md](COMPARISON.md) and [METRICS.md](METRICS.md).
+[METRICS.md](METRICS.md).
 
 ## Client-side only
 
@@ -26,8 +26,10 @@ for publication. `metrum-ai-bench-cli sut init` writes a template;
 `/proc`, marking those fields in `field_provenance` as `observed` and setting
 top-level `provenance` to `mixed`. Probing never SSHs to the remote serving
 host, does not confirm that the endpoint matches the declaration, and does not
-replace operator-owned `runtime` / `model` / `vendor` fields. A mismatched or
-empty declaration remains a policy/process failure.
+replace operator-owned `runtime` / `model` / `vendor` fields. `--require-sut`
+rejects incomplete declarations (missing GPU, driver, runtime, or host OS)
+before any request is sent. Values remain declared (or locally probed), not
+remotely verified.
 
 ## Performance, not quality (except ASR)
 

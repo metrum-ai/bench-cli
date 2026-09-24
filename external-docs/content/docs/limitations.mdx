@@ -9,7 +9,7 @@ sidebar_position: 7
 # Known limitations
 
 Honest scope for Metrum AI Bench CLI at the 1.0 line. See also
-[Comparison](./comparison) and [Performance Methodology](./performance-methodology).
+[Performance Methodology](./performance-methodology).
 
 ---
 
@@ -36,7 +36,9 @@ the run summary for publication. `metrum-ai-bench-cli sut init` writes a
 template; `sut init --probe` may fill **local** GPU/OS/CPU/memory and mark
 those fields in `field_provenance` as `observed`. Probing never SSHs to the
 remote serving host and does not prove the endpoint matches the declaration.
-A mismatched or empty declaration is a policy/process failure.
+`--require-sut` rejects incomplete declarations (missing GPU, driver, runtime,
+or host OS) before any request is sent. Values remain declared or locally
+probed, not remotely verified.
 
 ---
 

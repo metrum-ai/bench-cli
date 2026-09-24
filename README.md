@@ -107,7 +107,7 @@ cargo test --all-targets
 | `metrum-ai-bench-cli selftest` | Local sanity check of the install | After build or release unpack |
 | `metrum-ai-bench-cli preflight` | Serving URL reachability, chat, stream smoke | Before long GPU runs |
 | `metrum-ai-bench-cli sut init` | SUT JSON template / local `--probe` | Scaffold publishable inventory |
-| `metrum-ai-bench-cli compare` | Labeled delta table across strategic runs | Two-GPU or two-engine bake-offs |
+| `metrum-ai-bench-cli compare` | Labeled delta table across strategic runs | Diff two of our own strategic summaries |
 | `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary, not a unified subcommand) |
 | `metrum-ai-bench-cli-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
 
@@ -149,8 +149,10 @@ For matched ISL/OSL compares, pass `--isl-target` / `--osl-target` (or
 `--fail-on-osl-mismatch` so drifted output length cannot silent-pass a
 publishable gate. Pair with `--max-tokens` near the OSL target.
 
-Example SUT declaration (`examples/sut.example.json`). Every field except the
-defaulted `provenance` is optional; omit or null what you do not know:
+Example SUT declaration (`examples/sut.example.json`). Plain `--sut` accepts a
+partial declaration. `--require-sut` rejects a block missing `gpu.model`,
+`gpu.count` (>0), `driver_version`, `runtime.name`, `runtime.version`,
+`runtime.config` (exact launch or serving flags), or `host_os`:
 
 ```json
 {
@@ -161,7 +163,11 @@ defaulted `provenance` is optional; omit or null what you do not know:
   "cpu": "Example CPU",
   "memory_gb": 256,
   "driver_version": "NVIDIA 580.xx",
-  "runtime": { "name": "vllm", "version": "latest", "config": "TP=1" },
+  "runtime": {
+    "name": "vllm",
+    "version": "0.10.0",
+    "config": "vllm serve example/model --tensor-parallel-size 1 --dtype auto"
+  },
   "model": { "id": "example/model", "revision": null, "quantization": null },
   "host_os": "Ubuntu 22.04",
   "notes": "Example only: replace with your declared inventory."
@@ -336,7 +342,6 @@ distributions.
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
 [prompt library](docs/PROMPT_LIBRARY.md), [reproduction](docs/REPRODUCING.md),
-[comparison notes](docs/COMPARISON.md),
 [reasoning models](docs/REASONING_MODELS.md), and
 [known limitations](docs/LIMITATIONS.md).
 

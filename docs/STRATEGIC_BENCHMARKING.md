@@ -36,11 +36,25 @@ machine-readable summary and HTML carry a SUT block under
 `docs/RESULTS_PUBLICATION_POLICY.md`. Without `--sut`, the CLI prints the same
 self-describing notice as the modality binaries.
 
-Each load stage is measured independently. `--warmup-requests` are issued at the
-start of every stage and written to the CSV with `warmup=true`, but they are
-excluded from stage `n`, latency percentiles, throughput, goodput, and knee
-detection. Prefer a non-zero warmup on GPU endpoints so cold model-load does
-not inflate the baseline stage.
+Each load stage is measured independently. `--warmup-requests` are issued and
+fully completed at the start of every stage, then the measurement epoch resets.
+Warmup rows are written to the CSV with `warmup=true` and excluded from stage
+`n`, latency percentiles, throughput, goodput, and knee detection. Measured
+prompt indexing restarts at zero after warmup so the mix is not shifted.
+Prefer a warmup count at least as large as stage concurrency on GPU endpoints
+so cold model-load and CUDA graph capture do not inflate the baseline stage.
+`--warmup-requests 0` is for mock/determinism only.
+
+For fixed-length throughput studies on engines that honor them, pass
+`--ignore-eos` and optionally `--min-tokens` with `--max-tokens` (engine
+extensions, not portable OpenAI fields). Prefer `--extra-body-json` when a
+gateway needs a different nesting. These controls are chat-only and are
+stamped into stage `config`. Do not use them as defaults for natural-EOS,
+tool-call, JSON-schema, or reasoning workloads.
+
+Stdout JSON includes additive publication fields (`schema_version`,
+`tool_version`, `environment`, `config`, `sut`) while retaining `points` for
+`metrum-ai-bench-cli compare`.
 
 For a Hugging Face prompt-library mix, extract JSONL with
 `metrum-ai-bench-cli-prompts`, then pass the file and the report's
@@ -52,6 +66,7 @@ metrum-ai-bench-cli-strategic \
   --model mock --streaming \
   --prompts /tmp/mix.jsonl \
   --max-tokens "$(jq .recommended_max_tokens /tmp/mix-report.json)" \
+  --ignore-eos \
   --warmup-requests 2 \
   --sweep 1,2,4,8 --requests-per-stage 32 \
   --html report.html --csv requests.csv
@@ -60,7 +75,8 @@ metrum-ai-bench-cli-strategic \
 `--prompts` requires `--max-tokens`. Without `--max-tokens` on a plain
 `--prompt` chat sweep, the CLI prints a warning: output length is uncontrolled
 and token throughput is not comparable across configs. Stage `config` stamps
-`max_tokens`, `prompts`, `prompt_pool_size`, and `warmup_requests`.
+`max_tokens`, `ignore_eos`, `min_tokens`, `prompts`, `prompt_pool_size`, and
+`warmup_requests`.
 
 The report plots achieved
 throughput against p95 latency and marks the unit-normalized Kneedle result.

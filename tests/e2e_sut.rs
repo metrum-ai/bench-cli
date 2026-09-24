@@ -97,7 +97,13 @@ fn sut_present_embedded_and_require_implies_redact() {
     let sut = tmp.path().join("sut.json");
     std::fs::write(
         &sut,
-        r#"{"name":"test-box","gpu":{"model":"L40S","count":1}}"#,
+        r#"{
+            "name":"test-box",
+            "gpu":{"model":"L40S","count":1},
+            "driver_version":"NVIDIA 580.xx",
+            "runtime":{"name":"vllm","version":"0.10.0","config":"vllm serve dummy --tensor-parallel-size 1"},
+            "host_os":"Ubuntu 22.04"
+        }"#,
     )
     .unwrap();
     let data_log = tmp.path().join("out.jsonl");
@@ -144,6 +150,43 @@ fn require_sut_without_file_sends_no_requests() {
     assert!(
         !data_log.exists() || std::fs::metadata(&data_log).map(|m| m.len()).unwrap_or(0) == 0,
         "no results should be written when --require-sut fails closed"
+    );
+}
+
+#[test]
+fn require_sut_rejects_incomplete_file() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let url = dummy.url("/v1/chat/completions");
+    let tmp = tempfile::tempdir().unwrap();
+    let prompts = write_prompts(tmp.path());
+    let sut = tmp.path().join("sut.json");
+    std::fs::write(&sut, r#"{}"#).unwrap();
+    let data_log = tmp.path().join("out.jsonl");
+    let mut args = base_args(
+        &url,
+        prompts.to_str().unwrap(),
+        data_log.to_str().unwrap(),
+        tmp.path().join("d.log").to_str().unwrap(),
+        tmp.path().join("e.log").to_str().unwrap(),
+    );
+    args.extend([
+        "--sut".into(),
+        sut.to_str().unwrap().into(),
+        "--require-sut".into(),
+    ]);
+    let output = Command::new(llm_bin()).args(&args).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("incomplete SUT") || stderr.contains("--require-sut"),
+        "stderr={stderr}"
+    );
+    assert!(
+        !data_log.exists() || std::fs::metadata(&data_log).map(|m| m.len()).unwrap_or(0) == 0,
+        "no results should be written when incomplete --require-sut fails closed"
     );
 }
 
