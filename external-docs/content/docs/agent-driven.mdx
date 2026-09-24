@@ -62,10 +62,11 @@ Use named `--profile` values unless the operator overrides targets in writing:
 | `summarize-long` | 4096 | 512 | long context |
 | `code-medium` | 1024 | 512 | coding turns |
 
-Pin revision `0666f62e581b482838ae2e17b333ee36ff3d01b0` in examples (replace when
-the Hub pin advances). Use `--config sample` for smoke; `--config full` for
-publishable compares. Record `profile.name` / `profile.version` from the mix
-report in SUT notes when publishing.
+Default Hub revision is `main` (latest). The mix report records the resolved
+commit SHA. For publishable compares, re-run with that SHA (or
+`--require-pinned-revision`) so the workload cannot drift. Use `--config sample`
+for smoke; `--config full` for publishable compares. Record `profile.name` /
+`profile.version` from the mix report in SUT notes when publishing.
 
 ## Why agents work well here
 
@@ -90,9 +91,10 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
   serving config for this exact model + engine (vLLM/SGLang/etc.). Do not reuse
   memorized launch flags. Record sources and chosen args in `sut.json` notes /
   `runtime.config`.
-- Default prompts: extract from Hugging Face `metrum-ai/prompt-library` with a
-  pinned `--revision`. Do not invent a handmade one-line prompt for shared
-  numbers.
+- Default prompts: extract from Hugging Face `metrum-ai/prompt-library`
+  (revision defaults to latest `main`; resolved SHA is in the mix report).
+  For publishable numbers, re-run with that SHA. Do not invent a handmade
+  one-line prompt for shared numbers.
 - After extract: set `--num-requests` to `report.selected_count` and
   `--max-tokens` to `report.recommended_max_tokens`. On modality `llm`,
   `--warmup-requests 0` preserves mix slots; for GPU cold-start prefer
@@ -137,8 +139,9 @@ Constraints:
 - API key: $BENCH_API_KEY as --api-key (do not print the secret).
 - Model id: <MODEL_ID>
 - Scenario label: hf-chat-512-128
-- Pin Hub revision 0666f62e581b482838ae2e17b333ee36ff3d01b0, --config sample,
-  --count 32 --seed 42
+- Hub revision: default latest `main` (resolved SHA in mix-report). For a
+  frozen publishable compare, pass that SHA with `--require-pinned-revision`.
+  `--config sample`, `--count 32 --seed 42`
 - Workload: --profile chat-medium
 - Write mix to bench-out/mix.jsonl and report to bench-out/mix-report.json
 - llm: --mode chat --streaming --concurrency 4 --seed 42
@@ -158,7 +161,7 @@ Shell skeleton:
 mkdir -p bench-out
 
 metrum-ai-bench-cli prompts -- \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --config sample \
   --count 32 --seed 42 \
   --profile chat-medium \
   --output bench-out/mix.jsonl --report bench-out/mix-report.json

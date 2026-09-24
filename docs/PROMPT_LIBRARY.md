@@ -20,14 +20,12 @@ is required to land both axes.
 | Repository | `metrum-ai/prompt-library` |
 | Configs | `sample` (smoke; default in docs) or `full` |
 | Split | `train` |
-| Pin | Pass a 40-character commit SHA via `--revision` (or `--allow-moving-revision` for floating refs) |
-
-Pinned revision used in README examples:
-`0666f62e581b482838ae2e17b333ee36ff3d01b0`.
+| Default revision | `main` (latest Hub commit; resolved SHA is written to `--report`) |
+| Pin (optional) | Pass a 40-character commit SHA via `--revision`, or `--require-pinned-revision` |
 
 Other Metrum AI prompt sets published on Hugging Face under the `metrum-ai`
-organization can be used the same way; record the dataset name, revision, and
-row count in the SUT block or run notes.
+organization can be used the same way; record the dataset name, **resolved**
+revision SHA from the mix report, and row count in the SUT block or run notes.
 
 ### Fields used for selection
 
@@ -69,21 +67,32 @@ with `--profile`. Zero CLI tolerances fall back to the profile defaults.
 
 ```bash
 metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample \
   --count 64 --seed 42 \
   --profile chat-medium \
   --output /tmp/mix.jsonl --report /tmp/mix-report.json
 ```
 
-The mix report includes `profile.name` and `profile.version` when a profile was
-used.
+The mix report includes the **resolved** Hub commit SHA under `revision`, plus
+`profile.name` and `profile.version` when a profile was used.
+
+To freeze a publishable compare, pass an explicit SHA (from a prior report or
+Hub) and optionally `--require-pinned-revision`:
+
+```bash
+metrum-ai-bench-cli-prompts \
+  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
+  --require-pinned-revision \
+  --config sample \
+  --count 64 --seed 42 \
+  --profile chat-medium \
+  --output /tmp/mix.jsonl --report /tmp/mix-report.json
+```
 
 ## CLI knobs
 
 ```bash
 metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 \
   --config sample \
   --count 64 --count-slack 64 --seed 42 \
   --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
@@ -93,6 +102,9 @@ metrum-ai-bench-cli-prompts \
 
 | Flag | Meaning |
 |------|---------|
+| `--revision` | Hub ref (default `main` = latest). Pass a 40-char SHA to pin |
+| `--require-pinned-revision` | Fail unless `--revision` is a 40-char SHA |
+| `--allow-moving-revision` | Deprecated no-op (floating refs always resolve) |
 | `--profile` | Named versioned ISL/OSL pair (see table above) |
 | `--count` | Preferred mix size (soft) |
 | `--count-slack` | Max \|actual − preferred\| (default `max(count, 32)`) |
@@ -112,7 +124,7 @@ closer to `--count` and with fewer repeats.
 - **JSONL** (`--output`): one object per selected slot, including intentional
   repeats. `prompt` already includes the word-count hint. Extra fields
   (`source_ordinal`, `target_output_tokens`, …) are ignored by llm today.
-- **Report** (`--report`): pinned revision, preferred vs `selected_count`,
+- **Report** (`--report`): resolved Hub revision SHA, preferred vs `selected_count`,
   achieved ISL/OSL and gaps, repeat histogram, `recommended_max_tokens`,
   `recommended_num_requests`, schedule SHA-256, optional `profile`.
 
@@ -130,7 +142,7 @@ Mean-target example (same dummy-server loop as the README median example):
 
 ```bash
 target/release/metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --config sample \
   --count 32 --seed 7 \
   --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \
   --osl-target 128 --osl-unit tokens --osl-stat mean --osl-tolerance 16 \

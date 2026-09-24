@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.5.0** ([CHANGELOG](CHANGELOG.md)).
+release: **1.5.1** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -238,9 +238,9 @@ cargo build --release --bin metrum-ai-bench-cli-prompts --bin metrum-ai-bench-cl
 (cd dummy-model-server && go run ./cmd/dummy-model-server \
   -port 18321 -latency 100ms -chunk-interval 20ms) &
 
-# Median targets (sample config; pin a commit SHA)
+# Median targets (sample config; default revision = latest Hub main)
 target/release/metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --config sample \
   --count 64 --seed 42 \
   --isl-target 512 --isl-unit tokens --isl-stat median --isl-tolerance 64 \
   --osl-target 128 --osl-unit tokens --osl-stat median --osl-tolerance 32 \
@@ -260,7 +260,7 @@ Mean-target extract (same llm/dummy pattern afterward):
 
 ```bash
 target/release/metrum-ai-bench-cli-prompts \
-  --revision 0666f62e581b482838ae2e17b333ee36ff3d01b0 --config sample \
+  --config sample \
   --count 32 --seed 7 \
   --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \
   --osl-target 128 --osl-unit tokens --osl-stat mean --osl-tolerance 16 \

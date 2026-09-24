@@ -39,9 +39,10 @@ struct Args {
 
     #[arg(
         long,
-        help = "Pinned dataset revision (40-char commit SHA unless --allow-moving-revision)"
+        default_value = "main",
+        help = "Dataset revision (default: main = latest). Pass a 40-char commit SHA to pin. Branch/tag names resolve to the current commit."
     )]
-    revision: Option<String>,
+    revision: String,
 
     #[arg(long, default_value = "sample", help = "Dataset config: sample|full")]
     config: String,
@@ -51,9 +52,15 @@ struct Args {
 
     #[arg(
         long,
-        help = "Allow floating revisions such as main (resolves to a commit)"
+        help = "Deprecated no-op: floating refs (including default main) always resolve. Kept for CLI compatibility."
     )]
     allow_moving_revision: bool,
+
+    #[arg(
+        long,
+        help = "Fail unless --revision is a 40-character commit SHA (publication pin)"
+    )]
+    require_pinned_revision: bool,
 
     #[arg(long, help = "Cache directory for Hub downloads")]
     cache_dir: Option<PathBuf>,
@@ -279,10 +286,19 @@ fn run(args: Args) -> anyhow::Result<()> {
             "local-parquet".to_string(),
         )
     } else {
-        let revision_arg = args.revision.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("--revision is required unless --local-jsonl/--local-parquet is set")
-        })?;
-        let sha = resolve_revision(&args.dataset, revision_arg, args.allow_moving_revision)?;
+        let revision_arg = args.revision.trim();
+        if args.require_pinned_revision {
+            let pinned = revision_arg.len() == 40
+                && revision_arg.bytes().all(|b| b.is_ascii_hexdigit());
+            if !pinned {
+                anyhow::bail!(
+                    "--require-pinned-revision needs a 40-character commit SHA; got `{revision_arg}`"
+                );
+            }
+        }
+        // Latest by default: floating refs (main/tags/branches) always resolve to a SHA.
+        let _ = args.allow_moving_revision; // deprecated; floating resolve is unconditional
+        let sha = resolve_revision(&args.dataset, revision_arg, true)?;
         let cache = args.cache_dir.unwrap_or_else(default_cache_dir);
         let spec = DatasetRef {
             repo: args.dataset.clone(),
