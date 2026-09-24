@@ -69,15 +69,32 @@ trap cleanup EXIT
 : "${SHADEFORM_API_KEY:?set SHADEFORM_API_KEY}"
 : "${HF_TOKEN:?set HF_TOKEN}"
 
-# SSH key: use default from account
-SSH_JSON="$(curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" https://api.shadeform.ai/v1/sshkeys)"
-SSH_KEY_ID="$(jq -r '.ssh_keys[] | select(.is_default==true) | .id' <<<"${SSH_JSON}" | head -1)"
-if [[ -z "${SSH_KEY_ID}" || "${SSH_KEY_ID}" == "null" ]]; then
-  SSH_KEY_ID="$(jq -r '.ssh_keys[0].id // empty' <<<"${SSH_JSON}")"
+# Fail fast if the API key cannot manage instances (types is public).
+INST_CODE="$(curl -sS -o /tmp/sf-instances.json -w '%{http_code}' \
+  -H "X-API-KEY: ${SHADEFORM_API_KEY}" -H "Accept: application/json" \
+  https://api.shadeform.ai/v1/instances || true)"
+if [[ "${INST_CODE}" != "200" ]]; then
+  log "Shadeform /v1/instances returned HTTP ${INST_CODE}; refresh SHADEFORM_API_KEY"
+  exit 1
 fi
-: "${SSH_KEY_ID:?no Shadeform SSH key on account}"
-export SHADEFORM_SSH_KEY_ID="${SSH_KEY_ID}"
-log "using ssh_key_id=${SSH_KEY_ID}"
+
+# SSH key: prefer SHADEFORM_SSH_KEY_ID, else account default, else omit (managed key).
+SSH_KEY_ID="${SHADEFORM_SSH_KEY_ID:-}"
+if [[ -z "${SSH_KEY_ID}" ]]; then
+  if SSH_JSON="$(curl -fsS -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
+    https://api.shadeform.ai/v1/sshkeys 2>/dev/null)"; then
+    SSH_KEY_ID="$(jq -r '.ssh_keys[] | select(.is_default==true) | .id' <<<"${SSH_JSON}" | head -1)"
+    if [[ -z "${SSH_KEY_ID}" || "${SSH_KEY_ID}" == "null" ]]; then
+      SSH_KEY_ID="$(jq -r '.ssh_keys[0].id // empty' <<<"${SSH_JSON}")"
+    fi
+  fi
+fi
+if [[ -n "${SSH_KEY_ID}" ]]; then
+  export SHADEFORM_SSH_KEY_ID="${SSH_KEY_ID}"
+  log "using ssh_key_id=${SSH_KEY_ID}"
+else
+  log "no ssh_key_id; create will use Shadeform managed key"
+fi
 
 # Prefer RTXPro6000 (confirmed available), then H200, then H100 single-GPU.
 pick_json=""
@@ -111,8 +128,9 @@ TYPE="$(jq -r '.shade_instance_type' <<<"${pick_json}")"
 NAME="metrum-telemetry-$(date -u +%Y%m%d-%H%M%S)"
 CREATE_PAYLOAD="$(jq -n \
   --arg cloud "${CLOUD}" --arg region "${REGION}" --arg type "${TYPE}" \
-  --arg name "${NAME}" --arg ssh "${SSH_KEY_ID}" \
-  '{cloud:$cloud, region:$region, shade_instance_type:$type, shade_cloud:true, name:$name, ssh_key_id:$ssh}')"
+  --arg name "${NAME}" --arg ssh "${SSH_KEY_ID:-}" \
+  '{cloud:$cloud, region:$region, shade_instance_type:$type, shade_cloud:true, name:$name}
+   | if $ssh == "" then . else . + {ssh_key_id:$ssh} end')"
 log "creating instance"
 CREATE_RESP="$(curl -fsS -X POST -H "X-API-KEY: ${SHADEFORM_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -241,16 +259,58 @@ remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
   --csv ${RESULTS_REMOTE}/requests-open.csv \
   > ${RESULTS_REMOTE}/stdout-open.json"
 
+# Interrupt: start a long sweep, SIGINT mid-run, expect partial summary.
+log "interrupt partial-summary check"
+remote "cd ${RESULTS_REMOTE} && ./bin/metrum-ai-bench-cli-strategic \
+  --url http://127.0.0.1:8000/v1/chat/completions \
+  --api-key dummy \
+  --model sut \
+  --streaming \
+  --prompts ${RESULTS_REMOTE}/prompts/mix.jsonl \
+  --max-tokens 512 \
+  --ignore-eos \
+  --warmup-requests 2 \
+  --requests-per-stage 64 \
+  --sweep 8,16,32 \
+  --sweep-by concurrency \
+  --sut ${RESULTS_REMOTE}/sut.json --require-sut \
+  --telemetry ${RESULTS_REMOTE}/telemetry.yaml \
+  --ndjson ${RESULTS_REMOTE}/run-interrupt.ndjson \
+  --html ${RESULTS_REMOTE}/report-interrupt.html \
+  --csv ${RESULTS_REMOTE}/requests-interrupt.csv \
+  > ${RESULTS_REMOTE}/stdout-interrupt.json &
+  echo \$! > ${RESULTS_REMOTE}/interrupt.pid
+  sleep 25
+  kill -INT \$(cat ${RESULTS_REMOTE}/interrupt.pid) || true
+  wait \$(cat ${RESULTS_REMOTE}/interrupt.pid) || true
+  python3 - <<'PY'
+import json
+path='${RESULTS_REMOTE}/run-interrupt.ndjson'
+partial=False
+kinds=set()
+with open(path) as f:
+  for line in f:
+    row=json.loads(line)
+    kinds.add(row.get('kind'))
+    if row.get('kind')=='summary':
+      partial=bool(row.get('partial'))
+assert 'telemetry' in kinds or 'request' in kinds, kinds
+assert partial, 'expected summary.partial=true after SIGINT'
+print('interrupt ok partial=true kinds=', sorted(kinds))
+PY"
+
 # Analyze locally after pull
 log "fetching artifacts"
 mkdir -p "${ART}/raw"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
   "${REMOTE}:${RESULTS_REMOTE}/run-closed.ndjson" \
   "${REMOTE}:${RESULTS_REMOTE}/run-open.ndjson" \
+  "${REMOTE}:${RESULTS_REMOTE}/run-interrupt.ndjson" \
   "${REMOTE}:${RESULTS_REMOTE}/report-closed.html" \
   "${REMOTE}:${RESULTS_REMOTE}/report-open.html" \
   "${REMOTE}:${RESULTS_REMOTE}/stdout-closed.json" \
   "${REMOTE}:${RESULTS_REMOTE}/stdout-open.json" \
+  "${REMOTE}:${RESULTS_REMOTE}/stdout-interrupt.json" \
   "${REMOTE}:${RESULTS_REMOTE}/sut.json" \
   "${REMOTE}:${RESULTS_REMOTE}/telemetry.yaml" \
   "${REMOTE}:${RESULTS_REMOTE}/prompts/mix-report.json" \
@@ -291,8 +351,9 @@ cat >"${ART}/VALIDATION.md" <<EOF
 - region: ${REGION}
 - cloud: ${CLOUD}
 - workload: Jarvis-style coding sweep (target ~16k ISL / 512 OSL, concurrency 1..64)
+- validation: closed sweep, open rate sweep, SIGINT partial summary
 - telemetry: all-smi (Metrum fork /metric), vllm, node, optional dcgm/cadvisor
-- artifacts: run-closed/open ndjson (compressed), HTML reports, sut.json, telemetry.yaml, stdout JSON
+- artifacts: run-closed/open/interrupt ndjson (compressed), HTML reports, sut.json, telemetry.yaml, stdout JSON
 
 See analyze-closed.txt / analyze-open.txt and README_BUNDLE.md for offline analysis.
 EOF

@@ -349,3 +349,307 @@ pub fn metric_type_label(m: MetricType) -> &'static str {
 pub fn default_require_failures() -> u32 {
     DEFAULT_REQUIRE_FAILURES
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telemetry::config::{
+        TelemetryConfig, TelemetrySource, UnitScale, DEFAULT_MAX_BODY_BYTES,
+        DEFAULT_REQUIRE_FAILURES,
+    };
+    use axum::body::Body;
+    use axum::http::{header, StatusCode};
+    use axum::response::Response;
+    use axum::routing::get;
+    use axum::Router;
+    use regex::RegexSet;
+    use std::collections::BTreeMap;
+    use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::Arc;
+    use tempfile::NamedTempFile;
+    use tokio::net::TcpListener;
+
+    const FIXTURE: &str = r#"
+# HELP DCGM_FI_DEV_POWER_USAGE Power draw
+# TYPE DCGM_FI_DEV_POWER_USAGE gauge
+DCGM_FI_DEV_POWER_USAGE{gpu="0"} 250.5
+# HELP DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION Energy
+# TYPE DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION counter
+DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
+"#;
+
+    async fn serve_metrics(
+        status: StatusCode,
+        body: &'static str,
+        hits: Option<Arc<AtomicUsize>>,
+    ) -> SocketAddr {
+        let app = Router::new().route(
+            "/metrics",
+            get(move || {
+                let hits = hits.clone();
+                async move {
+                    if let Some(h) = hits {
+                        h.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
+                    Response::builder()
+                        .status(status)
+                        .header(header::CONTENT_TYPE, "text/plain; version=0.0.4")
+                        .header(header::DATE, "Wed, 24 Sep 2026 14:00:00 GMT")
+                        .body(Body::from(body))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+        addr
+    }
+
+    fn compiled(url: &str, allow_empty: bool) -> CompiledSource {
+        let cfg = TelemetryConfig {
+            default_interval_ms: 200,
+            timeout_ms: 500,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            sources: vec![TelemetrySource {
+                name: "dcgm".into(),
+                url: url.into(),
+                interval_ms: Some(100),
+                include: vec!["^DCGM_FI_DEV_(POWER_USAGE|TOTAL_ENERGY_CONSUMPTION)$".into()],
+                units: BTreeMap::from([(
+                    "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION".into(),
+                    UnitScale {
+                        scale: 0.001,
+                        unit: "J".into(),
+                    },
+                )]),
+                bearer_env: None,
+                basic_auth_env: None,
+                insecure_tls: false,
+                allow_empty,
+            }],
+        };
+        cfg.compile().expect("compile")[0].clone()
+    }
+
+    #[tokio::test]
+    async fn probe_and_scrape_happy_path_writes_telemetry() {
+        let addr = serve_metrics(StatusCode::OK, FIXTURE, None).await;
+        let url = format!("http://{addr}/metrics");
+        let client = build_telemetry_client(false, true).expect("client");
+        let src = compiled(&url, false);
+        let cfg = TelemetryConfig {
+            default_interval_ms: 200,
+            timeout_ms: 500,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            sources: vec![],
+        };
+        let probes = probe_sources(&client, &cfg, std::slice::from_ref(&src))
+            .await
+            .expect("probe");
+        assert_eq!(probes.len(), 1);
+        assert!(probes[0].stamp.matched_series.unwrap_or(0) >= 2);
+
+        let file = NamedTempFile::new().expect("tmp");
+        let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
+        let stop = Arc::new(AtomicBool::new(false));
+        let epoch = Arc::new(RunEpoch::new());
+        let run_id = Arc::new("run-probe".to_string());
+        let handles = spawn_scrapers(
+            client,
+            cfg,
+            vec![src],
+            epoch,
+            run_id,
+            writer.clone(),
+            Arc::clone(&stop),
+            false,
+            3,
+        );
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        stop.store(true, Ordering::Relaxed);
+        for h in handles {
+            let _ = h.await;
+        }
+        drop(writer);
+        let stats = handle.shutdown().await.expect("shutdown");
+        assert!(stats.written_rows >= 1, "expected telemetry rows");
+        let text = std::fs::read_to_string(file.path()).expect("read");
+        assert!(text.contains("\"kind\":\"telemetry\""));
+        assert!(text.contains("DCGM_FI_DEV_POWER_USAGE"));
+    }
+
+    #[tokio::test]
+    async fn probe_rejects_zero_matches_unless_allow_empty() {
+        let addr = serve_metrics(StatusCode::OK, "# empty\n", None).await;
+        let url = format!("http://{addr}/metrics");
+        let client = build_telemetry_client(false, false).expect("client");
+        let src = compiled(&url, false);
+        let cfg = TelemetryConfig {
+            default_interval_ms: 200,
+            timeout_ms: 500,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            sources: vec![],
+        };
+        let err = probe_sources(&client, &cfg, &[src])
+            .await
+            .expect_err("zero matches");
+        assert!(err.to_string().contains("matched zero series"));
+
+        let src_ok = compiled(&url, true);
+        probe_sources(&client, &cfg, &[src_ok])
+            .await
+            .expect("allow_empty");
+    }
+
+    #[tokio::test]
+    async fn scrape_http_error_emits_scrape_error_and_can_abort() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let addr = serve_metrics(StatusCode::INTERNAL_SERVER_ERROR, "boom", Some(hits)).await;
+        let url = format!("http://{addr}/metrics");
+        let client = build_telemetry_client(false, false).expect("client");
+        let src = compiled(&url, true);
+        let cfg = TelemetryConfig {
+            default_interval_ms: 100,
+            timeout_ms: 200,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            sources: vec![],
+        };
+        let file = NamedTempFile::new().expect("tmp");
+        let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
+        let stop = Arc::new(AtomicBool::new(false));
+        let handles = spawn_scrapers(
+            client,
+            cfg,
+            vec![src],
+            Arc::new(RunEpoch::new()),
+            Arc::new("run-fail".into()),
+            writer.clone(),
+            Arc::clone(&stop),
+            true,
+            2,
+        );
+        let join = handles.into_iter().next().unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(3), join)
+            .await
+            .expect("join timeout")
+            .expect("task");
+        assert!(result.is_err(), "require-telemetry should abort");
+        assert!(stop.load(Ordering::Relaxed));
+        drop(writer);
+        let _ = handle.shutdown().await;
+        let text = std::fs::read_to_string(file.path()).expect("read");
+        assert!(text.contains("\"kind\":\"scrape_error\""));
+        assert!(text.contains("HTTP 500") || text.contains("\"http_status\":500"));
+    }
+
+    #[tokio::test]
+    async fn max_body_bytes_is_enforced() {
+        let addr = serve_metrics(StatusCode::OK, FIXTURE, None).await;
+        let url = format!("http://{addr}/metrics");
+        let client = build_telemetry_client(false, false).expect("client");
+        let mut src = compiled(&url, false);
+        let cfg = TelemetryConfig {
+            default_interval_ms: 200,
+            timeout_ms: 500,
+            max_body_bytes: 8,
+            sources: vec![],
+        };
+        let err = fetch_body(&client, &src, Duration::from_secs(1), cfg.max_body_bytes)
+            .await
+            .expect_err("oversized");
+        assert!(err.to_string().contains("max_body_bytes"));
+        src.allow_empty = true;
+        let _ = src;
+    }
+
+    #[test]
+    fn unit_scaling_and_guesses() {
+        let mut units = BTreeMap::new();
+        units.insert(
+            "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION".into(),
+            UnitScale {
+                scale: 0.001,
+                unit: "J".into(),
+            },
+        );
+        let src = CompiledSource {
+            name: "dcgm".into(),
+            url: "http://127.0.0.1/metrics".into(),
+            interval_ms: 250,
+            include: RegexSet::new(["^DCGM_"]).expect("re"),
+            units,
+            bearer_env: None,
+            basic_auth_env: None,
+            insecure_tls: false,
+            allow_empty: false,
+        };
+        let (v, u, raw) = apply_units(&src, "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION", 1000.0);
+        assert!((v - 1.0).abs() < 1e-9);
+        assert_eq!(u, "J");
+        assert_eq!(raw, Some(1000.0));
+        assert_eq!(guess_unit("DCGM_FI_DEV_POWER_USAGE"), "W");
+        assert_eq!(guess_unit("node_rapl_package_joules_total"), "J");
+        assert_eq!(guess_unit("gpu_temp_celsius"), "C");
+        assert_eq!(guess_unit("node_memory_MemAvailable_bytes"), "B");
+        assert_eq!(guess_unit("vllm:num_requests_running"), "1");
+        assert_eq!(
+            extract_http_status(&anyhow::anyhow!("HTTP 503 from x")),
+            Some(503)
+        );
+        assert_eq!(
+            extract_http_status(&anyhow::anyhow!("connection refused")),
+            None
+        );
+        assert_eq!(metric_type_label(MetricType::Gauge), "gauge");
+        assert_eq!(default_require_failures(), DEFAULT_REQUIRE_FAILURES);
+        let _ = new_last_seen();
+    }
+
+    #[tokio::test]
+    async fn bearer_env_missing_fails_fetch() {
+        let addr = serve_metrics(StatusCode::OK, FIXTURE, None).await;
+        let url = format!("http://{addr}/metrics");
+        let mut src = compiled(&url, false);
+        src.bearer_env = Some("METRUM_TEST_MISSING_BEARER_ENV_XYZ".into());
+        let client = build_telemetry_client(false, false).expect("client");
+        let err = fetch_body(
+            &client,
+            &src,
+            Duration::from_secs(1),
+            DEFAULT_MAX_BODY_BYTES,
+        )
+        .await
+        .expect_err("missing bearer");
+        assert!(err.to_string().contains("bearer_env"));
+    }
+
+    #[tokio::test]
+    async fn auth_headers_attach_bearer_and_basic() {
+        std::env::set_var("METRUM_TEST_BEARER_TOKEN", "tok123");
+        std::env::set_var("METRUM_TEST_BASIC_AUTH", "user:pass");
+        let mut src = compiled("http://127.0.0.1/metrics", true);
+        src.bearer_env = Some("METRUM_TEST_BEARER_TOKEN".into());
+        let headers = auth_headers(&src).expect("bearer");
+        assert!(headers
+            .get(AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("Bearer "));
+        src.bearer_env = None;
+        src.basic_auth_env = Some("METRUM_TEST_BASIC_AUTH".into());
+        let headers = auth_headers(&src).expect("basic");
+        assert!(headers
+            .get(AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("Basic "));
+        std::env::remove_var("METRUM_TEST_BEARER_TOKEN");
+        std::env::remove_var("METRUM_TEST_BASIC_AUTH");
+    }
+}
