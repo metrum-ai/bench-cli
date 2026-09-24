@@ -3,8 +3,8 @@
 #
 # Ephemeral self-hosted pool for metrum-ai/bench-cli (label: bench-cli).
 # Deploy on pikachu. Replaces bare-metal ~/github-runners-bench-cli for CI
-# cargo test. Do not put bench-cli-docs-deploy here: restore-docs inspects
-# host Docker volumes and runs sudo scripts under /home/ubuntu/src.
+# cargo test. Docs are not deployed from any runner: the docs web host
+# pulls the docs bundle from each GitHub Release (see docs/RELEASING.md).
 #
 # AppArmor is not required. apparmor:unconfined skips the host
 # docker-default profile so the pool starts on hosts without AA policy.
