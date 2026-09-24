@@ -248,9 +248,11 @@ jobs:
           test -f "${checksum}"
           test -f "${manifest}"
           (cd dist && sha256sum -c "metrum-ai-bench-cli-docs-${version}.tar.gz.sha256")
-          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/${version}/"
-          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/latest/"
-          tar -tzf "${archive}" | grep -q "metrum-ai-bench-cli/versions.json"
+          # Buffer the listing so grep -q cannot SIGPIPE tar under pipefail.
+          archive_listing="$(tar -tzf "${archive}")"
+          grep -Fq "metrum-ai-bench-cli/${version}/" <<<"${archive_listing}"
+          grep -Fq "metrum-ai-bench-cli/latest/" <<<"${archive_listing}"
+          grep -Fq "metrum-ai-bench-cli/versions.json" <<<"${archive_listing}"
           python3 -c "import json,sys; json.load(open(sys.argv[1]))" "${manifest}"
           ls -l dist/
 
