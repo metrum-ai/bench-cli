@@ -185,9 +185,10 @@ fn llm_closed_loop_window_matches_record_span() {
     assert!(!run_id.is_empty(), "run_id must be non-empty");
     assert_eq!(config["common"]["seed"], 7);
     assert_eq!(config["common"]["warmup_requests"], 0);
-    assert_eq!(
-        config["effective_system_prompt"],
-        "You are a helpful assistant."
+    assert!(
+        config["effective_system_prompt"].is_null(),
+        "default chat body omits system prompt: {}",
+        config["effective_system_prompt"]
     );
     let body = &config["body_template"];
     let body_str = body.to_string();
@@ -198,6 +199,10 @@ fn llm_closed_loop_window_matches_record_span() {
     assert!(
         !body_str.contains("\"Hi\""),
         "body_template must not embed the raw prompt"
+    );
+    assert!(
+        !body_str.contains("helpful assistant"),
+        "default body must omit system prompt: {body_str}"
     );
     assert!(summary["completion_tokens_per_second"].as_f64().is_some());
     assert_eq!(summary["completion_tokens_source"], "server_usage");

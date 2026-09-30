@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.5.1** ([CHANGELOG](CHANGELOG.md)).
+release: **1.5.2** ([CHANGELOG](CHANGELOG.md)).
 
 Metrum AI Bench CLI measures one environment and produces a result with a
 manifest. Metrum AI Bench Platform (commercial) remembers, compares, governs,
@@ -65,6 +65,11 @@ is longer and still healthy. See the expected-band table in
 `--require-sut` refuses to run without that block and is what makes the number
 publishable; see [Publishing a result](#publishing-a-result). If you are about
 to test a thinking model, read [Reasoning models](#reasoning-models) first.
+
+For a real GPU server (vLLM / SGLang), prefer the vendor container images
+documented under
+[Platforms](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/platforms/)
+instead of installing those stacks with `pip` on the host.
 
 ## Install
 
