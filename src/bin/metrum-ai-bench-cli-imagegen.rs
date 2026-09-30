@@ -737,6 +737,10 @@ fn validate_args(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
     if parse_size(&args.size).is_none() {
         return Err(anyhow::anyhow!("--size must be formatted as WxH").into());
     }
+    metrum_ai_bench::measurement::ensure_warmup_leaves_measurement(
+        u64::from(args.warmup_requests),
+        u64::from(args.num_requests),
+    )?;
     Ok(())
 }
 

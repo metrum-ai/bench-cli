@@ -30,6 +30,9 @@ pub struct IslOslValidation {
     pub osl_tolerance: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<&'static str>,
+    /// Token-count basis: `server_usage` or `tokenizer`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length_basis: Option<&'static str>,
     pub isl_mean: Option<f64>,
     pub isl_p50: Option<f64>,
     pub osl_mean: Option<f64>,
@@ -125,24 +128,22 @@ fn load_mix_report(path: &Path) -> anyhow::Result<MixReportTargets> {
     })
 }
 
-fn measured_isl(record: &RequestRecord) -> Option<f64> {
-    if let Some(tokens) = record.tokenized_prompt_tokens {
-        return Some(tokens as f64);
+fn measured_isl(record: &RequestRecord) -> Option<(f64, &'static str)> {
+    if !record.usage_missing {
+        return Some((record.prompt_tokens as f64, "server_usage"));
     }
-    if record.usage_missing {
-        return None;
-    }
-    Some(record.prompt_tokens as f64)
+    record
+        .tokenized_prompt_tokens
+        .map(|tokens| (tokens as f64, "tokenizer"))
 }
 
-fn measured_osl(record: &RequestRecord) -> Option<f64> {
-    if let Some(tokens) = record.tokenized_completion_tokens {
-        return Some(tokens as f64);
+fn measured_osl(record: &RequestRecord) -> Option<(f64, &'static str)> {
+    if !record.usage_missing {
+        return Some((record.completion_tokens as f64, "server_usage"));
     }
-    if record.usage_missing {
-        return None;
-    }
-    Some(record.completion_tokens as f64)
+    record
+        .tokenized_completion_tokens
+        .map(|tokens| (tokens as f64, "tokenizer"))
 }
 
 fn outside_tolerance(value: f64, target: f64, tolerance: f64) -> bool {
@@ -161,21 +162,36 @@ pub fn validate_records(
         .iter()
         .filter(|r| r.phase == Phase::Measure && r.is_success())
         .collect();
+    let isl_pairs: Vec<(f64, &'static str)> =
+        successes.iter().filter_map(|r| measured_isl(r)).collect();
+    let osl_pairs: Vec<(f64, &'static str)> =
+        successes.iter().filter_map(|r| measured_osl(r)).collect();
+    let length_basis = isl_pairs
+        .iter()
+        .chain(osl_pairs.iter())
+        .map(|(_, basis)| *basis)
+        .find(|basis| *basis == "tokenizer")
+        .or_else(|| {
+            isl_pairs
+                .first()
+                .or(osl_pairs.first())
+                .map(|(_, basis)| *basis)
+        });
     summarize_pairs(
         targets,
-        &successes
-            .iter()
-            .filter_map(|r| measured_isl(r))
-            .collect::<Vec<_>>(),
-        &successes
-            .iter()
-            .filter_map(|r| measured_osl(r))
-            .collect::<Vec<_>>(),
+        &isl_pairs.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
+        &osl_pairs.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
         successes.len(),
         &successes
             .iter()
-            .map(|r| (measured_isl(r), measured_osl(r)))
+            .map(|r| {
+                (
+                    measured_isl(r).map(|(v, _)| v),
+                    measured_osl(r).map(|(v, _)| v),
+                )
+            })
             .collect::<Vec<_>>(),
+        length_basis,
     )
 }
 
@@ -193,7 +209,14 @@ pub fn validate_token_counts(
         .iter()
         .map(|(i, o)| (Some(*i as f64), Some(*o as f64)))
         .collect();
-    summarize_pairs(targets, &isl, &osl, rows.len(), &pairs)
+    summarize_pairs(
+        targets,
+        &isl,
+        &osl,
+        rows.len(),
+        &pairs,
+        Some("server_usage"),
+    )
 }
 
 fn summarize_pairs(
@@ -202,6 +225,7 @@ fn summarize_pairs(
     osl_vals: &[f64],
     compared: usize,
     pairs: &[(Option<f64>, Option<f64>)],
+    length_basis: Option<&'static str>,
 ) -> Option<IslOslValidation> {
     let isl_dist = DistSummary::from_values(isl_vals);
     let osl_dist = DistSummary::from_values(osl_vals);
@@ -225,6 +249,7 @@ fn summarize_pairs(
         isl_tolerance: targets.isl_tolerance,
         osl_tolerance: targets.osl_tolerance,
         source: targets.source,
+        length_basis,
         isl_mean: isl_dist.avg,
         isl_p50: isl_dist.p50,
         osl_mean: osl_dist.avg,
@@ -309,6 +334,41 @@ mod tests {
     }
 
     #[test]
+    fn prefers_server_usage_over_tokenizer() {
+        let targets = IslOslTargets {
+            isl_target: Some(100.0),
+            osl_target: Some(50.0),
+            isl_tolerance: 0.0,
+            osl_tolerance: 0.0,
+            source: Some("cli"),
+        };
+        let mut record = ok(120, 55);
+        record.tokenized_prompt_tokens = Some(97);
+        record.tokenized_completion_tokens = Some(40);
+        let v = validate_records(&[record], &targets).expect("active");
+        assert_eq!(v.length_basis, Some("server_usage"));
+        assert!((v.isl_mean.unwrap() - 120.0).abs() < 1e-12);
+        assert!((v.osl_mean.unwrap() - 55.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tokenizer_fills_when_usage_missing() {
+        let targets = IslOslTargets {
+            isl_target: Some(100.0),
+            osl_target: None,
+            isl_tolerance: 5.0,
+            osl_tolerance: 0.0,
+            source: Some("cli"),
+        };
+        let mut record = ok(0, 0);
+        record.usage_missing = true;
+        record.tokenized_prompt_tokens = Some(97);
+        let v = validate_records(&[record], &targets).expect("active");
+        assert_eq!(v.length_basis, Some("tokenizer"));
+        assert!((v.isl_mean.unwrap() - 97.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn fail_gate_errors_on_mismatch() {
         let v = IslOslValidation {
             isl_target: None,
@@ -316,6 +376,7 @@ mod tests {
             isl_tolerance: 0.0,
             osl_tolerance: 0.0,
             source: Some("cli"),
+            length_basis: Some("server_usage"),
             isl_mean: None,
             isl_p50: None,
             osl_mean: Some(20.0),

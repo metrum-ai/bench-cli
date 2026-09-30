@@ -292,15 +292,26 @@ async fn check_streaming_first_token(
         };
     }
     match chat_stream::consume(response.bytes_stream(), started).await {
-        Ok(result) => {
-            let ttft_ms = result.ttft.as_secs_f64() * 1000.0;
-            PreflightCheck {
-                name: "streaming_first_token".into(),
-                status: CheckStatus::Pass,
-                detail: format!("first visible token in {ttft_ms:.0} ms"),
-                remediation: None,
+        Ok(result) => match result.ttft {
+            Some(ttft) => {
+                let ttft_ms = ttft.as_secs_f64() * 1000.0;
+                PreflightCheck {
+                    name: "streaming_first_token".into(),
+                    status: CheckStatus::Pass,
+                    detail: format!("first visible token in {ttft_ms:.0} ms"),
+                    remediation: None,
+                }
             }
-        }
+            None => PreflightCheck {
+                name: "streaming_first_token".into(),
+                status: CheckStatus::Fail,
+                detail: "stream finished without a visible output token".into(),
+                remediation: Some(format!(
+                    "Streaming may be broken or gateways may synthesize SSE; check engine flags. {}",
+                    remediation_docker()
+                )),
+            },
+        },
         Err(err) => PreflightCheck {
             name: "streaming_first_token".into(),
             status: CheckStatus::Fail,
