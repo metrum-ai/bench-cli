@@ -162,14 +162,10 @@ pub fn validate_records(
         .iter()
         .filter(|r| r.phase == Phase::Measure && r.is_success())
         .collect();
-    let isl_pairs: Vec<(f64, &'static str)> = successes
-        .iter()
-        .filter_map(|r| measured_isl(r))
-        .collect();
-    let osl_pairs: Vec<(f64, &'static str)> = successes
-        .iter()
-        .filter_map(|r| measured_osl(r))
-        .collect();
+    let isl_pairs: Vec<(f64, &'static str)> =
+        successes.iter().filter_map(|r| measured_isl(r)).collect();
+    let osl_pairs: Vec<(f64, &'static str)> =
+        successes.iter().filter_map(|r| measured_osl(r)).collect();
     let length_basis = isl_pairs
         .iter()
         .chain(osl_pairs.iter())
@@ -213,7 +209,14 @@ pub fn validate_token_counts(
         .iter()
         .map(|(i, o)| (Some(*i as f64), Some(*o as f64)))
         .collect();
-    summarize_pairs(targets, &isl, &osl, rows.len(), &pairs, Some("server_usage"))
+    summarize_pairs(
+        targets,
+        &isl,
+        &osl,
+        rows.len(),
+        &pairs,
+        Some("server_usage"),
+    )
 }
 
 fn summarize_pairs(

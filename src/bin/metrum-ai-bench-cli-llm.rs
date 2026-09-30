@@ -977,9 +977,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let isl_osl = metrum_ai_bench::isl_osl::validate_records(&records, &isl_osl_targets);
     let measure_successes: Vec<_> = records
         .iter()
-        .filter(|r| {
-            r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success()
-        })
+        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success())
         .collect();
     let missing_ttft = measure_successes
         .iter()

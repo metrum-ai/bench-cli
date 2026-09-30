@@ -1114,10 +1114,8 @@ async fn main() -> Result<()> {
         if let Some(ref v) = isl_osl {
             any_osl_validation = Some(v.clone());
         }
-        let measured_successes: Vec<_> = records
-            .iter()
-            .filter(|r| !r.warmup && r.success)
-            .collect();
+        let measured_successes: Vec<_> =
+            records.iter().filter(|r| !r.warmup && r.success).collect();
         let missing_ttft = measured_successes
             .iter()
             .filter(|r| r.ttft_s.is_none())
