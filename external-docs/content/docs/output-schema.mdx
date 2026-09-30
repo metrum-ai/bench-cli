@@ -66,12 +66,16 @@ Additional v3 fields:
 | `config.run_id` | UUID generated once per run |
 | `config.effective_max_concurrency` | Outstanding-request cap in force |
 | `config.common` | Effective `CommonBenchArgs` JSON object. Real field names include `seed`, `warmup_requests`, `request_rate`, `arrival`, `max_concurrency`, `slos`, `tokenizer`, and related keys - not prose shorthand. Secrets are never stamped. |
-| `config.effective_system_prompt` | System string actually sent (omitted/`null` when N/A) |
+| `config.effective_system_prompt` | System string actually sent (omitted/`null` when N/A). LLM defaults to none. |
 | `config.body_template` | Sanitized request skeleton with a `{{prompt}}` placeholder |
 | `config.unique_prompt_nonce_template` | Present when `--unique-prompts` is on |
 | `usage_missing_count` | Measure-phase successes with `usage_missing` |
 | `completion_tokens_per_second` | `null` when usage is missing without tokenizer fallback |
 | `completion_tokens_source` | `"server_usage"` or `"tokenizer_fallback"` when the rate is present |
+| `ttft_approx_count` | Measured successes with TTFT from HTTP time-to-first-byte (`--infer-ttft-from-first-byte`) |
+| `ttft_warning` | Optional note when TTFT was approximated or left unmeasured |
+| Per-request `ttft_source` | `"stream"` or `"first_byte_approx"` when `ttft_s` is present |
+| `isl_osl.length_basis` | `"server_usage"` or `"tokenizer"` for published ISL/OSL means |
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 `p99_unreliable` (unreliable when `n * (1 - p/100) < 1`).

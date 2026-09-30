@@ -66,6 +66,11 @@ is longer and still healthy. See the expected-band table in
 publishable; see [Publishing a result](#publishing-a-result). If you are about
 to test a thinking model, read [Reasoning models](#reasoning-models) first.
 
+For a real GPU server (vLLM / SGLang), prefer the vendor container images
+documented under
+[Platforms](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/platforms/)
+instead of installing those stacks with `pip` on the host.
+
 ## Install
 
 **GitHub Releases** (preferred for binaries): download the tarball for your

@@ -111,6 +111,9 @@ pub struct RequestRow {
     pub service_latency_s: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
+    /// Provenance for `ttft_s` when present (`stream` or `first_byte_approx`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Last-seen included metric values at request completion (sugar, not truth).

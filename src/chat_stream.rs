@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub struct ChatStreamResult {
     pub latency: Duration,
-    pub ttft: Duration,
+    /// First visible output token time. `None` when the stream finished without
+    /// visible content (reasoning-only or empty completion).
+    pub ttft: Option<Duration>,
     pub first_reasoning: Option<Duration>,
     pub itl: Vec<Duration>,
     pub prompt_tokens: u64,
@@ -93,14 +95,20 @@ impl Consumer {
         Ok(())
     }
 
-    fn finish(self, latency: Duration) -> Result<ChatStreamResult, RequestError> {
+    fn finish(
+        self,
+        latency: Duration,
+        allow_missing_ttft: bool,
+    ) -> Result<ChatStreamResult, RequestError> {
         if !self.done && !self.saw_finish {
             return Err(RequestError::StreamTruncated);
         }
-        let ttft = self.first_token_time.ok_or(RequestError::NoOutputToken)?;
+        if self.first_token_time.is_none() && !allow_missing_ttft {
+            return Err(RequestError::NoOutputToken);
+        }
         Ok(ChatStreamResult {
             latency,
-            ttft,
+            ttft: self.first_token_time,
             first_reasoning: self.first_reasoning_time,
             itl: self.itl,
             prompt_tokens: self.prompt_tokens,
@@ -119,6 +127,20 @@ where
     S: Stream<Item = Result<B, reqwest::Error>>,
     B: AsRef<[u8]>,
 {
+    consume_with_options(stream, started, false).await
+}
+
+/// Like [`consume`], but keep a finished stream that never emitted a visible
+/// token when `allow_missing_ttft` is true (for `--infer-ttft-from-first-byte`).
+pub async fn consume_with_options<S, B>(
+    stream: S,
+    started: Instant,
+    allow_missing_ttft: bool,
+) -> Result<ChatStreamResult, RequestError>
+where
+    S: Stream<Item = Result<B, reqwest::Error>>,
+    B: AsRef<[u8]>,
+{
     futures_util::pin_mut!(stream);
     let mut consumer = Consumer::default();
     while let Some(item) = stream.next().await {
@@ -128,7 +150,7 @@ where
             break;
         }
     }
-    consumer.finish(started.elapsed())
+    consumer.finish(started.elapsed(), allow_missing_ttft)
 }
 
 #[cfg(test)]
@@ -173,7 +195,7 @@ mod tests {
         .expect("content");
         assert_eq!(
             consumer
-                .finish(Duration::from_millis(20))
+                .finish(Duration::from_millis(20), false)
                 .expect_err("truncated"),
             RequestError::StreamTruncated
         );
@@ -197,10 +219,24 @@ mod tests {
                 .expect("terminal");
             assert_eq!(
                 consumer
-                    .finish(Duration::from_millis(20))
+                    .finish(Duration::from_millis(20), false)
                     .expect_err("no output"),
                 RequestError::NoOutputToken
             );
+            let mut allowed = Consumer::default();
+            event(
+                &mut allowed,
+                json!({"choices":[{"delta":{"reasoning_content":"think"}}]}),
+                10,
+            )
+            .expect("reasoning");
+            allowed
+                .feed(terminal.as_bytes(), Duration::from_millis(20))
+                .expect("terminal");
+            let result = allowed
+                .finish(Duration::from_millis(20), true)
+                .expect("allowed missing ttft");
+            assert!(result.ttft.is_none());
         }
     }
 
@@ -218,10 +254,10 @@ mod tests {
         }
         event(&mut consumer, json!({"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}), 80).expect("finish");
         let result = consumer
-            .finish(Duration::from_millis(90))
+            .finish(Duration::from_millis(90), false)
             .expect("complete without DONE");
         assert_eq!(result.first_reasoning, Some(Duration::from_millis(10)));
-        assert_eq!(result.ttft, Duration::from_millis(30));
+        assert_eq!(result.ttft, Some(Duration::from_millis(30)));
         assert_eq!(result.itl, vec![Duration::from_millis(30)]);
         assert_eq!(result.completion_text, "hello world");
         assert_eq!(

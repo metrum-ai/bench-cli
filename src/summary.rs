@@ -74,9 +74,19 @@ pub struct RunSummary {
     /// Runtime ISL/OSL vs optional targets; omitted when no targets configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isl_osl: Option<IslOslValidation>,
+    /// Count of measured successes whose TTFT came from HTTP time-to-first-byte.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub ttft_approx_count: usize,
+    /// Human-readable note when TTFT was approximated or left unmeasured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_warning: Option<String>,
     pub partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<EffectiveRunConfig>,
+}
+
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Default)]
@@ -318,6 +328,8 @@ impl RunSummary {
             cost_per_million_output_tokens: None,
             observed_concurrency: None,
             isl_osl: None,
+            ttft_approx_count: 0,
+            ttft_warning: None,
             partial,
             config: None,
         }
@@ -344,6 +356,13 @@ impl RunSummary {
     /// Attach runtime ISL/OSL validation block.
     pub fn with_isl_osl(mut self, isl_osl: Option<IslOslValidation>) -> Self {
         self.isl_osl = isl_osl;
+        self
+    }
+
+    /// Stamp TTFT approximation count and optional warning text.
+    pub fn with_ttft_audit(mut self, approx_count: usize, warning: Option<String>) -> Self {
+        self.ttft_approx_count = approx_count;
+        self.ttft_warning = warning;
         self
     }
 
@@ -452,6 +471,15 @@ pub fn print_run_summary(summary: &RunSummary) {
         &summary.coordinated_omission_latency_s,
     );
     print_dist("TTFT", &summary.ttft_s);
+    if summary.ttft_approx_count > 0 {
+        println!(
+            "  TTFT approximated from first-byte: {}",
+            summary.ttft_approx_count
+        );
+    }
+    if let Some(warning) = &summary.ttft_warning {
+        println!("  TTFT warning: {warning}");
+    }
     print_dist("TPOT", &summary.tpot_s);
     print_dist("ITL", &summary.itl_s);
     if summary.connect_s.n > 0 {

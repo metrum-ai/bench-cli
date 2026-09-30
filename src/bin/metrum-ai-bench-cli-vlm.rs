@@ -142,6 +142,13 @@ struct Args {
     )]
     streaming: bool,
 
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
+    )]
+    infer_ttft_from_first_byte: bool,
+
     #[arg(long, help = "Maximum number of tokens")]
     max_tokens: u32,
 
@@ -226,6 +233,7 @@ async fn make_request(
     api_key: &str,
     images: &[ImageData],
     streaming: bool,
+    allow_missing_ttft: bool,
 ) -> Result<
     (
         Duration,
@@ -285,12 +293,16 @@ async fn make_request(
         .collect();
 
     if streaming {
-        let stream =
-            metrum_ai_bench::chat_stream::consume(response.bytes_stream(), start_time).await?;
+        let stream = metrum_ai_bench::chat_stream::consume_with_options(
+            response.bytes_stream(),
+            start_time,
+            allow_missing_ttft,
+        )
+        .await?;
         return Ok((
             stream.latency,
             first_byte,
-            Some(stream.ttft),
+            stream.ttft,
             stream.prompt_tokens,
             stream.completion_tokens,
             stream.total_tokens,
@@ -658,6 +670,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-vlm", args.common.quiet);
+
+    metrum_ai_bench::measurement::ensure_warmup_leaves_measurement(
+        u64::from(args.common.warmup_requests),
+        u64::from(args.num_requests),
+    )?;
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
 
@@ -1123,6 +1140,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
         let request_timeout = args.request_timeout;
         let streaming = args.streaming;
+        let infer_ttft = args.infer_ttft_from_first_byte;
         let selected_images_clone = selected_images.clone();
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
         let seq = slot.seq;
@@ -1155,6 +1173,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &api_key,
                 &selected_images_clone,
                 streaming,
+                infer_ttft,
             )
             .await;
             drop(permit);
@@ -1188,6 +1207,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let tokenized_completion_tokens =
                         tokenizer.count(&completion_text).ok().flatten();
                     let usage_missing = completion_tokens == 0 && !completion_text.is_empty();
+                    let resolved = metrum_ai_bench::measurement::resolve_ttft(
+                        streaming,
+                        ttft.map(|d| d.as_secs_f64()),
+                        Some(first_byte.as_secs_f64()),
+                        infer_ttft,
+                    );
                     let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         seq,
                         phase,
@@ -1195,7 +1220,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         response_time,
-                        ttft,
+                        None,
                         first_reasoning,
                         itl,
                         prompt_tokens,
@@ -1203,6 +1228,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         total_tokens,
                     )
                     .with_first_byte(first_byte)
+                    .with_resolved_ttft(resolved)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
@@ -1491,10 +1517,48 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.common.price_per_hour,
         sut_block.as_ref(),
     );
+    let measure_successes: Vec<_> = records
+        .iter()
+        .filter(|r| {
+            r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success()
+        })
+        .collect();
+    let missing_ttft = measure_successes
+        .iter()
+        .filter(|r| r.ttft_s.is_none())
+        .count();
+    let approx_count = measure_successes
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.ttft_source,
+                Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
+            )
+        })
+        .count();
+    let no_output_token_errors = records
+        .iter()
+        .filter(|r| {
+            r.phase == metrum_ai_bench::record::Phase::Measure
+                && matches!(
+                    r.error,
+                    Some(metrum_ai_bench::error::RequestError::NoOutputToken)
+                )
+        })
+        .count();
+    let ttft_audit = metrum_ai_bench::measurement::audit_chat_ttft(
+        args.streaming,
+        args.infer_ttft_from_first_byte,
+        measure_successes.len(),
+        missing_ttft,
+        approx_count,
+        no_output_token_errors,
+    )?;
     shared_summary = shared_summary
         .with_sut(sut_block)
         .with_price(price)
-        .with_observed_concurrency(Some(inflight_tracker.snapshot()));
+        .with_observed_concurrency(Some(inflight_tracker.snapshot()))
+        .with_ttft_audit(ttft_audit.approx_count, ttft_audit.warning);
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }

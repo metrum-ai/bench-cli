@@ -69,7 +69,7 @@ pub struct CommonBenchArgs {
 
     #[arg(
         long,
-        help = "Override the default system prompt (empty string disables it)"
+        help = "Optional system prompt for chat (omit for none; empty string also disables)"
     )]
     pub system_prompt: Option<String>,
 

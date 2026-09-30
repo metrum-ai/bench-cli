@@ -90,6 +90,9 @@ pub struct RequestRecord {
     pub connect_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
+    /// Provenance for `ttft_s`: `stream` or `first_byte_approx`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_source: Option<crate::measurement::TtftSource>,
     /// Prefill proxy: `ttft_s - connect_s` when both exist, otherwise `ttft_s`.
     /// Still includes server queueing that lands before the first visible token.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,6 +164,7 @@ impl RequestRecord {
             decode_s: None,
             decode_tok_s: None,
             ttft_s: ttft.map(|d| d.as_secs_f64()),
+            ttft_source: ttft.map(|_| crate::measurement::TtftSource::Stream),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
             itl_s: itl.iter().map(|d| d.as_secs_f64()).collect(),
             in_flight_at_send: None,
@@ -205,6 +209,7 @@ impl RequestRecord {
             decode_s: None,
             decode_tok_s: None,
             ttft_s: None,
+            ttft_source: None,
             first_reasoning_s: None,
             itl_s: Vec::new(),
             in_flight_at_send: None,
@@ -234,6 +239,13 @@ impl RequestRecord {
     pub fn with_first_byte(mut self, first_byte: Duration) -> Self {
         self.first_byte_s = Some(first_byte.as_secs_f64());
         self
+    }
+
+    /// Apply streamed or approximated TTFT and refresh phase proxies.
+    pub fn with_resolved_ttft(mut self, resolved: crate::measurement::ResolvedTtft) -> Self {
+        self.ttft_s = resolved.ttft_s;
+        self.ttft_source = resolved.source;
+        self.with_phase_metrics()
     }
 
     pub fn with_connect(mut self, connect_s: f64) -> Self {
