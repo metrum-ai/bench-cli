@@ -715,3 +715,83 @@ fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
         "stderr:\n{stderr}"
     );
 }
+
+#[test]
+fn llm_rejects_warmup_that_consumes_all_requests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let prompts = tmp.path().join("prompts.jsonl");
+    std::fs::write(&prompts, r#"{"prompt":"Hi"}"#).unwrap();
+    let data_log = tmp.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--url",
+            "http://127.0.0.1:9/v1/chat/completions",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "empty-warmup",
+            "--num-requests",
+            "4",
+            "--warmup-requests",
+            "4",
+            "--concurrency",
+            "1",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "8",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("d.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("e.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ])
+        .output()
+        .expect("run llm");
+    assert!(
+        !out.status.success(),
+        "warmup >= num_requests must fail before requests"
+    );
+    assert!(
+        !data_log.exists(),
+        "must not write a data log when the empty-run gate fires"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("warmup_requests (4)") && text.contains("num_requests (4)"),
+        "error must name both counts:\n{text}"
+    );
+}
+
+#[test]
+fn strategic_rejects_zero_requests_per_stage() {
+    let out = Command::new(metrum_ai_bench_strategic_bin())
+        .args([
+            "--url",
+            "http://127.0.0.1:9/v1/chat/completions",
+            "--api-key",
+            "dummy",
+            "--model",
+            "dummy",
+            "--requests-per-stage",
+            "0",
+            "--sweep",
+            "1",
+        ])
+        .output()
+        .expect("run strategic");
+    assert!(!out.status.success());
+    let text = combined_output(&out);
+    assert!(
+        text.contains("requests_per_stage") || text.contains("range"),
+        "must reject zero measured requests:\n{text}"
+    );
+}

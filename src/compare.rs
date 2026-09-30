@@ -470,6 +470,7 @@ mod tests {
                 first_byte_s: Some(0.01),
                 connect_s: Some(0.0),
                 ttft_s: Some(0.02),
+                ttft_source: None,
                 prefill_s: Some(0.02),
                 decode_s: Some(0.08),
                 decode_tok_s: Some(200.0),

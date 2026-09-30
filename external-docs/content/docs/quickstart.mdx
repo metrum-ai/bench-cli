@@ -217,7 +217,20 @@ design.
 
 ---
 
-## 5. Read the result
+## 5. Point a real GPU server at vendor images
+
+The dummy loop above does not need a GPU. When you measure vLLM or SGLang on a
+GPU host, bring the server up with the vendor container images documented in
+[Platforms](./platforms). Installing those stacks with `pip` on a stock cloud
+image commonly fails on JIT kernel compilation (FlashInfer and friends) and can
+look like a Bench defect when the serve path is wrong.
+
+Run the CLI on the same host (loopback URL) so WAN RTT does not land in TTFT.
+Use `metrum-ai-bench-cli preflight` before a long sweep.
+
+---
+
+## 6. Read the result
 
 Every completed request is flushed incrementally to JSONL. Warmup records remain
 auditable but are excluded from measured distributions. A graceful Ctrl-C stops

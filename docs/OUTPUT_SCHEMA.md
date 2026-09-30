@@ -74,7 +74,8 @@ Additional v3 fields:
     `ca_cert` path) plus optional `scenario` (the modality `--scenario` label).
     Secrets are never stamped.
   - `effective_system_prompt` - system string actually sent (omitted/`null` when
-    N/A or disabled); VLM currently records its hardcoded image-capable default
+    N/A or disabled). LLM chat defaults to no system message; VLM still uses its
+    image-capable default unless overridden.
   - `body_template` - sanitized request skeleton with a `{{prompt}}` placeholder
     (no secrets, no raw images/audio)
   - `unique_prompt_nonce_template` - present when `--unique-prompts` is on:
@@ -84,6 +85,12 @@ Additional v3 fields:
   `usage_missing` without a tokenizer count to fill the gap; otherwise a rate
 - `completion_tokens_source` - `"server_usage"` or `"tokenizer_fallback"` when
   the rate is present
+- `ttft_approx_count` - measured successes whose TTFT came from HTTP
+  time-to-first-byte via `--infer-ttft-from-first-byte` (omitted when zero)
+- `ttft_warning` - optional human-readable note when TTFT was approximated or
+  left unmeasured without `--streaming`
+- Per-request `ttft_source` - `"stream"` or `"first_byte_approx"` when `ttft_s`
+  is present
 - `price_per_hour` / `price_provenance` - declared `$/hour` from
   `--price-per-hour` (`"cli"`) or `sut.cost.price_per_hour` (`"sut"`); both
   `null` when absent. CLI overrides SUT.
@@ -97,7 +104,8 @@ Additional v3 fields:
   distributions over measured successes (empty `n=0` when absent)
 - `isl_osl` - optional runtime ISL/OSL validation vs `--isl-target` /
   `--osl-target` or `--prompt-mix-report`: targets, tolerances, measured
-  mean/p50, and mismatch counts
+  mean/p50, mismatch counts, and `length_basis` (`server_usage` or
+  `tokenizer`)
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 `p99_unreliable` using `percentile_unreliable(n, p)` (unreliable when

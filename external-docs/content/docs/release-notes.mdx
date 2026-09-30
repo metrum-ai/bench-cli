@@ -17,6 +17,26 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.5.2
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.5.2 |
+| **Previous version** | 1.5.1 |
+| **Release Date** | September 30, 2026 |
+
+- Reject empty measurements when warmup consumes the whole run, or strategic
+  `requests_per_stage` is zero.
+- Streaming chat fails without visible-token TTFT unless
+  `--infer-ttft-from-first-byte` opts into a first-byte approximation
+  (`ttft_source` stamped on outputs).
+- LLM default system prompt removed; published ISL/OSL prefer server `usage`
+  (`isl_osl.length_basis`).
+- Quickstart points real GPU servers at vendor Docker images.
+
+---
+
 ## Metrum AI Bench CLI 1.5.1
 
 | | |

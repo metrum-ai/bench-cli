@@ -497,6 +497,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         eprintln!("  --scenario, --num-requests, --input, --model");
         return Err("Missing required arguments".into());
     }
+    metrum_ai_bench::measurement::ensure_warmup_leaves_measurement(
+        u64::from(args.common.warmup_requests),
+        u64::from(args.num_requests.unwrap()),
+    )?;
     // Endpoint source: exactly one of (--url + --api-key) or --endpoints-file
     let resolved_endpoints = resolve_endpoints(
         args.url.as_deref(),

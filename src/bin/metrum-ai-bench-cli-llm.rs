@@ -92,6 +92,13 @@ struct Args {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
+    )]
+    infer_ttft_from_first_byte: bool,
+
+    #[arg(
+        long,
         default_value = "warn",
         help = "Log level: error, warn, info, debug, trace"
     )]
@@ -160,7 +167,7 @@ struct Args {
 struct StreamMetrics {
     latency: Duration,
     first_byte: Duration,
-    /// `None` for non-streaming responses (TTFT is undefined; do not fabricate).
+    /// `None` when no visible-token TTFT was observed.
     ttft: Option<Duration>,
     first_reasoning: Option<Duration>,
     itl: Vec<Duration>,
@@ -181,6 +188,7 @@ async fn make_request(
     streaming: bool,
     request_timeout: u64,
     api_key: &str,
+    allow_missing_ttft: bool,
 ) -> Result<StreamMetrics, Box<dyn Error + Send + Sync>> {
     let start_time = Instant::now();
 
@@ -257,15 +265,19 @@ async fn make_request(
             return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
         }
 
-        let stream =
-            metrum_ai_bench::chat_stream::consume(response.bytes_stream(), start_time).await?;
+        let stream = metrum_ai_bench::chat_stream::consume_with_options(
+            response.bytes_stream(),
+            start_time,
+            allow_missing_ttft,
+        )
+        .await?;
         let completion_text = stream.completion_text;
         trace!("Request completed successfully");
         let completion_word_count = count_words(&completion_text);
         Ok(StreamMetrics {
             latency: stream.latency,
             first_byte,
-            ttft: Some(stream.ttft),
+            ttft: stream.ttft,
             first_reasoning: stream.first_reasoning,
             itl: stream.itl,
             prompt_tokens: stream.prompt_tokens,
@@ -393,12 +405,13 @@ fn build_request_body(
     extra_body_json: Option<&str>,
     system_prompt: Option<&str>,
 ) -> Result<Value, Box<dyn Error + Send + Sync>> {
-    let system = system_prompt.unwrap_or("You are a helpful assistant.");
     let mut base_payload = match mode {
         MetrumAiBenchLLMMode::Chat => {
             let mut messages = Vec::new();
-            if !system.is_empty() {
-                messages.push(json!({"role": "system", "content": system}));
+            if let Some(system) = system_prompt {
+                if !system.is_empty() {
+                    messages.push(json!({"role": "system", "content": system}));
+                }
             }
             messages.push(json!({"role": "user", "content": prompt}));
             json!({
@@ -452,6 +465,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-llm", args.common.quiet);
+
+    metrum_ai_bench::measurement::ensure_warmup_leaves_measurement(
+        u64::from(args.common.warmup_requests),
+        u64::from(args.num_requests),
+    )?;
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
 
@@ -674,6 +692,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let request_timeout = args.request_timeout;
         let mode = args.mode;
         let streaming = args.streaming;
+        let infer_ttft = args.infer_ttft_from_first_byte;
         let seq = slot.seq;
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
@@ -697,6 +716,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     streaming,
                     request_timeout,
                     &api_key,
+                    infer_ttft,
                 ),
             )
             .await;
@@ -721,6 +741,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let tokenized_completion_tokens =
                         tokenizer.count(&sm.completion_text).ok().flatten();
                     let usage_missing = sm.completion_tokens == 0 && !sm.completion_text.is_empty();
+                    let resolved = metrum_ai_bench::measurement::resolve_ttft(
+                        streaming,
+                        sm.ttft.map(|d| d.as_secs_f64()),
+                        Some(sm.first_byte.as_secs_f64()),
+                        infer_ttft,
+                    );
                     let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         seq,
                         phase,
@@ -728,7 +754,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         sm.latency,
-                        sm.ttft,
+                        None,
                         sm.first_reasoning,
                         sm.itl,
                         sm.prompt_tokens,
@@ -736,6 +762,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         sm.total_tokens,
                     )
                     .with_first_byte(sm.first_byte)
+                    .with_resolved_ttft(resolved)
                     .with_connect(connect_s)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
@@ -914,7 +941,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
     let effective_system_prompt = args
         .common
-        .effective_system_prompt("You are a helpful assistant.");
+        .system_prompt
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .cloned();
     let mut run_summary = metrum_ai_bench::summary::RunSummary::from_records_with_options(
         &records,
         window_seconds,
@@ -945,11 +975,54 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let isl_osl_targets = args.common.resolve_isl_osl_targets()?;
     let isl_osl = metrum_ai_bench::isl_osl::validate_records(&records, &isl_osl_targets);
+    let measure_successes: Vec<_> = records
+        .iter()
+        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success())
+        .collect();
+    let missing_ttft = measure_successes
+        .iter()
+        .filter(|r| r.ttft_s.is_none())
+        .count();
+    let approx_count = measure_successes
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.ttft_source,
+                Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
+            )
+        })
+        .count();
+    let no_output_token_errors = records
+        .iter()
+        .filter(|r| {
+            r.phase == metrum_ai_bench::record::Phase::Measure
+                && matches!(
+                    r.error,
+                    Some(metrum_ai_bench::error::RequestError::NoOutputToken)
+                )
+        })
+        .count();
+    let ttft_audit = if matches!(args.mode, MetrumAiBenchLLMMode::Chat) {
+        metrum_ai_bench::measurement::audit_chat_ttft(
+            args.streaming,
+            args.infer_ttft_from_first_byte,
+            measure_successes.len(),
+            missing_ttft,
+            approx_count,
+            no_output_token_errors,
+        )?
+    } else {
+        metrum_ai_bench::measurement::TtftAudit {
+            approx_count: 0,
+            warning: None,
+        }
+    };
     run_summary = run_summary
         .with_sut(sut_block)
         .with_price(price)
         .with_observed_concurrency(Some(inflight_tracker.snapshot()))
-        .with_isl_osl(isl_osl.clone());
+        .with_isl_osl(isl_osl.clone())
+        .with_ttft_audit(ttft_audit.approx_count, ttft_audit.warning);
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
@@ -1178,5 +1251,47 @@ mod tests {
 
         assert_eq!(stream_choice_output_text(&choice), None);
         assert!(!stream_choice_has_output_token(&choice));
+    }
+
+    #[test]
+    fn default_chat_body_omits_system_prompt() {
+        let body = super::build_request_body(
+            super::MetrumAiBenchLLMMode::Chat,
+            "dummy",
+            16,
+            0.1,
+            "hello",
+            false,
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect("body");
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "hello");
+    }
+
+    #[test]
+    fn explicit_system_prompt_is_sent() {
+        let body = super::build_request_body(
+            super::MetrumAiBenchLLMMode::Chat,
+            "dummy",
+            16,
+            0.1,
+            "hello",
+            false,
+            false,
+            None,
+            None,
+            Some("be terse"),
+        )
+        .expect("body");
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "be terse");
     }
 }
