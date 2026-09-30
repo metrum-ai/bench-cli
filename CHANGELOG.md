@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.5.2 (2026-09-30)
+
 ### Fixed
 - Reject empty measurements before any request: modality binaries fail when
   `warmup_requests >= num_requests`; strategic fails when
