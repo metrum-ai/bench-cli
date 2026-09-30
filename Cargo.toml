@@ -99,7 +99,7 @@ regex = { version = "1.13.1", features = ["std"] }
 bytes = "1.12.1"
 
 [dev-dependencies]
-criterion = { version = "0.7.0", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [[bench]]
 name = "telemetry_parser"
