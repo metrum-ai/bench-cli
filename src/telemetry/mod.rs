@@ -69,6 +69,7 @@ mod tests {
                 queue_delay_s: 0.0,
                 service_latency_s: 0.003,
                 ttft_s: Some(0.001),
+                ttft_source: Some("stream".into()),
                 error: None,
                 telemetry_at_done: None,
             }))

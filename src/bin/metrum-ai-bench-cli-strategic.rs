@@ -54,6 +54,12 @@ struct Args {
         help = "Stream chat responses to measure TTFT; embeddings and rerank remain JSON"
     )]
     streaming: bool,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
+    )]
+    infer_ttft_from_first_byte: bool,
     #[arg(long, default_value_t = 100)]
     requests_per_stage: u64,
     #[arg(long, default_value = "1,2,4,8")]
@@ -563,6 +569,7 @@ fn spawn_one_request(
     let validator = validator.cloned();
     let kind = args.kind;
     let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
+    let infer_ttft = args.infer_ttft_from_first_byte;
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
     tokio::spawn(async move {
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
@@ -600,7 +607,7 @@ fn spawn_one_request(
         let connect_s = connect_slot.take();
         let mut first_byte_s = None;
         let mut t_first_ns = None;
-        let mut ttft_s = None;
+        let mut stream_ttft_s = None;
         let mut itl_s = Vec::new();
         let result: Result<Value> = async {
             let response = result?;
@@ -608,9 +615,13 @@ fn spawn_one_request(
             t_first_ns.replace(run_epoch.elapsed_ns());
             let response = response.error_for_status()?;
             if streaming {
-                let stream =
-                    metrum_ai_bench::chat_stream::consume(response.bytes_stream(), sent).await?;
-                ttft_s = Some(stream.ttft.as_secs_f64());
+                let stream = metrum_ai_bench::chat_stream::consume_with_options(
+                    response.bytes_stream(),
+                    sent,
+                    infer_ttft,
+                )
+                .await?;
+                stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());
                 itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
                 Ok(json!({
                     "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
@@ -638,6 +649,12 @@ fn spawn_one_request(
         };
         drop(permit);
         drop(inflight_guard);
+        let resolved = metrum_ai_bench::measurement::resolve_ttft(
+            streaming,
+            stream_ttft_s,
+            first_byte_s,
+            infer_ttft,
+        );
         let record = BenchRecord {
             seq: sequence,
             stage,
@@ -649,7 +666,8 @@ fn spawn_one_request(
             service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
             first_byte_s,
             connect_s: Some(connect_s),
-            ttft_s,
+            ttft_s: resolved.ttft_s,
+            ttft_source: resolved.source,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -684,6 +702,7 @@ fn spawn_one_request(
                         queue_delay_s: record.queue_delay_s,
                         service_latency_s: record.service_latency_s,
                         ttft_s: record.ttft_s,
+                        ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
                         error,
                         telemetry_at_done: None,
                     },
@@ -872,6 +891,7 @@ async fn main() -> Result<()> {
         .clone()
         .ok_or_else(|| anyhow::anyhow!("--model is required"))?;
     metrum_ai_bench::sut::warn_remote_benchmark_url(&url);
+    metrum_ai_bench::measurement::ensure_requests_per_stage(args.requests_per_stage)?;
     let (sut_block, _redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
         args.sut.as_deref(),
         args.require_sut,
@@ -1094,7 +1114,47 @@ async fn main() -> Result<()> {
         if let Some(ref v) = isl_osl {
             any_osl_validation = Some(v.clone());
         }
-        points.push(summarize_stage_with_options(
+        let measured_successes: Vec<_> =
+            records.iter().filter(|r| !r.warmup && r.success).collect();
+        let missing_ttft = measured_successes
+            .iter()
+            .filter(|r| r.ttft_s.is_none())
+            .count();
+        let approx_count = measured_successes
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.ttft_source,
+                    Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
+                )
+            })
+            .count();
+        let no_output_token_errors = records
+            .iter()
+            .filter(|r| {
+                !r.warmup
+                    && r.error
+                        .as_deref()
+                        .is_some_and(|msg| msg.contains("no output token"))
+            })
+            .count();
+        let chat_kind = matches!(args.kind, EndpointKind::Chat);
+        let ttft_audit = if chat_kind {
+            metrum_ai_bench::measurement::audit_chat_ttft(
+                args.streaming,
+                args.infer_ttft_from_first_byte,
+                measured_successes.len(),
+                missing_ttft,
+                approx_count,
+                no_output_token_errors,
+            )?
+        } else {
+            metrum_ai_bench::measurement::TtftAudit {
+                approx_count: 0,
+                warning: None,
+            }
+        };
+        let mut point = summarize_stage_with_options(
             stage,
             &records,
             seconds,
@@ -1103,7 +1163,10 @@ async fn main() -> Result<()> {
             price_per_hour,
             Some(observed),
             isl_osl,
-        ));
+        );
+        point.ttft_approx_count = ttft_audit.approx_count;
+        point.ttft_warning = ttft_audit.warning;
+        points.push(point);
         all_records.extend(records);
     }
     stop_scrapers.store(true, Ordering::Relaxed);
@@ -1345,5 +1408,28 @@ mod tests {
         assert!(parse_sweep("1,0").is_err());
         assert!(parse_sweep("2,1").is_err());
         assert!(parse_sweep("x").is_err());
+    }
+
+    #[test]
+    fn chat_body_default_is_user_only() {
+        let body = chat_body(ChatBodyOpts {
+            model: "dummy",
+            prompt: "hello",
+            streaming: false,
+            max_tokens: Some(16),
+            ignore_eos: false,
+            min_tokens: None,
+            extra_body: None,
+            shared_prefix: None,
+            prefix_control: PrefixControl::None,
+            session_key: "s0",
+            schema: None,
+            tools: None,
+        })
+        .expect("body");
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "hello");
     }
 }

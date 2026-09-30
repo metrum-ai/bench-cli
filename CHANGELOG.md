@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed
+- Reject empty measurements before any request: modality binaries fail when
+  `warmup_requests >= num_requests`; strategic fails when
+  `requests_per_stage == 0`.
+- Streaming chat runs that produce no visible-token TTFT now fail unless
+  `--infer-ttft-from-first-byte` is set. That opt-in copies HTTP
+  time-to-first-byte into `ttft_s`, stamps `ttft_source=first_byte_approx`,
+  and prints a stderr warning with the approximated request count. Non-streaming
+  chat warns that TTFT is unmeasured.
+- LLM chat no longer injects a default system prompt. Omitted `--system-prompt`
+  matches strategic's user-only body so both binaries publish comparable
+  server `usage.prompt_tokens`.
+- Runtime ISL/OSL validation prefers server usage token counts; tokenizer
+  lengths apply only when `usage_missing` is set. `isl_osl.length_basis`
+  records `server_usage` or `tokenizer`.
+
+### Added
+- `--infer-ttft-from-first-byte` on LLM, VLM, and strategic chat.
+- `ttft_s` distribution, `ttft_approx_count`, and `ttft_warning` on strategic
+  sweep points; per-request `ttft_source` on request JSONL / strategic CSV /
+  NDJSON.
+- Quickstart points real GPU servers at vendor Docker images (F27).
+
 ## 1.5.1 (2026-09-24)
 
 ### Changed

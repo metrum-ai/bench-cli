@@ -35,6 +35,9 @@ pub struct BenchRecord {
     /// Send-to-first-visible-output timing; absent for unary responses.
     #[serde(default)]
     pub ttft_s: Option<f64>,
+    /// Provenance for `ttft_s`: `stream` or `first_byte_approx`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_source: Option<crate::measurement::TtftSource>,
     /// Prefill proxy (`ttft - connect` or `ttft`).
     #[serde(default)]
     pub prefill_s: Option<f64>,
@@ -173,11 +176,24 @@ pub struct SweepPoint {
     pub prefill_s: crate::stats::DistSummary,
     pub decode_s: crate::stats::DistSummary,
     pub decode_tok_s: crate::stats::DistSummary,
+    /// Type-7 TTFT distribution over measured successes with a recorded TTFT.
+    #[serde(default)]
+    pub ttft_s: crate::stats::DistSummary,
+    /// Count of measured successes whose TTFT came from HTTP time-to-first-byte.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub ttft_approx_count: usize,
+    /// Human-readable note when TTFT was approximated or left unmeasured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_warning: Option<String>,
     /// Runtime ISL/OSL vs optional targets for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isl_osl: Option<crate::isl_osl::IslOslValidation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
+}
+
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 
 fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) -> bool {
@@ -315,6 +331,19 @@ pub fn summarize_stage_with_options(
         .iter()
         .filter_map(|record| record.decode_tok_s)
         .collect();
+    let ttft: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.ttft_s)
+        .collect();
+    let ttft_approx_count = success_rows
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.ttft_source,
+                Some(crate::measurement::TtftSource::FirstByteApprox)
+            )
+        })
+        .count();
     let mut thresholds: std::collections::BTreeMap<String, f64> = [
         ("ttft", slos.ttft_s),
         ("tpot", slos.tpot_s),
@@ -356,6 +385,9 @@ pub fn summarize_stage_with_options(
         prefill_s: crate::stats::DistSummary::from_values(&prefill),
         decode_s: crate::stats::DistSummary::from_values(&decode),
         decode_tok_s: crate::stats::DistSummary::from_values(&decode_tok),
+        ttft_s: crate::stats::DistSummary::from_values(&ttft),
+        ttft_approx_count,
+        ttft_warning: None,
         isl_osl,
         config,
     }
@@ -1035,6 +1067,9 @@ mod tests {
                     prefill_s: crate::stats::DistSummary::from_values(&[]),
                     decode_s: crate::stats::DistSummary::from_values(&[]),
                     decode_tok_s: crate::stats::DistSummary::from_values(&[]),
+                    ttft_s: crate::stats::DistSummary::from_values(&[]),
+                    ttft_approx_count: 0,
+                    ttft_warning: None,
                     isl_osl: None,
                     config: None,
                 }
@@ -1071,6 +1106,9 @@ mod tests {
             prefill_s: crate::stats::DistSummary::from_values(&[]),
             decode_s: crate::stats::DistSummary::from_values(&[]),
             decode_tok_s: crate::stats::DistSummary::from_values(&[]),
+            ttft_s: crate::stats::DistSummary::from_values(&[]),
+            ttft_approx_count: 0,
+            ttft_warning: None,
             isl_osl: None,
             config: None,
         }];
@@ -1167,6 +1205,7 @@ mod tests {
             first_byte_s: None,
             connect_s: None,
             ttft_s: None,
+            ttft_source: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -1212,6 +1251,7 @@ mod tests {
             first_byte_s: None,
             connect_s: None,
             ttft_s: None,
+            ttft_source: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -1281,6 +1321,7 @@ mod tests {
             first_byte_s: None,
             connect_s: None,
             ttft_s: Some(0.2),
+            ttft_source: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -1343,6 +1384,7 @@ mod tests {
             first_byte_s: None,
             connect_s: None,
             ttft_s: None,
+            ttft_source: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -1419,6 +1461,7 @@ mod tests {
             first_byte_s: None,
             connect_s: None,
             ttft_s: None,
+            ttft_source: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,

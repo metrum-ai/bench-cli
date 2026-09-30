@@ -55,6 +55,8 @@ Options:
           Mode of operation: 'chat' or 'completion' [possible values: chat, completion]
       --streaming
           Enable streaming mode
+      --infer-ttft-from-first-byte
+          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
       --log-level <LOG_LEVEL>
           Log level: error, warn, info, debug, trace [default: warn]
       --model <MODEL>
@@ -80,7 +82,7 @@ Options:
       --extra-body-json <EXTRA_BODY_JSON>
           Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
-          Override the default system prompt (empty string disables it)
+          Optional system prompt for chat (omit for none; empty string also disables)
       --unique-prompts
           Prefix each prompt with a unique nonce to avoid prefix-cache hits
       --tokenizer <TOKENIZER>
@@ -192,7 +194,7 @@ Options:
       --extra-body-json <EXTRA_BODY_JSON>
           Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
       --system-prompt <SYSTEM_PROMPT>
-          Override the default system prompt (empty string disables it)
+          Optional system prompt for chat (omit for none; empty string also disables)
       --unique-prompts
           Prefix each prompt with a unique nonce to avoid prefix-cache hits
       --tokenizer <TOKENIZER>
@@ -231,6 +233,8 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
       --streaming
           Enable streaming mode for measured TTFT/ITL
+      --infer-ttft-from-first-byte
+          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -348,7 +352,7 @@ Options:
           Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
-          Override the default system prompt (empty string disables it)
+          Optional system prompt for chat (omit for none; empty string also disables)
 
       --unique-prompts
           Prefix each prompt with a unique nonce to avoid prefix-cache hits
@@ -762,6 +766,8 @@ Options:
           [default: chat] [possible values: chat, embeddings, rerank]
       --streaming
           Stream chat responses to measure TTFT; embeddings and rerank remain JSON
+      --infer-ttft-from-first-byte
+          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
       --requests-per-stage <REQUESTS_PER_STAGE>
           [default: 100]
       --sweep <SWEEP>

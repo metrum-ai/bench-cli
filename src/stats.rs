@@ -107,6 +107,12 @@ impl DistSummary {
     }
 }
 
+impl Default for DistSummary {
+    fn default() -> Self {
+        Self::from_values(&[])
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ConfidenceInterval {
     pub level: f64,
