@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=scripts/live/lib/hub_prompts.sh
 source "${SCRIPT_DIR}/lib/hub_prompts.sh"
+# shellcheck source=scripts/live/lib/bench_bin.sh
+source "${SCRIPT_DIR}/lib/bench_bin.sh"
 API_BASE="${SHADEFORM_API_BASE:-https://api.shadeform.ai/v1}"
 ENV_JSON="${ENV_JSON:-${REPO_ROOT}/env.json}"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/live-results}"
@@ -57,7 +59,7 @@ create options:
   --execute              Actually POST /instances/create (default: dry-run)
 
 Environment:
-  SHADEFORM_API_KEY      Preferred; else read from env.json via jq
+  SHADEFORM_API_KEY      Optional; if set and differs from env.json, env.json wins
   ENV_JSON               Path to env.json (default: <repo>/env.json)
   RESULTS_DIR            Output dir for run-* (default: <repo>/live-results)
 
@@ -75,12 +77,24 @@ require_cmd() {
 }
 
 load_api_key() {
-  if [[ -n "${SHADEFORM_API_KEY:-}" ]]; then
+  require_cmd jq
+  local from_env="${SHADEFORM_API_KEY:-}"
+  local from_file=""
+  if [[ -f "${ENV_JSON}" ]]; then
+    from_file="$(jq -r '.SHADEFORM_API_KEY // empty' "${ENV_JSON}")"
+  fi
+  if [[ -n "${from_env}" && -n "${from_file}" && "${from_env}" != "${from_file}" ]]; then
+    # Prefer env.json when both are set and disagree (env often holds a stale export).
+    echo "warning: SHADEFORM_API_KEY in the environment differs from ${ENV_JSON}; using ${ENV_JSON}" >&2
+    SHADEFORM_API_KEY="${from_file}"
     return 0
   fi
-  require_cmd jq
+  if [[ -n "${from_env}" ]]; then
+    SHADEFORM_API_KEY="${from_env}"
+    return 0
+  fi
   [[ -f "${ENV_JSON}" ]] || die "SHADEFORM_API_KEY unset and ${ENV_JSON} missing"
-  SHADEFORM_API_KEY="$(jq -r '.SHADEFORM_API_KEY // empty' "${ENV_JSON}")"
+  SHADEFORM_API_KEY="${from_file}"
   [[ -n "${SHADEFORM_API_KEY}" && "${SHADEFORM_API_KEY}" != "null" ]] \
     || die "SHADEFORM_API_KEY not found in ${ENV_JSON}"
 }
@@ -379,21 +393,8 @@ cmd_delete() {
 }
 
 resolve_bench_bin() {
-  local want="$1" # metrum-ai-bench-cli-llm | metrum-ai-bench-cli-vlm
-  if command -v "${want}" >/dev/null 2>&1; then
-    echo "${want}"
-    return 0
-  fi
-  local candidate
-  for candidate in \
-    "${REPO_ROOT}/target/release/${want}" \
-    "${REPO_ROOT}/target/debug/${want}"; do
-    if [[ -x "${candidate}" ]]; then
-      echo "${candidate}"
-      return 0
-    fi
-  done
-  die "binary not found: ${want}; build the crate first"
+  # Prebuilt binaries only (scripts/live/lib/bench_bin.sh); never compiles.
+  bench_bin_resolve "${REPO_ROOT}" "$1" || die "binary not found: $1"
 }
 
 cmd_run_llm() {

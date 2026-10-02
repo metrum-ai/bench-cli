@@ -33,6 +33,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=scripts/live/lib/hub_prompts.sh
 source "${SCRIPT_DIR}/lib/hub_prompts.sh"
+# shellcheck source=scripts/live/lib/bench_bin.sh
+source "${SCRIPT_DIR}/lib/bench_bin.sh"
 
 die() { echo "error: $*" >&2; exit 1; }
 usage() { sed -n '5,28p' "$0" >&2; exit 2; }
@@ -69,13 +71,8 @@ mkdir -p "${out}"
 cp "${sut}" "${out}/sut.json"
 
 resolve_bin() {
-  local want="$1" c
-  for c in ${BENCH_BIN_DIR:+"${BENCH_BIN_DIR}/${want}"} \
-           "${REPO_ROOT}/target/release/${want}" "${REPO_ROOT}/target/debug/${want}"; do
-    [[ -x "${c}" ]] && { echo "${c}"; return 0; }
-  done
-  command -v "${want}" 2>/dev/null && return 0
-  die "binary not found: ${want} (cargo build --release, or set BENCH_BIN_DIR)"
+  # Prebuilt binaries only (scripts/live/lib/bench_bin.sh); never compiles.
+  bench_bin_resolve "${REPO_ROOT}" "$1" || die "binary not found: $1"
 }
 
 deadline=$((SECONDS + ${READY_TIMEOUT_S:-600}))
@@ -128,6 +125,11 @@ case "${modality}" in
     ;;
 esac
 [[ "${modality}" == imagegen ]] || cmd+=(--seed "${seed}")
+# Record which binary ran (path, --version, checkout) in the SUT, so a tip
+# build that still prints the last release version is not taken for it.
+ident="$(bench_bin_identity "${cmd[0]}" "${REPO_ROOT}")"
+jq --arg id "${ident}" '.notes = ((.notes // "") + (if (.notes // "") == "" then "" else "; " end) + "bench binary: " + $id)
+  | .extra = ((.extra // {}) + {bench_binary: $id})' "${out}/sut.json" >"${out}/sut.tmp" && mv "${out}/sut.tmp" "${out}/sut.json"
 cmd+=("${common[@]}")
 
 printf '%q ' "${cmd[@]}" >"${out}/command.txt"; echo >>"${out}/command.txt"

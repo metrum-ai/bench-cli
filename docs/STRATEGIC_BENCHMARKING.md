@@ -3,6 +3,13 @@
 
 # Strategic benchmarking
 
+**Search first.** Before a sweep against a real server, web-search the
+current vendor docs for the model and engine version. Check the launch
+arguments (max sequences, context length, memory), the sampling and thinking
+parameters, and the concurrency range the engine supports, then pick
+`--sweep` and the request counts from that. Record sources in the SUT. The
+engine map is in [SERVING.md](SERVING.md).
+
 For agent-bench, start from the streaming LLM/chat path so TTFT measures visible
 output as it arrives. The unary strategic path cannot measure TTFT. Strategic
 chat turns opt in with `--streaming`, including `--sessions`; their per-turn CSV
@@ -148,7 +155,7 @@ For durable hardware and engine time series during a sweep, pass `--ndjson`
 with `--telemetry` (YAML Prometheus sources) or legacy `--metrics-url`. Optional
 `--require-telemetry` aborts after consecutive scrape failures. The default
 smoke source is the Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
-fork at `http://127.0.0.1:9090/metric`. Scope, units, join model, and recipes:
+fork at `http://127.0.0.1:9090/metrics`. Scope, units, join model, and recipes:
 [TELEMETRY.md](TELEMETRY.md). Analysis formulas: [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
 
 ## OpenTelemetry

@@ -55,7 +55,7 @@ default_interval_ms: 1000
 timeout_ms: 500
 sources:
   - name: all-smi
-    url: http://{address}/metric
+    url: http://{address}/metrics
     interval_ms: 100
     include:
       - "^all_smi_(gpu|cpu|memory)_"

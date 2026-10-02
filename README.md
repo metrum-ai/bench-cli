@@ -27,6 +27,59 @@ median within CLI tolerances, then feed the resulting JSONL to
 ships only tiny fixtures ([test-data/README.md](test-data/README.md)). VLM, ASR,
 and image-generation still use those local fixtures; they are not on the Hub.
 
+## Before you benchmark (agents and operators)
+
+Read this before any run against a real model server. It applies equally to
+human engineers and to AI coding agents driving the CLI.
+
+1. **This CLI is a client.** It does not serve models. Choose a compatible
+   serving stack and start it yourself. [docs/SERVING.md](docs/SERVING.md)
+   maps each modality to its framework, launcher, and upstream docs:
+   - LLM and VLM: regular vLLM
+   - ASR: vLLM-Omni is intended; regular vLLM speech-to-text until
+     vllm-omni#5722 lands
+   - ImageGen: vLLM-Omni
+2. **Search first, every time.** Before a real-backend run, web-search the
+   current vendor documentation for the exact model, engine, and engine
+   version, and check:
+   - that the workload is compatible with that model and endpoint
+   - the serving framework and image tag
+   - the model card's recommended settings
+   - the engine launch arguments
+   - the request parameters (thinking toggles, diffusion steps, audio limits)
+   - a reasonable concurrency and ISL/OSL sweep
+
+   Do not reuse memorized flags or an older run's command line. Record the
+   choices and their source URLs in the SUT `runtime.config` and `notes`.
+3. **Link out; do not copy.** Upstream recipes change. This repository keeps
+   only version pins we tested, our CLI flags, SUT fields, and pitfalls
+   unique to this client.
+4. **Prompts.** For LLM runs, extract a mix from Hugging Face
+   [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
+   with `metrum-ai-bench-cli-prompts`. When nothing else is specified, use
+   its defaults (config `sample`, profile `chat-short`) rather than a
+   handmade prompt. See [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md).
+   VLM, ASR, and ImageGen use the fixtures in `test-data/`.
+5. **Use prebuilt binaries** unless a from-source build is wanted. Check, in
+   order:
+   1. an unpacked release tarball's `ROOT/bin/`
+   2. an existing `target/release/` (or `target/rel-user/release/`) build
+      in this checkout
+   3. only then one `cargo build --release --bins` in the single primary
+      checkout
+
+   Building is right when the operator asks for it or when a needed fix
+   exists only in the working tree. Record the binary path and commit in the
+   SUT notes, since a build from an untagged commit prints the last release
+   version. Details: [docs/SERVING.md](docs/SERVING.md#use-prebuilt-binaries).
+6. **Publishable runs** pass `--sut <file> --require-sut`
+   ([examples/sut.example.json](examples/sut.example.json)). Thinking models
+   need [docs/REASONING_MODELS.md](docs/REASONING_MODELS.md) before you
+   choose `--max-tokens`.
+7. **Check what is verified.** [docs/CLAIMS_LEDGER.md](docs/CLAIMS_LEDGER.md)
+   separates "supported in code" from "verified live, per modality". Do not
+   claim more than it says.
+
 ## Quickstart (60 seconds)
 
 One publishable LLM run against the local dummy server. From a GitHub Release
@@ -118,6 +171,12 @@ cargo test --all-targets
 | `metrum-ai-bench-cli compare` | Labeled delta table across strategic runs | Diff two of our own strategic summaries |
 | `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary, not a unified subcommand) |
 | `metrum-ai-bench-cli-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
+
+Which server to run for each modality (regular vLLM for LLM and VLM; vLLM-Omni
+for image generation, and for ASR once vllm-omni#5722 lands), with launchers
+and upstream links, is in
+[docs/SERVING.md](docs/SERVING.md). Modality guides:
+[ASR](docs/ASR.md) and [image generation](docs/IMAGEGEN.md).
 
 The preferred entry point for modalities is `metrum-ai-bench-cli` with those
 subcommands. Modality binaries (`metrum-ai-bench-cli-llm`, and so on) can also
@@ -230,6 +289,8 @@ Optional ASR ground truth is JSONL with matching `id` and `transcript`.
 WER/CER use `--normalizer` (`whisper-english` default, `whisper-basic`, or
 `none`); the choice is recorded in `config.normalizer`. See
 [docs/ASR.md](docs/ASR.md) for more detail.
+For image generation flags and server defaults, see
+[docs/IMAGEGEN.md](docs/IMAGEGEN.md).
 
 **Imagegen:** pass `--prompt` once, or `--prompts` JSONL:
 
@@ -302,7 +363,7 @@ The `metrum-ai-bench-cli-strategic` runner adds concurrency/rate sweeps
 (`--sweep`), knee detection, multi-turn sessions, validity rules,
 server-metrics correlation, tagged telemetry NDJSON (`--ndjson` with
 `--telemetry` Prometheus scrapes; default exporter is the Metrum
-[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metric`), and
+[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metrics`), and
 CSV, HTML (`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP
 exports. See [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md) and
 [telemetry](docs/TELEMETRY.md).
@@ -361,7 +422,8 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
-and [known limitations](docs/LIMITATIONS.md).
+[serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
+[image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
 
 ## Security and provenance
 

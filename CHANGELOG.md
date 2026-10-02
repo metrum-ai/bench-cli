@@ -3,6 +3,49 @@
 ## Unreleased
 
 ### Documentation
+- Engine map corrected. LLM and VLM run on regular vLLM, and ImageGen runs on
+  vLLM-Omni. ASR's intended stack is vLLM-Omni, but in vllm-omni v0.30.0
+  `--omni` exposes only the generate and speech tasks, so
+  `/v1/audio/transcriptions` is unavailable (vllm-omni#5722). Until that
+  lands, ASR is served with regular vLLM speech-to-text. The prior live ASR
+  PASS (2026-10-02 widen) used regular vLLM; re-validate on vLLM-Omni when
+  the fix ships. Updated `docs/SERVING.md`, `docs/ASR.md`, `CLAUDE.md`, and
+  `scripts/live/README.md`.
+- README "Before you benchmark (agents and operators)". It states that the
+  CLI is a client, that every real-backend run starts with a web search of
+  vendor docs (workload, framework, model card, engine args, request params,
+  sweep), that the Hub prompt library is the LLM default, that prebuilt
+  binaries come before building, and where live status lives. Search-first
+  notes were added to SERVING, ASR, IMAGEGEN, REASONING_MODELS,
+  STRATEGIC_BENCHMARKING, and TELEMETRY.
+- TELEMETRY and CLAUDE.md note that all-smi fork v0.26.3-metrum.4 serves
+  `/metrics` (`/metric` returns 404).
+
+### Changed
+- `scripts/live/serve/asr.sh` takes `ASR_STACK=vllm` (default,
+  `vllm/vllm-openai:v0.30.0`) or `ASR_STACK=omni`
+  (`vllm/vllm-omni:v0.30.0`, `--omni`, for re-validation once
+  vllm-omni#5722 lands). Each stack writes its own sources into the SUT.
+- Live scripts resolve prebuilt binaries through the new
+  `scripts/live/lib/bench_bin.sh`, in this order:
+  `BENCH_BIN_DIR`, release tarball `bin/`, `target/release`,
+  `target/rel-user/release`, `PATH`.
+  They never compile and never pick debug builds implicitly.
+  `local_smoke.sh` records the binary path, `--version`, and checkout in the
+  SUT.
+- `docs/SERVING.md`: one table mapping each modality to its recommended
+  engine (vLLM, SGLang, vLLM multimodal, vLLM speech-to-text, vLLM-Omni),
+  example model, `scripts/live/serve/` launcher, upstream docs, and ledger
+  status, plus engine notes that change results.
+- `docs/IMAGEGEN.md`: new guide for `metrum-ai-bench-cli-imagegen` on
+  vLLM-Omni. It covers request knobs and their server defaults (50 steps
+  when `num_inference_steps` is omitted versus 9 for Z-Image-Turbo),
+  `b64_json` responses, artifacts, and the not-verified-live status.
+- `docs/ASR.md`: a Serving frameworks section (vLLM speech-to-text with the
+  launcher and upstream links, Whisper `--max-model-len 448`, and other
+  `/v1/audio/transcriptions` backends). It links vLLM's audio docs instead of
+  listing codecs.
+- README and `scripts/live/README.md` link the new guides.
 - `docs/CLAIMS_LEDGER.md` separates `Verified-in-code` from
   `Verified-live (<campaign id>, <date>)` and rates live status per
   modality: LLM and VLM verified live in the 2026-10-01 readiness review,
