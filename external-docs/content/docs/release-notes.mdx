@@ -17,6 +17,31 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.5.3
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.5.3 |
+| **Previous version** | 1.5.2 |
+| **Release Date** | October 2, 2026 |
+
+- Four-modality live validation on Shadeform (campaign
+  `publish-20261002T162512Z`): LLM, VLM, ASR, and ImageGen gates PASS with
+  `--sut` / `--require-sut` and all-smi `/metrics` telemetry.
+- VLM accepts inline `data:` base64 image URLs in prompt files.
+- Imagegen `--seed-mode increment` works with a single `--prompt` (unique
+  seeds per request).
+- Preflight `--extra-body-json` for thinking-model chat probes.
+- Live scripts: Hub prompt extract by default, prebuilt binary resolution
+  (`bench_bin.sh`), modality serve launchers, widen helpers, and
+  `assert_headline.sh`.
+- Dummy `-strict-media` plus real ASR/VLM fixtures for e2e and quickstarts.
+- Telemetry defaults and `analyze.py` power/energy handling aligned to the
+  Metrum all-smi fork (`/metrics`, millijoule scale, skip power-limit gauges).
+
+---
+
 ## Metrum AI Bench CLI 1.5.2
 
 | | |

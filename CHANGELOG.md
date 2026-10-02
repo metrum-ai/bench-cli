@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.5.3 (2026-10-02)
+
 ### Documentation
 - Engine map corrected. LLM and VLM run on regular vLLM, and ImageGen runs on
   vLLM-Omni. ASR's intended stack is vLLM-Omni, but in vllm-omni v0.30.0
@@ -131,6 +133,23 @@
   The image cache keys `data:` entries by SHA-256 digest, and logs show the
   digest instead of the payload. `--server-side-download` still rejects
   `data:` entries.
+- Imagegen `--seed-mode increment` with a single `--prompt` no longer pins
+  every request to the CLI `--seed`. The synthetic prompt row leaves `seed`
+  unset so increment can apply `seed + request_index`. Explicit per-row seeds
+  in JSONL still override. Confirmed on campaign `publish-20261002T162512Z`
+  (unique PNG digests under increment).
+- `metrum-ai-bench-cli preflight` accepts `--extra-body-json` and merges it
+  into chat probe bodies (needed for thinking models that require
+  `chat_template_kwargs.enable_thinking=false` to emit visible tokens).
+- Default all-smi scrape URL in telemetry examples/config is
+  `http://127.0.0.1:9090/metrics` (Metrum fork `v0.26.3-metrum.4`; `/metric`
+  returns 404).
+- `docs/queries/analyze.py` power correlation: skip power limit/cap gauges,
+  and scale `*millijoule*` energy counters to joules unless the metric name
+  contains `raw`.
+- `scripts/live/shadeform.sh` prefers `env.json`'s `SHADEFORM_API_KEY` when
+  the process environment also sets a different key, and warns on stderr
+  (no key material printed).
 
 ## 1.5.2 (2026-09-30)
 
