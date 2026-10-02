@@ -5,6 +5,12 @@
 
 `metrum-ai-bench-cli-imagegen` measures OpenAI-compatible `POST /v1/images/generations` endpoints. It records latency, images per second, the bytes returned, and a hash for every saved artifact.
 
+**Search first.** Before a real run, web-search the current vLLM-Omni docs
+and the model card for the exact diffusion model. Check the supported
+models, the image tag, recommended steps, guidance, and resolution, and the
+request fields the server accepts. Record them in the SUT. Defaults here are
+for `Tongyi-MAI/Z-Image-Turbo` on vllm-omni v0.30.0 only.
+
 **Status:** image generation is supported in code but has **not been verified against a real server**; see [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). Do not publish image-generation numbers until the live gate (`.github/workflows/live-modality-smoke.yml`, cell `imagegen`) passes and the ledger row is updated.
 
 ## What to run

@@ -3,6 +3,14 @@
 
 # Strategic telemetry (Prometheus scrape)
 
+**Search first, then check the path.** Before a run, confirm the exporter's
+current release, its listen port, and the path your installed binary serves.
+On 2026-10-02 the Metrum all-smi fork v0.26.3-metrum.4 served
+**`/metrics`**, and `/metric` returned HTTP 404. The `/metric` URLs below and
+in `docs/telemetry/examples/all-smi.yaml` are the repo default; point the YAML
+at the path your binary answers (`curl -s -o /dev/null -w '%{http_code}'
+http://127.0.0.1:9090/metrics`).
+
 `metrum-ai-bench-cli-strategic` optionally scrapes Prometheus text or
 OpenMetrics exposition during a sweep and writes tagged NDJSON rows beside
 request and stage rows. Hardware and engine signals reach the client only

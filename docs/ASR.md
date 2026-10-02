@@ -3,8 +3,15 @@
 
 # ASR benchmark
 
-`metrum-ai-bench-cli-asr` benchmarks OpenAI-compatible `/audio/transcriptions`
-endpoints. Its input is JSONL:
+`metrum-ai-bench-cli-asr` benchmarks OpenAI-compatible
+`/v1/audio/transcriptions` endpoints. To start: pick a server under
+[Serving frameworks](#serving-frameworks), serve one of the real speech
+fixtures in `test-data/asr/` with `--ground-truth`, and gate the cell with
+`scripts/live/assert_headline.sh asr`. Before a real run, web-search the
+current vendor docs for your exact ASR model and engine version, and record
+the launch arguments and sources in the SUT (see [SERVING.md](SERVING.md)).
+
+Its input is JSONL:
 
 ```json
 {"id":"1089-134686-0030","path":"test-data/asr/1089-134686-0030.wav","format":"wav","duration":2.715}
@@ -16,10 +23,14 @@ Run the bench against any server that implements OpenAI-compatible
 `POST /v1/audio/transcriptions` (multipart `file`, `model`, optional
 `language` and `response_format`).
 
-### Recommended: vLLM speech-to-text
+| Stack | Status for this CLI (checked 2026-10-02) | Launcher |
+|---|---|---|
+| **vLLM-Omni** | Intended ASR stack. **Blocked in v0.30.0**: with `--omni` the engine reports only the `generate` and `speech` tasks, so the server never mounts `/v1/audio/transcriptions` ([vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722), open). Use it only to re-validate once that issue is closed. | `ASR_STACK=omni scripts/live/serve/asr.sh start` (`vllm/vllm-omni:v0.30.0`) |
+| **Regular vLLM speech-to-text** | Works today and is the launcher default. vLLM documents Whisper on this endpoint ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)). The 2026-10-02 widen ASR cells ran on it. | `scripts/live/serve/asr.sh start` (`vllm/vllm-openai:v0.30.0`) |
+| Other OpenAI-compatible servers | Possible; not run by us. | none |
 
 ```bash
-scripts/live/serve/asr.sh start      # vllm/vllm-openai:v0.30.0, openai/whisper-large-v3-turbo, --max-model-len 448
+scripts/live/serve/asr.sh start      # ASR_STACK=vllm: vllm/vllm-openai:v0.30.0, whisper-large-v3-turbo, --max-model-len 448
 metrum-ai-bench-cli-asr --url http://127.0.0.1:8000/v1/audio/transcriptions --api-key dummy \
   --model openai/whisper-large-v3-turbo --scenario asr-smoke \
   --input test-data/asr/input.jsonl --ground-truth test-data/asr/truth.jsonl \
@@ -28,17 +39,20 @@ metrum-ai-bench-cli-asr --url http://127.0.0.1:8000/v1/audio/transcriptions --ap
 scripts/live/assert_headline.sh asr asr.jsonl
 ```
 
-[`scripts/live/serve/asr.sh`](../scripts/live/serve/asr.sh) pins
-`vllm/vllm-openai:v0.30.0` and writes a SUT with the exact launch command.
-Upstream references:
+[`scripts/live/serve/asr.sh`](../scripts/live/serve/asr.sh) writes a SUT with
+the exact launch command and the stack's sources. Results from different
+stacks compare serving stacks, not models: record the stack in the SUT and do
+not mix them in one comparison. Upstream references:
 
-- Endpoint, request fields, and supported models:
-  [vLLM speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)
-- Audio inputs, decoder backends, and `--media-io-kwargs`:
-  [vLLM multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs.html)
+- vLLM-Omni: [docs](https://docs.vllm.ai/projects/vllm-omni/en/latest/),
+  [v0.30.0 release](https://github.com/vllm-project/vllm-omni/releases/tag/v0.30.0),
+  [transcription RFC #5722](https://github.com/vllm-project/vllm-omni/issues/5722)
+- vLLM: [speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/),
+  [multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs.html)
+  (audio decoders, `--media-io-kwargs`),
+  [v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0)
 - Model: [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo)
   (transcription only; turbo does not translate)
-- Release we pin: [vLLM v0.30.0](https://github.com/vllm-project/vllm/releases/tag/v0.30.0)
 
 ### Whisper on vLLM 0.30.0: `--max-model-len 448`
 
@@ -64,16 +78,14 @@ with `--media-io-kwargs '{"audio": {"audio_backend": "soundfile"}}'`.
 ### Other OpenAI-compatible backends
 
 Any server that speaks `/v1/audio/transcriptions` works with the same flags.
-For example, [speaches](https://github.com/speaches-ai/speaches) (faster-whisper)
-describes itself as OpenAI API compatible. We have not run it. If you use a
-backend other than vLLM, record its name, version, and launch command in the
-SUT, and check that its `response_format` values include `json` or
-`verbose_json` (`--response-format`). Results from different backends compare
-serving stacks, not models.
+For example, [speaches](https://github.com/speaches-ai/speaches)
+(faster-whisper) describes itself as OpenAI API compatible; we have not run
+it. Record the backend name, version, and launch command in the SUT. Check
+that it accepts `--response-format json` or `verbose-json`.
 
 Live verification status for ASR is tracked in
-[CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). It is functional only until a live run
-reports WER. [SERVING.md](SERVING.md) lists the stack for every modality.
+[CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). [SERVING.md](SERVING.md) lists the
+stack for every modality.
 
 ## Audio must be real, decodable audio
 
