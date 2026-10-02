@@ -203,7 +203,7 @@ default_interval_ms: 1000
 timeout_ms: 800
 sources:
   - name: all-smi
-    url: http://127.0.0.1:9090/metric
+    url: http://127.0.0.1:9090/metrics
     interval_ms: 500
     include:
       - "^all_smi_(gpu|cpu|memory)_"

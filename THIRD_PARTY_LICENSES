@@ -27,6 +27,11 @@ expressions are enforced by `cargo deny check licenses` in CI.
 Notable redistributed data:
 - webpki-roots: Mozilla root certificate store data,
   CDLA-Permissive-2.0.
+- test-data/asr/: three utterances (1089-134686-0030, 2961-961-0016,
+  6930-81414-0005) and their transcripts from LibriSpeech test-clean,
+  https://www.openslr.org/12, CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). Converted from FLAC to
+  16 kHz mono PCM WAV; see test-data/README.md and NOTICE.
 
 Full license texts are available from each package's source distribution in
 the Cargo registry and must accompany binary redistribution where required.

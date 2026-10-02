@@ -29,6 +29,32 @@ Options:
   -V, --version  Print version
 ```
 
+### `metrum-ai-bench-cli preflight`
+
+```text
+Usage: metrum-ai-bench-cli preflight [OPTIONS] --url <URL> --api-key <API_KEY>
+
+Options:
+      --url <URL>
+          Endpoint URL (base or full `/v1/chat/completions` path)
+      --api-key <API_KEY>
+          API key sent as a Bearer token (use `dummy` when the server ignores it)
+      --model <MODEL>
+          Model id for chat/streaming probes [default: dummy]
+      --connect-timeout <CONNECT_TIMEOUT>
+          Connect timeout in seconds [default: 10]
+      --request-timeout <REQUEST_TIMEOUT>
+          Request timeout in seconds [default: 60]
+      --latency-samples <LATENCY_SAMPLES>
+          Number of unary latency samples [default: 3]
+      --extra-body-json <EXTRA_BODY_JSON>
+          Extra JSON object merged into chat probe bodies (for example `{"chat_template_kwargs":{"enable_thinking":false}}` on thinking models)
+      --json
+          Also print the machine-readable JSON report after the table
+  -h, --help
+          Print help
+```
+
 ## `metrum-ai-bench-cli-llm`
 
 ```text

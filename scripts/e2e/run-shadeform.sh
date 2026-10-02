@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Shadeform telemetry e2e: RTXPro6000 > H200 > H100, Qwen/Qwen3.8-27B,
-# Jarvis-style concurrency sweep (1..64), all-smi fork /metric.
+# Jarvis-style concurrency sweep (1..64), all-smi fork /metrics.
 # Hard cap: 3 GPU-hours. Secrets from env only.
 set -euo pipefail
 
@@ -543,7 +543,7 @@ cat >"${ART}/VALIDATION.md" <<EOF
 - dataset: https://huggingface.co/datasets/metrum-ai/prompt-library (pinned revision; see mix-report.json)
 - workload: Hub \`rag-medium\` mix, closed concurrency 1..64, open rate sweep, SIGINT partial, promptfoo general+coding, AIPerf bake-off
 - validation: closed sweep, open rate sweep, SIGINT partial summary, promptfoo general + coding, AIPerf comparison
-- telemetry: all-smi (Metrum fork /metric), vllm, node, optional dcgm/cadvisor
+- telemetry: all-smi (Metrum fork /metrics), vllm, node, optional dcgm/cadvisor
 - artifacts: run-closed/open/interrupt ndjson (compressed), HTML reports, sut.json, telemetry.yaml, stdout JSON, promptfoo-*.json/txt, aiperf/, COMPARISON_AIPERF.md
 
 See \`COMPARISON_AIPERF.md\` for metrum vs NVIDIA AIPerf methodology, setup/run timings, and metric comparison.

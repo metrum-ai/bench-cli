@@ -5,6 +5,7 @@
 package media_test
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"strings"
@@ -223,5 +224,39 @@ func TestRepoDummyMP3Shape(t *testing.T) {
 	b := mediatest.RepoDummyMP3()
 	if len(b) != 104 || b[0] != 0xFF || b[1] != 0xFB || b[2] != 0x90 || b[3] != 0x00 {
 		t.Fatalf("fixture drifted from test-data/dummy.mp3: len=%d head=% x", len(b), b[:4])
+	}
+}
+
+// id3Prefix returns an ID3v2.4 tag header with an empty body of n bytes.
+func id3Prefix(n int) []byte {
+	h := []byte{'I', 'D', '3', 4, 0, 0, byte(n >> 21 & 0x7f), byte(n >> 14 & 0x7f), byte(n >> 7 & 0x7f), byte(n & 0x7f)}
+	return append(h, make([]byte, n)...)
+}
+
+func TestValidateAudioAcceptsID3PrefixedContainers(t *testing.T) {
+	flac := append([]byte("fLaC"), bytes.Repeat([]byte{0x12, 0x34}, 1024)...)
+	cases := map[string][]byte{
+		"id3+flac": append(id3Prefix(32), flac...),
+		"id3+wav":  append(id3Prefix(16), mediatest.SineWAV()...),
+	}
+	for name, b := range cases {
+		if err := media.ValidateAudio(b); err != nil {
+			t.Errorf("%s: unexpected reject: %v", name, err)
+		}
+	}
+	silentFLAC := append(id3Prefix(32), append([]byte("fLaC"), make([]byte, 2048)...)...)
+	if err := media.ValidateAudio(silentFLAC); err == nil {
+		t.Error("id3+all-zero flac: expected reject")
+	}
+}
+
+func TestValidateAudioToleratesMissingWAVPadByte(t *testing.T) {
+	wav := mediatest.SineWAV()
+	// Insert an odd-sized LIST chunk without its pad byte after fmt.
+	list := append([]byte("LIST"), 3, 0, 0, 0, 'a', 'b', 'c')
+	fmtEnd := 12 + 8 + 16
+	b := append(append(append([]byte{}, wav[:fmtEnd]...), list...), wav[fmtEnd:]...)
+	if err := media.ValidateAudio(b); err != nil {
+		t.Fatalf("unexpected reject: %v", err)
 	}
 }

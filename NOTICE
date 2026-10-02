@@ -11,3 +11,13 @@ Third-party components are distributed under their own licenses; run
 whose licenses require attribution notices:
 
 - webpki-roots (Mozilla root certificate store data), CDLA-Permissive-2.0
+
+Test fixtures with attribution requirements:
+
+- test-data/asr/*.wav and the transcripts in test-data/asr/truth.jsonl are
+  three utterances from LibriSpeech ASR corpus test-clean (V. Panayotov,
+  G. Chen, D. Povey, S. Khudanpur, "LibriSpeech: an ASR corpus based on public
+  domain audio books", ICASSP 2015), https://www.openslr.org/12, licensed
+  CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Metrum AI
+  converted the FLAC originals to 16 kHz mono 16-bit PCM WAV with
+  scripts/fetch_asr_fixtures.sh; the audio content is unchanged.
