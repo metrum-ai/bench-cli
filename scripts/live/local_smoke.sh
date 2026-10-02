@@ -136,5 +136,6 @@ set +e
 "${cmd[@]}" | tee "${out}/stdout.txt"
 echo "${PIPESTATUS[0]}" >"${out}/exit_code.txt"
 set -e
-"${SCRIPT_DIR}/assert_headline.sh" "${modality}" "${out}/results.jsonl" "${assert_args[@]}" | tee "${out}/assert.txt"
+"${SCRIPT_DIR}/assert_headline.sh" "${modality}" "${out}/results.jsonl" ${assert_args[@]+"${assert_args[@]}"} \
+  | tee "${out}/assert.txt"
 exit "${PIPESTATUS[0]}"

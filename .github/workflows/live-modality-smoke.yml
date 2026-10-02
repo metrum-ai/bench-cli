@@ -8,7 +8,8 @@
 #
 # Runs on the self-hosted pool with the opt-in gpu-h100 label
 # (deploy/github-runners-bench-cli, profile `gpu`). Until a runner with that
-# label is registered, jobs queue and then time out.
+# label is registered, set no variables: dispatches queue and tag pushes skip.
+# Set repository variable LIVE_RUNNER_READY=true once the runner exists.
 #
 # release.yml calls this workflow (workflow_call) when the repository
 # variable LIVE_GATE_REQUIRED is `true`; the tag trigger below then skips so
@@ -25,6 +26,10 @@ on:
         description: Set by release.yml so the tag-triggered copy can skip
         type: boolean
         default: true
+      ref:
+        description: Git ref to test (release.yml passes the release tag)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -37,10 +42,13 @@ concurrency:
 jobs:
   live:
     name: live ${{ matrix.modality }}
+    # Tag pushes run only once a gpu-h100 runner exists (LIVE_RUNNER_READY),
+    # so tags do not queue for a day on a label no runner has, and only when
+    # release.yml is not already calling the gate.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       inputs.from_release == true ||
-      vars.LIVE_GATE_REQUIRED != 'true'
+      (vars.LIVE_RUNNER_READY == 'true' && vars.LIVE_GATE_REQUIRED != 'true')
     strategy:
       fail-fast: false
       # Each launcher binds port 8000 on the same GPU.
@@ -57,6 +65,8 @@ jobs:
       OUT: ${{ github.workspace }}/live-results/ci-${{ matrix.modality }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: build bench binaries

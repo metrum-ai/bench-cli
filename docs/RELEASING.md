@@ -34,7 +34,7 @@ that a real server accepts the media we send. `.github/workflows/live-modality-s
 runs one smoke cell per modality (LLM, VLM, ASR, imagegen) on a real serving
 stack (`scripts/live/serve/*.sh`) and fails the cell through
 `scripts/live/assert_headline.sh`. It runs on `workflow_dispatch` and on `v*`
-tags, on the self-hosted runner label `gpu-h100`
+tags (tags only when `LIVE_RUNNER_READY` is `true`), on the self-hosted runner label `gpu-h100`
 (`deploy/github-runners-bench-cli/MANUAL`, "GPU runner").
 
 A release is blocked until the gate is green for every modality the README
@@ -42,7 +42,8 @@ claims. Link the green run in the release PR.
 
 | Variable | Effect |
 |----------|--------|
-| `LIVE_GATE_REQUIRED` | When `true`, `release.yml` calls the gate as job `live-gate`, and `github-release` and `crates-io` need it to succeed. The tag-triggered copy of the gate then skips so it does not run twice. |
+| `LIVE_GATE_REQUIRED` | When `true`, `release.yml` calls the gate as job `live-gate` on the release tag, and `github-release` and `crates-io` need it to succeed. The tag-triggered copy of the gate then skips so it does not run twice. |
+| `LIVE_RUNNER_READY` | When `true`, `v*` tag pushes start the gate on their own. Leave unset until a `gpu-h100` runner is registered, so tags do not queue on a label no runner has. |
 | `LIVE_HF_HOME` | Hugging Face cache path on the GPU host (default `/srv/hf-cache`). |
 
 `LIVE_GATE_REQUIRED` is off by default because no runner carries `gpu-h100`
