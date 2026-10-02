@@ -81,6 +81,28 @@ p99 is marked `p99_unreliable` when fewer than **100** samples exist
 (`src/stats.rs`). Small-*n* p95/p90 also carry unreliability flags; treat tail
 percentiles accordingly.
 
+## The dummy server proves plumbing, not media correctness
+
+`dummy-model-server` does not run a model. By default it accepts any bytes
+as audio and charges a flat 256 prompt tokens per `image_url` part without
+looking at it, so a passing run against it shows that requests, timing, and
+records work, not that a real server would accept the payload.
+
+With `-strict-media` (the Rust e2e harness default) it rejects with HTTP 400:
+
+- chat `image_url` parts with a `data:` URL that is not base64, does not
+  decode as PNG, JPEG, GIF, or WebP, or is smaller than 2x2;
+- transcription uploads under 1024 bytes, with an unknown container, a
+  malformed WAV `fmt `/`data` chunk or MPEG frame header, or an all-zero body
+  (message `Invalid or unsupported audio file`, as vLLM sends).
+
+Strict mode still does not fetch `http(s)` image URLs, decode pixels or
+audio samples, check that audio is speech, or validate image-generation
+output. Its transcript is the constant `dummy transcription`, so WER against
+the dummy is meaningless. Live verification per modality is tracked in
+[CLAIMS_LEDGER.md](CLAIMS_LEDGER.md) and produced by
+`.github/workflows/live-modality-smoke.yml`.
+
 ## Single node / single client process
 
 One Bench process drives one endpoint or one configured pool. Fleet-wide
