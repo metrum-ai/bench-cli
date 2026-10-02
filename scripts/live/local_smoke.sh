@@ -94,6 +94,12 @@ case "${modality}" in
   llm)
     hub_prompts_extract "${REPO_ROOT}" "${out}/prompts.jsonl" "${out}/prompt-mix.json" "${total}"
     hub_prompts_stamp_sut "${out}/sut.json" "${out}/prompt-mix.json"
+    # --count is a soft target; size the run to the rows actually selected
+    # so every selected prompt is sent once (docs/LIMITATIONS.md).
+    total="$(jq -r '.selected_count' "${out}/prompt-mix.json")"
+    for i in "${!common[@]}"; do
+      [[ "${common[$i]}" == --num-requests ]] && common[i+1]="${total}"
+    done
     max_tokens="${MAX_TOKENS:-$(jq -r '.recommended_max_tokens' "${out}/prompt-mix.json")}"
     no_thinking='{"chat_template_kwargs":{"enable_thinking":false}}'
     cmd=("$(resolve_bin metrum-ai-bench-cli-llm)" --url "${base}/v1/chat/completions" --mode chat --streaming
