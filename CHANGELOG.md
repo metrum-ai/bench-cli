@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- VLM accepts inline `data:<mime>;base64,<payload>` image URLs in prompt
+  files. They were previously read as local file paths and failed with
+  "Failed to read local image file". Whitespace in the payload is ignored,
+  padding is optional, and the MIME type sent is sniffed from the decoded
+  bytes. Non-base64 `data:` URLs fail with an error that names the scheme.
+  The image cache keys `data:` entries by SHA-256 digest, and logs show the
+  digest instead of the payload. `--server-side-download` still rejects
+  `data:` entries.
+
 ## 1.5.2 (2026-09-30)
 
 ### Fixed

@@ -206,7 +206,15 @@ hint). Examples:
 ```json
 {"prompt":"Describe the image.","image_urls":["https://example.com/a.png"]}
 {"prompt":"Count the objects.","image_url":"test-data/tiny.png"}
+{"prompt":"What color is this?","image_url":"data:image/png;base64,iVBORw0KGgo..."}
 ```
+
+Each VLM image entry is a local path, a `file://` URI, an `http(s)://` URL, or
+an inline `data:<mime>;base64,<payload>` URL. Inline images are decoded once
+before the measurement window, and the MIME type sent to the server is taken
+from the decoded bytes. Non-base64 `data:` URLs are rejected.
+`--server-side-download` forwards only `http(s)` URLs and rejects local paths,
+`file://`, and `data:` entries.
 
 **ASR**
 

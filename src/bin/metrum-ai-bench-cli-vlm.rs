@@ -115,7 +115,7 @@ struct Args {
 
     #[arg(
         long,
-        help = "Path to the JSONL file containing prompts (one object per line with \"prompt\" and \"image_urls\" or \"image_url\")"
+        help = "Path to the JSONL file containing prompts (one object per line with \"prompt\" and \"image_urls\" or \"image_url\"; each image is a local path, file:// URI, http(s) URL, or base64 data: URL)"
     )]
     prompts: String,
 
@@ -220,7 +220,7 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
-        help = "Whether to let the server download images instead of base64 encoding them"
+        help = "Send http(s) image URLs for the server to download instead of base64 encoding them; local paths, file:// and data: URLs are rejected in this mode"
     )]
     server_side_download: bool,
 }
@@ -421,14 +421,28 @@ impl ImageCache {
         timeout_secs: u64,
         reencode_jpeg: bool,
     ) -> Result<ImageData, Box<dyn Error + Send + Sync>> {
-        if let Some(data) = self.get(path) {
-            debug!("Cache hit for image: {}", path);
+        // `data:` URLs are keyed (and logged) by digest so large inline images
+        // are not duplicated into the cache key or every log line.
+        let key = metrum_ai_bench::prompt_inputs::image_ref_key(path);
+        let label = key.as_str();
+        if let Some(data) = self.get(&key) {
+            debug!("Cache hit for image: {}", label);
             return Ok(data);
         }
 
-        debug!("Cache miss for image: {}", path);
+        debug!("Cache miss for image: {}", label);
+        let mut declared_mime = None;
         // Load and process image
-        let image_data = if path.starts_with("http://") || path.starts_with("https://") {
+        let image_data = if metrum_ai_bench::prompt_inputs::is_data_url(path) {
+            let decoded = metrum_ai_bench::prompt_inputs::decode_data_url(path)?;
+            debug!(
+                "Decoded inline image {} ({} bytes)",
+                label,
+                decoded.bytes.len()
+            );
+            declared_mime = Some(decoded.declared_mime);
+            decoded.bytes
+        } else if path.starts_with("http://") || path.starts_with("https://") {
             // For URLs, use client with timeout (no unbounded reqwest::get)
             debug!("Fetching image from URL: {}", path);
             let response = client
@@ -466,22 +480,28 @@ impl ImageCache {
             _ => "image/jpeg",
         }
         .to_string();
+        if let Some(declared) = declared_mime.filter(|d| !d.is_empty() && *d != mime_type) {
+            debug!(
+                "data: URL {} declares {} but the bytes look like {}; sending {}",
+                label, declared, mime_type, mime_type
+            );
+        }
 
         // Read the header for dimensions; the payload stays byte-identical to
         // the source unless a resize or an explicit re-encode is requested.
         let (source_width, source_height) =
             image::ImageReader::new(std::io::Cursor::new(&image_data))
                 .with_guessed_format()
-                .map_err(|e| format!("Failed to read image header from '{}': {}", path, e))?
+                .map_err(|e| format!("Failed to read image header from '{}': {}", label, e))?
                 .into_dimensions()
-                .map_err(|e| format!("Failed to read image size from '{}': {}", path, e))?;
+                .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
 
         let oversized =
             max_dimension.is_some_and(|max_dim| source_width > max_dim || source_height > max_dim);
 
         let (encoded, width, height) = if oversized || reencode_jpeg {
             let mut img = image::load_from_memory(&image_data)
-                .map_err(|e| format!("Failed to decode image from '{}': {}", path, e))?;
+                .map_err(|e| format!("Failed to decode image from '{}': {}", label, e))?;
             if oversized {
                 let max_dim = max_dimension.expect("oversized implies a limit");
                 let scale = max_dim as f32 / source_width.max(source_height) as f32;
@@ -525,10 +545,12 @@ impl ImageCache {
             width,
             height,
             size_bytes,
-            url: path.to_string(), // Store the original URL/path
+            // Original URL/path for server_side_download; data: URLs keep only
+            // their digest (server_side_download never forwards them).
+            url: key.clone(),
         };
 
-        self.put(path.to_string(), image_data.clone());
+        self.put(key, image_data.clone());
         Ok(image_data)
     }
 }
@@ -782,7 +804,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     )
                     .await
                 {
-                    warn!("Image preload failed for {url}: {e}");
+                    warn!(
+                        "Image preload failed for {}: {e}",
+                        metrum_ai_bench::prompt_inputs::image_ref_key(url)
+                    );
                 }
             }
         }
@@ -901,7 +926,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             };
             if refs_to_check.iter().any(|r| !is_http_url(r)) {
                 error!(
-                    "server_side_download requires http(s) URLs; local paths and file:// are not sent (endpoint={})",
+                    "server_side_download requires http(s) URLs; local paths, file:// and data: URLs are not sent (endpoint={})",
                     endpoint_name
                 );
                 emit_preprocess_failure(

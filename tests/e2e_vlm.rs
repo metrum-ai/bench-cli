@@ -23,18 +23,25 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_with_rows(|image| {
+        vec![format!(
+            r#"{{"prompt":"Describe this image","image_url":"{}"}}"#,
+            image.to_str().unwrap()
+        )]
+    })
+}
+
+/// Fixture whose prompt file rows are built from the on-disk PNG path.
+fn fixture_with_rows(rows: impl Fn(&std::path::Path) -> Vec<String>) -> Fixture {
     let dir = tempfile::tempdir().expect("tmpdir");
     let image = dir.path().join("pixel.png");
     std::fs::write(&image, tiny_png()).expect("write png");
 
     let prompts = dir.path().join("prompts.jsonl");
     let mut file = std::fs::File::create(&prompts).expect("create prompts");
-    writeln!(
-        file,
-        r#"{{"prompt":"Describe this image","image_url":"{}"}}"#,
-        image.to_str().unwrap()
-    )
-    .expect("write prompts");
+    for row in rows(&image) {
+        writeln!(file, "{row}").expect("write prompts");
+    }
 
     Fixture {
         prompts,
@@ -297,4 +304,105 @@ fn vlm_mid_stream_error_is_api_error() {
     let records = request_records(&fixture.data_log);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["error"]["kind"], "api_error");
+}
+
+fn png_data_url() -> String {
+    use base64::Engine;
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(tiny_png())
+    )
+}
+
+/// Inline base64 `data:` image URLs load like local files instead of being
+/// read as a file path.
+#[test]
+fn vlm_accepts_base64_data_url_images() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture_with_rows(|_| {
+        vec![format!(
+            r#"{{"prompt":"Describe this image","image_url":"{}"}}"#,
+            png_data_url()
+        )]
+    });
+    run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 2, &[]);
+
+    let records = request_records(&fixture.data_log);
+    assert_eq!(records.len(), 2, "expected one record per request");
+    for record in &records {
+        assert!(
+            record["error"].is_null(),
+            "data: URL request failed: {}",
+            record["error"]
+        );
+        assert_eq!(record["modality_metrics"]["image_count"], 1.0);
+        assert_eq!(
+            record["modality_metrics"]["image_bytes"].as_f64(),
+            Some(tiny_png().len() as f64),
+            "data: URL bytes must be sent unchanged"
+        );
+    }
+}
+
+/// One prompt file can mix local paths, data: URLs, and image_urls arrays
+/// holding both.
+#[test]
+fn vlm_mixed_file_and_data_url_prompt_file() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture_with_rows(|image| {
+        let path = image.to_str().unwrap().to_string();
+        let data = png_data_url();
+        vec![
+            format!(r#"{{"prompt":"File","image_url":"{path}"}}"#),
+            format!(r#"{{"prompt":"Inline","image_url":"{data}"}}"#),
+            format!(r#"{{"prompt":"Both","image_urls":["{path}","{data}"]}}"#),
+        ]
+    });
+    run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 3, &[]);
+
+    let records = request_records(&fixture.data_log);
+    assert_eq!(records.len(), 3, "expected one record per prompt row");
+    let mut counts: Vec<f64> = records
+        .iter()
+        .map(|r| {
+            assert!(r["error"].is_null(), "request failed: {}", r["error"]);
+            r["modality_metrics"]["image_count"]
+                .as_f64()
+                .expect("image_count")
+        })
+        .collect();
+    counts.sort_by(f64::total_cmp);
+    assert_eq!(counts, vec![1.0, 1.0, 2.0]);
+}
+
+/// A corrupt data: URL becomes a classified per-request error that names the
+/// scheme, not a crash or a misleading "file not found".
+#[test]
+fn vlm_corrupt_data_url_is_a_named_error_record() {
+    let Some(dummy) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture_with_rows(|_| {
+        vec![r#"{"prompt":"Bad","image_url":"data:image/png;base64,***not-base64***"}"#.to_string()]
+    });
+    run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 1, &[]);
+
+    let records = request_records(&fixture.data_log);
+    assert_eq!(records.len(), 1);
+    let error = records[0]["error"].to_string();
+    assert!(
+        error.contains("invalid base64 in data: URL"),
+        "error must name the data: scheme: {error}"
+    );
+    assert!(
+        !error.contains("Failed to read local image file"),
+        "data: URL must not be read as a path: {error}"
+    );
 }
