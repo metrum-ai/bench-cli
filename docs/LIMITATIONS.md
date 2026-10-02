@@ -13,7 +13,7 @@ Bench is a load-generation **client**. It measures what the client observes
 observe GPU utilization, KV-cache state, or scheduler internals on the server
 except when you optionally scrape Prometheus endpoints from the strategic
 runner (`--metrics-url` and/or `--telemetry` YAML into `--ndjson`). Those
-series come from exporters on the host (default: Metrum all-smi fork `/metric`),
+series come from exporters on the host (default: Metrum all-smi fork `/metrics`),
 not from an in-process NVML binding.
 
 ## Gateways that synthesize streaming

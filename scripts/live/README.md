@@ -29,10 +29,10 @@ through `lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
 clearly instead of compiling. `local_smoke.sh` records the binary path,
 `--version`, and the checkout in the SUT.
 
-**Shadeform key.** `shadeform.sh` prefers an exported `SHADEFORM_API_KEY` over
-`env.json`. If your shell exports a different key, API calls (including
-deletes) get HTTP 401. Run `env -u SHADEFORM_API_KEY scripts/live/shadeform.sh ...`
-and confirm every delete with `GET /instances/<id>/info`.
+**Shadeform key.** When both an exported `SHADEFORM_API_KEY` and `env.json`
+are set and disagree, `shadeform.sh` prefers `env.json` and warns on stderr
+(without printing key material). Confirm every delete with
+`GET /instances/<id>/info` after `down`.
 
 Which engine to use for each modality, the upstream docs for it, and the
 pitfalls that change results are in the guides, not here:

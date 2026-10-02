@@ -585,6 +585,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             record
                 .modality_metrics
                 .insert("response_bytes".into(), outcome.response_bytes as f64);
+            if let Some(seed) = outcome.seed {
+                record
+                    .modality_labels
+                    .insert("seed".into(), seed.to_string());
+            }
             for (idx, artifact) in outcome.image_artifacts.iter().enumerate() {
                 record
                     .modality_metrics
@@ -872,10 +877,12 @@ async fn health_check_endpoints(
 
 fn load_prompts(args: &Args) -> Result<Vec<PromptRow>, Box<dyn Error + Send + Sync>> {
     if let Some(prompt) = &args.prompt {
+        // Leave seed unset so SeedMode::Increment can apply args.seed + request_index.
+        // JSONL rows may still set an explicit per-row seed.
         return Ok(vec![PromptRow {
             id: "prompt-0".to_string(),
             prompt: prompt.clone(),
-            seed: args.seed,
+            seed: None,
             size: None,
             negative_prompt: args.negative_prompt.clone(),
         }]);
@@ -1333,6 +1340,39 @@ fn parse_size(size: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    fn prompt_row(seed: Option<i64>) -> PromptRow {
+        PromptRow {
+            id: "prompt-0".into(),
+            prompt: "x".into(),
+            seed,
+            size: None,
+            negative_prompt: None,
+        }
+    }
+
+    fn parse_args(extra: &[&str]) -> Args {
+        let mut argv = vec![
+            "metrum-ai-bench-cli-imagegen",
+            "--scenario",
+            "t",
+            "--model",
+            "m",
+            "--num-requests",
+            "3",
+            "--concurrency",
+            "1",
+            "--data-log",
+            "out.jsonl",
+            "--prompt",
+            "x",
+            "--seed",
+            "7",
+        ];
+        argv.extend_from_slice(extra);
+        Args::try_parse_from(argv).expect("parse args")
+    }
 
     #[test]
     fn parses_size() {
@@ -1358,5 +1398,35 @@ mod tests {
             generations_url("http://localhost:8000/v1/images/generations/"),
             "http://localhost:8000/v1/images/generations"
         );
+    }
+
+    #[test]
+    fn single_prompt_row_leaves_seed_unset_for_increment() {
+        let args = parse_args(&["--seed-mode", "increment"]);
+        let rows = load_prompts(&args).expect("load");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].seed, None);
+        assert_eq!(resolve_seed(&args, &rows[0], 0), Some(7));
+        assert_eq!(resolve_seed(&args, &rows[0], 1), Some(8));
+        assert_eq!(resolve_seed(&args, &rows[0], 2), Some(9));
+    }
+
+    #[test]
+    fn increment_honors_explicit_prompt_seed() {
+        let args = parse_args(&["--seed-mode", "increment"]);
+        let row = prompt_row(Some(42));
+        assert_eq!(resolve_seed(&args, &row, 0), Some(42));
+        assert_eq!(resolve_seed(&args, &row, 1), Some(42));
+    }
+
+    #[test]
+    fn fixed_and_prompt_modes_use_cli_seed_when_row_has_none() {
+        let fixed = parse_args(&["--seed-mode", "fixed"]);
+        let prompt_mode = parse_args(&["--seed-mode", "prompt"]);
+        let row = prompt_row(None);
+        assert_eq!(resolve_seed(&fixed, &row, 0), Some(7));
+        assert_eq!(resolve_seed(&fixed, &row, 1), Some(7));
+        assert_eq!(resolve_seed(&prompt_mode, &row, 0), Some(7));
+        assert_eq!(resolve_seed(&prompt_mode, &row, 1), Some(7));
     }
 }

@@ -276,7 +276,8 @@ async fn main() -> Result<()> {
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route("/ready", get(|| async { StatusCode::OK }))
         .route("/metrics", get(metrics))
-        // Metrum all-smi fork documents /metric; serve the same body for CI.
+        // Legacy alias: older configs used /metric for the Metrum all-smi fork,
+        // which actually serves /metrics. Keep the alias so old YAML still runs.
         .route("/metric", get(metrics))
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(infer))

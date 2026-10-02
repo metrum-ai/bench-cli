@@ -102,3 +102,92 @@ Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3`
 - Script: `scripts/live/matrix_smoke.sh` (+ `shadeform.sh` model/extra-args).
 - Secrets: `env.json` never printed or committed.
 - N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
+
+---
+
+# Smoke results - campaign `widen-shadeform-20261002`
+
+> **Coverage:** Shadeform parallel widen across LLM, VLM, ASR, and ImageGen on
+> 1x H100 PCIe (massedcompute / Scaleway). Not a publication under
+> [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Raw logs live
+> under gitignored `artifacts/live/`. Combined operator report:
+> `/tmp/bench-cli-shadeform-smoke-report.md` (plus per-lane
+> `/tmp/bench-cli-{vlm,asr,imagegen}-smoke-report.md`).
+
+| Field | Value |
+|-------|-------|
+| Campaign ID | `widen-shadeform-20261002` |
+| Bench package | `metrum-ai-bench-cli-*` from `fix/modality-validation` @ `61fa69e` (version string `1.5.2`; not the 1.5.2 release tag) |
+| Date (UTC) | 2026-10-02 |
+| Engines | LLM/VLM/ASR: `vllm/vllm-openai:v0.30.0`; ImageGen: `vllm/vllm-omni:v0.30.0` |
+| Telemetry | Metrum all-smi fork `v0.26.3-metrum.4` at `http://127.0.0.1:9090/metrics` |
+| Modalities | llm, vlm, asr, imagegen |
+
+## Systems under test
+
+| Modality | Cloud / SKU | Model | Launch notes |
+|----------|-------------|-------|--------------|
+| LLM | Scaleway `paris-france-1`, 1x H100 PCIe ($3.30/h) | `Qwen/Qwen3.8-27B-FP8` | `--reasoning-parser qwen3 --language-model-only --max-model-len 131072 --gpu-memory-utilization 0.90 --max-num-seqs 256`; thinking off via `chat_template_kwargs.enable_thinking=false` |
+| VLM | massedcompute `desmoines-usa-1`, 1x H100 PCIe ($2.73/h) | `Qwen/Qwen3-VL-32B-Instruct-FP8` | `--max-model-len 32768 --limit-mm-per-prompt.video 0 --async-scheduling --mm-processor-cache-gb 0` |
+| ASR | massedcompute `desmoines-usa-1`, 1x H100 PCIe ($2.73/h) | `openai/whisper-large-v3-turbo` | plain vLLM STT, `--max-model-len 448` (Omni ASR blocked by vllm-omni#5722) |
+| ImageGen | massedcompute `desmoines-usa-1`, 1x H100 PCIe ($2.73/h) | `Tongyi-MAI/Z-Image-Turbo` | `vllm serve ... --omni --port 8000` |
+
+All measured cells used `--sut` / `--require-sut`. Instances deleted after each lane.
+
+## Results
+
+TTFT is always `ttft_s` (first visible streamed token), never `first_byte_s`.
+
+### LLM
+
+Artifacts: `artifacts/live/widen-20261002T144347Z/`.
+
+| Cell | n | err | Output tok/s | TTFT p50 (s) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| preflight | - | - | - | - | FAIL (streaming_first_token empty; fixed later with preflight `--extra-body-json`) |
+| G5 | 200 | 0 | 54.542 | 0.0554 | PASS |
+| MB | 200 | 0 | 54.558 | 0.0501 | PASS |
+| strategic c=1 | 48 | 0 | 54.579 | 0.0503 | PASS |
+| strategic c=4 | 48 | 0 | 194.835 | 0.0794 | PASS |
+| strategic c=16 | 48 | 0 | 620.258 | 0.2069 | PASS |
+
+Prompts from `metrum-ai/prompt-library` (`sample`, ISL 256 / OSL 128).
+
+### VLM
+
+Artifacts: `artifacts/live/widen-parallel-vlm-20261002T153627Z/`.
+
+| Cell | n | err | Completion tok/s | Req/s | TTFT p50 / p95 (s) | E2E p50 / p95 (s) |
+| --- | --- | --- | --- | --- | --- | --- |
+| vlm-c8-a1 (gate) | 64 | 0 | 329.043 | 3.113 | 0.141 / 0.237 | 2.518 / 2.704 |
+| vlm-c16-a1 | 64 | 0 | 579.148 | 5.468 | 0.213 / 0.398 | 2.807 / 3.086 |
+| vlm-c32-a1 | 64 | 0 | 867.291 | 8.043 | 0.391 / 0.649 | 3.479 / 4.208 |
+
+### ASR
+
+Artifacts: `artifacts/live/widen-parallel-asr-20261002T153555Z/`. Fixtures: `test-data/asr/`.
+
+| Cell | n | err | Req/s | Latency p50 (s) | Mean WER / CER |
+| --- | --- | --- | --- | --- | --- |
+| asr-c1-a1 (gate) | 60 | 0 | 12.953 | 0.0668 | 0.0000 / 0.0000 |
+| asr-c8-a1 | 960 | 0 | 42.663 | 0.1554 | 0.0000 / 0.0000 |
+
+Independent verbose_json probe also scored WER 0.0000.
+
+### Image generation
+
+Artifacts: `artifacts/live/widen-parallel-imagegen-20261002T153737Z/`. Smoke-scale only (not a performance claim).
+
+| Cell | n | err | Latency p50 (s) | Req/s | Decoded artifacts |
+| --- | --- | --- | --- | --- | --- |
+| c2 (gate) | 4 | 0 | 3.013 | 0.525 | 5/5 |
+| c1 | 8 | 0 | 1.547 | 0.640 | 9/9 |
+
+As-run note: `--prompt` + `--seed` under default `--seed-mode increment` sent a constant seed (findings PR fixes client increment).
+
+## Provenance notes
+
+- Operator LLM lane plus parallel Herdr agents `smoke-vlm`, `smoke-asr`, `smoke-img`.
+- Secrets: `env.json` never printed or committed.
+- N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
+- Findings follow-ups (same date): all-smi scrape path `/metrics`, `analyze.py` power allowlist + millijoule scale, Omni metric filter in `widen_cell.sh`, ASR torchcodec triage, shadeform key preference, preflight `--extra-body-json`, imagegen seed increment.

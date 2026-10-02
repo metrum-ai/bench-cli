@@ -155,7 +155,7 @@ For durable hardware and engine time series during a sweep, pass `--ndjson`
 with `--telemetry` (YAML Prometheus sources) or legacy `--metrics-url`. Optional
 `--require-telemetry` aborts after consecutive scrape failures. The default
 smoke source is the Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
-fork at `http://127.0.0.1:9090/metric`. Scope, units, join model, and recipes:
+fork at `http://127.0.0.1:9090/metrics`. Scope, units, join model, and recipes:
 [TELEMETRY.md](TELEMETRY.md). Analysis formulas: [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
 
 ## OpenTelemetry
