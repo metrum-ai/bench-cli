@@ -29,6 +29,32 @@ Options:
   -V, --version  Print version
 ```
 
+### `metrum-ai-bench-cli preflight`
+
+```text
+Usage: metrum-ai-bench-cli preflight [OPTIONS] --url <URL> --api-key <API_KEY>
+
+Options:
+      --url <URL>
+          Endpoint URL (base or full `/v1/chat/completions` path)
+      --api-key <API_KEY>
+          API key sent as a Bearer token (use `dummy` when the server ignores it)
+      --model <MODEL>
+          Model id for chat/streaming probes [default: dummy]
+      --connect-timeout <CONNECT_TIMEOUT>
+          Connect timeout in seconds [default: 10]
+      --request-timeout <REQUEST_TIMEOUT>
+          Request timeout in seconds [default: 60]
+      --latency-samples <LATENCY_SAMPLES>
+          Number of unary latency samples [default: 3]
+      --extra-body-json <EXTRA_BODY_JSON>
+          Extra JSON object merged into chat probe bodies (for example `{"chat_template_kwargs":{"enable_thinking":false}}` on thinking models)
+      --json
+          Also print the machine-readable JSON report after the table
+  -h, --help
+          Print help
+```
+
 ## `metrum-ai-bench-cli-llm`
 
 ```text
@@ -168,7 +194,7 @@ Options:
       --concurrency <CONCURRENCY>
           Number of concurrent requests (must be >= 1)
       --prompts <PROMPTS>
-          Path to the JSONL file containing prompts (one object per line with "prompt" and "image_urls" or "image_url")
+          Path to the JSONL file containing prompts (one object per line with "prompt" and "image_urls" or "image_url"; each image is a local path, file:// URI, http(s) URL, or base64 data: URL)
       --log-level <LOG_LEVEL>
           Log level: error, warn, info, debug, trace [default: warn]
       --model <MODEL>
@@ -268,7 +294,7 @@ Options:
       --image-detail <IMAGE_DETAIL>
           Image detail level: 'low' or 'high' [default: low] [possible values: low, high]
       --server-side-download
-          Whether to let the server download images instead of base64 encoding them
+          Send http(s) image URLs for the server to download instead of base64 encoding them; local paths, file:// and data: URLs are rejected in this mode
   -h, --help
           Print help
   -V, --version

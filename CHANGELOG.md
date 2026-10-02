@@ -2,6 +2,136 @@
 
 ## Unreleased
 
+### Documentation
+- Engine map corrected. LLM and VLM run on regular vLLM, and ImageGen runs on
+  vLLM-Omni. ASR's intended stack is vLLM-Omni, but in vllm-omni v0.30.0
+  `--omni` exposes only the generate and speech tasks, so
+  `/v1/audio/transcriptions` is unavailable (vllm-omni#5722). Until that
+  lands, ASR is served with regular vLLM speech-to-text. The prior live ASR
+  PASS (2026-10-02 widen) used regular vLLM; re-validate on vLLM-Omni when
+  the fix ships. Updated `docs/SERVING.md`, `docs/ASR.md`, `CLAUDE.md`, and
+  `scripts/live/README.md`.
+- README "Before you benchmark (agents and operators)". It states that the
+  CLI is a client, that every real-backend run starts with a web search of
+  vendor docs (workload, framework, model card, engine args, request params,
+  sweep), that the Hub prompt library is the LLM default, that prebuilt
+  binaries come before building, and where live status lives. Search-first
+  notes were added to SERVING, ASR, IMAGEGEN, REASONING_MODELS,
+  STRATEGIC_BENCHMARKING, and TELEMETRY.
+- TELEMETRY and CLAUDE.md note that all-smi fork v0.26.3-metrum.4 serves
+  `/metrics` (`/metric` returns 404).
+
+### Changed
+- `scripts/live/serve/asr.sh` takes `ASR_STACK=vllm` (default,
+  `vllm/vllm-openai:v0.30.0`) or `ASR_STACK=omni`
+  (`vllm/vllm-omni:v0.30.0`, `--omni`, for re-validation once
+  vllm-omni#5722 lands). Each stack writes its own sources into the SUT.
+- Live scripts resolve prebuilt binaries through the new
+  `scripts/live/lib/bench_bin.sh`, in this order:
+  `BENCH_BIN_DIR`, release tarball `bin/`, `target/release`,
+  `target/rel-user/release`, `PATH`.
+  They never compile and never pick debug builds implicitly.
+  `local_smoke.sh` records the binary path, `--version`, and checkout in the
+  SUT.
+- `docs/SERVING.md`: one table mapping each modality to its recommended
+  engine (vLLM, SGLang, vLLM multimodal, vLLM speech-to-text, vLLM-Omni),
+  example model, `scripts/live/serve/` launcher, upstream docs, and ledger
+  status, plus engine notes that change results.
+- `docs/IMAGEGEN.md`: new guide for `metrum-ai-bench-cli-imagegen` on
+  vLLM-Omni. It covers request knobs and their server defaults (50 steps
+  when `num_inference_steps` is omitted versus 9 for Z-Image-Turbo),
+  `b64_json` responses, artifacts, and the not-verified-live status.
+- `docs/ASR.md`: a Serving frameworks section (vLLM speech-to-text with the
+  launcher and upstream links, Whisper `--max-model-len 448`, and other
+  `/v1/audio/transcriptions` backends). It links vLLM's audio docs instead of
+  listing codecs.
+- README and `scripts/live/README.md` link the new guides.
+- `docs/CLAIMS_LEDGER.md` separates `Verified-in-code` from
+  `Verified-live (<campaign id>, <date>)` and rates live status per
+  modality: LLM and VLM verified live in the 2026-10-01 readiness review,
+  ASR functional only (no WER yet), image generation not verified live.
+- README points to the ledger for live-verification status.
+- `docs/ASR.md`: valid-audio requirement, WER/CER from `--ground-truth`, and
+  Whisper `--max-model-len 448` on vLLM 0.30.0.
+- `docs/LIMITATIONS.md` (and the docs site): what `dummy-model-server`
+  does and does not validate, with and without `-strict-media`.
+- `docs/RELEASING.md`: a smoke cell with 0 successes blocks a release until
+  triaged in an issue.
+
+### Added
+- `dummy-model-server -strict-media` rejects media a real server rejects:
+  `data:` image URLs that are not base64, do not decode as PNG, JPEG, GIF,
+  or WebP, or are smaller than 2x2 return HTTP 400 on chat completions;
+  transcription uploads under 1024 bytes, with an unknown container, a
+  malformed WAV or MP3 header, or an all-zero body return HTTP 400
+  `Invalid or unsupported audio file` (the vLLM error text). The default
+  stays permissive. The Rust e2e harness (`tests/common::spawn_dummy`) now
+  starts the dummy in strict mode; `spawn_dummy_permissive` opts out.
+- e2e tests prove strict mode turns a header-only MP3 (ASR) and a 1x1 PNG
+  (VLM) into classified `http_status` 400 records.
+
+- Real media fixtures. `test-data/asr/` has three LibriSpeech `test-clean`
+  utterances (CC BY 4.0) as 16 kHz mono WAV, 395 KB in total, with exact
+  transcripts in `truth.jsonl` and an `input.jsonl` manifest, so ASR
+  quickstarts report WER and CER. `scripts/fetch_asr_fixtures.sh`
+  regenerates them byte for byte. `test-data/vlm/shapes-512.png` is a
+  512x512 PNG with shapes and a word, written by
+  `scripts/gen_vlm_fixture.py`, plus `test-data/vlm/prompts.jsonl`.
+- `tests/e2e_fixtures.rs` checks that the shipped fixtures pass
+  `-strict-media` and that the negative fixture does not.
+- Release archives include `NOTICE` and `THIRD_PARTY_LICENSES`, and the
+  release smoke checks that the new fixtures are present.
+
+- Live modality gate. `.github/workflows/live-modality-smoke.yml` runs one
+  smoke cell per modality on a real serving stack (runner label `gpu-h100`)
+  on `workflow_dispatch` and `v*` tags. `scripts/live/serve/{llm,vlm,asr,imagegen}.sh`
+  start vLLM 0.30.0 (Qwen3-8B, Qwen3-VL-8B-Instruct, Whisper large-v3-turbo
+  with `--max-model-len 448`) and vllm-omni 0.30.0 (Z-Image-Turbo) and write
+  a SUT with the exact launch command and sources.
+  `scripts/live/local_smoke.sh --local --modality <m>` (also
+  `run_smoke.sh --local`) runs a cell on the same host.
+  `scripts/live/assert_headline.sh` fails a cell with 0 successes, a
+  success ratio below `MIN_SUCCESS_RATIO`, no `--require-sut`, ASR records
+  without WER/CER, VLM records without images, or imagegen without
+  decodable artifacts; CI runs its offline self-test.
+- `release.yml` job `live-gate` calls the live gate and blocks
+  `github-release` and `crates-io` when repository variable
+  `LIVE_GATE_REQUIRED` is `true` (off by default until a GPU runner exists).
+- `deploy/github-runners-bench-cli`: opt-in `runner-gpu` service (compose
+  profile `gpu`, labels from `GPU_LABELS`) with GPU reservation, host
+  networking, the host Docker socket, and a shared Hugging Face cache.
+
+### Changed
+- LLM live scripts (`matrix_smoke.sh`, `campaign.sh`, `shadeform.sh run-llm`,
+  `run_smoke.sh`) extract prompts with `metrum-ai-bench-cli-prompts` through
+  `scripts/live/lib/hub_prompts.sh` instead of writing handmade JSONL.
+  Defaults are `metrum-ai/prompt-library`, config `sample`, profile
+  `chat-short`; `PROMPT_*` variables or a local JSONL/parquet override them.
+  The mix's dataset, revision SHA, profile, and row count are stamped into
+  the SUT.
+- Live VLM cells use `test-data/vlm/shapes-512.png` instead of a 2x2 PNG.
+- `run_smoke.sh` polls `/v1/models` with curl; it previously required a
+  `wait_for_vllm` binary that the project never shipped.
+- `test-data/dummy.mp3` is now `test-data/negative/header-only-invalid.mp3`.
+  It was never audio (an MPEG frame header plus 100 zero bytes) and every
+  real server rejects it. README, `docs/ASR.md`, and the docs site examples
+  use `test-data/asr/` and `test-data/vlm/` instead.
+- `scripts/live/matrix_smoke.sh` ASR cells upload the LibriSpeech clips with
+  `--ground-truth`, and the manifest uses `duration` (the old `duration_s`
+  key was ignored by `metrum-ai-bench-cli-asr`).
+- `tests/e2e_asr.rs` uploads a generated 16 kHz mono PCM WAV sine tone
+  instead of a 30-byte fake MP3.
+
+### Fixed
+- VLM accepts inline `data:<mime>;base64,<payload>` image URLs in prompt
+  files. They were previously read as local file paths and failed with
+  "Failed to read local image file". Whitespace in the payload is ignored,
+  padding is optional, and the MIME type sent is sniffed from the decoded
+  bytes. Non-base64 `data:` URLs fail with an error that names the scheme.
+  The image cache keys `data:` entries by SHA-256 digest, and logs show the
+  digest instead of the payload. `--server-side-download` still rejects
+  `data:` entries.
+
 ## 1.5.2 (2026-09-30)
 
 ### Fixed

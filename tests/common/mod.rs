@@ -60,9 +60,18 @@ fn dummy_required() -> bool {
     std::env::var("METRUM_BENCH_REQUIRE_DUMMY").is_ok_and(|v| v != "0" && !v.is_empty())
 }
 
-/// Start the dummy server on a free port with `extra_args` appended.
+/// Start the dummy server on a free port in `-strict-media` mode with
+/// `extra_args` appended, so tests send media a real server would accept.
 /// Returns `None` when `go` is unavailable, so callers can skip.
 pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
+    let mut args = vec!["-strict-media"];
+    args.extend_from_slice(extra_args);
+    spawn_dummy_permissive(&args)
+}
+
+/// Start the dummy server without `-strict-media`. Only for tests that
+/// deliberately send media a real server would reject.
+pub fn spawn_dummy_permissive(extra_args: &[&str]) -> Option<Dummy> {
     if !go_available() {
         assert!(
             !dummy_required(),
@@ -166,6 +175,33 @@ pub fn tiny_png() -> Vec<u8> {
         .write_to(&mut bytes, image::ImageFormat::Png)
         .expect("encode png");
     bytes.into_inner()
+}
+
+/// A 16 kHz mono 16-bit PCM WAV holding a 440 Hz sine tone, so ASR tests
+/// upload audio that `-strict-media` (and a real server) can parse.
+pub fn sine_wav(seconds: f64) -> Vec<u8> {
+    const RATE: u32 = 16_000;
+    let samples = (seconds * f64::from(RATE)) as u32;
+    let data_len = samples * 2;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&RATE.to_le_bytes());
+    out.extend_from_slice(&(RATE * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for i in 0..samples {
+        let t = f64::from(i) / f64::from(RATE);
+        let v = (t * 440.0 * std::f64::consts::TAU).sin() * 0.3 * f64::from(i16::MAX);
+        out.extend_from_slice(&(v as i16).to_le_bytes());
+    }
+    out
 }
 
 pub fn skip(reason: &str) {

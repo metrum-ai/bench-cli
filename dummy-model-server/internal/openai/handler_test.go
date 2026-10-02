@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/config"
+	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/media/mediatest"
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/server"
 )
 
@@ -190,5 +191,126 @@ func TestGoldenTimingShape(t *testing.T) {
 	raw := rec.Body.String()
 	if strings.Count(raw, `"content":"."`) != 20 {
 		t.Fatalf("want 20 content tokens, got %d", strings.Count(raw, `"content":"."`))
+	}
+}
+
+// chatWithImages posts a non-stream chat request carrying one image_url part
+// per URL and returns the recorder.
+func chatWithImages(t *testing.T, h http.Handler, urls ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	parts := []map[string]any{{"type": "text", "text": "What is this?"}}
+	for _, u := range urls {
+		parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": u}})
+	}
+	body, err := json.Marshal(map[string]any{
+		"model":      "dummy",
+		"messages":   []map[string]any{{"role": "user", "content": parts}},
+		"max_tokens": 2,
+		"stream":     false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// badImages are image_url values the Metrum AI strict-media mode must reject.
+var badImages = []struct {
+	name, url, detail string
+}{
+	{"1x1 png", mediatest.DataURL("image/png", mediatest.PNG(1, 1)), "image too small: 1x1"},
+	{"old abc stub", "data:image/jpeg;base64,abc", "unsupported image format"},
+	{"not base64", "data:image/png,raw", "must be base64-encoded"},
+	{"corrupt base64", "data:image/png;base64,***", "invalid base64 in data: URL"},
+	{"missing comma", "data:image/png;base64", "missing comma"},
+}
+
+func TestChatStrictMediaRejects(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) { c.StrictMedia = true }))
+	good := mediatest.DataURL("image/png", mediatest.PNG(2, 2))
+	for _, tc := range badImages {
+		t.Run(tc.name, func(t *testing.T) {
+			// Put a valid image first to prove every part is checked.
+			rec := chatWithImages(t, h, good, tc.url)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status %d want 400; body %s", rec.Code, rec.Body.String())
+			}
+			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+				t.Fatalf("content-type %q", ct)
+			}
+			var out struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+					Code    int    `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatalf("error body not JSON: %v", err)
+			}
+			if !strings.HasPrefix(out.Error.Message, "Invalid image: ") || !strings.Contains(out.Error.Message, tc.detail) {
+				t.Fatalf("message %q want prefix %q and detail %q", out.Error.Message, "Invalid image: ", tc.detail)
+			}
+			if out.Error.Type != "invalid_request_error" || out.Error.Code != 400 {
+				t.Fatalf("error shape %+v", out.Error)
+			}
+		})
+	}
+}
+
+func TestChatStrictMediaRejectsStream(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) { c.StrictMedia = true }))
+	body := `{"model":"dummy","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,abc"}}]}],"max_tokens":2,"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("stream request with bad image: status %d want 400", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "data:") {
+		t.Fatal("rejected request must not start an SSE stream")
+	}
+}
+
+func TestChatStrictMediaAccepts(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) { c.StrictMedia = true }))
+	rec := chatWithImages(t, h,
+		mediatest.DataURL("image/png", mediatest.PNG(2, 2)),
+		mediatest.DataURL("image/jpeg", mediatest.JPEG(8, 8)),
+		mediatest.DataURL("image/gif", mediatest.GIF(4, 3)),
+		"https://example.com/cat.png",
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	pt := int(resp["usage"].(map[string]any)["prompt_tokens"].(float64))
+	if pt < 4*256 {
+		t.Fatalf("prompt_tokens=%d want >= 1024 for 4 images", pt)
+	}
+
+	// Plain text requests are unaffected by strict mode.
+	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi"}],"max_tokens":2}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("text-only strict: status %d", rec.Code)
+	}
+}
+
+func TestChatNonStrictAcceptsBadImages(t *testing.T) {
+	h := server.New(testCfg())
+	for _, tc := range badImages {
+		rec := chatWithImages(t, h, tc.url)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: non-strict must accept, got %d %s", tc.name, rec.Code, rec.Body.String())
+		}
 	}
 }

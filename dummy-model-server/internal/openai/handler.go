@@ -5,12 +5,14 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/config"
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/limiter"
+	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/media"
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/sse"
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/vision"
 )
@@ -49,6 +51,13 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	// Unknown fields are ignored for all compat modes (SGLang requires this).
 	_ = h.Cfg.Compat
+
+	if h.Cfg.StrictMedia {
+		if err := validateChatImages(req.Messages); err != nil {
+			writeErrCode(w, http.StatusBadRequest, "Invalid image: "+err.Error())
+			return
+		}
+	}
 
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
@@ -269,4 +278,23 @@ func promptTokensChat(messages []chatMessage) int {
 		contents = append(contents, m.Content)
 	}
 	return vision.PromptTokensFromParts(contents)
+}
+
+// validateChatImages runs Metrum AI strict-media checks on every image_url
+// part in the conversation and returns the first failure.
+func validateChatImages(messages []chatMessage) error {
+	for _, m := range messages {
+		for _, p := range m.Content {
+			if p.Type != "image_url" {
+				continue
+			}
+			if p.ImageURL == nil {
+				return errors.New("image_url part is missing image_url.url")
+			}
+			if err := media.ValidateImageURL(p.ImageURL.URL); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

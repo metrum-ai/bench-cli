@@ -2,6 +2,7 @@ target/
 target-e2e/
 *.csv
 *.jsonl
+!test-data/**/*.jsonl
 *.md5
 env.chetan
 create_release.env

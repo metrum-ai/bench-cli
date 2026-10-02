@@ -138,10 +138,86 @@ pub fn normalize_image_ref(s: &str) -> String {
     }
 }
 
+/// Returns true if the image reference is an inline `data:` URL (scheme is case-insensitive).
+pub fn is_data_url(s: &str) -> bool {
+    s.trim_start()
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+}
+
+/// An inline image decoded from a `data:<mime>;base64,<payload>` URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataUrlImage {
+    /// MIME type declared before `;base64` (may be empty; the caller sniffs the bytes).
+    pub declared_mime: String,
+    /// Decoded payload bytes.
+    pub bytes: Vec<u8>,
+}
+
+/// Decode a Metrum AI Bench VLM `data:` image URL.
+///
+/// Accepts `data:<mime>;base64,<payload>` only. Whitespace inside the payload
+/// (line-wrapped base64) is ignored and padding is optional. Every error names
+/// the `data:` scheme so it cannot be confused with a missing local file.
+pub fn decode_data_url(s: &str) -> Result<DataUrlImage, String> {
+    use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
+    use base64::engine::DecodePaddingMode;
+    use base64::Engine;
+
+    let s = s.trim();
+    if !is_data_url(s) {
+        return Err("not a data: URL".into());
+    }
+    let (meta, payload) = s[5..]
+        .split_once(',')
+        .ok_or("malformed data: URL: missing ',' between media type and payload")?;
+    let mut params = meta.split(';');
+    let declared_mime = params
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !params.any(|p| p.trim().eq_ignore_ascii_case("base64")) {
+        return Err(
+            "unsupported data: URL: only base64 payloads are accepted (expected ';base64,')".into(),
+        );
+    }
+    let compact: String = payload.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.is_empty() {
+        return Err("empty payload in data: URL".into());
+    }
+    let engine = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+    let bytes = engine
+        .decode(compact.as_bytes())
+        .map_err(|e| format!("invalid base64 in data: URL: {e}"))?;
+    Ok(DataUrlImage {
+        declared_mime,
+        bytes,
+    })
+}
+
+/// Stable short identity for an image reference, used as the VLM image-cache
+/// key and in log and error messages. `data:` URLs are reduced to a SHA-256
+/// digest so multi-megabyte inline images are not copied into keys or logs;
+/// every other reference is returned unchanged.
+pub fn image_ref_key(s: &str) -> String {
+    use sha2::{Digest, Sha256};
+    if !is_data_url(s) {
+        return s.to_string();
+    }
+    let digest = Sha256::digest(s.trim().as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("data:sha256:{hex}")
+}
+
 /// Load metrum-ai-bench-cli-vlm records from a JSONL file.
 /// Minimum contract: one object per line with "prompt" (string) and "image_urls" (array of strings).
 /// Accepts optional "image_url" (string) for single-image rows and normalizes to image_urls internally.
-/// Image entries support HTTP(S) URLs, file:// URIs, and plain local paths; file:// is normalized to a path.
+/// Image entries support HTTP(S) URLs, file:// URIs, base64 `data:` URLs, and plain local paths;
+/// file:// is normalized to a path.
 pub type VlmInputRecord = (String, Vec<String>);
 
 pub fn load_metrum_ai_bench_vlm_records(
@@ -393,5 +469,109 @@ mod tests {
         server.join().unwrap();
 
         assert_eq!(prompts, vec!["Hello from URL", "Second prompt"]);
+    }
+
+    fn encoded(format: image::ImageFormat) -> Vec<u8> {
+        let img =
+            image::RgbImage::from_fn(4, 3, |x, y| image::Rgb([x as u8 * 60, y as u8 * 80, 7]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut out, format)
+            .unwrap();
+        out.into_inner()
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    #[test]
+    fn test_decode_data_url_png() {
+        let png = encoded(image::ImageFormat::Png);
+        let url = format!("data:image/png;base64,{}", b64(&png));
+        let decoded = decode_data_url(&url).unwrap();
+        assert_eq!(decoded.declared_mime, "image/png");
+        assert_eq!(decoded.bytes, png);
+        assert_eq!(
+            image::guess_format(&decoded.bytes).unwrap(),
+            image::ImageFormat::Png
+        );
+    }
+
+    #[test]
+    fn test_decode_data_url_jpeg_with_whitespace_and_no_padding() {
+        let jpeg = encoded(image::ImageFormat::Jpeg);
+        let body = b64(&jpeg);
+        let wrapped: String = body
+            .trim_end_matches('=')
+            .as_bytes()
+            .chunks(60)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n ");
+        let url = format!("  DATA:image/JPEG;base64,{wrapped}  ");
+        assert!(is_data_url(&url));
+        let decoded = decode_data_url(&url).unwrap();
+        assert_eq!(decoded.declared_mime, "image/jpeg");
+        assert_eq!(decoded.bytes, jpeg);
+    }
+
+    #[test]
+    fn test_decode_data_url_missing_comma() {
+        let err = decode_data_url("data:image/png;base64iVBORw0KGgo").unwrap_err();
+        assert!(err.contains("data: URL"), "{err}");
+        assert!(err.contains("','"), "{err}");
+    }
+
+    #[test]
+    fn test_decode_data_url_rejects_non_base64() {
+        let err = decode_data_url("data:image/svg+xml,%3Csvg%3E").unwrap_err();
+        assert!(err.contains("data: URL"), "{err}");
+        assert!(err.contains("base64"), "{err}");
+    }
+
+    #[test]
+    fn test_decode_data_url_corrupt_base64() {
+        let err = decode_data_url("data:image/png;base64,iVBOR*w0KGgo!!").unwrap_err();
+        assert!(err.starts_with("invalid base64 in data: URL"), "{err}");
+    }
+
+    #[test]
+    fn test_decode_data_url_empty_payload() {
+        let err = decode_data_url("data:image/png;base64,   ").unwrap_err();
+        assert!(err.contains("empty payload in data: URL"), "{err}");
+    }
+
+    #[test]
+    fn test_image_ref_key_hashes_data_urls_only() {
+        assert_eq!(image_ref_key("/a/b.png"), "/a/b.png");
+        assert_eq!(
+            image_ref_key("https://example.com/a.png"),
+            "https://example.com/a.png"
+        );
+        let url = format!(
+            "data:image/png;base64,{}",
+            b64(&encoded(image::ImageFormat::Png))
+        );
+        let key = image_ref_key(&url);
+        assert!(key.starts_with("data:sha256:"), "{key}");
+        assert_eq!(key.len(), "data:sha256:".len() + 64);
+        assert_eq!(key, image_ref_key(&url), "key must be stable");
+        assert_ne!(key, image_ref_key(&format!("{url}AAAA")));
+    }
+
+    #[test]
+    fn test_load_metrum_ai_bench_vlm_records_keeps_data_urls() {
+        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_data_url_test.jsonl");
+        let data = "data:image/png;base64,iVBORw0KGgo=";
+        let content = format!(
+            "{{\"prompt\":\"A\",\"image_url\":\"{data}\"}}\n{{\"prompt\":\"B\",\"image_urls\":[\"/x.png\",\"{data}\"]}}\n"
+        );
+        std::fs::write(&tmp, content).unwrap();
+        let records = load_metrum_ai_bench_vlm_records(tmp.to_str().unwrap()).unwrap();
+        assert_eq!(records[0].1, vec![data.to_string()]);
+        assert_eq!(records[1].1, vec!["/x.png".to_string(), data.to_string()]);
+        let _ = std::fs::remove_file(&tmp);
     }
 }

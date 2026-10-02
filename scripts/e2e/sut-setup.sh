@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Idempotent SUT setup on a Shadeform GPU box for telemetry e2e.
-# Prefer Qwen/Qwen3.8-27B; scrape all-smi from the Metrum fork on /metric.
+# Prefer Qwen/Qwen3.8-27B; scrape all-smi from the Metrum fork on /metrics.
 set -euo pipefail
 
 MODEL="${MODEL:-Qwen/Qwen3.8-27B}"
@@ -62,7 +62,7 @@ need jq
 mkdir -p "$HF_HOME" /tmp/metrum-e2e
 export PATH="${ALL_SMI_BIN_DIR}:${HOME}/.cargo/bin:${PATH}"
 
-# --- all-smi (Metrum fork) on 127.0.0.1:9090/metric ---
+# --- all-smi (Metrum fork) on 127.0.0.1:9090/metrics ---
 if ! curl -fsS --max-time 2 http://127.0.0.1:9090/metric >/dev/null 2>&1 \
   && ! curl -fsS --max-time 2 http://127.0.0.1:9090/metrics >/dev/null 2>&1; then
   if ! command -v all-smi >/dev/null 2>&1; then
@@ -81,9 +81,10 @@ if ! curl -fsS --max-time 2 http://127.0.0.1:9090/metric >/dev/null 2>&1 \
     sleep 1
   done
 fi
-ALL_SMI_PATH="/metric"
+# The fork serves /metrics (v0.26.3-metrum.4); /metric is a legacy path.
+ALL_SMI_PATH="/metrics"
 if ! curl -fsS --max-time 2 "http://127.0.0.1:9090${ALL_SMI_PATH}" >/dev/null 2>&1; then
-  ALL_SMI_PATH="/metrics"
+  ALL_SMI_PATH="/metric"
 fi
 log "all-smi ok at http://127.0.0.1:9090${ALL_SMI_PATH}"
 
