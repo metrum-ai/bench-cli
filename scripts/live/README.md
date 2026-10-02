@@ -3,6 +3,82 @@ Copyright (c) 2026 Metrum AI, Inc.
 SPDX-License-Identifier: Apache-2.0
 -->
 
+# Live tests
+
+## Local live gate (no Shadeform)
+
+One smoke cell per modality against a real serving stack on this host. This
+is what `.github/workflows/live-modality-smoke.yml` runs on the `gpu-h100`
+runner.
+
+```bash
+cargo build --release --bins
+scripts/live/serve/asr.sh start          # also writes live-results/serve-asr/sut.json
+scripts/live/local_smoke.sh --local --modality asr
+scripts/live/serve/asr.sh stop
+```
+
+`scripts/live/run_smoke.sh --local --modality <m>` is the same command.
+
+**Search first and reuse binaries.** Before each run, web-search the current
+vendor docs for the exact model and engine version, and override the launcher
+(`MODEL=`, `SERVE_ARGS_OVERRIDE=`, `SOURCES_OVERRIDE=`, `SUT_NOTES_OVERRIDE=`)
+when they differ from the pins here. The scripts resolve prebuilt binaries
+through `lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
+`target/release`, then `target/rel-user/release`, then `PATH`. They fail
+clearly instead of compiling. `local_smoke.sh` records the binary path,
+`--version`, and the checkout in the SUT.
+
+**Shadeform key.** When both an exported `SHADEFORM_API_KEY` and `env.json`
+are set and disagree, `shadeform.sh` prefers `env.json` and warns on stderr
+(without printing key material). Confirm every delete with
+`GET /instances/<id>/info` after `down`.
+
+Which engine to use for each modality, the upstream docs for it, and the
+pitfalls that change results are in the guides, not here:
+[docs/SERVING.md](../../docs/SERVING.md) (index),
+[docs/ASR.md](../../docs/ASR.md) (vLLM speech-to-text, Whisper
+`--max-model-len 448`), and [docs/IMAGEGEN.md](../../docs/IMAGEGEN.md)
+(vLLM-Omni, steps and guidance defaults).
+
+For a Shadeform VM that serves each modality in turn over SSH, with all-smi
+telemetry, use `widen_oss_modalities.sh` (`up` holds the VM with a delete
+trap), `widen_cell.sh` (one cell plus telemetry sidecars on the GPU host),
+and `telemetry_sidecar.py` (Prometheus poller for the modality binaries,
+which have no `--telemetry` flag).
+
+| Modality | Launcher | Stack (researched 2026-10-02; sources in each script) | Smoke input |
+|---|---|---|---|
+| llm | `serve/llm.sh` | Regular vLLM 0.30.0, `Qwen/Qwen3-8B`, `--reasoning-parser qwen3 --max-model-len 32768` | Hub mix: `metrum-ai/prompt-library`, config `sample`, profile `chat-short`; thinking disabled per request |
+| vlm | `serve/vlm.sh` | Regular vLLM 0.30.0, `Qwen/Qwen3-VL-8B-Instruct`, Qwen3-VL recipe flags | `test-data/vlm/prompts.jsonl` (512x512 PNG) |
+| asr | `serve/asr.sh` | Default `ASR_STACK=vllm`: vLLM 0.30.0 speech-to-text, `openai/whisper-large-v3-turbo`, `--max-model-len 448`. `ASR_STACK=omni`: vllm-omni 0.30.0 `--omni`, the intended stack, blocked until vllm-omni#5722 (no `/v1/audio/transcriptions` under `--omni`) | `test-data/asr/` LibriSpeech clips with `--ground-truth` |
+| imagegen | `serve/imagegen.sh` | vllm-omni 0.30.0, `Tongyi-MAI/Z-Image-Turbo`, `--omni` | 1024x1024, 9 steps, guidance 0.0 |
+
+Launchers take `start` (default), `stop`, `print` (show the docker command),
+and `logs`. `PORT`, `HF_HOME`, `HF_TOKEN` (passed by name, never written),
+`GPU_DEVICES`, and `IMAGE`/`MODEL` overrides are read from the environment.
+The SUT they write records the exact docker command in `runtime.config`, the
+model revision SHA from the Hub, the GPU from `nvidia-smi`, and the source
+URLs in `extra.launcher_sources`.
+
+`scripts/live/assert_headline.sh <modality> <data_log> [--artifact-dir DIR]`
+fails the cell when successes are 0 or below `MIN_SUCCESS_RATIO` (default
+1.0), when `--require-sut` was not set, when ASR records lack WER/CER, when
+VLM records sent no image, or when imagegen produced no decodable PNG/JPEG.
+`scripts/tests/assert_headline_test.sh` is its offline self-test.
+
+### LLM prompts come from the Hub
+
+`scripts/live/lib/hub_prompts.sh` wraps `metrum-ai-bench-cli-prompts`. All
+LLM smoke and campaign scripts use it; none write handmade prompt JSONL. With
+no dataset given it uses `metrum-ai/prompt-library` (public, Apache-2.0),
+config `sample`, profile `chat-short` (256 / 64). `PROMPT_DATASET`,
+`PROMPT_CONFIG`, `PROMPT_REVISION`, `PROMPT_PROFILE`, `PROMPT_LOCAL_JSONL`,
+and `PROMPT_LOCAL_PARQUET` override it; an explicit local file wins over the
+Hub. Dataset, resolved revision SHA, profile, and row count go into the SUT
+`notes` and `extra.prompt_*`. VLM, ASR, and imagegen have no Hub prompt
+dataset and use the local fixtures above.
+
 # Shadeform live tests
 
 Helpers for optional GPU smoke runs against real vLLM / SGLang on Shadeform.
@@ -12,8 +88,10 @@ Helpers for optional GPU smoke runs against real vLLM / SGLang on Shadeform.
 ## Prerequisites
 
 - `curl`, `jq`, and a Shadeform API key
-- Built binaries on `PATH` (after the rename): `metrum-ai-bench-cli-llm`,
-  `metrum-ai-bench-cli-vlm`, and `wait_for_vllm`
+- Built binaries on `PATH` or under `target/{release,debug}`:
+  `metrum-ai-bench-cli-llm`, `metrum-ai-bench-cli-vlm`, and
+  `metrum-ai-bench-cli-prompts` (`wait_for_vllm` was never shipped;
+  `run_smoke.sh` now polls `/v1/models` with curl)
 - `env.json` at the repo root (gitignored) **or** `SHADEFORM_API_KEY` in the
   environment. Never commit `env.json` or paste key values into PRs/logs.
 - Optional `SHADEFORM_SSH_KEY_ID` selects an uploaded key for diagnostic SSH.

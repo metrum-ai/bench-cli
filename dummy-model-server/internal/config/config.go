@@ -41,6 +41,8 @@ type Config struct {
 	ImageSize      string
 	MaxImages      int
 	AllowAnyModel  bool
+	// StrictMedia rejects media payloads real servers reject (see internal/media).
+	StrictMedia bool
 }
 
 // ParseFlags defines and parses CLI flags.
@@ -67,6 +69,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.StringVar(&cfg.ImageSize, "image-size", "64x64", "Default image size WxH for image generations")
 	fs.IntVar(&cfg.MaxImages, "max-images", 4, "Maximum n for image generations")
 	fs.BoolVar(&cfg.AllowAnyModel, "allow-any-model", true, "Accept any model name on image generations")
+	fs.BoolVar(&cfg.StrictMedia, "strict-media", false, "Reject invalid image data: URLs and audio uploads with HTTP 400, like real servers")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

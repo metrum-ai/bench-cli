@@ -72,6 +72,7 @@ pub async fn run_preflight(
     connect_timeout: Duration,
     request_timeout: Duration,
     latency_samples: u32,
+    extra_body: Option<&serde_json::Value>,
 ) -> Result<PreflightReport> {
     let chat_url = normalize_chat_url(url);
     let client = build_http_client(HttpClientOptions {
@@ -90,9 +91,27 @@ pub async fn run_preflight(
     let reachable = checks.last().is_some_and(|c| c.status == CheckStatus::Pass);
 
     if reachable {
-        checks.push(check_chat_unary(&client, &chat_url, api_key, model, request_timeout).await);
         checks.push(
-            check_streaming_first_token(&client, &chat_url, api_key, model, request_timeout).await,
+            check_chat_unary(
+                &client,
+                &chat_url,
+                api_key,
+                model,
+                request_timeout,
+                extra_body,
+            )
+            .await,
+        );
+        checks.push(
+            check_streaming_first_token(
+                &client,
+                &chat_url,
+                api_key,
+                model,
+                request_timeout,
+                extra_body,
+            )
+            .await,
         );
         checks.push(
             check_latency_sample(
@@ -102,6 +121,7 @@ pub async fn run_preflight(
                 model,
                 request_timeout,
                 latency_samples.max(1),
+                extra_body,
             )
             .await,
         );
@@ -174,14 +194,29 @@ async fn check_reachability(
     }
 }
 
-fn chat_body(model: &str, stream: bool, max_tokens: u32) -> serde_json::Value {
-    json!({
+fn chat_body(
+    model: &str,
+    stream: bool,
+    max_tokens: u32,
+    extra_body: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let mut body = json!({
         "model": model,
         "stream": stream,
         "max_tokens": max_tokens,
         "temperature": 0.0,
         "messages": [{"role": "user", "content": "ping"}]
-    })
+    });
+    if let Some(extra) = extra_body {
+        if let Some(obj) = extra.as_object() {
+            if let Some(map) = body.as_object_mut() {
+                for (k, v) in obj {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    body
 }
 
 async fn check_chat_unary(
@@ -190,9 +225,10 @@ async fn check_chat_unary(
     api_key: &str,
     model: &str,
     request_timeout: Duration,
+    extra_body: Option<&serde_json::Value>,
 ) -> PreflightCheck {
     let started = Instant::now();
-    let body = chat_body(model, false, 4);
+    let body = chat_body(model, false, 4, extra_body);
     match client
         .post(url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -259,9 +295,10 @@ async fn check_streaming_first_token(
     api_key: &str,
     model: &str,
     request_timeout: Duration,
+    extra_body: Option<&serde_json::Value>,
 ) -> PreflightCheck {
     let started = Instant::now();
-    let body = chat_body(model, true, 8);
+    let body = chat_body(model, true, 8, extra_body);
     let response = match client
         .post(url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -331,11 +368,12 @@ async fn check_latency_sample(
     model: &str,
     request_timeout: Duration,
     samples: u32,
+    extra_body: Option<&serde_json::Value>,
 ) -> PreflightCheck {
     let mut latencies_ms = Vec::with_capacity(samples as usize);
     for _ in 0..samples {
         let started = Instant::now();
-        let body = chat_body(model, false, 4);
+        let body = chat_body(model, false, 4, extra_body);
         match client
             .post(url)
             .header("Authorization", format!("Bearer {api_key}"))
@@ -445,7 +483,19 @@ pub fn run_preflight_blocking(
     connect_timeout_s: u64,
     request_timeout_s: u64,
     latency_samples: u32,
+    extra_body_json: Option<&str>,
 ) -> Result<PreflightReport> {
+    let extra_body = match extra_body_json {
+        None => None,
+        Some(raw) => {
+            let v: serde_json::Value =
+                serde_json::from_str(raw).context("--extra-body-json must be a JSON object")?;
+            if !v.is_object() {
+                anyhow::bail!("--extra-body-json must be a JSON object");
+            }
+            Some(v)
+        }
+    };
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -457,6 +507,7 @@ pub fn run_preflight_blocking(
         Duration::from_secs(connect_timeout_s),
         Duration::from_secs(request_timeout_s),
         latency_samples,
+        extra_body.as_ref(),
     ))
 }
 
@@ -515,10 +566,19 @@ mod tests {
             1,
             2,
             1,
+            None,
         )
         .expect("preflight runs");
         assert!(!report.all_passed);
         assert_eq!(report.checks[0].name, "reachability");
         assert_eq!(report.checks[0].status, CheckStatus::Fail);
+    }
+
+    #[test]
+    fn extra_body_merges_into_chat_body() {
+        let extra = json!({"chat_template_kwargs":{"enable_thinking":false}});
+        let body = chat_body("m", true, 8, Some(&extra));
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
     }
 }

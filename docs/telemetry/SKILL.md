@@ -25,7 +25,7 @@ asks for power, energy, J/token, GPU util, KV cache, or preemption trends.
    [exporters.md](exporters.md) / [examples/](examples/) for expected labels.
 8. Default hardware source for this repo: Metrum
    [chetan-metrum-ai/all-smi](https://github.com/chetan-metrum-ai/all-smi) at
-   `http://127.0.0.1:9090/metric`.
+   `http://127.0.0.1:9090/metrics`.
 
 ## Do not
 

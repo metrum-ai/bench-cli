@@ -32,3 +32,32 @@
 #   sudo systemctl status gha-bench-cli-pool
 #
 # Do not attach bench-cli-docs-deploy to this pool.
+#
+# GPU runner (opt-in, label gpu-h100) for live-modality-smoke.yml:
+#   The service runner-gpu sits behind compose profile `gpu`, so
+#   `./pool start` never starts it. Host prerequisites:
+#     - NVIDIA driver and NVIDIA Container Toolkit, with
+#       `docker run --rm --gpus all nvidia/cuda:12.9.1-base-ubuntu24.04 nvidia-smi`
+#       working on the host
+#     - one H100 (or set GPU_LABELS to match what the host has)
+#     - HF_CACHE_DIR (default /srv/hf-cache) created and writable; set the
+#       repository variable LIVE_HF_HOME to the same path
+#     - optional repository secret HF_TOKEN for gated models
+#   Start / stop:
+#     docker compose --profile gpu up -d runner-gpu
+#     docker compose --profile gpu stop runner-gpu
+#   Check passthrough from inside the runner:
+#     docker exec gha-bench-cli-gpu nvidia-smi -L
+#     docker exec gha-bench-cli-gpu docker version
+#   How it works: the runner reserves the GPUs (so nvidia-smi can record
+#   the SUT), mounts the host Docker socket, and uses host networking. The
+#   launchers in scripts/live/serve/ start vLLM / vllm-omni as sibling
+#   containers on the host daemon with --gpus, publish port 8000 on the
+#   host, and the smoke step reaches them at 127.0.0.1:8000.
+#   Security: the Docker socket is root on the host. Keep this runner on a
+#   repo-scoped, ephemeral registration, and do not run untrusted fork PRs
+#   on the gpu-h100 label (the live workflow has no pull_request trigger).
+#   The GPU runner also carries the bench-cli label, so ordinary CI jobs can
+#   land on it; drop bench-cli from GPU_LABELS to prevent that and change
+#   runs-on in live-modality-smoke.yml to match.
+

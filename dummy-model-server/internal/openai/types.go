@@ -104,3 +104,12 @@ func readBody(r *http.Request) ([]byte, error) {
 	defer r.Body.Close()
 	return io.ReadAll(r.Body)
 }
+
+// writeErrCode is writeErr plus the numeric "code" field that vLLM and
+// SGLang include; used only by strict-media rejections so default error
+// bodies stay unchanged.
+func writeErrCode(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]any{
+		"error": map[string]any{"message": msg, "type": "invalid_request_error", "code": status},
+	})
+}

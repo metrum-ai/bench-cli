@@ -5,7 +5,10 @@
 
 mod common;
 
-use common::{request_records, run_config, skip, spawn_dummy, summary_record};
+use common::{
+    request_records, run_config, sine_wav, skip, spawn_dummy, spawn_dummy_permissive,
+    summary_record,
+};
 use serde_json::Value;
 use std::io::Write;
 use std::process::Command;
@@ -32,15 +35,16 @@ struct Fixture {
 /// each normalizer setting yields a different, predictable WER.
 fn fixture(reference: &str) -> Fixture {
     let dir = tempfile::tempdir().expect("tmpdir");
-    let audio = dir.path().join("sample.mp3");
-    // The dummy server never decodes the payload; any bytes will do.
-    std::fs::write(&audio, b"ID3\x04\x00\x00\x00\x00\x00\x00fake mp3 payload").expect("write mp3");
+    let audio = dir.path().join("sample.wav");
+    // Valid PCM WAV: the harness runs the dummy with -strict-media, which
+    // rejects undecodable uploads the way vLLM does.
+    std::fs::write(&audio, sine_wav(AUDIO_SECONDS)).expect("write wav");
 
     let input = dir.path().join("input.jsonl");
     let mut file = std::fs::File::create(&input).expect("create input");
     writeln!(
         file,
-        r#"{{"id":"sample-1","path":"{}","format":"mp3","duration":{}}}"#,
+        r#"{{"id":"sample-1","path":"{}","format":"wav","duration":{}}}"#,
         audio.to_str().unwrap(),
         AUDIO_SECONDS
     )
@@ -230,5 +234,40 @@ fn asr_data_log_has_no_legacy_summary() {
         modality_metric(&records[0], "rtfx_client").is_some()
             || modality_metric(&records[0], "rtfx").is_some(),
         "measured-phase RTFx must still be present on the request record"
+    );
+}
+
+/// Under -strict-media the dummy rejects a header-only fake MP3 with the vLLM
+/// error text; the client records a classified HTTP error, not a crash.
+#[test]
+fn asr_strict_media_rejects_fake_audio_as_classified_error() {
+    let bad = b"ID3\x04\x00\x00\x00\x00\x00\x00fake mp3 payload";
+    let run = |dummy: &common::Dummy| -> Vec<Value> {
+        let fixture = fixture(DUMMY_TRANSCRIPT);
+        let audio = fixture.input.with_file_name("sample.wav");
+        std::fs::write(&audio, bad).expect("overwrite with fake audio");
+        run_asr(&fixture, &dummy.url("/v1/audio/transcriptions"), &[]);
+        request_records(&fixture.data_log)
+    };
+
+    let Some(strict) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let records = run(&strict);
+    assert_eq!(records.len(), 1);
+    let error = &records[0]["error"];
+    assert_eq!(error["kind"], "http_status", "error record: {error}");
+    assert_eq!(error["status"], 400, "error record: {error}");
+
+    let Some(permissive) = spawn_dummy_permissive(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let records = run(&permissive);
+    assert!(
+        records[0]["error"].is_null(),
+        "permissive dummy accepts any bytes: {}",
+        records[0]["error"]
     );
 }
