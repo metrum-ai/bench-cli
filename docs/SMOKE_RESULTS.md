@@ -191,3 +191,31 @@ As-run note: `--prompt` + `--seed` under default `--seed-mode increment` sent a 
 - Secrets: `env.json` never printed or committed.
 - N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
 - Findings follow-ups (same date): all-smi scrape path `/metrics`, `analyze.py` power allowlist + millijoule scale, Omni metric filter in `widen_cell.sh`, ASR torchcodec triage, shadeform key preference, preflight `--extra-body-json`, imagegen seed increment.
+
+---
+
+# Smoke results - campaign `publish-20261002T162512Z`
+
+> Four-modality Shadeform publish widen run from the operator host after the
+> modality-gap stack landed on `main` (`ca51dd5`). Full narrative:
+> `artifacts/live/publish-20261002T162512Z/REPORT.md`.
+
+| Field | Value |
+|-------|-------|
+| Campaign ID | `publish-20261002T162512Z` |
+| Bench package | tip `v1.5.2-9-gca51dd5` (`ca51dd5`) |
+| Date (UTC) | 2026-10-02 |
+| Engines | LLM/VLM/ASR: `vllm/vllm-openai:v0.30.0`; ImageGen: `vllm/vllm-omni:v0.30.0` |
+| Telemetry | all-smi `v0.26.3-metrum.4` `/metrics` |
+| Modalities | llm, vlm, asr, imagegen |
+
+## Headline
+
+| Modality | SKU | Model | Gate cell | Result |
+|---|---|---|---|---|
+| LLM | 1x H100 PCIe | `Qwen/Qwen3.8-27B-FP8` | G5 / MB | 200/200 each; **52.357 / 52.474** output tok/s; TTFT p50 ~0.073 s |
+| VLM | 1x H100 PCIe | `Qwen/Qwen3-VL-32B-Instruct-FP8` | c8 / c16 / c32 | 64/128/256 ok; **360.5 / 697.8 / 1278.9** completion tok/s |
+| ASR | 1x H100 PCIe | `openai/whisper-large-v3-turbo` | c1 / c8 | 60/960 ok; **WER/CER 0.0000**; 13.6 / 42.7 req/s |
+| ImageGen | 1x L40S | `Tongyi-MAI/Z-Image-Turbo` | c2 / c1 | 10/8 ok; unique increment seeds; 0.315 / 0.331 req/s |
+
+LLM strategic sweep not claimed (remote `--extra-body-json` quoting failure after G5/MB). All instances deleted.
