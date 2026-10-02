@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- `dummy-model-server -strict-media` rejects media a real server rejects:
+  `data:` image URLs that are not base64, do not decode as PNG, JPEG, GIF,
+  or WebP, or are smaller than 2x2 return HTTP 400 on chat completions;
+  transcription uploads under 1024 bytes, with an unknown container, a
+  malformed WAV or MP3 header, or an all-zero body return HTTP 400
+  `Invalid or unsupported audio file` (the vLLM error text). The default
+  stays permissive. The Rust e2e harness (`tests/common::spawn_dummy`) now
+  starts the dummy in strict mode; `spawn_dummy_permissive` opts out.
+- e2e tests prove strict mode turns a header-only MP3 (ASR) and a 1x1 PNG
+  (VLM) into classified `http_status` 400 records.
+
+### Changed
+- `tests/e2e_asr.rs` uploads a generated 16 kHz mono PCM WAV sine tone
+  instead of a 30-byte fake MP3.
+
 ### Fixed
 - VLM accepts inline `data:<mime>;base64,<payload>` image URLs in prompt
   files. They were previously read as local file paths and failed with

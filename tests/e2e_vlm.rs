@@ -406,3 +406,45 @@ fn vlm_corrupt_data_url_is_a_named_error_record() {
         "data: URL must not be read as a path: {error}"
     );
 }
+
+fn one_pixel_png() -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("encode png");
+    bytes.into_inner()
+}
+
+/// Under -strict-media the dummy rejects a 1x1 image the way vision encoders
+/// do; the client records a classified HTTP error, not a crash.
+#[test]
+fn vlm_strict_media_rejects_one_pixel_image_as_classified_error() {
+    let run = |dummy: &common::Dummy| -> Vec<serde_json::Value> {
+        let fixture = fixture();
+        std::fs::write(&fixture.image, one_pixel_png()).expect("write 1x1 png");
+        run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 1, &[]);
+        request_records(&fixture.data_log)
+    };
+
+    let Some(strict) = spawn_dummy(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let records = run(&strict);
+    assert_eq!(records.len(), 1);
+    let error = &records[0]["error"];
+    assert_eq!(error["kind"], "http_status", "error record: {error}");
+    assert_eq!(error["status"], 400, "error record: {error}");
+
+    let Some(permissive) = common::spawn_dummy_permissive(&[]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let records = run(&permissive);
+    assert!(
+        records[0]["error"].is_null(),
+        "permissive dummy accepts a 1x1 image: {}",
+        records[0]["error"]
+    );
+}
