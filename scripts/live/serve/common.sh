@@ -16,6 +16,8 @@
 #   SERVE_OUT    directory for sut.json and the container log
 #                (default live-results/serve-<modality>)
 #   READY_TIMEOUT_S  seconds to wait for /v1/models (default 1800)
+#   SERVE_ARGS_OVERRIDE / SOURCES_OVERRIDE / SUT_NOTES_OVERRIDE  replace the
+#                launcher's flags, source URLs, and SUT notes (with MODEL=...)
 #
 # Subcommands: start (default) | stop | print | logs
 
@@ -28,20 +30,26 @@ serve_docker_cmd() {
              -v "${HF_HOME:-${HOME}/.cache/huggingface}:/root/.cache/huggingface")
   [[ -n "${HF_TOKEN:-}" ]] && cmd+=(-e HF_TOKEN)
   local e
-  for e in "${DOCKER_ENV[@]}"; do cmd+=(-e "${e}"); done
+  # ${a[@]+...} keeps empty arrays safe under set -u on bash 3.2 (macOS).
+  for e in ${DOCKER_ENV[@]+"${DOCKER_ENV[@]}"}; do cmd+=(-e "${e}"); done
   cmd+=("${IMAGE}")
-  if [[ ${#ENTRYPOINT_CMD[@]} -gt 0 ]]; then cmd+=("${ENTRYPOINT_CMD[@]}"); fi
-  cmd+=("${MODEL}" "${SERVE_ARGS[@]}")
+  cmd+=(${ENTRYPOINT_CMD[@]+"${ENTRYPOINT_CMD[@]}"})
+  cmd+=("${MODEL}" ${SERVE_ARGS[@]+"${SERVE_ARGS[@]}"})
   printf '%q ' "${cmd[@]}"
 }
 
 serve_gpu_json() {
+  local line=""
   if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits -i "${GPU_INDEX:-0}" \
-      | awk -F', ' '{printf "{\"model\":\"%s\",\"count\":1,\"memory_gb\":%d,\"driver\":\"NVIDIA %s\"}", $1, $2/1024, $3}'
-  else
-    echo '{"model":"not captured (nvidia-smi missing)","count":1,"memory_gb":null,"driver":"not captured"}'
+    line="$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits \
+      -i "${GPU_INDEX:-0}" 2>/dev/null | head -1 || true)"
   fi
+  if [[ -z "${line}" ]]; then
+    echo "warning: nvidia-smi unavailable or failed; SUT GPU fields marked not captured" >&2
+    echo '{"model":"not captured (nvidia-smi unavailable)","count":1,"memory_gb":null,"driver":"not captured"}'
+    return 0
+  fi
+  awk -F', ' '{printf "{\"model\":\"%s\",\"count\":1,\"memory_gb\":%d,\"driver\":\"NVIDIA %s\"}", $1, $2/1024, $3}' <<<"${line}"
 }
 
 serve_model_revision() {
@@ -79,6 +87,11 @@ serve_write_sut() {
 
 serve_main() {
   local sub="${1:-start}"
+  # Campaign overrides (space-separated; use --flag=value forms for values
+  # that contain spaces). Sources and notes for the override go in the SUT.
+  if [[ -n "${SERVE_ARGS_OVERRIDE:-}" ]]; then read -r -a SERVE_ARGS <<<"${SERVE_ARGS_OVERRIDE}"; fi
+  if [[ -n "${SOURCES_OVERRIDE:-}" ]]; then read -r -a SOURCES <<<"${SOURCES_OVERRIDE}"; fi
+  if [[ -n "${SUT_NOTES_OVERRIDE:-}" ]]; then SUT_NOTES="${SUT_NOTES_OVERRIDE}"; fi
   local name="metrum-live-${MODALITY}"
   local out="${SERVE_OUT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/live-results/serve-${MODALITY}}"
   local docker_cmd
@@ -99,9 +112,10 @@ serve_main() {
       command -v jq >/dev/null || serve_die "jq is required"
       mkdir -p "${out}"
       docker rm -f "${name}" >/dev/null 2>&1 || true
+      # SUT first, so a capture failure never leaves a container running.
+      serve_write_sut "${out}/sut.json" "${docker_cmd}"
       echo "# ${docker_cmd}" >&2
       eval "${docker_cmd}" >/dev/null
-      serve_write_sut "${out}/sut.json" "${docker_cmd}"
       local url="http://127.0.0.1:${PORT:-8000}/v1/models" deadline=$((SECONDS + ${READY_TIMEOUT_S:-1800}))
       until curl -fsS -o /dev/null --max-time 5 "${url}"; do
         if ! docker ps -q -f "name=^${name}$" | grep -q .; then

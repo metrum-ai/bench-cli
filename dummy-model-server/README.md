@@ -59,7 +59,8 @@ What it validates:
 - **Chat `image_url` parts** (`POST /v1/chat/completions`): every `data:` URL must
   be `data:<mime>;base64,<payload>`, decode as base64 (whitespace and missing
   padding tolerated), have a PNG, JPEG, GIF, or WebP header, and be at least 2x2
-  pixels. Failures return HTTP 400 with
+  pixels. BMP and TIFF are rejected even though vLLM (PIL) accepts them, so
+  keep strict-mode fixtures to the four formats above. Failures return HTTP 400 with
   `{"error":{"message":"Invalid image: <detail>","type":"invalid_request_error","code":400}}`.
 - **Audio uploads** (`POST /v1/audio/transcriptions`): the multipart `file` must be
   at least 1024 bytes and a recognized container. WAV files need a sane `fmt `

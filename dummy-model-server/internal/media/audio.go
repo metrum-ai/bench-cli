@@ -57,6 +57,16 @@ func ValidateAudio(b []byte) error {
 	if len(b) < MinAudioBytes {
 		return fmt.Errorf("audio payload too small: %d bytes (minimum %d)", len(b), MinAudioBytes)
 	}
+	return validateContainer(b)
+}
+
+// validateContainer dispatches on container magic. It is also used for the
+// bytes after an ID3v2 tag, because some FLAC, OGG, and WAV writers prepend
+// one and ffmpeg and libFLAC still decode those files.
+func validateContainer(b []byte) error {
+	if len(b) < 12 {
+		return errors.New("audio payload truncated after header")
+	}
 	switch {
 	case len(b) >= 12 && string(b[0:4]) == "RIFF" && string(b[8:12]) == "WAVE":
 		if allZero(b[wavHeaderBytes:]) {
@@ -79,6 +89,19 @@ func ValidateAudio(b []byte) error {
 	default:
 		return errors.New("unrecognized audio container (expected WAV, MP3, FLAC, OGG, M4A, or WebM)")
 	}
+}
+
+// isChunkID reports whether b[off:off+4] is a printable-ASCII RIFF chunk id.
+func isChunkID(b []byte, off int) bool {
+	if off < 0 || off+4 > len(b) {
+		return false
+	}
+	for _, c := range b[off : off+4] {
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func allZero(b []byte) bool {
@@ -159,8 +182,15 @@ func validateWAV(b []byte) error {
 		if size > remaining {
 			break
 		}
-		// Chunks are word-aligned: odd sizes carry one pad byte.
-		off = bodyStart + int(size) + int(size&1)
+		// Chunks are word-aligned: odd sizes carry one pad byte. Some
+		// writers omit it (libsndfile tolerates that), so fall back to the
+		// unpadded offset when the padded one does not start a chunk id.
+		next := bodyStart + int(size)
+		if size&1 == 1 && !isChunkID(b, next+1) && isChunkID(b, next) {
+			off = next
+		} else {
+			off = next + int(size&1)
+		}
 	}
 	if fmtChunk == nil {
 		return errors.New("WAV is missing fmt chunk")
@@ -296,6 +326,10 @@ func validateMP3(b []byte) error {
 		}
 		if start >= len(b) {
 			return errors.New("ID3v2 tag has no audio frames after it")
+		}
+		if rest := b[start:]; len(rest) >= 4 && (string(rest[0:4]) == "fLaC" ||
+			string(rest[0:4]) == "OggS" || string(rest[0:4]) == "RIFF") {
+			return validateContainer(rest)
 		}
 	}
 

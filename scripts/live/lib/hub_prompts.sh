@@ -12,8 +12,8 @@
 #   PROMPT_REVISION  main                      (resolved to a commit SHA in the report)
 #   PROMPT_PROFILE   chat-short                (256 / 64 tokens)
 #   PROMPT_SEED      7
-#   BENCH_BIN_DIR    directory holding the bench binaries (checked first, then
-#                    target/release, target/debug, PATH)
+#   BENCH_BIN_DIR    directory holding the bench binaries (checked first; see
+#                    scripts/live/lib/bench_bin.sh for the full order)
 # An explicit source wins over the Hub defaults:
 #   PROMPT_LOCAL_JSONL=/path/rows.jsonl    -> --local-jsonl
 #   PROMPT_LOCAL_PARQUET=/path/shard.parquet -> --local-parquet
@@ -21,15 +21,10 @@
 # one of the manipulation-resistant-prompts-* sets for fixed word counts.
 
 hub_prompts_bin() {
-  local root="$1" c
-  for c in ${BENCH_BIN_DIR:+"${BENCH_BIN_DIR}/metrum-ai-bench-cli-prompts"} \
-           "${root}/target/release/metrum-ai-bench-cli-prompts" \
-           "${root}/target/debug/metrum-ai-bench-cli-prompts"; do
-    [[ -x "${c}" ]] && { echo "${c}"; return 0; }
-  done
-  command -v metrum-ai-bench-cli-prompts 2>/dev/null && return 0
-  echo "error: metrum-ai-bench-cli-prompts not found; run cargo build --release" >&2
-  return 1
+  # Prebuilt binaries only; see scripts/live/lib/bench_bin.sh for the order.
+  # shellcheck source=scripts/live/lib/bench_bin.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/bench_bin.sh"
+  bench_bin_resolve "$1" metrum-ai-bench-cli-prompts
 }
 
 # hub_prompts_extract REPO_ROOT OUT_JSONL REPORT_JSON COUNT [extra prompts args...]
