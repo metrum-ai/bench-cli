@@ -71,6 +71,10 @@ enum Commands {
         /// Number of unary latency samples.
         #[arg(long, default_value_t = 3)]
         latency_samples: u32,
+        /// Extra JSON object merged into chat probe bodies (for example
+        /// `{"chat_template_kwargs":{"enable_thinking":false}}` on thinking models).
+        #[arg(long)]
+        extra_body_json: Option<String>,
         /// Also print the machine-readable JSON report after the table.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -238,6 +242,7 @@ fn run_preflight(args: Commands) -> ExitCode {
         connect_timeout,
         request_timeout,
         latency_samples,
+        extra_body_json,
         json,
     } = args
     else {
@@ -250,6 +255,7 @@ fn run_preflight(args: Commands) -> ExitCode {
         connect_timeout,
         request_timeout,
         latency_samples,
+        extra_body_json.as_deref(),
     ) {
         Ok(report) => {
             print!("{}", metrum_ai_bench::preflight::format_table(&report));

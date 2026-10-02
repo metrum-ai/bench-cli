@@ -69,11 +69,60 @@ records the value in the launch command and rules out a larger value. Sources:
 and `examples/generate/multimodal/audio_language_offline.py` in vLLM v0.30.0.
 `scripts/live/serve/asr.sh` uses this configuration.
 
-If valid WAV files still return `Invalid or unsupported audio file`, the
-image may be missing an audio decoder (vLLM reports a missing `soundfile`
-or `av` library with the same message). Check with
-`python -c "import soundfile, av"` inside the container, or force a backend
-with `--media-io-kwargs '{"audio": {"audio_backend": "soundfile"}}'`.
+#### Troubleshooting audio decoding
+
+If valid WAV files return `Invalid or unsupported audio file`, or every
+upload fails, suspect the server's audio decoder. vLLM 0.30.0 chooses the
+decoder with `--media-io-kwargs '{"audio": {"audio_backend": ...}}'`. The
+default, `auto`, tries soundfile, then torchcodec, then PyAV. Any other value
+uses only that backend, with no fallback
+([`vllm/multimodal/media/audio.py`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/multimodal/media/audio.py)).
+
+The stock `vllm/vllm-openai:v0.30.0` image does not include the
+`vllm[audio]` extra. `soundfile` and `av` are not installed, so
+`python -c "import soundfile, av"` fails even on a working server. The image
+ships torchcodec, and torchcodec decodes the uploads. As a result, each
+upload logs this line once and still succeeds:
+
+`ERROR ... Failed to load audio via soundfile: ImportError('Please install vllm[audio] for audio support')`
+
+On this image that ERROR is expected. In the 2026-10-02 widen ASR run on
+1x H100, all 1031 uploads logged it once each and returned HTTP 200.
+
+To check decoding:
+
+1. Send a real fixture straight to the server, without the bench:
+
+   ```bash
+   curl -sS http://127.0.0.1:8000/v1/audio/transcriptions \
+     -H 'Authorization: Bearer dummy' \
+     -F file=@test-data/asr/1089-134686-0030.wav \
+     -F model=openai/whisper-large-v3-turbo -F language=en -F response_format=json
+   ```
+
+   A working server answers HTTP 200 with the transcript
+   `Beware of making that mistake.`
+2. If that fails, search the server log (`docker logs metrum-live-asr` for
+   the launcher's container) for
+   `torchcodec unavailable (...); falling back to PyAV`. That WARNING, not the
+   soundfile ERROR, means torchcodec cannot decode. torchcodec needs both its
+   Python package and a system FFmpeg. `import torchcodec` alone is not a
+   check, because torchcodec loads FFmpeg only when it opens a file. The
+   stock image has no PyAV, so there is nothing left to fall back to.
+
+To fix a missing decoder:
+
+- Install the audio extra in a derived image, pinned to the installed
+  version so pip adds only the decoders: `pip install 'vllm[audio]==0.30.0'`.
+  This adds `av`, `scipy`, `soundfile`, `soxr`, and `mistral_common[audio]`.
+- Or select torchcodec explicitly:
+  `--media-io-kwargs '{"audio": {"audio_backend": "torchcodec"}}'`. This
+  also skips the soundfile attempt and its ERROR line. We have not measured
+  this setting.
+
+Do not set `audio_backend` to `soundfile` or `pyav` on the stock image. An
+explicit backend gets no fallback, so every upload fails while that library
+is missing. This comes from the v0.30.0 source; it was not run live.
 
 ### Other OpenAI-compatible backends
 

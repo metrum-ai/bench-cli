@@ -363,7 +363,7 @@ The `metrum-ai-bench-cli-strategic` runner adds concurrency/rate sweeps
 (`--sweep`), knee detection, multi-turn sessions, validity rules,
 server-metrics correlation, tagged telemetry NDJSON (`--ndjson` with
 `--telemetry` Prometheus scrapes; default exporter is the Metrum
-[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metric`), and
+[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metrics`), and
 CSV, HTML (`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP
 exports. See [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md) and
 [telemetry](docs/TELEMETRY.md).

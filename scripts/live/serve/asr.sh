@@ -25,12 +25,13 @@
 #   https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/
 #   https://github.com/vllm-project/vllm/blob/v0.30.0/examples/generate/multimodal/audio_language_offline.py
 # vLLM answers HTTP 400 "Invalid or unsupported audio file" both for bad
-# bytes and when an audio decoder library is missing from the image. If
-# valid WAVs from test-data/asr/ get that error, check the container with
-#   docker exec metrum-live-asr python -c "import soundfile, av"
-# and, if needed, add
-#   --media-io-kwargs '{"audio": {"audio_backend": "soundfile"}}'
-# (docs/features/multimodal_inputs.md in vLLM v0.30.0).
+# bytes and when an audio decoder library is missing from the image. Stock
+# vllm/vllm-openai:v0.30.0 decodes via torchcodec and often logs a soundfile
+# ImportError on every upload even when transcriptions succeed. Triage with:
+#   docker exec metrum-live-asr python -c "import torchcodec"
+# or by sending a real WAV from test-data/asr/. Prefer
+#   --media-io-kwargs '{"audio": {"audio_backend": "torchcodec"}}'
+# Do not force soundfile on the stock image (it is absent there). See docs/ASR.md.
 set -euo pipefail
 MODALITY=asr
 MODEL="${MODEL:-openai/whisper-large-v3-turbo}"
