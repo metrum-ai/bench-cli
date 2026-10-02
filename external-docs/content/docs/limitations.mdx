@@ -105,7 +105,8 @@ records work, not that a real server would accept the payload.
 With `-strict-media` (the Rust e2e harness default) it rejects with HTTP 400:
 
 - chat `image_url` parts with a `data:` URL that is not base64, does not
-  decode as PNG, JPEG, GIF, or WebP, or is smaller than 2x2;
+  decode as PNG, JPEG, GIF, or WebP, or is smaller than 2x2 (BMP and TIFF,
+  which vLLM accepts through PIL, are rejected here too);
 - transcription uploads under 1024 bytes, with an unknown container, a
   malformed WAV `fmt `/`data` chunk or MPEG frame header, or an all-zero body
   (message `Invalid or unsupported audio file`, as vLLM sends).
