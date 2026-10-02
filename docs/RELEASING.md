@@ -27,6 +27,30 @@ the README quickstart). The dummy is a static Go binary cross-compiled with
 `CGO_ENABLED=0` for the same four targets (Linux and macOS, `x86_64` and
 `aarch64`). It is not published to crates.io.
 
+## Live modality gate
+
+Every non-LLM test in CI runs against `dummy-model-server`, which cannot prove
+that a real server accepts the media we send. `.github/workflows/live-modality-smoke.yml`
+runs one smoke cell per modality (LLM, VLM, ASR, imagegen) on a real serving
+stack (`scripts/live/serve/*.sh`) and fails the cell through
+`scripts/live/assert_headline.sh`. It runs on `workflow_dispatch` and on `v*`
+tags, on the self-hosted runner label `gpu-h100`
+(`deploy/github-runners-bench-cli/MANUAL`, "GPU runner").
+
+A release is blocked until the gate is green for every modality the README
+claims. Link the green run in the release PR.
+
+| Variable | Effect |
+|----------|--------|
+| `LIVE_GATE_REQUIRED` | When `true`, `release.yml` calls the gate as job `live-gate`, and `github-release` and `crates-io` need it to succeed. The tag-triggered copy of the gate then skips so it does not run twice. |
+| `LIVE_HF_HOME` | Hugging Face cache path on the GPU host (default `/srv/hf-cache`). |
+
+`LIVE_GATE_REQUIRED` is off by default because no runner carries `gpu-h100`
+yet. With it on and no such runner, the `live-gate` jobs queue until GitHub
+times them out and the release never publishes. Turn it on once the GPU runner
+is registered and one manual dispatch is green; until then the rule above is
+enforced by review, not by the workflow.
+
 ## Never publish an rc
 
 Tags containing `-rc.` must never be published to crates.io. The `crates-io`

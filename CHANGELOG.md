@@ -26,7 +26,36 @@
 - Release archives include `NOTICE` and `THIRD_PARTY_LICENSES`, and the
   release smoke checks that the new fixtures are present.
 
+- Live modality gate. `.github/workflows/live-modality-smoke.yml` runs one
+  smoke cell per modality on a real serving stack (runner label `gpu-h100`)
+  on `workflow_dispatch` and `v*` tags. `scripts/live/serve/{llm,vlm,asr,imagegen}.sh`
+  start vLLM 0.30.0 (Qwen3-8B, Qwen3-VL-8B-Instruct, Whisper large-v3-turbo
+  with `--max-model-len 448`) and vllm-omni 0.30.0 (Z-Image-Turbo) and write
+  a SUT with the exact launch command and sources.
+  `scripts/live/local_smoke.sh --local --modality <m>` (also
+  `run_smoke.sh --local`) runs a cell on the same host.
+  `scripts/live/assert_headline.sh` fails a cell with 0 successes, a
+  success ratio below `MIN_SUCCESS_RATIO`, no `--require-sut`, ASR records
+  without WER/CER, VLM records without images, or imagegen without
+  decodable artifacts; CI runs its offline self-test.
+- `release.yml` job `live-gate` calls the live gate and blocks
+  `github-release` and `crates-io` when repository variable
+  `LIVE_GATE_REQUIRED` is `true` (off by default until a GPU runner exists).
+- `deploy/github-runners-bench-cli`: opt-in `runner-gpu` service (compose
+  profile `gpu`, labels from `GPU_LABELS`) with GPU reservation, host
+  networking, the host Docker socket, and a shared Hugging Face cache.
+
 ### Changed
+- LLM live scripts (`matrix_smoke.sh`, `campaign.sh`, `shadeform.sh run-llm`,
+  `run_smoke.sh`) extract prompts with `metrum-ai-bench-cli-prompts` through
+  `scripts/live/lib/hub_prompts.sh` instead of writing handmade JSONL.
+  Defaults are `metrum-ai/prompt-library`, config `sample`, profile
+  `chat-short`; `PROMPT_*` variables or a local JSONL/parquet override them.
+  The mix's dataset, revision SHA, profile, and row count are stamped into
+  the SUT.
+- Live VLM cells use `test-data/vlm/shapes-512.png` instead of a 2x2 PNG.
+- `run_smoke.sh` polls `/v1/models` with curl; it previously required a
+  `wait_for_vllm` binary that the project never shipped.
 - `test-data/dummy.mp3` is now `test-data/negative/header-only-invalid.mp3`.
   It was never audio (an MPEG frame header plus 100 zero bytes) and every
   real server rejects it. README, `docs/ASR.md`, and the docs site examples

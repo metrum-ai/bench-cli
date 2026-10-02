@@ -1,0 +1,96 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Metrum AI Bench CLI live modality gate: one smoke cell per modality on a
+# real serving stack (scripts/live/serve/*.sh), gated by
+# scripts/live/assert_headline.sh. Every other workflow runs against
+# dummy-model-server, which cannot prove media correctness.
+#
+# Runs on the self-hosted pool with the opt-in gpu-h100 label
+# (deploy/github-runners-bench-cli, profile `gpu`). Until a runner with that
+# label is registered, jobs queue and then time out.
+#
+# release.yml calls this workflow (workflow_call) when the repository
+# variable LIVE_GATE_REQUIRED is `true`; the tag trigger below then skips so
+# the gate does not run twice. See docs/RELEASING.md.
+name: live-modality-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  workflow_call:
+    inputs:
+      from_release:
+        description: Set by release.yml so the tag-triggered copy can skip
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One GPU host: never run two gates at once, never cancel a running gate.
+  group: live-modality-smoke
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: live ${{ matrix.modality }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      inputs.from_release == true ||
+      vars.LIVE_GATE_REQUIRED != 'true'
+    strategy:
+      fail-fast: false
+      # Each launcher binds port 8000 on the same GPU.
+      max-parallel: 1
+      matrix:
+        modality: [llm, vlm, asr, imagegen]
+    runs-on: [self-hosted, linux, x64, bench-cli, gpu-h100]
+    timeout-minutes: 90
+    env:
+      PORT: "8000"
+      HF_HOME: ${{ vars.LIVE_HF_HOME || '/srv/hf-cache' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      SERVE_OUT: ${{ github.workspace }}/live-results/serve-${{ matrix.modality }}
+      OUT: ${{ github.workspace }}/live-results/ci-${{ matrix.modality }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: build bench binaries
+        run: cargo build --release --bins
+      - name: start ${{ matrix.modality }} server
+        run: bash scripts/live/serve/${{ matrix.modality }}.sh start
+      - name: smoke and assert headline
+        env:
+          BENCH_BIN_DIR: ${{ github.workspace }}/target/release
+        run: |
+          bash scripts/live/local_smoke.sh --local --modality "${{ matrix.modality }}" \
+            --sut "${SERVE_OUT}/sut.json" --out "${OUT}"
+      - name: server log
+        if: always()
+        run: |
+          mkdir -p "${SERVE_OUT}"
+          docker logs "metrum-live-${{ matrix.modality }}" >"${SERVE_OUT}/server.log" 2>&1 || true
+      - name: stop server
+        if: always()
+        run: bash scripts/live/serve/${{ matrix.modality }}.sh stop
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: live-${{ matrix.modality }}
+          path: |
+            live-results/ci-${{ matrix.modality }}/results.jsonl
+            live-results/ci-${{ matrix.modality }}/sut.json
+            live-results/ci-${{ matrix.modality }}/assert.txt
+            live-results/ci-${{ matrix.modality }}/command.txt
+            live-results/ci-${{ matrix.modality }}/prompt-mix.json
+            live-results/ci-${{ matrix.modality }}/stdout.txt
+            live-results/ci-${{ matrix.modality }}/error.log
+            live-results/ci-${{ matrix.modality }}/artifacts/
+            live-results/serve-${{ matrix.modality }}/sut.json
+            live-results/serve-${{ matrix.modality }}/server.log
+          if-no-files-found: warn
+          retention-days: 30

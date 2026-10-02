@@ -252,7 +252,7 @@ jobs:
           test -f "${root}/THIRD_PARTY_LICENSES"
           test -f "${root}/test-data/asr/input.jsonl"
           test -f "${root}/test-data/asr/truth.jsonl"
-          test "$(ls "${root}"/test-data/asr/*.wav | wc -l)" -eq 3
+          wavs=("${root}"/test-data/asr/*.wav); test "${#wavs[@]}" -eq 3
           test -f "${root}/test-data/vlm/shapes-512.png"
           test -f "${root}/test-data/vlm/prompts.jsonl"
           test -f "${root}/test-data/negative/header-only-invalid.mp3"
@@ -295,7 +295,7 @@ jobs:
           test -f "${root}/THIRD_PARTY_LICENSES"
           test -f "${root}/test-data/asr/input.jsonl"
           test -f "${root}/test-data/asr/truth.jsonl"
-          test "$(ls "${root}"/test-data/asr/*.wav | wc -l)" -eq 3
+          wavs=("${root}"/test-data/asr/*.wav); test "${#wavs[@]}" -eq 3
           test -f "${root}/test-data/vlm/shapes-512.png"
           test -f "${root}/test-data/vlm/prompts.jsonl"
           test -f "${root}/test-data/negative/header-only-invalid.mp3"
@@ -362,11 +362,30 @@ jobs:
             external-docs/dist/metrum-ai-bench-cli-docs-versions.json
           if-no-files-found: error
 
+  live-gate:
+    # Real-backend smoke for every modality (live-modality-smoke.yml). Opt-in
+    # with repository variable LIVE_GATE_REQUIRED=true once a gpu-h100
+    # runner is registered; while unset the job is skipped and publishing
+    # proceeds as before. docs/RELEASING.md still requires a green gate.
+    needs: verify
+    if: vars.LIVE_GATE_REQUIRED == 'true'
+    uses: ./.github/workflows/live-modality-smoke.yml
+    with:
+      from_release: true
+    secrets: inherit
+
   github-release:
+    # always() so a skipped live-gate (variable unset) does not skip publish;
+    # every other dependency must still succeed.
     if: >-
-      github.event_name == 'push' ||
-      inputs.publish_release == true
-    needs: [artifact-sign, smoke-linux, smoke-macos, docs-bundle]
+      always() &&
+      needs.artifact-sign.result == 'success' &&
+      needs.smoke-linux.result == 'success' &&
+      needs.smoke-macos.result == 'success' &&
+      needs.docs-bundle.result == 'success' &&
+      (needs.live-gate.result == 'success' || needs.live-gate.result == 'skipped') &&
+      (github.event_name == 'push' || inputs.publish_release == true)
+    needs: [artifact-sign, smoke-linux, smoke-macos, docs-bundle, live-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -394,6 +413,10 @@ jobs:
     # Deliberate gate: never publish -rc. tags; require CRATES_IO_PUBLISH=true.
     # workflow_dispatch publish_crate is allowed only for non-rc release tags.
     if: >-
+      always() &&
+      needs.smoke-linux.result == 'success' &&
+      needs.smoke-macos.result == 'success' &&
+      (needs.live-gate.result == 'success' || needs.live-gate.result == 'skipped') &&
       vars.CRATES_IO_PUBLISH == 'true' &&
       (
         (
@@ -408,7 +431,7 @@ jobs:
           !contains(inputs.release_tag, '-rc.')
         )
       )
-    needs: [smoke-linux, smoke-macos]
+    needs: [smoke-linux, smoke-macos, live-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -70,5 +70,38 @@ services:
       DISABLE_AUTO_UPDATE: "true"
       RUNNER_WORKDIR: /tmp/runner-work
 
+  # Opt-in GPU runner for .github/workflows/live-modality-smoke.yml. Not
+  # started by `./pool start`; see MANUAL ("GPU runner").
+  runner-gpu:
+    <<: *runner
+    profiles: ["gpu"]
+    container_name: gha-bench-cli-gpu
+    # Launchers publish the model server on the host's port 8000; host
+    # networking lets the runner reach it at 127.0.0.1.
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
+    environment:
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-pikachu-bench-cli}-gpu
+      RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+      REPO_URL: ${REPO_URL:-https://github.com/metrum-ai/bench-cli}
+      ORG_NAME: ${ORG_NAME:-metrum-ai}
+      LABELS: ${GPU_LABELS:-self-hosted,linux,x64,bench-cli,gpu-h100}
+      EPHEMERAL: ${EPHEMERAL:-true}
+      DISABLE_AUTO_UPDATE: "true"
+      RUNNER_WORKDIR: /tmp/runner-work
+    volumes:
+      - runner-tools:/opt/hostedtoolcache
+      # The launchers run `docker run --gpus` against the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside and outside: the host daemon resolves the bind
+      # mount the launcher passes for the Hugging Face cache.
+      - ${HF_CACHE_DIR:-/srv/hf-cache}:${HF_CACHE_DIR:-/srv/hf-cache}
+
 volumes:
   runner-tools:
