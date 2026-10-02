@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Documentation
+- `docs/CLAIMS_LEDGER.md` separates `Verified-in-code` from
+  `Verified-live (<campaign id>, <date>)` and rates live status per
+  modality: LLM and VLM verified live in the 2026-10-01 readiness review,
+  ASR functional only (no WER yet), image generation not verified live.
+- README points to the ledger for live-verification status.
+- `docs/ASR.md`: valid-audio requirement, WER/CER from `--ground-truth`, and
+  Whisper `--max-model-len 448` on vLLM 0.30.0.
+- `docs/LIMITATIONS.md` (and the docs site): what `dummy-model-server`
+  does and does not validate, with and without `-strict-media`.
+- `docs/RELEASING.md`: a smoke cell with 0 successes blocks a release until
+  triaged in an issue.
+
 ### Added
 - `dummy-model-server -strict-media` rejects media a real server rejects:
   `data:` image URLs that are not base64, do not decode as PNG, JPEG, GIF,

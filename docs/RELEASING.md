@@ -51,6 +51,18 @@ times them out and the release never publishes. Turn it on once the GPU runner
 is registered and one manual dispatch is green; until then the rule above is
 enforced by review, not by the workflow.
 
+## Zero-success smoke cells block a release
+
+Any smoke cell (live gate, `matrix_smoke.sh`, `campaign.sh`, or a manual
+smoke cited in release notes) with 0 successful requests is a release
+blocker until it is triaged in a GitHub issue. The issue must state the
+cause (client bug, fixture, server configuration, or server bug) and either
+link the fix or record a decision, signed off in the issue, to ship with the
+modality marked unverified in [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). Recording
+the cell as "all-error measurements" in a results document is not triage.
+Campaign `matrix-20260915-195537` (0 of 472 ASR transcriptions succeeded) is
+the example this rule exists for.
+
 ## Never publish an rc
 
 Tags containing `-rc.` must never be published to crates.io. The `crates-io`
