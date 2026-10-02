@@ -12,6 +12,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/live/lib/hub_prompts.sh
+source "${SCRIPT_DIR}/lib/hub_prompts.sh"
 API_BASE="${SHADEFORM_API_BASE:-https://api.shadeform.ai/v1}"
 ENV_JSON="${ENV_JSON:-${REPO_ROOT}/env.json}"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/live-results}"
@@ -416,12 +418,9 @@ cmd_run_llm() {
   mkdir -p "${out_dir}"
   local prompts="${out_dir}/prompts.jsonl"
   if [[ ! -f "${prompts}" ]]; then
-    printf '%s\n' \
-      '{"prompt":"Say hello in one short sentence."}' \
-      '{"prompt":"What is 2+2? Reply with one number."}' \
-      '{"prompt":"Name a primary color."}' \
-      '{"prompt":"Reply with the word ok."}' \
-      >"${prompts}"
+    # Hub prompt mix (scripts/live/lib/hub_prompts.sh defaults).
+    hub_prompts_extract "${REPO_ROOT}" "${prompts}" "${out_dir}/prompt-mix.json" "${num_requests}"
+    echo "# $(hub_prompts_note "${out_dir}/prompt-mix.json")" >&2
   fi
 
   local bin
