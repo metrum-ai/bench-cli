@@ -43,6 +43,13 @@ for tool in curl tar md5sum ffmpeg ffprobe; do
 done
 
 mkdir -p "$CACHE" "$OUT"
+OUT="$(cd "$OUT" && pwd)"
+# Manifest paths are relative to the repository root (as the bench and the
+# release archive expect) when OUT is inside it, absolute otherwise.
+case "$OUT/" in
+  "$ROOT"/*) manifest_dir="${OUT#"$ROOT"/}" ;;
+  *) manifest_dir="$OUT" ;;
+esac
 tarball="${CACHE}/test-clean.tar.gz"
 
 expected_md5="$(curl -fsSL "$MD5_URL" | awk '$2 == "test-clean.tar.gz" {print $1}')"
@@ -81,7 +88,7 @@ for utt in "${UTTERANCES[@]}"; do
   [[ -n "$transcript" ]] || { echo "no transcript for $utt" >&2; exit 1; }
   duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$dst")"
   printf '{"id":"%s","transcript":"%s"}\n' "$utt" "$transcript" >> "${OUT}/truth.jsonl"
-  printf '{"id":"%s","path":"test-data/asr/%s.wav","format":"wav","duration":%.3f}\n' \
-    "$utt" "$utt" "$duration" >> "${OUT}/input.jsonl"
+  printf '{"id":"%s","path":"%s","format":"wav","duration":%.3f}\n' \
+    "$utt" "${manifest_dir}/${utt}.wav" "$duration" >> "${OUT}/input.jsonl"
   echo "wrote $dst (${duration}s)"
 done

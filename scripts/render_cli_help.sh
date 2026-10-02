@@ -30,10 +30,11 @@ done
 
 render_help() {
   local bin="$1"
+  shift
   # Skip ASCII banner / preamble; clap usage starts at "Usage:"
   # Unset API key env vars so clap does not embed live secrets into docs/CLI.md.
   env -u OPENAI_API_KEY -u METRUM_AI_BENCH_API_KEY \
-    "${BIN_DIR}/${bin}" --help 2>/dev/null | sed -n '/^Usage:/,$p'
+    "${BIN_DIR}/${bin}" "$@" --help 2>/dev/null | sed -n '/^Usage:/,$p'
 }
 
 {
@@ -53,6 +54,14 @@ render_help() {
     render_help "${bin}"
     echo '```'
     echo
+    if [[ "${bin}" == "metrum-ai-bench-cli" ]]; then
+      echo "### \`${bin} preflight\`"
+      echo
+      echo '```text'
+      render_help "${bin}" preflight
+      echo '```'
+      echo
+    fi
   done
 } >"${OUT}"
 

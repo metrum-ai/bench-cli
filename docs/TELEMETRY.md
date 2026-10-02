@@ -3,10 +3,16 @@
 
 # Strategic telemetry (Prometheus scrape)
 
+**Search first, then check the path.** Before a run, confirm the exporter's
+current release, its listen port, and the path your installed binary serves
+(`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/metrics`). The
+Metrum all-smi fork v0.26.3-metrum.4 serves **`/metrics`**. Its `/metric`
+returned HTTP 404 on 2026-10-02, although earlier repo docs gave `/metric`.
+
 `metrum-ai-bench-cli-strategic` optionally scrapes Prometheus text or
 OpenMetrics exposition during a sweep and writes tagged NDJSON rows beside
 request and stage rows. Hardware and engine signals reach the client only
-through HTTP GET of `/metrics` (or `/metric` on the Metrum all-smi fork). No
+through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
 source, not a crate dependency.
 
@@ -26,7 +32,7 @@ still feeds the existing strategic correlation path only.
 Example:
 
 ```bash
-# Default smoke: Metrum all-smi fork on loopback /metric
+# Default smoke: Metrum all-smi fork on loopback /metrics
 # Prefer a release binary (x86_64 example):
 curl -fsSL -o /tmp/all-smi.tgz \
   https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
@@ -47,7 +53,7 @@ metrum-ai-bench-cli-strategic \
 The checked-in default is the Metrum fork of all-smi:
 
 - Install: https://github.com/chetan-metrum-ai/all-smi
-- Listen: `http://127.0.0.1:9090/metric` (fork path; upstream lablup uses `/metrics`)
+- Listen: `http://127.0.0.1:9090/metrics`. The same path as upstream lablup; `/metric` is not served. The API binds `0.0.0.0` with no bind flag, so firewall port 9090 on shared hosts.
 - Example YAML: [docs/telemetry/examples/all-smi.yaml](telemetry/examples/all-smi.yaml)
 
 Bind exporters to `127.0.0.1` on the serving host when possible. Example YAMLs
@@ -146,16 +152,15 @@ Energy cross-check (counter Δ vs trapezoid ∫ power):
 SELECT 'see docs/queries/energy_crosscheck.sql' AS recipe;
 ```
 
-## Why only `/metrics` (and `/metric` for all-smi)
+## Why only `/metrics`
 
 One scrape is one keep-alive HTTP GET plus a streaming text parse. Cost stays
 on the order of a few milliseconds of client CPU and a small body (bounded by
 `max_body_bytes`, default 16 MiB). The CLI never links vendor SDKs, never
 opens BMC sessions, and never speaks Redfish or IPMI JSON: those surfaces
 already have Prometheus exporters. Adding Gaudi, ROCm, or a new engine is a
-YAML `include` list. The Metrum all-smi fork exposes exposition at `/metric`
-while keeping the same Prometheus text format; other exporters use `/metrics`
-(Redfish multi-target uses `/redfish?target=...`).
+YAML `include` list. The Metrum all-smi fork and the other exporters here use
+`/metrics` (Redfish multi-target uses `/redfish?target=...`).
 
 ## Why not per-request telemetry as truth
 

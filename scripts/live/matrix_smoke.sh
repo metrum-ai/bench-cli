@@ -12,6 +12,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/live/lib/hub_prompts.sh
+source "${SCRIPT_DIR}/lib/hub_prompts.sh"
+# shellcheck source=scripts/live/lib/bench_bin.sh
+source "${SCRIPT_DIR}/lib/bench_bin.sh"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/live-results}"
 SHADE="${SCRIPT_DIR}/shadeform.sh"
 
@@ -77,14 +81,8 @@ fi
 export VLLM_IMAGE ENGINE
 
 resolve_bin() {
-  local want="$1"
-  for candidate in \
-    "${REPO_ROOT}/target/release/${want}" \
-    "${REPO_ROOT}/target/debug/${want}"; do
-    [[ -x "${candidate}" ]] && { echo "${candidate}"; return 0; }
-  done
-  command -v "${want}" >/dev/null 2>&1 && { command -v "${want}"; return 0; }
-  die "binary not found: ${want}"
+  # Prebuilt binaries only (scripts/live/lib/bench_bin.sh); never compiles.
+  bench_bin_resolve "${REPO_ROOT}" "$1" || die "binary not found: $1"
 }
 
 wait_http() {
@@ -115,16 +113,16 @@ nreq_for() {
 }
 
 write_isl_prompts() {
+  # Hub prompt mix (scripts/live/lib/hub_prompts.sh) targeted at
+  # ISL_TOKENS x MAX_TOKENS, unless PROMPT_PROFILE names a profile. The first
+  # cell's mix is stamped into the campaign SUT notes.
   local path="$1" n="$2"
-  python3 - <<'PY' "${path}" "${n}" "${ISL_TOKENS}"
-import json, pathlib, sys
-path, n, isl = pathlib.Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-# ~1 token ≈ 1 word for this pad (conservative ISL targeting).
-pad = ("benchmark " * isl).strip()
-with path.open("w") as f:
-    for i in range(n):
-        f.write(json.dumps({"prompt": f"Cell {i}. Continue after this context:\n{pad}"}) + "\n")
-PY
+  local target=(--isl-target "${ISL_TOKENS}" --osl-target "${MAX_TOKENS}")
+  [[ -n "${PROMPT_PROFILE:-}" ]] && target=(--profile "${PROMPT_PROFILE}")
+  hub_prompts_extract "${REPO_ROOT}" "${path}" "${path%.jsonl}.mix.json" "${n}" "${target[@]}"
+  if [[ -f "${root}/sut.json" ]] && ! jq -e '.extra.prompt_dataset' "${root}/sut.json" >/dev/null; then
+    hub_prompts_stamp_sut "${root}/sut.json" "${path%.jsonl}.mix.json"
+  fi
 }
 
 install_ttl() {
@@ -323,23 +321,14 @@ run_vlm_cell() {
   nreq="$(nreq_for "${conc}")"
   out="${root}/vlm/${model//\//_}/${cell}"
   mkdir -p "${out}" "${root}/fixtures"
-  img="${root}/fixtures/pixel.png"
-  if [[ ! -f "${img}" ]]; then
-    python3 - <<'PY' "${img}"
-import struct, zlib, pathlib, sys
-def chunk(tag, data):
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-raw = b"\x00\xff\x00\x00\x00\xff\x00" + b"\x00\x00\xff\x00\xff\x00\x00"
-pathlib.Path(sys.argv[1]).write_bytes(
-    b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
-    + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
-PY
-  fi
+  # 512x512 fixture (test-data/vlm); real vision encoders reject tiny images.
+  img="${REPO_ROOT}/test-data/vlm/shapes-512.png"
+  [[ -f "${img}" ]] || die "missing ${img} (scripts/gen_vlm_fixture.py)"
   prompts="${out}/prompts.jsonl"
   : >"${prompts}"
   local i
   for ((i = 0; i < nreq + 8; i++)); do
-    # Pad text side toward ISL; image is tiny fixture for smoke wiring.
+    # Pad text side toward ISL; the image is the 512x512 shapes fixture.
     pad="$(python3 -c "print(('vision context '*(${ISL_TOKENS}//3)).strip())")"
     jq -nc --arg p "Describe briefly. ${pad} cell=${i}" --arg u "${img}" \
       '{prompt:$p, image_url:$u}' >>"${prompts}"

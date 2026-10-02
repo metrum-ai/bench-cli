@@ -11,6 +11,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/live/lib/hub_prompts.sh
+source "${SCRIPT_DIR}/lib/hub_prompts.sh"
+# shellcheck source=scripts/live/lib/bench_bin.sh
+source "${SCRIPT_DIR}/lib/bench_bin.sh"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/live-results}"
 SHADE="${SCRIPT_DIR}/shadeform.sh"
 LANES="${CAMPAIGN_LANES:-llm vlm}"
@@ -55,21 +59,8 @@ cmd="${1:-plan}"
 shift || true
 
 resolve_bin() {
-  local want="$1"
-  local candidate
-  for candidate in \
-    "${REPO_ROOT}/target/release/${want}" \
-    "${REPO_ROOT}/target/debug/${want}"; do
-    if [[ -x "${candidate}" ]]; then
-      echo "${candidate}"
-      return 0
-    fi
-  done
-  if command -v "${want}" >/dev/null 2>&1; then
-    command -v "${want}"
-    return 0
-  fi
-  die "binary not found: ${want}"
+  # Prebuilt binaries only (scripts/live/lib/bench_bin.sh); never compiles.
+  bench_bin_resolve "${REPO_ROOT}" "$1" || die "binary not found: $1"
 }
 
 wait_http() {
@@ -522,13 +513,13 @@ PY
 }
 
 write_llm_prompts() {
-  local path="$1"
-  local n="$2"
-  local i
-  : >"${path}"
-  for ((i = 0; i < n; i++)); do
-    printf '{"prompt":"Campaign prompt %s. Reply in one short sentence about throughput testing."}\n' "${i}" >>"${path}"
-  done
+  # Hub prompt mix (scripts/live/lib/hub_prompts.sh; default chat-short on
+  # metrum-ai/prompt-library sample). Stamped into the SUT notes once.
+  local path="$1" n="$2"
+  hub_prompts_extract "${REPO_ROOT}" "${path}" "${path%.jsonl}.mix.json" "${n}"
+  if [[ -f "${root}/sut.json" ]] && ! jq -e '.extra.prompt_dataset' "${root}/sut.json" >/dev/null; then
+    hub_prompts_stamp_sut "${root}/sut.json" "${path%.jsonl}.mix.json"
+  fi
 }
 
 write_vlm_prompts() {
@@ -578,22 +569,9 @@ run_vlm_cell() {
   local url="$1" cell="$2" conc="$3" nreq="$4"
   local out="${root}/vlm/${cell}"
   mkdir -p "${out}"
-  local img="${root}/fixtures/pixel.png"
-  mkdir -p "${root}/fixtures"
-  if [[ ! -f "${img}" ]]; then
-    python3 - <<'PY' "${img}"
-import struct, zlib, pathlib, sys
-def chunk(tag, data):
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-sig = b"\x89PNG\r\n\x1a\n"
-ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
-# filter byte + RGB for 2 pixels per row, two rows
-raw = b"\x00\xff\x00\x00\x00\xff\x00" + b"\x00\x00\xff\x00\xff\x00\x00"
-idat = chunk(b"IDAT", zlib.compress(raw))
-iend = chunk(b"IEND", b"")
-pathlib.Path(sys.argv[1]).write_bytes(sig + ihdr + idat + iend)
-PY
-  fi
+  # 512x512 fixture (test-data/vlm); real vision encoders reject tiny images.
+  local img="${REPO_ROOT}/test-data/vlm/shapes-512.png"
+  [[ -f "${img}" ]] || die "missing ${img} (scripts/gen_vlm_fixture.py)"
   local prompts="${out}/prompts.jsonl"
   write_vlm_prompts "${prompts}" "${img}" "$((nreq + 8))"
   local bin
