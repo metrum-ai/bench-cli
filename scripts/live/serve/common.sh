@@ -16,6 +16,8 @@
 #   SERVE_OUT    directory for sut.json and the container log
 #                (default live-results/serve-<modality>)
 #   READY_TIMEOUT_S  seconds to wait for /v1/models (default 1800)
+#   SERVE_ARGS_OVERRIDE / SOURCES_OVERRIDE / SUT_NOTES_OVERRIDE  replace the
+#                launcher's flags, source URLs, and SUT notes (with MODEL=...)
 #
 # Subcommands: start (default) | stop | print | logs
 
@@ -85,6 +87,11 @@ serve_write_sut() {
 
 serve_main() {
   local sub="${1:-start}"
+  # Campaign overrides (space-separated; use --flag=value forms for values
+  # that contain spaces). Sources and notes for the override go in the SUT.
+  if [[ -n "${SERVE_ARGS_OVERRIDE:-}" ]]; then read -r -a SERVE_ARGS <<<"${SERVE_ARGS_OVERRIDE}"; fi
+  if [[ -n "${SOURCES_OVERRIDE:-}" ]]; then read -r -a SOURCES <<<"${SOURCES_OVERRIDE}"; fi
+  if [[ -n "${SUT_NOTES_OVERRIDE:-}" ]]; then SUT_NOTES="${SUT_NOTES_OVERRIDE}"; fi
   local name="metrum-live-${MODALITY}"
   local out="${SERVE_OUT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/live-results/serve-${MODALITY}}"
   local docker_cmd
