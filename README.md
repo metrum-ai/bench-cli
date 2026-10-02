@@ -119,6 +119,11 @@ cargo test --all-targets
 | `metrum-ai-bench-cli-strategic` | Concurrency/rate sweeps, knee, sessions, exports | Capacity planning and multi-turn validity (separate binary, not a unified subcommand) |
 | `metrum-ai-bench-cli-mock-server` | Deterministic OpenAI-compatible mock for strategic fixtures | Local strategic tests without the Go dummy |
 
+Which server to run for each modality (vLLM for LLM, VLM, and ASR; vLLM-Omni
+for image generation), with launchers and upstream links, is in
+[docs/SERVING.md](docs/SERVING.md). Modality guides:
+[ASR](docs/ASR.md) and [image generation](docs/IMAGEGEN.md).
+
 The preferred entry point for modalities is `metrum-ai-bench-cli` with those
 subcommands. Modality binaries (`metrum-ai-bench-cli-llm`, and so on) can also
 be invoked directly. As of **1.3.0**, deprecated `metrumbench-*` and pre-1.2.0
@@ -230,6 +235,8 @@ Optional ASR ground truth is JSONL with matching `id` and `transcript`.
 WER/CER use `--normalizer` (`whisper-english` default, `whisper-basic`, or
 `none`); the choice is recorded in `config.normalizer`. See
 [docs/ASR.md](docs/ASR.md) for more detail.
+For image generation flags and server defaults, see
+[docs/IMAGEGEN.md](docs/IMAGEGEN.md).
 
 **Imagegen:** pass `--prompt` once, or `--prompts` JSONL:
 
@@ -361,7 +368,8 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
-and [known limitations](docs/LIMITATIONS.md).
+[serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
+[image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
 
 ## Security and provenance
 

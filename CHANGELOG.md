@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Documentation
+- `docs/SERVING.md`: one table mapping each modality to its recommended
+  engine (vLLM, SGLang, vLLM multimodal, vLLM speech-to-text, vLLM-Omni),
+  example model, `scripts/live/serve/` launcher, upstream docs, and ledger
+  status, plus engine notes that change results.
+- `docs/IMAGEGEN.md`: new guide for `metrum-ai-bench-cli-imagegen` on
+  vLLM-Omni. It covers request knobs and their server defaults (50 steps
+  when `num_inference_steps` is omitted versus 9 for Z-Image-Turbo),
+  `b64_json` responses, artifacts, and the not-verified-live status.
+- `docs/ASR.md`: a Serving frameworks section (vLLM speech-to-text with the
+  launcher and upstream links, Whisper `--max-model-len 448`, and other
+  `/v1/audio/transcriptions` backends). It links vLLM's audio docs instead of
+  listing codecs.
+- README and `scripts/live/README.md` link the new guides.
 - `docs/CLAIMS_LEDGER.md` separates `Verified-in-code` from
   `Verified-live (<campaign id>, <date>)` and rates live status per
   modality: LLM and VLM verified live in the 2026-10-01 readiness review,

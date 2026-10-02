@@ -20,6 +20,19 @@ scripts/live/serve/asr.sh stop
 
 `scripts/live/run_smoke.sh --local --modality <m>` is the same command.
 
+Which engine to use for each modality, the upstream docs for it, and the
+pitfalls that change results are in the guides, not here:
+[docs/SERVING.md](../../docs/SERVING.md) (index),
+[docs/ASR.md](../../docs/ASR.md) (vLLM speech-to-text, Whisper
+`--max-model-len 448`), and [docs/IMAGEGEN.md](../../docs/IMAGEGEN.md)
+(vLLM-Omni, steps and guidance defaults).
+
+For a Shadeform VM that serves each modality in turn over SSH, with all-smi
+telemetry, use `widen_oss_modalities.sh` (`up` holds the VM with a delete
+trap), `widen_cell.sh` (one cell plus telemetry sidecars on the GPU host),
+and `telemetry_sidecar.py` (Prometheus poller for the modality binaries,
+which have no `--telemetry` flag).
+
 | Modality | Launcher | Stack (researched 2026-10-02; sources in each script) | Smoke input |
 |---|---|---|---|
 | llm | `serve/llm.sh` | vLLM 0.30.0, `Qwen/Qwen3-8B`, `--reasoning-parser qwen3 --max-model-len 32768` | Hub mix: `metrum-ai/prompt-library`, config `sample`, profile `chat-short`; thinking disabled per request |
