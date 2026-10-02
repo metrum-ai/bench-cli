@@ -371,25 +371,23 @@ run_asr_cell() {
   nreq="$(nreq_for "${conc}")"
   out="${root}/asr/${model//\//_}/${cell}"
   mkdir -p "${out}" "${root}/fixtures"
-  # Reuse repo fixture if present; else synthesize tiny wav metadata pointing at dummy.mp3
-  local audio="${REPO_ROOT}/test-data/dummy.mp3"
-  [[ -f "${audio}" ]] || audio="${root}/fixtures/dummy.mp3"
-  if [[ ! -f "${audio}" ]]; then
-    printf 'ID3' >"${audio}"  # minimal placeholder; server may error - recorded
-  fi
+  # Real LibriSpeech test-clean speech (test-data/asr, CC BY 4.0) with exact
+  # transcripts, so cells report WER and CER. Rows repeat the three clips.
+  local fixtures="${REPO_ROOT}/test-data/asr"
+  [[ -f "${fixtures}/input.jsonl" && -f "${fixtures}/truth.jsonl" ]] \
+    || die "missing ${fixtures}/input.jsonl or truth.jsonl (see scripts/fetch_asr_fixtures.sh)"
   input_jsonl="${out}/input.jsonl"
   : >"${input_jsonl}"
   local i
   for ((i = 0; i < nreq + 8; i++)); do
-    jq -nc --arg id "a${i}" --arg p "${audio}" \
-      '{id:$id, path:$p, duration_s:1.0}' >>"${input_jsonl}"
+    jq -c --arg root "${REPO_ROOT}" '.path = ($root + "/" + .path)' "${fixtures}/input.jsonl" >>"${input_jsonl}"
   done
   bin="$(resolve_bin metrum-ai-bench-cli-asr)"
   {
     echo "${bin}"
     printf ' %q' --url "${url}" --api-key none --scenario "matrix-asr-${cell}" \
       --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
-      --input "${input_jsonl}" --model "${model}" \
+      --input "${input_jsonl}" --ground-truth "${fixtures}/truth.jsonl" --model "${model}" \
       --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
       --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut
     echo
@@ -397,7 +395,7 @@ run_asr_cell() {
   set +e
   "${bin}" --url "${url}" --api-key none --scenario "matrix-asr-${cell}" \
     --num-requests "${nreq}" --concurrency "${conc}" --warmup-requests "${WARMUP}" --seed "${SEED}" \
-    --input "${input_jsonl}" --model "${model}" \
+    --input "${input_jsonl}" --ground-truth "${fixtures}/truth.jsonl" --model "${model}" \
     --data-log "${out}/results.jsonl" --debug-log "${out}/debug.log" \
     --error-log "${out}/error.log" --log-level warn --sut "${root}/sut.json" --require-sut | tee "${out}/stdout.txt"
   echo $? >"${out}/exit_code.txt"

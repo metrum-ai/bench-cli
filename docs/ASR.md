@@ -7,7 +7,7 @@
 endpoints. Its input is JSONL:
 
 ```json
-{"id":"sample-1","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}
+{"id":"1089-134686-0030","path":"test-data/asr/1089-134686-0030.wav","format":"wav","duration":2.715}
 ```
 
 Optional ground truth is JSONL with matching `id` and `transcript` fields.

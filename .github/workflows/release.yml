@@ -157,7 +157,7 @@ jobs:
           test -x "${root}/bin/metrum-ai-bench-cli"
           test -x "${root}/bin/metrum-ai-bench-cli-mock-server"
           test -x "${root}/bin/dummy-model-server"
-          cp LICENSE README.md TRADEMARKS.md "${root}/"
+          cp LICENSE NOTICE THIRD_PARTY_LICENSES README.md TRADEMARKS.md "${root}/"
           mkdir -p "${root}/docs"
           cp docs/RESULTS_PUBLICATION_POLICY.md docs/CLAIMS_LEDGER.md \
              docs/NAMING.md "${root}/docs/"
@@ -248,6 +248,15 @@ jobs:
           test -f "${root}/docs/CLAIMS_LEDGER.md"
           test -f "${root}/examples/sut.example.json"
           test -f "${root}/test-data/llm-hi.jsonl"
+          test -f "${root}/NOTICE"
+          test -f "${root}/THIRD_PARTY_LICENSES"
+          test -f "${root}/test-data/asr/input.jsonl"
+          test -f "${root}/test-data/asr/truth.jsonl"
+          test "$(ls "${root}"/test-data/asr/*.wav | wc -l)" -eq 3
+          test -f "${root}/test-data/vlm/shapes-512.png"
+          test -f "${root}/test-data/vlm/prompts.jsonl"
+          test -f "${root}/test-data/negative/header-only-invalid.mp3"
+          test ! -e "${root}/test-data/dummy.mp3"
           "${root}/bin/metrum-ai-bench-cli" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench-cli" selftest
           "${root}/bin/metrum-ai-bench-cli-mock-server" --help | grep -qi mock
@@ -282,6 +291,15 @@ jobs:
           test -f "${root}/docs/CLAIMS_LEDGER.md"
           test -f "${root}/examples/sut.example.json"
           test -f "${root}/test-data/llm-hi.jsonl"
+          test -f "${root}/NOTICE"
+          test -f "${root}/THIRD_PARTY_LICENSES"
+          test -f "${root}/test-data/asr/input.jsonl"
+          test -f "${root}/test-data/asr/truth.jsonl"
+          test "$(ls "${root}"/test-data/asr/*.wav | wc -l)" -eq 3
+          test -f "${root}/test-data/vlm/shapes-512.png"
+          test -f "${root}/test-data/vlm/prompts.jsonl"
+          test -f "${root}/test-data/negative/header-only-invalid.mp3"
+          test ! -e "${root}/test-data/dummy.mp3"
           "${root}/bin/metrum-ai-bench-cli" --help | grep -qi benchmark
           "${root}/bin/metrum-ai-bench-cli" selftest
           "${root}/bin/metrum-ai-bench-cli-mock-server" --help | grep -qi mock

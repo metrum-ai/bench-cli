@@ -14,7 +14,26 @@
 - e2e tests prove strict mode turns a header-only MP3 (ASR) and a 1x1 PNG
   (VLM) into classified `http_status` 400 records.
 
+- Real media fixtures. `test-data/asr/` has three LibriSpeech `test-clean`
+  utterances (CC BY 4.0) as 16 kHz mono WAV, 395 KB in total, with exact
+  transcripts in `truth.jsonl` and an `input.jsonl` manifest, so ASR
+  quickstarts report WER and CER. `scripts/fetch_asr_fixtures.sh`
+  regenerates them byte for byte. `test-data/vlm/shapes-512.png` is a
+  512x512 PNG with shapes and a word, written by
+  `scripts/gen_vlm_fixture.py`, plus `test-data/vlm/prompts.jsonl`.
+- `tests/e2e_fixtures.rs` checks that the shipped fixtures pass
+  `-strict-media` and that the negative fixture does not.
+- Release archives include `NOTICE` and `THIRD_PARTY_LICENSES`, and the
+  release smoke checks that the new fixtures are present.
+
 ### Changed
+- `test-data/dummy.mp3` is now `test-data/negative/header-only-invalid.mp3`.
+  It was never audio (an MPEG frame header plus 100 zero bytes) and every
+  real server rejects it. README, `docs/ASR.md`, and the docs site examples
+  use `test-data/asr/` and `test-data/vlm/` instead.
+- `scripts/live/matrix_smoke.sh` ASR cells upload the LibriSpeech clips with
+  `--ground-truth`, and the manifest uses `duration` (the old `duration_s`
+  key was ignored by `metrum-ai-bench-cli-asr`).
 - `tests/e2e_asr.rs` uploads a generated 16 kHz mono PCM WAV sine tone
   instead of a 30-byte fake MP3.
 

@@ -205,7 +205,7 @@ hint). Examples:
 
 ```json
 {"prompt":"Describe the image.","image_urls":["https://example.com/a.png"]}
-{"prompt":"Count the objects.","image_url":"test-data/tiny.png"}
+{"prompt":"Name the shapes and the word.","image_url":"test-data/vlm/shapes-512.png"}
 {"prompt":"What color is this?","image_url":"data:image/png;base64,iVBORw0KGgo..."}
 ```
 
@@ -219,7 +219,7 @@ from the decoded bytes. Non-base64 `data:` URLs are rejected.
 **ASR**
 
 ```json
-{"id":"sample-1","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}
+{"id":"1089-134686-0030","path":"test-data/asr/1089-134686-0030.wav","format":"wav","duration":2.715}
 {"id":"sample-2","url":"https://example.com/clip.wav","format":"wav","duration":1.5}
 ```
 
@@ -323,16 +323,15 @@ For deterministic strategic fixtures, the Rust mock server binary is
 Compact VLM / ASR / imagegen examples (second shell, after the dummy is up):
 
 ```bash
-printf '%s\n' '{"prompt":"Hi","image_url":"test-data/tiny.png"}' > /tmp/vlm.jsonl
 target/release/metrum-ai-bench-cli-vlm --url http://127.0.0.1:18321/v1/chat/completions \
   --api-key dummy --scenario vlm --num-requests 4 --concurrency 2 \
-  --prompts /tmp/vlm.jsonl --model dummy --max-tokens 16 \
+  --prompts test-data/vlm/prompts.jsonl --model dummy --max-tokens 16 \
   --data-log /tmp/vlm.jsonl.out --streaming
 
-printf '%s\n' '{"id":"a","path":"test-data/dummy.mp3","format":"mp3","duration":2.0}' > /tmp/asr.jsonl
 target/release/metrum-ai-bench-cli-asr --url http://127.0.0.1:18321/v1/audio/transcriptions \
   --api-key dummy --scenario asr --num-requests 4 --concurrency 2 \
-  --input /tmp/asr.jsonl --model dummy --data-log /tmp/asr.jsonl.out
+  --input test-data/asr/input.jsonl --ground-truth test-data/asr/truth.jsonl \
+  --model dummy --data-log /tmp/asr.jsonl.out
 
 target/release/metrum-ai-bench-cli-imagegen --url http://127.0.0.1:18321/v1 \
   --api-key dummy --scenario img --num-requests 2 --concurrency 1 \
