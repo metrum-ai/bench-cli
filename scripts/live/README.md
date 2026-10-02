@@ -20,6 +20,20 @@ scripts/live/serve/asr.sh stop
 
 `scripts/live/run_smoke.sh --local --modality <m>` is the same command.
 
+**Search first and reuse binaries.** Before each run, web-search the current
+vendor docs for the exact model and engine version, and override the launcher
+(`MODEL=`, `SERVE_ARGS_OVERRIDE=`, `SOURCES_OVERRIDE=`, `SUT_NOTES_OVERRIDE=`)
+when they differ from the pins here. The scripts resolve prebuilt binaries
+through `lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
+`target/release`, then `target/rel-user/release`, then `PATH`. They fail
+clearly instead of compiling. `local_smoke.sh` records the binary path,
+`--version`, and the checkout in the SUT.
+
+**Shadeform key.** When both an exported `SHADEFORM_API_KEY` and `env.json`
+are set and disagree, `shadeform.sh` prefers `env.json` and warns on stderr
+(without printing key material). Confirm every delete with
+`GET /instances/<id>/info` after `down`.
+
 Which engine to use for each modality, the upstream docs for it, and the
 pitfalls that change results are in the guides, not here:
 [docs/SERVING.md](../../docs/SERVING.md) (index),
@@ -35,9 +49,9 @@ which have no `--telemetry` flag).
 
 | Modality | Launcher | Stack (researched 2026-10-02; sources in each script) | Smoke input |
 |---|---|---|---|
-| llm | `serve/llm.sh` | vLLM 0.30.0, `Qwen/Qwen3-8B`, `--reasoning-parser qwen3 --max-model-len 32768` | Hub mix: `metrum-ai/prompt-library`, config `sample`, profile `chat-short`; thinking disabled per request |
-| vlm | `serve/vlm.sh` | vLLM 0.30.0, `Qwen/Qwen3-VL-8B-Instruct`, Qwen3-VL recipe flags | `test-data/vlm/prompts.jsonl` (512x512 PNG) |
-| asr | `serve/asr.sh` | vLLM 0.30.0, `openai/whisper-large-v3-turbo`, `--max-model-len 448` | `test-data/asr/` LibriSpeech clips with `--ground-truth` |
+| llm | `serve/llm.sh` | Regular vLLM 0.30.0, `Qwen/Qwen3-8B`, `--reasoning-parser qwen3 --max-model-len 32768` | Hub mix: `metrum-ai/prompt-library`, config `sample`, profile `chat-short`; thinking disabled per request |
+| vlm | `serve/vlm.sh` | Regular vLLM 0.30.0, `Qwen/Qwen3-VL-8B-Instruct`, Qwen3-VL recipe flags | `test-data/vlm/prompts.jsonl` (512x512 PNG) |
+| asr | `serve/asr.sh` | Default `ASR_STACK=vllm`: vLLM 0.30.0 speech-to-text, `openai/whisper-large-v3-turbo`, `--max-model-len 448`. `ASR_STACK=omni`: vllm-omni 0.30.0 `--omni`, the intended stack, blocked until vllm-omni#5722 (no `/v1/audio/transcriptions` under `--omni`) | `test-data/asr/` LibriSpeech clips with `--ground-truth` |
 | imagegen | `serve/imagegen.sh` | vllm-omni 0.30.0, `Tongyi-MAI/Z-Image-Turbo`, `--omni` | 1024x1024, 9 steps, guidance 0.0 |
 
 Launchers take `start` (default), `stop`, `print` (show the docker command),

@@ -5,7 +5,7 @@
 
 metrum-ai-bench-cli-{llm,vlm,asr} have no --telemetry flag (only the
 strategic binary scrapes). This sidecar polls a Prometheus text endpoint, by
-default the Metrum all-smi fork at http://127.0.0.1:9090/metric, and writes
+default the Metrum all-smi fork at http://127.0.0.1:9090/metrics, and writes
 one NDJSON row per sample with a wall-clock timestamp, so a cell's data log
 can be joined to telemetry by time:
 
@@ -51,7 +51,7 @@ def parse(text, include):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
-    ap.add_argument("--url", default="http://127.0.0.1:9090/metric")
+    ap.add_argument("--url", default="http://127.0.0.1:9090/metrics")
     ap.add_argument("--src", default="all-smi")
     ap.add_argument("--interval-ms", type=int, default=500)
     ap.add_argument("--include", action="append", default=[])

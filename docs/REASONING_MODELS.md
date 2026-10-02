@@ -3,6 +3,13 @@
 
 # Reasoning models
 
+**Search first.** Thinking toggles, reasoning parsers, and effort levels
+differ by model and engine version. Before a real run, check the model card
+and the engine's reasoning docs (for vLLM:
+https://docs.vllm.ai/en/latest/features/reasoning_outputs.html). Then set the
+request fields explicitly with `--extra-body-json` so the manifest records
+them.
+
 Operator notes for benchmarking thinking / reasoning models with Metrum AI
 Bench. Read this before choosing `--max-tokens` or `reasoning_effort`.
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,12 +35,40 @@ POWER_METRICS = {
 
 ENERGY_METRICS = {
     "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION",
+    "all_smi_gpu_energy_hw_millijoules_total",
     "nvidia_smi_energy_joules_total",
     "gpu_energy_consumed",
     "hw_energy",
     "habanalabs_energy",
     "nv_energy_consumption",
 }
+
+
+# Power-named gauges that are configuration, not draw. The name fallback below
+# must skip them: all-smi exports power_limit_{current,max}_watts next to
+# power_consumption_watts, and summing them reported ~992 W on a 350 W H100.
+NOT_POWER_DRAW = re.compile(r"limit|cap|max|min|threshold|default|enforced", re.IGNORECASE)
+
+
+def is_power_draw(row: Dict[str, Any]) -> bool:
+    metric = row.get("metric", "")
+    if metric in POWER_METRICS:
+        return True
+    return (
+        "power" in metric.lower()
+        and row.get("unit") == "W"
+        and not NOT_POWER_DRAW.search(metric)
+    )
+
+
+def energy_joules(row: Dict[str, Any]) -> float:
+    """Counter value in joules. Millijoule counters (all-smi
+    all_smi_gpu_energy_hw_millijoules_total) are scaled by 0.001 unless the
+    ingest already scaled them via a YAML `units:` entry (then `raw` is set)."""
+    value = float(row["value"])
+    if "millijoule" in row.get("metric", "").lower() and "raw" not in row:
+        return value * 0.001
+    return value
 
 
 def load_rows(path: str) -> List[Dict[str, Any]]:
@@ -156,9 +185,7 @@ def main(argv: List[str]) -> int:
         power_by_t: Dict[int, float] = defaultdict(float)
         power_values: List[float] = []
         for r in window:
-            if r.get("metric") in POWER_METRICS or (
-                "power" in r.get("metric", "").lower() and r.get("unit") == "W"
-            ):
+            if is_power_draw(r):
                 power_by_t[r["t_ns"]] += float(r["value"])
                 power_values.append(float(r["value"]))
         power_series = [(t / 1e9, v) for t, v in sorted(power_by_t.items())]
@@ -176,7 +203,7 @@ def main(argv: List[str]) -> int:
                 r.get("unit") == "J" and "energy" in metric.lower()
             ):
                 energy_by_series[series_key(r)].append(
-                    (r["t_ns"] / 1e9, float(r["value"]))
+                    (r["t_ns"] / 1e9, energy_joules(r))
                 )
         energy_counter = 0.0
         energy_counter_ok = False

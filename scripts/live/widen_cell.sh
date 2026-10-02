@@ -23,9 +23,14 @@ python3 "${here}/telemetry_sidecar.py" "${out}/telemetry.ndjson" --src all-smi \
   --url "${ALLSMI_URL:-http://127.0.0.1:9090/metrics}" --interval-ms 500 \
   --include '^all_smi_(gpu|cpu|memory)_' &
 side1=$!
+# Engine exposition differs by modality: plain vLLM uses vllm:*; vLLM-Omni uses vllm_omni:*.
+engine_include='^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|generation_tokens_total|prompt_tokens_total)$'
+if [[ "${modality}" == imagegen ]]; then
+  engine_include='^vllm_omni:(num_requests_(running|waiting)|stage_gen_time_s|diffusion_exec_s|vae_decode_s|denoise_step_latency_s|request_queue_wait_s|peak_memory_mb)$'
+fi
 python3 "${here}/telemetry_sidecar.py" "${out}/telemetry.ndjson" --src vllm \
   --url "${VLLM_METRICS_URL:-http://127.0.0.1:8000/metrics}" --interval-ms 1000 \
-  --include '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|generation_tokens_total|prompt_tokens_total)$' &
+  --include "${engine_include}" &
 side2=$!
 
 printf '%q ' "${bin}" "$@" >"${out}/command.txt"; echo >>"${out}/command.txt"
