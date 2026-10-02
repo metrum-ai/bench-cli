@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=scripts/live/lib/hub_prompts.sh
 source "${SCRIPT_DIR}/lib/hub_prompts.sh"
+# shellcheck source=scripts/live/lib/bench_bin.sh
+source "${SCRIPT_DIR}/lib/bench_bin.sh"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/live-results}"
 SHADE="${SCRIPT_DIR}/shadeform.sh"
 LANES="${CAMPAIGN_LANES:-llm vlm}"
@@ -57,21 +59,8 @@ cmd="${1:-plan}"
 shift || true
 
 resolve_bin() {
-  local want="$1"
-  local candidate
-  for candidate in \
-    "${REPO_ROOT}/target/release/${want}" \
-    "${REPO_ROOT}/target/debug/${want}"; do
-    if [[ -x "${candidate}" ]]; then
-      echo "${candidate}"
-      return 0
-    fi
-  done
-  if command -v "${want}" >/dev/null 2>&1; then
-    command -v "${want}"
-    return 0
-  fi
-  die "binary not found: ${want}"
+  # Prebuilt binaries only (scripts/live/lib/bench_bin.sh); never compiles.
+  bench_bin_resolve "${REPO_ROOT}" "$1" || die "binary not found: $1"
 }
 
 wait_http() {

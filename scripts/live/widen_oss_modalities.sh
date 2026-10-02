@@ -25,7 +25,8 @@
 #   SHADE_CLOUD SHADE_REGION SHADE_TYPE SHADE_OS  override the cheapest pick
 #   TTL_HOURS           hard lifetime for the holder (default 4)
 #   WIDEN_STATE         state dir (default live-results/widen-state)
-#   BENCH_BIN_DIR       local binaries to push (default target/release)
+#   BENCH_BIN_DIR       local binaries to push (default: first match in
+#                       scripts/live/lib/bench_bin.sh order)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,7 +154,11 @@ cmd_status() {
 }
 
 cmd_push() {
-  local bin="${BENCH_BIN_DIR:-${REPO_ROOT}/target/release}" opts
+  # Push prebuilt binaries (scripts/live/lib/bench_bin.sh order); never compiles.
+  # shellcheck source=scripts/live/lib/bench_bin.sh
+  source "${SCRIPT_DIR}/lib/bench_bin.sh"
+  local bin opts
+  bin="$(dirname "$(bench_bin_resolve "${REPO_ROOT}" metrum-ai-bench-cli-llm)")" || die "no prebuilt binaries to push"
   mapfile -t opts < <(ssh_opts)
   local rsh="ssh ${opts[*]}" dest
   dest="$(state_get ssh_user)@$(state_get ip)"
