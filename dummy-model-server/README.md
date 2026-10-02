@@ -44,6 +44,42 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 | `-include-usage` | true | Default usage on final stream chunk |
 | `-seed` | 0 | RNG / image seed |
 | `-compat` | openai | `openai` \| `vllm` \| `sglang` |
+| `-strict-media` | false | Reject invalid image `data:` URLs and audio uploads with HTTP 400 (see below) |
+
+## Strict media (`-strict-media`)
+
+By default the server accepts any image or audio payload, which lets placeholder
+media (1x1 images, zero-filled "MP3" stubs) slip through tests that a real vLLM or
+SGLang deployment would fail. `-strict-media` turns on the Metrum AI
+`internal/media` checks so the dummy server rejects what real servers reject.
+With the flag off, behavior is unchanged.
+
+What it validates:
+
+- **Chat `image_url` parts** (`POST /v1/chat/completions`): every `data:` URL must
+  be `data:<mime>;base64,<payload>`, decode as base64 (whitespace and missing
+  padding tolerated), have a PNG, JPEG, GIF, or WebP header, and be at least 2x2
+  pixels. Failures return HTTP 400 with
+  `{"error":{"message":"Invalid image: <detail>","type":"invalid_request_error","code":400}}`.
+- **Audio uploads** (`POST /v1/audio/transcriptions`): the multipart `file` must be
+  at least 1024 bytes and a recognized container. WAV files need a sane `fmt `
+  chunk (known format tag, 1..8 channels, 1000..384000 Hz, valid bits per sample)
+  and a non-empty, non-silent `data` chunk. MP3 files need two consecutive valid
+  MPEG audio frame headers (after any ID3v2 tag) with a non-zero frame body.
+  FLAC, OGG, M4A/MP4, and WebM are accepted by magic bytes when their body is not
+  all zeros. Failures return HTTP 400 with JSON message
+  `Invalid or unsupported audio file` (the same text vLLM returns).
+
+What it does not do:
+
+- It does not run a model or decode pixels or the full audio stream; only
+  headers and frame structure are inspected.
+- It does not fetch or check `http(s)` image references; those are accepted as is.
+- It does not check that audio is speech or that an image has meaningful content.
+
+```bash
+go run ./cmd/dummy-model-server -port 8000 -strict-media
+```
 
 ## Timing model (appendix 8.3)
 

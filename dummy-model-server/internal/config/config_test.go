@@ -37,3 +37,27 @@ func TestParseFlagsBadCompat(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestParseFlagsStrictMedia(t *testing.T) {
+	cfg, err := config.ParseFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StrictMedia {
+		t.Fatal("strict-media must default to false")
+	}
+	cfg, err = config.ParseFlags([]string{"-strict-media"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.StrictMedia {
+		t.Fatal("-strict-media should set StrictMedia")
+	}
+	cfg, err = config.ParseFlags([]string{"-strict-media=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StrictMedia {
+		t.Fatal("-strict-media=false should clear StrictMedia")
+	}
+}
