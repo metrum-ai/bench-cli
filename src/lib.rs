@@ -29,6 +29,7 @@ pub mod telemetry;
 pub mod time_weighted;
 pub mod tokenizer;
 pub mod usage;
+pub mod vlm;
 
 pub mod banner {
     use std::io::IsTerminal;
