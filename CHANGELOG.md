@@ -31,6 +31,13 @@
   opt-in: those rows carry `user` and `command` labels and must not be used
   in published runs. Matched series go from 82 to 66 on a recorded all-smi
   metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
+- New design note `docs/design/AIPERF_INGEST.md` (#205), indexed from the new
+  `docs/design/README.md`. It maps AIPerf 0.11.0 and 0.13.0
+  `profile_export.jsonl` records to `request.v3` and `summary.v3` (including
+  the #191 distributions), lists gaps in both directions, and sets redaction
+  rules for imported `cli_command`, endpoints, paths, and model names. It
+  recommends a narrow `metrum-ai-bench-cli import aiperf` after #192 to
+  #195, with telemetry joins after #196. Design only; no behavior change.
 
 ### Added
 - `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
