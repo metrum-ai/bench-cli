@@ -210,6 +210,48 @@ fn reasoning_deltas_are_separated_from_ttft() {
             "ttft {ttft}s equals the reasoning timestamp, so reasoning was counted as output"
         );
     }
+
+    // #191: recorded fields are summarized; closed loop has no queue delay.
+    let summary = summary_record(&fixture.data_log).expect("summary");
+    for key in [
+        "first_byte_s",
+        "first_reasoning_s",
+        "isl_tokens",
+        "osl_tokens",
+    ] {
+        assert_eq!(summary[key]["n"], 2, "{key} n");
+    }
+    assert_eq!(summary["queue_delay_s"]["n"], 0, "closed loop queue delay");
+    assert_eq!(summary["osl_tokens_source"], "server_usage");
+    let endpoint = summary["per_endpoint"]
+        .as_object()
+        .and_then(|map| map.values().next())
+        .expect("endpoint");
+    assert_eq!(endpoint["first_reasoning_s"]["n"], 2);
+}
+
+/// #191: open-loop runs summarize queue delay; no reasoning deltas means
+/// `first_reasoning_s` stays empty rather than borrowing another timing.
+#[test]
+fn open_loop_summary_has_queue_delay_and_no_reasoning() {
+    let Some(dummy) = spawn_dummy(&["-latency", "20ms", "-chunk-interval", "5ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    assert!(run_llm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        4,
+        &["--request-rate", "20"]
+    ));
+    let summary = summary_record(&fixture.data_log).expect("summary");
+    assert_eq!(summary["queue_delay_s"]["n"], 4);
+    assert!(summary["queue_delay_s"]["min"].as_f64().unwrap() >= 0.0);
+    assert_eq!(summary["first_reasoning_s"]["n"], 0);
+    assert!(summary["first_reasoning_s"]["avg"].is_null());
+    assert_eq!(summary["first_byte_s"]["n"], 4);
+    assert_eq!(summary["osl_tokens"]["n"], 4);
 }
 
 /// Ctrl-C stops issuing, keeps the records already written, and marks the
