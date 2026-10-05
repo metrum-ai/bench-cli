@@ -31,6 +31,12 @@
   opt-in: those rows carry `user` and `command` labels and must not be used
   in published runs. Matched series go from 82 to 66 on a recorded all-smi
   metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
+- Comparison hygiene (#201). `docs/reviews/QUALITY_ASSESSMENT_PROMPT.md` now
+  points reviewers at AIPerf and `scripts/parity/README.md` instead of the
+  retired GenAI-Perf and the deleted `docs/COMPARISON.md`.
+  `docs/reviews/QUALITY_ASSESSMENT_REPORT.md` gains a header pointer to epic
+  #184 for current comparison work, and `artifacts/e2e/COMPARISON_AIPERF.md`
+  is marked as dated history. No metric or schema change.
 
 ### Added
 - `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
