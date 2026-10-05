@@ -171,6 +171,28 @@ Additional v3 fields:
   `cap`, `in_flight_mean` / `in_flight_p50` / `in_flight_max`,
   `cap_engagement_fraction` (acquires that blocked on the semaphore),
   `acquire_count`, `wait_count`
+- `effective_concurrency` / `effective_prefill_concurrency` /
+  `effective_decode_concurrency` (requests), `tokens_in_flight` (tokens),
+  `effective_prefill_throughput` / `effective_decode_throughput`
+  (tokens/second) - time-weighted blocks (#195), each an object
+  `{n, avg, active_avg, max, active_s}` over measured successes in the
+  `window_seconds` window. Definitions in [METRICS.md](METRICS.md).
+  - `n` (integer) - requests eligible for the block, counted before clipping
+    to the window.
+  - `avg` (block unit) - integral of the step function over the window
+    divided by `window_seconds`.
+  - `active_avg` (block unit) - the same integral divided by `active_s`;
+    `null` when `active_s` is 0.
+  - `max` (block unit) - peak instantaneous value inside the window.
+  - `active_s` (seconds) - time in the window with at least one
+    contributing request open.
+  - Always present. `avg`, `active_avg`, `max`, and `active_s` are `null`
+    when `n=0` or the window is not positive, never 0-filled. The phase
+    blocks (all but `effective_concurrency`) need a first-token split, so
+    they are `n=0` without streaming TTFT or with first-byte approximated
+    TTFT. `effective_concurrency` differs from `observed_concurrency`, which
+    is unchanged.
+  - Top level only; `per_endpoint` entries do not carry them.
 - `connect_s` / `prefill_s` / `decode_s` / `decode_tok_s` - type-7
   distributions over measured successes (empty `n=0` when absent). VLM
   summaries with a non-null `connection_reuse_rate` (after #194) build
@@ -304,6 +326,22 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   (`ttft_source = first_byte_approx`); `n=0` without streaming TTFT.
 - `time_to_second_token_s` (seconds) - `DistSummary` of per-request
   `ttft_s + itl_s[0]` over successes with a TTFT and at least one ITL sample.
+
+Time-weighted blocks (additive, #195): `effective_concurrency`,
+`effective_prefill_concurrency`, `effective_decode_concurrency`,
+`tokens_in_flight`, `effective_prefill_throughput`, and
+`effective_decode_throughput`, each the same
+`{n, avg, active_avg, max, active_s}` object as on `summary.v3`, always
+present, with the same `null` rules. Differences from the summary:
+
+- Intervals are `[sent_unix_ns, sent_unix_ns + service_latency_s]`, so
+  client queue delay is excluded. The window runs from the first measured
+  send of the stage to the latest successful `sent + service_latency_s`, so
+  it can differ slightly from the stage window behind `throughput`.
+- Tokens are `input_tokens` / `output_tokens` from server usage only; rows
+  reporting neither are skipped. `--kind embeddings` and `--kind rerank`
+  stages have no output, so `tokens_in_flight` and
+  `effective_decode_throughput` are `n=0`.
 
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
 trailing optional columns, in this order: `first_reasoning_s` (seconds),

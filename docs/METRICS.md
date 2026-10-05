@@ -98,6 +98,80 @@ Workload section. This page focuses on measured fields.
   `cap_engagement_fraction` (fraction of acquires that blocked on the cap).
   Optional per-request `in_flight_at_send`. In-flight values never exceed
   `cap`: a request leaves the gauge before its permit is released.
+- **Time-weighted metrics** (#195): six blocks, each an object
+  `{n, avg, active_avg, max, active_s}`, built by a sweep line over
+  per-request intervals. The design matches AIPerf
+  [effective vs active metrics](https://docs.nvidia.com/aiperf/reference/effective-vs-active-metrics):
+  time-weighted averages of a step function over the benchmark window, with
+  "active" variants restricted to time when the phase has a request in
+  flight.
+  - **Intervals**: one per measured success (failures and warmup excluded,
+    like every rate in the summary): `[send, send + latency_s]`, where `send`
+    is the monotonic `send_offset_s`. Strategic uses `sent_unix_ns` and
+    `service_latency_s`, so client queue delay is excluded. The window starts
+    at the first measured send of any outcome (the same start as
+    `window_seconds`) and lasts `window_seconds`, which ends at the latest
+    successful completion, so no success is clipped. Strategic uses the same
+    rule over the stage rows (first measured send to latest successful
+    `sent + service_latency_s`), which can differ slightly from the stage
+    window behind `throughput`. Intervals are clipped to the window. AIPerf
+    ends its window at the final response of any outcome; Bench ends it at
+    the last successful completion, like `window_seconds`.
+  - **Failures are excluded.** Under errors or timeouts the server was also
+    busy with the failed requests, so `effective_concurrency` understates
+    server busyness. Compare it with `observed_concurrency`, which counts
+    failed requests while they are in flight.
+  - **Phase split**: at the first generated token,
+    `min(first_reasoning_s, ttft_s)` (the same prefill end as
+    `prefill_tps_per_user`), clamped into `[0, latency_s]`. Rows with
+    `ttft_source = first_byte_approx` or no TTFT (unary) have no split and
+    count in `effective_concurrency` only.
+  - **Block fields**: `n` (integer) is the number of requests eligible for
+    the block, counted before clipping to the window.
+    `avg = integral / window_seconds`. `active_avg = integral / active_s`.
+    `max` is the peak instantaneous value inside the window. `active_s`
+    (seconds) is the time in the window with at least one contributing
+    request open. `avg`, `active_avg`, `max`, and `active_s` are `null` when
+    `n = 0` or the window is not positive; `active_avg` is also `null` when
+    `active_s = 0`. Never 0-filled.
+  - **`effective_concurrency`** (requests): requests in flight. Unclipped,
+    `avg = requests_per_second * mean(latency_s)` (Little's law). This is
+    not `observed_concurrency`, the client semaphore gauge sampled at each
+    send, which is unchanged.
+  - **`effective_prefill_concurrency`** (requests): requests between send and
+    first generated token. Includes network, connect, and server queue time.
+    This prefill is not the per-request `prefill_s`: that is
+    `ttft_s - connect_s` (visible TTFT, connect removed), while this split
+    keeps connect time and ends at the first generated token, reasoning
+    included. On streaming runs without reasoning the two differ only by
+    connect time (0.18% on the parity mock).
+  - **`effective_decode_concurrency`** (requests): requests between first
+    generated token and completion.
+  - **`tokens_in_flight`** (tokens): KV-cache occupancy proxy. During prefill
+    a request holds its prompt tokens; during decode it holds prompt tokens
+    plus output tokens accrued linearly from 0 at the first token to
+    `completion_tokens` at completion. Needs a phase split and both prompt
+    and output token accounting (server usage wins, tokenizer counts fill
+    `usage_missing` rows, as for `isl_tokens` / `osl_tokens`; rows with no
+    accounting are skipped).
+  - **`effective_prefill_throughput`** (tokens/second): each request's prompt
+    tokens spread uniformly over its prefill;
+    `avg = in-window prompt tokens / window_seconds`.
+  - **`effective_decode_throughput`** (tokens/second): each request's output
+    tokens (`completion_tokens`, reasoning included) spread uniformly over
+    its decode. Decode tokens include each request's first token, which
+    arrives at the split point, so the full `completion_tokens` counts. `avg` over the full window equals output tokens of split rows
+    divided by `window_seconds`, so when every success streams and has a
+    positive decode time it matches `completion_tokens_per_second`;
+    otherwise it is lower. `active_avg` is the rate while at least
+    one request decodes (the AIPerf "active" view); `max` is the peak
+    aggregate rate. For both throughput blocks, rows whose phase has zero
+    length or zero tokens have no defined rate and are skipped (`n`
+    excludes them).
+  - **Strategic tokens**: `input_tokens` / `output_tokens` from server usage
+    only; rows reporting neither are skipped. Embeddings and rerank stages
+    have no output, so `tokens_in_flight` and `effective_decode_throughput`
+    are `n=0` for them.
 - **ISL/OSL validation**: optional `--isl-target` / `--osl-target` (or
   `--prompt-mix-report` metadata) compared to measured prompt/completion
   tokens. Summary `isl_osl` carries means, p50, and mismatch counts.
@@ -349,4 +423,7 @@ and Visible completion tokens lines only when that distribution has `n > 0`.
 It also prints Time to second token, Prefill tok/s per user, and User tok/s
 lines when that distribution has `n > 0`, and Prompt tokens with Input
 tokens/sec, Completion tokens, and Total tokens/sec lines when the value is
-not `null` (#193).
+not `null` (#193). It prints one line per time-weighted block (Effective
+concurrency, Effective prefill concurrency, Effective decode concurrency,
+Tokens in flight, Effective prefill tok/s, Effective decode tok/s) when that
+block has `n > 0` (#195).
