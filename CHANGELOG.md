@@ -70,6 +70,33 @@
 - Console summary prints First byte, Queue delay, First reasoning, ISL tokens
   (source), and OSL tokens (source) lines when the distribution has samples
   (#191).
+- Reasoning token counts (#192, additive, no schema version bump). LLM and
+  VLM read the server-reported count from `usage` (final usage chunk when
+  streaming, response `usage` otherwise), accepting
+  `completion_tokens_details.reasoning_tokens`,
+  `output_tokens_details.reasoning_tokens`, and flat `reasoning_tokens`, in
+  that order. Unreported, `null`, negative, or non-integer values stay `null`
+  (never `0`); there is no tokenizer fallback. `request.v3` gains
+  `reasoning_tokens` and `visible_completion_tokens`
+  (`completion_tokens - reasoning_tokens`, `null` when reasoning is
+  unreported or exceeds `completion_tokens`), always serialized and always
+  `null` for ASR and imagegen.
+- `summary.v3` gains `reasoning_tokens` and `visible_completion_tokens`
+  type-7 distributions plus `reasoning_tokens_total` and
+  `visible_completion_tokens_total` (`null` when `n=0`); each `per_endpoint`
+  entry gains the two distributions. The console prints Reasoning tokens
+  (with total) and Visible completion tokens lines when `n > 0`.
+  `completion_tokens`, OSL, completion tok/s, and cost per million output
+  tokens still count reasoning as output (#192).
+- Strategic sweep points gain `reasoning_tokens`, `reasoning_tokens_total`,
+  and `visible_completion_tokens` (chat stages only); the request CSV gains a
+  trailing optional `reasoning_tokens` column after `first_reasoning_s`
+  (older CSVs still load); `telemetry.v1` request rows gain an optional
+  `reasoning_tokens`, omitted when not reported (#192).
+- `dummy-model-server` `-reasoning-tokens N` streams N `reasoning_content`
+  chunks and reports them in `usage.completion_tokens_details.reasoning_tokens`
+  (also added to `completion_tokens` / `total_tokens`), streaming and
+  non-streaming. The default `0` leaves the payload unchanged (#192).
 
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`

@@ -246,6 +246,7 @@ async fn make_request(
         Option<Duration>,
         Vec<Duration>,
         String,
+        Option<u64>,
     ),
     Box<dyn Error + Send + Sync>,
 > {
@@ -310,6 +311,7 @@ async fn make_request(
             stream.first_reasoning,
             stream.itl,
             stream.completion_text,
+            stream.reasoning_tokens,
         ));
     }
 
@@ -336,6 +338,7 @@ async fn make_request(
         .get("total_tokens")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    let reasoning_tokens = metrum_ai_bench::usage::reasoning_tokens(usage);
     let completion_text = json_resp
         .get("choices")
         .and_then(|c| c.get(0))
@@ -357,6 +360,7 @@ async fn make_request(
         None,
         Vec::new(),
         completion_text,
+        reasoning_tokens,
     ))
 }
 
@@ -1226,6 +1230,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     first_reasoning,
                     itl,
                     completion_text,
+                    reasoning_tokens,
                 )) => {
                     let completed_at =
                         metrum_ai_bench::runner::completed_at_from_start(started_at, response_time);
@@ -1253,6 +1258,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         completion_tokens,
                         total_tokens,
                     )
+                    .with_reasoning_tokens(reasoning_tokens)
                     .with_first_byte(first_byte)
                     .with_resolved_ttft(resolved)
                     .with_in_flight(in_flight_at_send)

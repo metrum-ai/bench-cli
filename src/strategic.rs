@@ -72,6 +72,10 @@ pub struct BenchRecord {
     /// Last column so older CSV readers keep their positions.
     #[serde(default)]
     pub first_reasoning_s: Option<f64>,
+    /// Server-reported reasoning tokens (chat only); empty when not reported.
+    /// Appended after `first_reasoning_s` so older CSV readers keep positions (#192).
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
 }
 
 fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -193,6 +197,12 @@ pub struct SweepPoint {
     pub isl_tokens: crate::stats::DistSummary,
     /// Per-request output tokens from server `usage` (no tokenizer fallback).
     pub osl_tokens: crate::stats::DistSummary,
+    /// Per-request server-reported reasoning tokens; rows without the field are skipped.
+    pub reasoning_tokens: crate::stats::DistSummary,
+    /// Sum of reported reasoning tokens over stage successes; null when `n = 0`.
+    pub reasoning_tokens_total: Option<u64>,
+    /// Per-request `output_tokens - reasoning_tokens` for reasoning-reporting rows.
+    pub visible_completion_tokens: crate::stats::DistSummary,
     /// Count of measured successes whose TTFT came from HTTP time-to-first-byte.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub ttft_approx_count: usize,
@@ -393,6 +403,17 @@ pub fn summarize_stage_with_options(
     } else {
         Vec::new()
     };
+    let reasoning: Vec<u64> = success_rows
+        .iter()
+        .filter_map(|record| record.reasoning_tokens)
+        .collect();
+    let visible: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| {
+            crate::usage::visible_completion_tokens(record.output_tokens, record.reasoning_tokens)
+        })
+        .map(|tokens| tokens as f64)
+        .collect();
     let ttft_approx_count = success_rows
         .iter()
         .filter(|record| {
@@ -449,6 +470,11 @@ pub fn summarize_stage_with_options(
         first_reasoning_s: crate::stats::DistSummary::from_values(&first_reasoning),
         isl_tokens: crate::stats::DistSummary::from_values(&isl),
         osl_tokens: crate::stats::DistSummary::from_values(&osl),
+        reasoning_tokens: crate::stats::DistSummary::from_values(
+            &reasoning.iter().map(|&v| v as f64).collect::<Vec<_>>(),
+        ),
+        reasoning_tokens_total: (!reasoning.is_empty()).then(|| reasoning.iter().sum()),
+        visible_completion_tokens: crate::stats::DistSummary::from_values(&visible),
         ttft_approx_count,
         ttft_warning: None,
         isl_osl,
@@ -1136,6 +1162,9 @@ mod tests {
                     first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
                     isl_tokens: crate::stats::DistSummary::from_values(&[]),
                     osl_tokens: crate::stats::DistSummary::from_values(&[]),
+                    reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
+                    reasoning_tokens_total: None,
+                    visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
                     ttft_approx_count: 0,
                     ttft_warning: None,
                     isl_osl: None,
@@ -1180,6 +1209,9 @@ mod tests {
             first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
             isl_tokens: crate::stats::DistSummary::from_values(&[]),
             osl_tokens: crate::stats::DistSummary::from_values(&[]),
+            reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
+            reasoning_tokens_total: None,
+            visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
             ttft_approx_count: 0,
             ttft_warning: None,
             isl_osl: None,
@@ -1293,6 +1325,7 @@ mod tests {
             error: None,
             warmup: false,
             first_reasoning_s: Some(0.06),
+            reasoning_tokens: None,
         };
         let slos = crate::summary::SloConfig::default();
         // Closed loop: scheduled == sent on every row, queue delay not applicable.
@@ -1348,6 +1381,7 @@ mod tests {
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         let point = summarize_stage_with_options(
             1.0,
@@ -1367,6 +1401,71 @@ mod tests {
     }
 
     #[test]
+    fn summarize_stage_reports_reasoning_tokens_from_reporting_rows() {
+        let row = BenchRecord {
+            seq: 0,
+            stage: 1.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.5,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.5,
+            first_byte_s: None,
+            connect_s: None,
+            ttft_s: None,
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 8,
+            output_tokens: 20,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+            reasoning_tokens: Some(5),
+        };
+        let mut other = row.clone();
+        other.reasoning_tokens = Some(7);
+        let mut unreported = row.clone();
+        unreported.reasoning_tokens = None;
+        let slos = crate::summary::SloConfig::default();
+        let point = summarize_stage(
+            1.0,
+            &[row.clone(), other, unreported.clone()],
+            1.0,
+            &slos,
+            None,
+        );
+        assert_eq!(point.reasoning_tokens.n, 2);
+        assert_eq!(point.reasoning_tokens.avg, Some(6.0));
+        assert_eq!(point.reasoning_tokens_total, Some(12));
+        assert_eq!(point.visible_completion_tokens.n, 2);
+        assert_eq!(point.visible_completion_tokens.avg, Some(14.0));
+        // The new column round-trips through CSV; absence stays empty, not 0.
+        let mut writer = csv::Writer::from_writer(Vec::new());
+        for written in [&row, &unreported] {
+            writer.serialize(written).unwrap();
+        }
+        let bytes = writer.into_inner().unwrap();
+        let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .expect("csv round trip");
+        assert_eq!(back[0].reasoning_tokens, Some(5));
+        assert_eq!(back[1].reasoning_tokens, None);
+        let empty = summarize_stage(1.0, &back[1..], 1.0, &slos, None);
+        assert_eq!(empty.reasoning_tokens.n, 0);
+        assert!(empty.reasoning_tokens_total.is_none());
+    }
+
+    #[test]
     fn pre_191_csv_without_first_reasoning_column_still_loads() {
         // Header and row as written before #191 (no trailing first_reasoning_s).
         let old = "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,\
@@ -1380,6 +1479,7 @@ true,,64,16,,,,false\n";
             .expect("old CSV deserializes");
         assert_eq!(records.len(), 1);
         assert!(records[0].first_reasoning_s.is_none());
+        assert!(records[0].reasoning_tokens.is_none());
         let point = summarize_stage(
             1.0,
             &records,
@@ -1420,6 +1520,7 @@ true,,64,16,,,,false\n";
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         let mut cold = measured.clone();
         cold.seq = 0;
@@ -1467,6 +1568,7 @@ true,,64,16,,,,false\n";
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -1538,6 +1640,7 @@ true,,64,16,,,,false\n";
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
         assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
@@ -1602,6 +1705,7 @@ true,,64,16,,,,false\n";
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -1680,6 +1784,7 @@ true,,64,16,,,,false\n";
             error: None,
             warmup: false,
             first_reasoning_s: None,
+            reasoning_tokens: None,
         };
         export_otlp(
             &reqwest::Client::new(),

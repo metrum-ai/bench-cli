@@ -41,6 +41,7 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 | `-omit-done` | false | Omit trailing `data: [DONE]` |
 | `-role-only` | false | Stream role delta only |
 | `-reasoning` | false | Emit `delta.reasoning_content` before content |
+| `-reasoning-tokens` | 0 | Emit N reasoning chunks, add N to `completion_tokens`, and report `usage.completion_tokens_details.reasoning_tokens` (non-streaming too); 0 = off |
 | `-include-usage` | true | Default usage on final stream chunk |
 | `-seed` | 0 | RNG / image seed |
 | `-compat` | openai | `openai` \| `vllm` \| `sglang` |

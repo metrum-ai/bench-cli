@@ -57,14 +57,22 @@ type choice struct {
 }
 
 type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	CompletionTokensDetails *completionTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// completionTokensDetails is the OpenAI-shaped breakdown; only set when the
+// server runs with -reasoning-tokens so the default payload is unchanged.
+type completionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 type streamChunk struct {

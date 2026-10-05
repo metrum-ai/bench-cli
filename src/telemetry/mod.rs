@@ -65,6 +65,7 @@ mod tests {
                 success: true,
                 input_tokens: 10,
                 output_tokens: 20,
+                reasoning_tokens: None,
                 latency_s: 0.003,
                 queue_delay_s: 0.0,
                 service_latency_s: 0.003,

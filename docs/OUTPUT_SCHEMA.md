@@ -21,6 +21,16 @@ Each line is a complete JSON object and carries `schema_version`.
 - optional `in_flight_at_send` (client outstanding count at send)
 - optional `scheduled_offset_s` and `queue_delay_s`
 - server usage counts plus optional `tokenized_*` counts and `usage_missing`
+- `reasoning_tokens` / `visible_completion_tokens` (integer tokens, additive,
+  #192) - always serialized. `reasoning_tokens` is the server-reported
+  reasoning count from `usage` (final usage chunk when streaming, response
+  `usage` otherwise; accepted locations in [METRICS.md](METRICS.md)).
+  `visible_completion_tokens = completion_tokens - reasoning_tokens`. Both are
+  `null` when the server did not report reasoning (never a fabricated `0`);
+  `visible_completion_tokens` is also `null` when `reasoning_tokens` exceeds
+  `completion_tokens`. Always `null` for ASR and imagegen, and for failed
+  requests whose stream ended in an error (including `no_output_token`).
+  `completion_tokens` is unchanged and still includes reasoning tokens.
 - typed `error`, `partial`, modality-specific numeric metrics, and optional
   string `modality_labels` (e.g. imagegen `artifact_0_sha256`)
 
@@ -125,6 +135,19 @@ Additional v3 fields:
   `queue_delay_s`, `first_reasoning_s`, `isl_tokens`, `osl_tokens`,
   `isl_tokens_source`, `osl_tokens_source`) computed over that endpoint's
   measured successes with the same rules.
+- `reasoning_tokens` / `visible_completion_tokens` - type-7 distributions in
+  tokens over measured successes whose request row carries the value (#192).
+  Always present; `n=0` with null stats when no measured success reported
+  reasoning (non-thinking models, servers that omit the field, ASR,
+  imagegen).
+- `reasoning_tokens_total` / `visible_completion_tokens_total` - integer
+  token sums over the same samples. Always present; `null` when the matching
+  distribution has `n=0`.
+- Each `per_endpoint` entry also carries `reasoning_tokens` and
+  `visible_completion_tokens` distributions (no totals).
+- `completion_tokens_per_second`, `osl_tokens`, and
+  `cost_per_million_output_tokens` still count reasoning tokens as output
+  (they use server `completion_tokens`).
 - `isl_osl` - optional runtime ISL/OSL validation vs `--isl-target` /
   `--osl-target` or `--prompt-mix-report`: targets, tolerances, measured
   mean/p50, mismatch counts, and `length_basis` (`server_usage` or
@@ -163,10 +186,24 @@ gains these type-7 `DistSummary` fields over measured successes in the stage
 
 Each is always present; `n=0` with null stats when no request qualifies.
 
-The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains a
-trailing optional column `first_reasoning_s` (seconds, last column). The cell
-is empty when the request streamed no reasoning delta. Existing columns keep
-their order.
+Reasoning token fields (additive, #192), chat stages only (`--kind
+embeddings` and `--kind rerank` never report reasoning):
+
+- `reasoning_tokens` (tokens) - `DistSummary` of server-reported reasoning
+  tokens over measured successes that reported it.
+- `reasoning_tokens_total` (integer tokens) - sum of those samples; `null`
+  when `reasoning_tokens` has `n=0`.
+- `visible_completion_tokens` (tokens) - `DistSummary` of
+  `output_tokens - reasoning_tokens` over the same rows, skipping rows where
+  reasoning exceeds `output_tokens`.
+
+The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
+trailing optional columns, in this order: `first_reasoning_s` (seconds), then
+`reasoning_tokens` (integer tokens, #192, last column). The `first_reasoning_s`
+cell is empty when the request streamed no reasoning delta; the
+`reasoning_tokens` cell is empty when the server did not report reasoning.
+Existing columns keep their order, and CSVs written before these columns
+existed still load (missing cells read as empty).
 
 ## Security and provenance
 
@@ -190,7 +227,7 @@ anchor for that Instant. See [TELEMETRY.md](TELEMETRY.md) and
 | `run` | `run_id`, `t0_wall`, `tool_version`, `schema_version` (`metrum-ai-bench-cli.telemetry.v1`), `config` | `sut`, `telemetry_sources` (`name`, `url`, `interval_ms`, `clock_offset_ms`, `matched_series`) |
 | `stage` | `run_id`, `stage`, `load`, `phase` (`warmup` \| `measure`), `t_start_ns`, `t_end_ns` | |
 | `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`) |
-| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `telemetry_at_done` (last-seen map; sugar, not truth) |
+| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `reasoning_tokens` (integer tokens, server-reported; omitted when not reported, #192), `telemetry_at_done` (last-seen map; sugar, not truth) |
 | `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status` |
 | `summary` | `run_id`, `partial`, `dropped_telemetry_rows`, `request_rows`, `telemetry_rows`, `scrape_error_rows`, `stage_rows` | |
 
