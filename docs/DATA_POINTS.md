@@ -55,8 +55,8 @@ and the release workflow publishes it in the release notes.
 These are the rules of `scripts/parity/count_points.py`, so schema counts
 and harness counts agree on what a quantity is.
 
-- **Quantity:** each distribution at any depth (named by its dotted path, for
-  example `modality_metrics.wer`), each top-level numeric scalar, and each
+- **Quantity:** each distribution at any depth (named by its dotted path),
+  each top-level numeric scalar, and each
   top-level block whose numeric leaves outside its distributions are
   non-empty (`goodput`, `observed_concurrency`, `effective_concurrency`).
 - **Values:** numeric slots in those quantities, all set. A run fills fewer:
@@ -64,7 +64,8 @@ and harness counts agree on what a quantity is.
   optional field that does not fire carries nothing.
 - **Per-request field:** a numeric field of a record, dotted for nested maps.
   A list of numbers (`itl_s`) counts once. `seq` and `error` never count.
-  Counts describe a successful request; a failed one carries the always set.
+  Counts describe a successful request; a failed one carries the always set
+  plus the request-side `http` fields.
 - **Optional:** in the maximal record but absent or `null` in the minimal
   one. Each optional field fires when any condition in its row holds.
 

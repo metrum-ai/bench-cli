@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Print docs/DATA_POINTS.md as a Metrum AI Bench release-notes section (#202):
-# headings move down one level under "## Data points", the generated-file
-# comments are dropped, and the per-field tables fold into one <details>
-# block so the headline counts stay on top.
+# headings outside code fences move down one level under "## Data points",
+# the generated-file comments are dropped, and the per-field tables fold into
+# one <details> block so the headline counts stay on top.
 #
 #   scripts/release_notes_data_points.sh > notes.md
 
@@ -16,6 +16,8 @@ DOC="${ROOT}/docs/DATA_POINTS.md"
 [[ -f "${DOC}" ]] || { echo "error: ${DOC} missing" >&2; exit 1; }
 
 awk '
+  /^```/ { fenced = !fenced; print; next }
+  fenced { print; next }
   /^<!--/ { next }
   /^# Data points$/ { print "## Data points"; next }
   /^## `summary.v3` quantities$/ && !folded {

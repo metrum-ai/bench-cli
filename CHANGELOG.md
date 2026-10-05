@@ -239,8 +239,8 @@
   and get no fixed count. A real llm run against dummy-model-server checks
   that the fired fields equal the documented set (plain run: 47 summary
   quantities and 21 per-request fields, as in the `scripts/parity/` harness).
-  CI fails when the file is stale; the release workflow checks it and
-  prepends it to the GitHub release notes
+  CI fails when the file is stale; the release workflow checks it on the
+  tag and adds it to the GitHub release notes after the generated changes
   (`scripts/release_notes_data_points.sh`). No schema change.
 
 ### Changed

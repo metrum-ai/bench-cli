@@ -14,9 +14,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
+TEST=data_points_doc_is_current
+# --exact matching nothing exits 0, so require the test to have run.
+run() {
+  local out
+  out="$("$@" cargo test --locked --test data_points -- --exact "${TEST}" 2>&1)" || {
+    echo "${out}" >&2
+    return 1
+  }
+  grep -q "test ${TEST} ... ok" <<<"${out}" || {
+    echo "${out}" >&2
+    echo "error: ${TEST} did not run" >&2
+    return 1
+  }
+}
+
 if [[ "${1:-}" == "--check" ]]; then
-  exec cargo test --locked --test data_points -- --exact data_points_doc_is_current
+  run env
+  echo "docs/DATA_POINTS.md is current"
+else
+  run env METRUM_BENCH_BLESS_DATA_POINTS=1
+  echo "wrote docs/DATA_POINTS.md"
 fi
-METRUM_BENCH_BLESS_DATA_POINTS=1 \
-  cargo test --locked --test data_points -- --exact data_points_doc_is_current
-echo "wrote docs/DATA_POINTS.md"

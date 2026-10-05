@@ -35,6 +35,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Verify the tagged tree, also on workflow_dispatch.
+          ref: ${{ env.RELEASE_TAG }}
       - name: Tag must be on main
         shell: bash
         run: |
@@ -395,6 +397,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Notes describe the tagged schemas, also on workflow_dispatch.
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-signed-*
@@ -402,17 +407,26 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-docs
-      - name: Data points for the release notes
+      # The full body is built here (GitHub's generated notes, then the
+      # data-point counts, #202) so a re-run or a dispatch on an existing
+      # release writes the same notes instead of replacing them.
+      - name: Release notes with data points
         shell: bash
-        run: bash scripts/release_notes_data_points.sh > release-notes-data-points.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${RELEASE_TAG}" --jq .body > release-notes.md
+          printf '\n' >> release-notes.md
+          bash scripts/release_notes_data_points.sh >> release-notes.md
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          # Prepended to the generated notes: the data-point counts (#202).
-          body_path: release-notes-data-points.md
+          body_path: release-notes.md
           # Infer prerelease from the tag so -rc.N never becomes GitHub Latest.
           prerelease: ${{ contains(env.RELEASE_TAG, '-rc.') || contains(env.RELEASE_TAG, '-alpha.') || contains(env.RELEASE_TAG, '-beta.') }}
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
             *.tar.gz
             *.sha256

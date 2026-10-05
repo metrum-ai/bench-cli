@@ -1106,8 +1106,8 @@ and the release workflow publishes it in the release notes.
 These are the rules of `scripts/parity/count_points.py`, so schema counts
 and harness counts agree on what a quantity is.
 
-- **Quantity:** each distribution at any depth (named by its dotted path, for
-  example `modality_metrics.wer`), each top-level numeric scalar, and each
+- **Quantity:** each distribution at any depth (named by its dotted path),
+  each top-level numeric scalar, and each
   top-level block whose numeric leaves outside its distributions are
   non-empty (`goodput`, `observed_concurrency`, `effective_concurrency`).
 - **Values:** numeric slots in those quantities, all set. A run fills fewer:
@@ -1115,7 +1115,8 @@ and harness counts agree on what a quantity is.
   optional field that does not fire carries nothing.
 - **Per-request field:** a numeric field of a record, dotted for nested maps.
   A list of numbers (`itl_s`) counts once. `seq` and `error` never count.
-  Counts describe a successful request; a failed one carries the always set.
+  Counts describe a successful request; a failed one carries the always set
+  plus the request-side `http` fields.
 - **Optional:** in the maximal record but absent or `null` in the minimal
   one. Each optional field fires when any condition in its row holds.
 
@@ -1218,75 +1219,187 @@ fn doc_path() -> PathBuf {
 
 // Tests
 
-/// Number of `pub` fields declared on `pub struct NAME` in `src`.
-fn declared_fields(src: &str, name: &str) -> usize {
+/// One `pub` field of a schema struct, read from its source.
+struct DeclaredField {
+    name: String,
+    ty: String,
+    flatten: bool,
+}
+
+fn source(path: &str) -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// `pub` fields declared on `pub struct NAME` in `path`, in order. A field
+/// whose layout this parser does not expect makes the coverage test fail
+/// loudly (a name mismatch), never pass silently.
+fn declared_fields(path: &str, name: &str) -> Vec<DeclaredField> {
+    let src = source(path);
     let start = src
         .find(&format!("pub struct {name} {{"))
-        .unwrap_or_else(|| panic!("pub struct {name} not found"));
+        .unwrap_or_else(|| panic!("pub struct {name} not found in {path}"));
     let body = &src[start..];
     let end = body.find("\n}").expect("struct end");
-    body[..end]
-        .lines()
-        .filter(|line| line.starts_with("    pub ") && line.contains(':'))
-        .count()
+    let mut fields = Vec::new();
+    let mut flatten = false;
+    for line in body[..end].lines().skip(1) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("#[serde(") && trimmed.contains("flatten") {
+            flatten = true;
+        }
+        if let Some(rest) = line.strip_prefix("    pub ") {
+            let (field, ty) = rest.split_once(':').expect("pub field: type");
+            fields.push(DeclaredField {
+                name: field.trim().to_string(),
+                ty: ty.trim().trim_end_matches(',').to_string(),
+                flatten,
+            });
+            flatten = false;
+        }
+    }
+    fields
+}
+
+/// Serialized key names of `name`: flattened fields expand to their own.
+fn serialized_names(path: &str, name: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for field in declared_fields(path, name) {
+        if field.flatten {
+            let ty = field.ty.rsplit("::").next().unwrap_or(&field.ty);
+            assert_eq!(
+                ty, "TimeWeightedMetrics",
+                "{name}.{}: teach the coverage test this flattened type",
+                field.name
+            );
+            out.extend(serialized_names("src/time_weighted.rs", ty));
+        } else {
+            out.insert(field.name);
+        }
+    }
+    out
+}
+
+/// Every schema struct and nested block the counts walk, with its maximal
+/// fixture and the keys that fixture may leave unset or `null` (run
+/// metadata, never counted).
+fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static str])> {
+    let summary = to_json(&summary_max());
+    vec![
+        (
+            "src/summary.rs",
+            "RunSummary",
+            summary.clone(),
+            &["config", "sut"],
+        ),
+        (
+            "src/record.rs",
+            "RequestRecord",
+            to_json(&request_max()),
+            &[],
+        ),
+        (
+            "src/strategic.rs",
+            "SweepPoint",
+            to_json(&sweep_max()),
+            &["config"],
+        ),
+        (
+            "src/telemetry/row.rs",
+            "RequestRow",
+            to_json(&request_row_max()),
+            &[],
+        ),
+        ("src/stats.rs", "DistSummary", to_json(&dist_full()), &[]),
+        (
+            "src/time_weighted.rs",
+            "TimeWeightedStat",
+            to_json(&tw_full()),
+            &[],
+        ),
+        (
+            "src/summary.rs",
+            "GoodputSummary",
+            summary["goodput"].clone(),
+            &[],
+        ),
+        (
+            "src/summary.rs",
+            "EndpointSummary",
+            to_json(&endpoint_summary(dist_full)),
+            &[],
+        ),
+        (
+            "src/concurrency.rs",
+            "ObservedConcurrency",
+            to_json(&observed_concurrency()),
+            &[],
+        ),
+        (
+            "src/isl_osl.rs",
+            "IslOslValidation",
+            to_json(&isl_osl()),
+            &[],
+        ),
+        (
+            "src/telemetry/session.rs",
+            "TelemetryRunInfo",
+            to_json(&telemetry_info()),
+            &[],
+        ),
+    ]
 }
 
 #[test]
 fn schema_fixtures_cover_every_field() {
-    let src = |path: &str| {
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
-            .expect("schema source")
-    };
-    let flattened = declared_fields(&src("src/time_weighted.rs"), "TimeWeightedMetrics");
-    // (json, source file, struct, keys a maximal fixture may leave unset,
-    // fields flattened into the parent)
-    let cases: [(Value, &str, &str, &[&str], usize); 4] = [
-        (
-            to_json(&summary_max()),
-            "src/summary.rs",
-            "RunSummary",
-            &["config"],
-            flattened,
-        ),
-        (
-            to_json(&request_max()),
-            "src/record.rs",
-            "RequestRecord",
-            &[],
-            0,
-        ),
-        (
-            to_json(&sweep_max()),
-            "src/strategic.rs",
-            "SweepPoint",
-            &["config"],
-            flattened,
-        ),
-        (
-            to_json(&request_row_max()),
-            "src/telemetry/row.rs",
-            "RequestRow",
-            &[],
-            0,
-        ),
-    ];
-    for (json, file, name, unset, flat) in cases {
-        let declared = declared_fields(&src(file), name);
-        let keys = json.as_object().expect("object").len();
-        let expected = declared - usize::from(flat > 0) + flat - unset.len();
+    for (path, name, json, unset) in maximal_cases() {
+        let keys: BTreeSet<String> = json.as_object().expect("object").keys().cloned().collect();
+        let expected: BTreeSet<String> = serialized_names(path, name)
+            .into_iter()
+            .filter(|k| !unset.contains(&k.as_str()) || json.get(k).is_some())
+            .collect();
         assert_eq!(
             keys, expected,
             "{name}: the maximal fixture must serialize every field; set each Option to Some"
         );
-        for key in unset {
-            assert!(json.get(*key).is_none(), "{name}.{key}");
-        }
         for (key, value) in json.as_object().unwrap() {
-            let metadata = SUMMARY_EXCLUDED.contains(&key.as_str());
             assert!(
-                metadata || !value.is_null(),
+                unset.contains(&key.as_str()) || !value.is_null(),
                 "{name}.{key} is null in the maximal fixture"
             );
+        }
+    }
+}
+
+/// A minimal fixture that sets an `Option` would publish an optional field
+/// as "always": every `Option` field must be absent or `null` there.
+#[test]
+fn minimal_fixtures_leave_every_option_unset() {
+    let cases: [(&str, &str, Value); 6] = [
+        ("src/summary.rs", "RunSummary", to_json(&summary_min())),
+        ("src/record.rs", "RequestRecord", to_json(&request_min())),
+        ("src/strategic.rs", "SweepPoint", to_json(&sweep_min())),
+        (
+            "src/telemetry/row.rs",
+            "RequestRow",
+            to_json(&request_row_min()),
+        ),
+        ("src/stats.rs", "DistSummary", to_json(&dist_empty())),
+        (
+            "src/time_weighted.rs",
+            "TimeWeightedStat",
+            to_json(&TimeWeightedStat::default()),
+        ),
+    ];
+    for (path, name, json) in cases {
+        for field in declared_fields(path, name) {
+            if field.ty.starts_with("Option<") {
+                assert!(
+                    json.get(&field.name).is_none_or(Value::is_null),
+                    "{name}.{} is set in the minimal fixture",
+                    field.name
+                );
+            }
         }
     }
 }
@@ -1426,11 +1539,13 @@ fn modality_fields() -> BTreeSet<String> {
 /// field is in the schema count.
 #[test]
 fn published_counts_match_real_llm_runs() {
-    let Some(dummy) = common::spawn_dummy(&[]) else {
+    // Paced like the parity harness, so TTFT and ITL are real intervals.
+    let Some(dummy) = common::spawn_dummy(&["-chunk-interval", "1ms"]) else {
         common::skip("go not available");
         return;
     };
-    let reasoning = common::spawn_dummy(&["-reasoning-tokens", "3"]).expect("second dummy");
+    let reasoning = common::spawn_dummy(&["-chunk-interval", "1ms", "-reasoning-tokens", "3"])
+        .expect("second dummy");
     let dir = tempfile::tempdir().expect("tempdir");
     let s = schemas();
 
