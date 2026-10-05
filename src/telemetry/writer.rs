@@ -30,6 +30,8 @@ pub struct WriterStats {
 
 #[derive(Default)]
 struct Counters {
+    /// Rows accepted into the channel (priority sends and kept telemetry).
+    enqueued: AtomicU64,
     written: AtomicU64,
     dropped: AtomicU64,
     request: AtomicU64,
@@ -114,13 +116,18 @@ impl NdjsonWriter {
         self.tx
             .send(row)
             .await
-            .map_err(|_| anyhow::anyhow!("telemetry NDJSON writer closed"))
+            .map_err(|_| anyhow::anyhow!("telemetry NDJSON writer closed"))?;
+        self.counters.enqueued.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
 
     /// Best-effort telemetry sample. Returns `true` when the row was dropped.
     pub fn try_send_telemetry(&self, row: Row) -> bool {
         match self.tx.try_send(row) {
-            Ok(()) => false,
+            Ok(()) => {
+                self.counters.enqueued.fetch_add(1, Ordering::Relaxed);
+                false
+            }
             Err(mpsc::error::TrySendError::Full(_)) | Err(mpsc::error::TrySendError::Closed(_)) => {
                 self.counters.dropped.fetch_add(1, Ordering::Relaxed);
                 true
@@ -135,6 +142,25 @@ impl NdjsonWriter {
     /// Counts of rows already accepted by the writer task (may lag the channel).
     pub fn stats_snapshot(&self) -> WriterStats {
         self.counters.snapshot()
+    }
+
+    /// Wait until the writer task has written every row enqueued so far, or
+    /// until `timeout` passes. Returns `true` when the channel drained, so a
+    /// following [`Self::stats_snapshot`] counts every row sent before it.
+    pub async fn flush_pending(&self, timeout: std::time::Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            // `enqueued` is bumped after the send returns, so it can trail
+            // `written` briefly; `>=` treats that as drained.
+            let enqueued = self.counters.enqueued.load(Ordering::Relaxed);
+            if self.counters.written.load(Ordering::Relaxed) >= enqueued {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
     }
 }
 

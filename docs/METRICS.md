@@ -400,13 +400,30 @@ Workload section. This page focuses on measured fields.
 Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 [REASONING_MODELS.md](REASONING_MODELS.md).
 
-## Strategic telemetry (NDJSON)
+## Run telemetry (NDJSON)
 
 Scraped Prometheus gauges/counters land in a separate `--ndjson` file, not
-inside modality `--data-log` request rows.
+inside modality `--data-log` request rows. Strategic and, since #196, the
+LLM, VLM, ASR, and imagegen binaries write the same
+`metrum-ai-bench-cli.telemetry.v1` rows, so the derived metrics below apply
+to a modality run's single `measure` stage as well.
 
 - **Shared epoch**: every `*_ns` field is nanoseconds from one run-start
-  `Instant`. `run.t0_wall` is ISO 8601 UTC metadata.
+  `Instant`, shared by request and telemetry rows. `run.t0_wall` is ISO 8601
+  UTC metadata.
+- **Modality request timing**: a modality `request` row is derived from its
+  `request.v3` record: `t_sent_ns` is `send_offset_s` (same origin: the run
+  clock starts at the NDJSON epoch),
+  `t_done_ns = t_sent_ns + latency_s`, `service_latency_s` is the record's
+  `latency_s`, and the row's `latency_s = queue_delay_s + latency_s`
+  (seconds). The `measure` stage window runs from the first measured send to
+  the last measured completion. Mapping:
+  [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md#modality-binaries).
+- **Summary telemetry counts**: `summary.v3.telemetry` (present only with
+  `--ndjson`) reports integer row counts per kind and
+  `dropped_telemetry_rows`; a non-zero drop count means time-weighted
+  telemetry math in that run has gaps. Strategic sweep points do not carry
+  this block; strategic stdout reports `dropped_telemetry_rows` once per run.
 - **Power / energy (offline)**: one GPU power source and one energy counter
   per stage, never summed across exporters. Prefer the Metrum all-smi fork
   (`all_smi_gpu_power_consumption_watts`,

@@ -145,6 +145,14 @@ Options:
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --quiet
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
+      --ndjson <PATH>
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+      --telemetry <PATH>
+          Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
+      --require-telemetry
+          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+      --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
+          Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
       --temperature <TEMPERATURE>
@@ -257,6 +265,14 @@ Options:
           Write environment.hostname as null [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
       --quiet
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
+      --ndjson <PATH>
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+      --telemetry <PATH>
+          Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
+      --require-telemetry
+          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+      --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
+          Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --streaming
           Enable streaming mode for measured TTFT/ITL
       --infer-ttft-from-first-byte
@@ -444,6 +460,20 @@ Options:
       --quiet
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
+      --ndjson <PATH>
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+
+      --telemetry <PATH>
+          Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
+
+      --require-telemetry
+          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+
+      --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
+          Consecutive scrape failures before --require-telemetry aborts
+          
+          [default: 3]
+
       --debug-log <DEBUG_LOG>
           Path to the debug log file
           
@@ -610,6 +640,14 @@ Options:
           [default: metrum-ai-bench-cli-imagegen-artifacts]
       --data-log <DATA_LOG>
           
+      --ndjson <PATH>
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+      --telemetry <PATH>
+          Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
+      --require-telemetry
+          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+      --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
+          Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --summary-json <SUMMARY_JSON>
           Optional path to write summary.v3 JSON (same schema as the data-log summary line)
       --debug-log <DEBUG_LOG>

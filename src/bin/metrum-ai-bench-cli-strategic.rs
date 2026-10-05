@@ -1590,75 +1590,51 @@ async fn main() -> Result<()> {
         bail!("--telemetry / telemetry via --metrics-url requires --ndjson PATH");
     }
 
-    let (ndjson_writer, ndjson_handle) = match &args.ndjson {
-        Some(path) => {
-            let (writer, handle) = metrum_ai_bench::telemetry::NdjsonWriter::spawn(path.clone())?;
-            (Some(writer), Some(handle))
-        }
-        None => (None, None),
-    };
-
-    let mut telemetry_source_stamps = Vec::new();
-    let mut scrape_handles: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
-    let stop_scrapers = Arc::new(AtomicBool::new(false));
-    if let Some(cfg) = &telemetry_cfg {
-        cfg.warn_fast_sources();
-        let sources = cfg.compile()?;
-        let insecure = sources.iter().any(|s| s.insecure_tls);
-        let client = metrum_ai_bench::telemetry::build_telemetry_client(insecure, true)?;
-        let probes = metrum_ai_bench::telemetry::probe_sources(&client, cfg, &sources).await?;
-        telemetry_source_stamps = probes.into_iter().map(|p| p.stamp).collect();
-        if let Some(writer) = &ndjson_writer {
-            scrape_handles = metrum_ai_bench::telemetry::spawn_scrapers(
-                client,
-                cfg.clone(),
-                sources,
-                Arc::clone(&run_epoch),
-                Arc::clone(&run_id),
-                writer.clone(),
-                Arc::clone(&stop_scrapers),
-                args.require_telemetry,
-                args.require_telemetry_failures,
-            );
-        }
+    // Same optional keys as the stdout config (#197), so NDJSON-only analysis
+    // sees the kind settings; chat/embeddings/rerank run rows are unchanged.
+    let mut run_config = json!({
+        "url": url,
+        "model": model,
+        "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
+        "sweep": args.sweep,
+        "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
+        "requests_per_stage": args.requests_per_stage,
+        "warmup_requests": args.warmup_requests,
+        "streaming": args.streaming,
+        "telemetry": args.telemetry,
+        "metrics_url": args.metrics_url,
+    });
+    if let Some(temperature) = args.temperature {
+        run_config["temperature"] = json!(decimal_f32(temperature));
     }
-
-    if let Some(writer) = &ndjson_writer {
-        let mut run_config = json!({
-            "url": url,
-            "model": model,
-            "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
-            "sweep": args.sweep,
-            "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
-            "requests_per_stage": args.requests_per_stage,
-            "warmup_requests": args.warmup_requests,
-            "streaming": args.streaming,
-            "telemetry": args.telemetry,
-            "metrics_url": args.metrics_url,
-        });
-        // Same optional keys as the stdout config, so NDJSON-only analysis
-        // sees the kind settings; chat/embeddings/rerank rows are unchanged.
-        if let Some(temperature) = args.temperature {
-            run_config["temperature"] = json!(decimal_f32(temperature));
-        }
-        if let Some(modality) = modality_config(&args, &inputs) {
-            run_config["modality"] = modality;
-        }
-        writer
-            .send_priority(metrum_ai_bench::telemetry::Row::Run(
-                metrum_ai_bench::telemetry::RunRow {
+    if let Some(modality) = modality_config(&args, &inputs) {
+        run_config["modality"] = modality;
+    }
+    // One shared lifecycle with the modality binaries (#196): writer, probe,
+    // run row, scrapers, drained summary row.
+    let mut telemetry_session = match &args.ndjson {
+        Some(path) => Some(
+            metrum_ai_bench::telemetry::TelemetrySession::start(
+                Some(Arc::clone(&run_epoch)),
+                metrum_ai_bench::telemetry::RunStamp {
                     run_id: (*run_id).clone(),
-                    t0_wall: run_epoch.t0_wall_iso(),
                     tool_version: VERSION.to_string(),
-                    schema_version: metrum_ai_bench::telemetry::TELEMETRY_SCHEMA_VERSION
-                        .to_string(),
                     sut: sut_json.clone(),
                     config: run_config,
-                    telemetry_sources: telemetry_source_stamps,
                 },
-            ))
-            .await?;
-    }
+                metrum_ai_bench::telemetry::SessionOptions {
+                    ndjson: path.clone(),
+                    config: telemetry_cfg.as_ref(),
+                    require_telemetry: args.require_telemetry,
+                    require_failures: args.require_telemetry_failures,
+                    abort: Some(stop.clone()),
+                },
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    let ndjson_writer = telemetry_session.as_ref().map(|s| s.writer());
 
     // Legacy whole-run aggregate for stdout when --metrics-url is set without NDJSON scrapers.
     let stop_legacy = Arc::new(AtomicBool::new(false));
@@ -1754,7 +1730,6 @@ async fn main() -> Result<()> {
     for stage in stages {
         if stop.is_stopped() {
             partial = true;
-            stop_scrapers.store(true, Ordering::Relaxed);
             break;
         }
         let (records, samples, seconds, observed) = run_stage(
@@ -1849,18 +1824,17 @@ async fn main() -> Result<()> {
         points.push(point);
         all_records.extend(records);
     }
-    stop_scrapers.store(true, Ordering::Relaxed);
     stop_legacy.store(true, Ordering::Relaxed);
-    for handle in scrape_handles {
-        match handle.await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                if args.require_telemetry {
-                    return Err(err);
+    if let Some(session) = telemetry_session.as_mut() {
+        if let Err(err) = session.join_scrapers().await {
+            // Close the NDJSON (partial) so rows already queued are kept.
+            drop(ndjson_writer);
+            if let Some(session) = telemetry_session.take() {
+                if let Err(close) = session.finish(true).await {
+                    eprintln!("warning: {close:#}");
                 }
-                eprintln!("warning: telemetry scraper exited: {err:#}");
             }
-            Err(err) => eprintln!("warning: telemetry scraper join failed: {err}"),
+            return Err(err);
         }
     }
     if let Some(scraper) = legacy_scraper {
@@ -1912,29 +1886,11 @@ async fn main() -> Result<()> {
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
     }
-    let mut ndjson_stats = metrum_ai_bench::telemetry::WriterStats::default();
-    if let (Some(writer), Some(handle)) = (ndjson_writer, ndjson_handle) {
-        // Drain pending rows so snapshot reflects request/stage counts, then
-        // write summary before closing the channel.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let snap = writer.stats_snapshot();
-        let dropped = writer.dropped_telemetry_rows();
-        writer
-            .send_priority(metrum_ai_bench::telemetry::Row::Summary(
-                metrum_ai_bench::telemetry::SummaryRow {
-                    run_id: (*run_id).clone(),
-                    partial,
-                    dropped_telemetry_rows: dropped,
-                    request_rows: snap.request_rows,
-                    telemetry_rows: snap.telemetry_rows,
-                    scrape_error_rows: snap.scrape_error_rows,
-                    stage_rows: snap.stage_rows,
-                },
-            ))
-            .await?;
-        drop(writer);
-        ndjson_stats = handle.shutdown().await?;
-    }
+    drop(ndjson_writer);
+    let dropped_telemetry_rows = match telemetry_session {
+        Some(session) => session.finish(partial).await?.dropped_telemetry_rows,
+        None => 0,
+    };
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -1951,7 +1907,7 @@ async fn main() -> Result<()> {
             "html_report": args.html,
             "partial": partial,
             "ndjson": args.ndjson,
-            "dropped_telemetry_rows": ndjson_stats.dropped_telemetry_rows,
+            "dropped_telemetry_rows": dropped_telemetry_rows,
         }))?
     );
     if let Some(ref validation) = any_osl_validation {
