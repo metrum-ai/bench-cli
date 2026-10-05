@@ -6,10 +6,9 @@
 #   curl -fsSL -o /tmp/all-smi.tgz \
 #     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 #   tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
-#   all-smi api --port 9090 --processes
+#   all-smi api --port 9090
 # The fork (v0.26.3-metrum.4) serves /metrics; /metric returns 404. It binds
 # 0.0.0.0 (no bind flag), so firewall port 9090 on shared hosts.
-# all_smi_process_* rows appear only with --processes (or ALL_SMI_API_PROCESSES).
 #
 # Starting point only: curl the live page and adjust include before a run.
 # Names below were checked against fork source at tag v0.26.3-metrum.4
@@ -40,8 +39,13 @@ sources:
       # NVLink topology: one label-only row per active link (source; absent
       # on PCIe-only hosts).
       - "^all_smi_nvlink_remote_device_type$"
-      # Per-process GPU and CPU use (source; needs --processes).
-      - "^all_smi_process_"
+      # Per-process rows (source) are OFF by default. Opt in only for local
+      # debugging: launch all-smi with --processes and uncomment the line
+      # below. WARNING: every all_smi_process_* row carries pid, name, user
+      # and command labels (command lines can hold secrets such as
+      # --api-key). include cannot drop labels, and labels are written to
+      # the NDJSON. Never use this in published runs.
+      # - "^all_smi_process_"
     units:
       # all-smi exports GPU energy in millijoules; store joules (raw keeps mJ).
       # all_smi_energy_consumed_joules_total is already in joules.

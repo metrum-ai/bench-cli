@@ -8,20 +8,28 @@
   the live `/metrics` page (all-smi, the serving engine, and any other
   exporter) and set `include` from that response.
 - `docs/TELEMETRY.md` compares that open scrape with AIPerf. AIPerf's metrics
-  reference is a named client catalog plus inference `/metrics` and
-  DCGM/pynvml/amdsmi GPU telemetry. Bench CLI stores client JSONL plus whatever
-  live Prometheus pages the YAML selects. The publish-20261002 campaign is the
-  example (all-smi and the serving engine in one NDJSON per cell).
+  reference is a named client catalog. Its `--server-metrics` (on by default)
+  ingests any Prometheus page, including the Metrum all-smi fork, and it also
+  exports raw time-stamped scrapes (Parquet by default, opt-in JSONL, and
+  per-record GPU telemetry JSONL). Its power-efficiency family (avg only)
+  comes from `--gpu-telemetry` alone (DCGM, pynvml, amdsmi). Bench CLI writes
+  the series matched by the YAML `include` into one NDJSON next to the
+  per-request JSONL, so GPU series from any exporter can be correlated per
+  request. The publish-20261002 campaign is the example (all-smi and the
+  serving engine in one NDJSON per cell).
+- Remaining all-smi `v0.26.3-metrum.3` references in
+  `docs/TELEMETRY.md`, `docs/telemetry/exporters.md`,
+  `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
+  in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
 - Example telemetry YAML `include` defaults now cover more of the live
   pages (#198). `docs/telemetry/examples/vllm.yaml` adds the TTFT, ITL, E2E,
   queue, prefill, and decode histograms (`_bucket` / `_sum` / `_count`) and
   the prefix-cache counters. `docs/telemetry/examples/all-smi.yaml` adds
-  chassis, energy, NVLink topology, and `all_smi_process_*` series (needs
-  `all-smi api --port 9090 --processes`), drops per-core
+  chassis, energy, and NVLink topology series, drops per-core
   `all_smi_cpu_core_utilization` through a CPU allowlist, and embeds the same
-  vLLM source as `vllm.yaml`. The all-smi install link in `all-smi.yaml`,
-  `docs/TELEMETRY.md`, and `docs/telemetry/exporters.md` moves to
-  v0.26.3-metrum.4. Matched series go from 82 to 66 on a recorded all-smi
+  vLLM source as `vllm.yaml`. `all_smi_process_*` stays a commented-out
+  opt-in: those rows carry `user` and `command` labels and must not be used
+  in published runs. Matched series go from 82 to 66 on a recorded all-smi
   metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
 
 ### Fixed

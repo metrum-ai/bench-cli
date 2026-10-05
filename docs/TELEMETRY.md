@@ -37,10 +37,24 @@ allowlist (`engine_include_patterns` in `src/telemetry/parser.rs`). Use
 ## Compared with AIPerf
 
 [AIPerf](https://github.com/ai-dynamo/aiperf) is NVIDIA's replacement for
-GenAI-Perf. Its metrics reference is a named client catalog. It also scrapes
-the inference server's `/metrics` (`--server-metrics`, on by default) and
-collects GPU telemetry from DCGM, pynvml, and amdsmi (`--gpu-telemetry`), then
-derives a power-efficiency family for NVIDIA and AMD.
+GenAI-Perf. Its metrics reference is a named client catalog. `--server-metrics`
+(on by default) ingests any Prometheus page, not only the inference server's
+`/metrics`, and the Metrum all-smi fork page works as a source. AIPerf also
+exports raw time-stamped scrapes: `server_metrics_export.parquet` by default
+(raw time series with deltas), `server_metrics_export.jsonl` with
+`timestamp_ns` per scrape when `--server-metrics-formats` includes `jsonl`,
+and `gpu_telemetry_export.jsonl` per record. Its JSON and CSV summaries are
+aggregates. See
+[server-metrics.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md)
+and
+[gpu-telemetry.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/kubernetes/gpu-telemetry.md).
+
+The difference is narrower. AIPerf derives its power-efficiency family (avg
+only) from `--gpu-telemetry` alone, meaning DCGM, pynvml, and amdsmi
+([gpu-telemetry-metrics-dataflow.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/gpu-telemetry-metrics-dataflow.md)).
+Bench CLI writes the series matched by the YAML `include` into one NDJSON next
+to the per-request JSONL, so GPU series from any exporter can be correlated
+per request.
 
 Bench CLI splits the same job differently. `request.v3` and `summary.v3` are
 the fixed client schema. Telemetry is not a second catalog in the binary:
@@ -101,6 +115,14 @@ The checked-in default is the Metrum fork of all-smi:
 - Install: https://github.com/chetan-metrum-ai/all-smi
 - Listen: `http://127.0.0.1:9090/metrics`. The same path as upstream lablup; `/metric` is not served. The API binds `0.0.0.0` with no bind flag, so firewall port 9090 on shared hosts.
 - Example YAML: [docs/telemetry/examples/all-smi.yaml](telemetry/examples/all-smi.yaml)
+  (GPU, host memory, aggregate CPU, chassis, energy, and NVLink series;
+  per-core CPU rows are left out).
+- Per-process rows (`all_smi_process_*`) are off by default. They need
+  `all-smi api --processes` plus the commented-out include line in the
+  example YAML. Every row carries `pid`, `name`, `user`, and `command` labels,
+  and command lines can hold secrets such as `--api-key`. `include` cannot
+  drop labels and the NDJSON stores them, so never enable process rows for a
+  published run.
 
 Bind exporters to `127.0.0.1` on the serving host when possible. Example YAMLs
 for DCGM, ROCm, engines, and BMC exporters live under
