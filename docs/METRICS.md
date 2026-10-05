@@ -115,9 +115,9 @@ Workload section. This page focuses on measured fields.
     rule over the stage rows (first measured send to latest successful
     `sent + service_latency_s`), which is the same stage window behind
     `throughput` and the stage token rates (#224). Intervals are clipped to
-    the window. AIPerf
-    ends its window at the final response of any outcome; Bench ends it at
-    the last successful completion, like `window_seconds`.
+    the window. AIPerf ends its window at the final response of any
+    outcome; Bench ends it at the last successful completion, like
+    `window_seconds`.
   - **Failures are excluded.** Under errors or timeouts the server was also
     busy with the failed requests, so `effective_concurrency` understates
     server busyness. Compare it with `observed_concurrency`, which counts

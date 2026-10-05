@@ -323,11 +323,17 @@
   instead of the completion of the last-started request (#224). It runs from
   the earliest measured send (any outcome) to the latest successful
   completion, or the latest completion of any outcome when the stage has no
-  success; warmup is excluded. Strategic stage `throughput`, `goodput`, token
-  rates, and `cost_per_million_output_tokens` can shift slightly (typically
-  down) versus earlier versions. All stage rates and the #195 time-weighted
-  blocks now share this one window, and `compare` uses the same window, so
-  numbers recomputed from the CSV match the live strategic output. No schema
+  success; warmup is excluded. In `--sweep-by concurrency` sends are stamped
+  after the semaphore, which does not release in spawn order, so the
+  last-started request often finished well before the stage ended and the
+  window was cut short. Strategic stage `throughput`, `goodput`, token rates
+  and `cost_per_million_output_tokens` therefore read lower than earlier
+  versions, by little at low concurrency and by up to about 20% at
+  concurrency 16 on a 64-request stage. A stage whose last-finishing request
+  failed can read slightly higher. The time-weighted blocks and `compare`
+  now take this same window, so numbers recomputed from the CSV match the
+  live strategic output (before, `compare` ended at the latest completion of
+  any outcome). Compare strategic rates across versions with care. No schema
   change.
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be

@@ -347,10 +347,12 @@ fn stage_time_weighted(
             }
         })
         .collect();
-    let window = spans
-        .iter()
-        .map(|span| span.start_s + span.latency_s)
-        .fold(0.0, f64::max);
+    // The stage window behind `throughput` (#224); spans start at its start.
+    let window = if spans.is_empty() {
+        0.0
+    } else {
+        stage_window_seconds(measured.iter().copied()).unwrap_or(0.0)
+    };
     crate::time_weighted::compute(&spans, 0.0, window)
 }
 
@@ -362,10 +364,19 @@ fn stage_time_weighted(
 /// last inside the window (#224). A stage with no success ends at the latest
 /// completion of any outcome. Warmup rows are ignored. `None` when the stage
 /// has no measured rows.
-pub fn stage_window_seconds(records: &[BenchRecord]) -> Option<f64> {
-    let measured: Vec<&BenchRecord> = records.iter().filter(|r| !r.warmup).collect();
+pub fn stage_window_seconds<'a>(records: impl IntoIterator<Item = &'a BenchRecord>) -> Option<f64> {
+    let measured: Vec<&BenchRecord> = records.into_iter().filter(|r| !r.warmup).collect();
     let start = measured.iter().map(|r| r.sent_unix_ns).min()?;
-    let end_of = |r: &&BenchRecord| r.sent_unix_ns + (r.service_latency_s.max(0.0) * 1e9) as u128;
+    // Non-finite or negative latency (a hand-edited `compare` CSV) counts as 0.
+    let end_of = |r: &&BenchRecord| {
+        let latency = r.service_latency_s;
+        let latency = if latency.is_finite() {
+            latency.max(0.0)
+        } else {
+            0.0
+        };
+        r.sent_unix_ns.saturating_add((latency * 1e9) as u128)
+    };
     let end = measured
         .iter()
         .filter(|r| r.success)
@@ -2580,16 +2591,18 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
         };
-        // Spawn order: row 0 (sent 0 s, ends 5 s), row 1 (sent 1 s, ends 2 s).
-        // A failure ending at 9 s and a warmup row ending at 20 s stay out.
+        // Spawn order: row 0 (sent 1.5 s, ends 6.5 s), a failure (sent 1 s,
+        // ends 10.5 s), row 1 (sent 2.5 s, ends 3.5 s). The window starts at
+        // the failure's send, not at the warmup row (sent 0 s, ends 20 s) or
+        // the first success, and ends at row 0, not the failure or row 1.
         let rows = [
-            row(0, 0.0, 5.0, true, false),
-            row(1, 1.0, 1.0, true, false),
-            row(2, 0.5, 8.5, false, false),
             row(9, 0.0, 20.0, true, true),
+            row(0, 1.5, 5.0, true, false),
+            row(2, 1.0, 9.5, false, false),
+            row(1, 2.5, 1.0, true, false),
         ];
         let window = stage_window_seconds(&rows).expect("window");
-        assert!((window - 5.0).abs() < 1e-9, "{window}");
+        assert!((window - 5.5).abs() < 1e-9, "{window}");
 
         // Every stage rate and the time-weighted blocks share that window.
         let point = summarize_stage(
@@ -2599,12 +2612,20 @@ true,,64,16,,,,false\n";
             &crate::summary::SloConfig::default(),
             None,
         );
-        assert!((point.throughput - 2.0 / 5.0).abs() < 1e-9);
-        assert!((point.goodput - 2.0 / 5.0).abs() < 1e-9);
+        assert!((point.throughput - 2.0 / 5.5).abs() < 1e-9);
+        assert!((point.goodput - 2.0 / 5.5).abs() < 1e-9);
         let tokens = point.completion_tokens_per_second.expect("token rate");
-        assert!((tokens - 40.0 / 5.0).abs() < 1e-9);
+        assert!((tokens - 40.0 / 5.5).abs() < 1e-9);
         let avg = point.time_weighted.effective_concurrency.avg.expect("avg");
-        assert!((avg - 6.0 / window).abs() < 1e-9, "{avg}");
+        assert!((avg - 6.0 / 5.5).abs() < 1e-9, "{avg}");
+
+        // A non-finite latency (hand-edited CSV) counts as 0, no overflow.
+        let odd = [
+            row(0, 1.0, 2.0, true, false),
+            row(1, 1.5, f64::INFINITY, true, false),
+        ];
+        let window = stage_window_seconds(&odd).expect("window");
+        assert!((window - 2.0).abs() < 1e-9, "{window}");
 
         // No success: the window falls back to the latest completion of any
         // outcome. No measured rows: no window.
