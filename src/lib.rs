@@ -11,6 +11,7 @@ pub mod endpoints;
 pub mod environment;
 pub mod error;
 pub mod http_client;
+pub mod imagegen;
 pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
