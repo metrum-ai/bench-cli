@@ -31,6 +31,12 @@
   opt-in: those rows carry `user` and `command` labels and must not be used
   in published runs. Matched series go from 82 to 66 on a recorded all-smi
   metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
+- Comparison hygiene (#201). `docs/reviews/QUALITY_ASSESSMENT_PROMPT.md` now
+  points reviewers at AIPerf and `scripts/parity/README.md` instead of the
+  retired GenAI-Perf and the deleted `docs/COMPARISON.md`.
+  `docs/reviews/QUALITY_ASSESSMENT_REPORT.md` gains a header pointer to epic
+  #184 for current comparison work, and `artifacts/e2e/COMPARISON_AIPERF.md`
+  is marked as dated history. No metric or schema change.
 - New design note `docs/design/AIPERF_INGEST.md` (#205), indexed from the new
   `docs/design/README.md`. It maps AIPerf 0.11.0 and 0.13.0
   `profile_export.jsonl` records to `request.v3` and `summary.v3` (including
@@ -77,6 +83,12 @@
 - Console summary prints First byte, Queue delay, First reasoning, ISL tokens
   (source), and OSL tokens (source) lines when the distribution has samples
   (#191).
+- New launcher subcommand `sut` prints the SUT JSON to stdout without docker
+  or a GPU. `HF_HUB_OFFLINE=1` skips the Hub revision lookup
+  (`model.revision` is then null). The offline self-test
+  `scripts/tests/serve_sut_test.sh` runs in CI and checks
+  `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
+  summary/request schema change (#203).
 
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
@@ -91,6 +103,20 @@
   should be re-measured rather than compared directly with new runs. For
   example, publish-20261002T162512Z g5-a1 at cap 1 reported
   `in_flight_max` 2.0.
+- `scripts/live/serve/*.sh` SUTs now fill `model.quantization` instead of
+  leaving it null for quantized checkpoints. `scripts/live/serve/common.sh`
+  takes it from `QUANTIZATION` (`none` records null), else from
+  `--quantization` / `-q` in `SERVE_ARGS`, else from a quantizer token in the
+  `MODEL` name (for example `-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is
+  `gptq`, `-W4A16-G128` is `w4a16`), else null. The rightmost method marker
+  wins, so `-FP8-to-BF16` is unquantized. `QUANTIZATION` is trimmed, must be
+  one word, and treats `none` / `null` in any case as null. New SUT field `extra.quantization_source` records which
+  one applied (`env`, `serve_args`, `model_name`, or `none`), and `notes` gains
+  a line when the value was derived from the model name (#203).
+- Each launcher sets `DEFAULT_MODEL`. `start` and `sut` now exit with an error
+  naming `SUT_NOTES_OVERRIDE` when `MODEL` differs from `DEFAULT_MODEL`
+  without it, so a SUT never carries serving notes researched for a different
+  model. A missing `SOURCES_OVERRIDE` in that case is a stderr warning (#203).
 
 ## 1.5.3 (2026-10-02)
 

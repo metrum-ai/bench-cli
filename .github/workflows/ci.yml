@@ -43,6 +43,8 @@ jobs:
         run: bash scripts/tests/check_naming_test.sh
       - name: live headline gate self-test
         run: bash scripts/tests/assert_headline_test.sh
+      - name: serve launcher SUT self-test
+        run: bash scripts/tests/serve_sut_test.sh
       - name: zero unsafe in src/
         run: |
           set -euo pipefail
