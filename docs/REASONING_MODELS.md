@@ -36,8 +36,16 @@ Definitions (from [METRICS.md](METRICS.md)):
   `visible_completion_tokens_total`): the server-reported reasoning count
   from `usage`, and `completion_tokens` minus that count. `null` (never `0`)
   when the server does not report it; Bench does not estimate it with a
-  tokenizer. Check your engine's docs for whether and how it reports
-  `usage.completion_tokens_details.reasoning_tokens`.
+  tokenizer. vLLM (the default engine, [SERVING.md](SERVING.md)) reports
+  `usage.completion_tokens_details.reasoning_tokens` from v0.28.0
+  ([vllm#45802](https://github.com/vllm-project/vllm/pull/45802)), and only
+  when started with `--reasoning-parser`
+  ([vLLM reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/)).
+  Without the parser, or on older vLLM, the field is `null`, so you will see
+  `reasoning_tokens.n=0` even though the model reasons. Add the model's
+  reasoning parser to the launch flags if you need the count. Other engines:
+  check their docs for `completion_tokens_details`. See
+  [METRICS.md](METRICS.md) for the accepted locations.
 
 See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 

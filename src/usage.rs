@@ -6,7 +6,10 @@
 use serde_json::Value;
 
 /// Locations of the reasoning token count inside a `usage` object, checked in
-/// order. The first one that holds a non-negative integer wins.
+/// order. The first non-zero non-negative integer wins; a reported `0` is
+/// used only when every reported location is `0`, so an OpenAI-style
+/// placeholder `completion_tokens_details: {reasoning_tokens: 0}` cannot mask
+/// a real count elsewhere.
 ///
 /// * `completion_tokens_details.reasoning_tokens`: OpenAI Chat Completions,
 ///   SGLang, DeepSeek, OpenRouter and most OpenAI-compatible servers.
@@ -19,11 +22,18 @@ pub const REASONING_TOKEN_POINTERS: [&str; 3] = [
 ];
 
 /// Reasoning token count reported by the server, or `None` when no accepted
-/// variant is present (never a fabricated `0`). A reported `0` stays `Some(0)`.
+/// variant is present (never a fabricated `0`). `Some(0)` only when every
+/// reported variant is `0`.
 pub fn reasoning_tokens(usage: &Value) -> Option<u64> {
-    REASONING_TOKEN_POINTERS
-        .iter()
-        .find_map(|pointer| usage.pointer(pointer).and_then(non_negative_count))
+    let mut reported_zero = false;
+    for pointer in REASONING_TOKEN_POINTERS {
+        match usage.pointer(pointer).and_then(non_negative_count) {
+            Some(0) => reported_zero = true,
+            Some(tokens) => return Some(tokens),
+            None => {}
+        }
+    }
+    reported_zero.then_some(0)
 }
 
 /// `completion_tokens - reasoning_tokens` when the server reported reasoning
@@ -67,6 +77,21 @@ mod tests {
         let usage =
             json!({"completion_tokens_details": {"reasoning_tokens": 3}, "reasoning_tokens": 9});
         assert_eq!(reasoning_tokens(&usage), Some(3));
+    }
+
+    #[test]
+    fn placeholder_zero_does_not_mask_a_later_real_count() {
+        let usage =
+            json!({"completion_tokens_details": {"reasoning_tokens": 0}, "reasoning_tokens": 9});
+        assert_eq!(reasoning_tokens(&usage), Some(9));
+        let all_zero = json!({
+            "completion_tokens_details": {"reasoning_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "reasoning_tokens": 0
+        });
+        assert_eq!(reasoning_tokens(&all_zero), Some(0));
+        let none = json!({"completion_tokens_details": {}, "output_tokens_details": null});
+        assert_eq!(reasoning_tokens(&none), None);
     }
 
     #[test]

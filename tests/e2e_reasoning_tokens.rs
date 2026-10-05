@@ -193,3 +193,91 @@ fn strategic_points_report_reasoning_tokens() {
             .all(|line| line.ends_with(&format!(",{REASONING}"))));
     }
 }
+
+/// Request rows from a strategic `--ndjson` run against `dummy_args`.
+fn strategic_ndjson_request_rows(dummy_args: &[&str], streaming: bool) -> Option<Vec<Value>> {
+    let dummy = spawn_dummy(dummy_args)?;
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let prompts = dir.path().join("prompts.jsonl");
+    std::fs::write(&prompts, "{\"prompt\":\"alpha\"}\n").expect("prompts");
+    let ndjson = dir.path().join("run.ndjson");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"));
+    command
+        .args([
+            "--url",
+            &dummy.url("/v1/chat/completions"),
+            "--model",
+            "dummy",
+            "--prompts",
+            prompts.to_str().expect("utf8"),
+            "--max-tokens",
+            &MAX_TOKENS.to_string(),
+            "--sweep",
+            "2",
+            "--requests-per-stage",
+            "3",
+        ])
+        .arg("--ndjson")
+        .arg(&ndjson)
+        .arg("--csv")
+        .arg(dir.path().join("records.csv"))
+        .arg("--html")
+        .arg(dir.path().join("report.html"));
+    if streaming {
+        command.arg("--streaming");
+    }
+    let output = command.output().expect("run strategic");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = std::fs::read_to_string(&ndjson)
+        .expect("read ndjson")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("ndjson row"))
+        .filter(|row| row["kind"] == "request")
+        .collect();
+    assert_eq!(rows.len(), 3, "request rows");
+    Some(rows)
+}
+
+/// telemetry.v1 request rows carry server-reported `reasoning_tokens` and
+/// omit the key (not `null`, not `0`) when the server did not report it.
+#[test]
+fn strategic_ndjson_request_rows_carry_or_omit_reasoning_tokens() {
+    for streaming in [true, false] {
+        let reasoning = REASONING.to_string();
+        let Some(reported) = strategic_ndjson_request_rows(
+            &["-reasoning-tokens", &reasoning, "-chunk-interval", "2ms"],
+            streaming,
+        ) else {
+            skip("go dummy-model-server not available");
+            return;
+        };
+        for row in &reported {
+            assert_eq!(row["success"], true, "{row}");
+            assert_eq!(
+                row["reasoning_tokens"], REASONING,
+                "streaming={streaming} {row}"
+            );
+            assert_eq!(row["output_tokens"], MAX_TOKENS + REASONING);
+        }
+        let Some(absent) =
+            strategic_ndjson_request_rows(&["-reasoning", "-chunk-interval", "2ms"], streaming)
+        else {
+            skip("go dummy-model-server not available");
+            return;
+        };
+        for row in &absent {
+            assert_eq!(row["success"], true, "{row}");
+            assert!(
+                row.as_object()
+                    .expect("row object")
+                    .get("reasoning_tokens")
+                    .is_none(),
+                "streaming={streaming} {row}"
+            );
+        }
+    }
+}

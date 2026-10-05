@@ -74,8 +74,10 @@
   VLM read the server-reported count from `usage` (final usage chunk when
   streaming, response `usage` otherwise), accepting
   `completion_tokens_details.reasoning_tokens`,
-  `output_tokens_details.reasoning_tokens`, and flat `reasoning_tokens`, in
-  that order. Unreported, `null`, negative, or non-integer values stay `null`
+  `output_tokens_details.reasoning_tokens`, and flat `reasoning_tokens`; the
+  first non-zero value wins, and `0` only when every reported location is
+  `0`. vLLM reports it from v0.28.0 when started with `--reasoning-parser`.
+  Unreported, `null`, negative, or non-integer values stay `null`
   (never `0`); there is no tokenizer fallback. `request.v3` gains
   `reasoning_tokens` and `visible_completion_tokens`
   (`completion_tokens - reasoning_tokens`, `null` when reasoning is

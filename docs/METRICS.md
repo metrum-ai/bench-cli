@@ -129,11 +129,25 @@ Workload section. This page focuses on measured fields.
   `usage.completion_tokens_details.reasoning_tokens` (OpenAI Chat
   Completions, SGLang, DeepSeek-style servers),
   `usage.output_tokens_details.reasoning_tokens` (OpenAI Responses API shape),
-  then flat `usage.reasoning_tokens`. The first non-negative integer wins.
-  Absent, `null`, negative, or non-integer values mean "not reported"
-  (`null`), never `0`; a reported `0` stays `0`. There is no tokenizer
+  then flat `usage.reasoning_tokens`. The first non-zero value wins; `0` is
+  recorded only when every reported location is `0`, so a placeholder
+  `completion_tokens_details.reasoning_tokens: 0` cannot hide a real count
+  elsewhere. Absent, `null`, negative, or non-integer values mean "not
+  reported" (`null`), never `0`. There is no tokenizer
   fallback, so servers that do not report the field give `null` even when
   they stream reasoning deltas.
+- **vLLM** (the default LLM and VLM engine, see [SERVING.md](SERVING.md))
+  reports `usage.completion_tokens_details.reasoning_tokens` on chat
+  completions, streaming and non-streaming, from v0.28.0
+  ([vllm#45802](https://github.com/vllm-project/vllm/pull/45802)), and only
+  when the server starts with `--reasoning-parser`
+  ([reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/)).
+  Without a reasoning parser, or on vLLM before v0.28.0,
+  `completion_tokens_details` is `null`, so Bench records `reasoning_tokens:
+  null` and the summary shows `n=0`. That means "not reported", not "no
+  reasoning". With a parser but a non-thinking model, vLLM reports `0`, which
+  Bench records as `0`. Intermediate stream chunks can carry a placeholder
+  `0`; the final usage chunk carries the count.
 - **Visible completion tokens** (`visible_completion_tokens`, tokens):
   `completion_tokens - reasoning_tokens`. `null` when reasoning is not
   reported, or when `reasoning_tokens > completion_tokens` (inconsistent
