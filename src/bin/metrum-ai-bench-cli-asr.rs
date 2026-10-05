@@ -203,7 +203,6 @@ async fn make_request(
     api_key: &str,
     response_format: &str,
     language: &str,
-    file_content: Vec<u8>,
 ) -> Result<
     (Duration, Duration, String, f64, &'static str, usize, usize),
     Box<dyn Error + Send + Sync>,
@@ -218,7 +217,8 @@ async fn make_request(
     debug!("Model: {}", model);
     debug!("Response format: {}", response_format);
 
-    // The caller reads the file before taking send_offset and send_instant.
+    // Read the file content before starting the request clock.
+    let file_content = tokio::fs::read(local_file_path).await?;
     let content_size = file_content.len();
     debug!("File size: {} bytes", content_size);
     let start_time = Instant::now();
@@ -807,37 +807,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let request_slot =
                 metrum_ai_bench::concurrency::InFlightSlot::new(&tracker_task, permit);
             let in_flight_at_send = request_slot.in_flight();
-            // Read the upload before the request clock starts, so the send
-            // offset and latency exclude local disk time.
-            let file_content: Result<Vec<u8>, Box<dyn Error + Send + Sync>> =
-                match &sample.local_file_path {
-                    Some(path) => tokio::fs::read(path).await.map_err(Into::into),
-                    None => Err("No local file path available for audio sample".into()),
-                };
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
             let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
-            let result = match file_content {
-                Ok(file_content) => {
-                    metrum_ai_bench::connect_timing::with_connect_slot(
-                        Arc::clone(&connect_slot),
-                        make_request(
-                            &client,
-                            &url,
-                            &model,
-                            &sample,
-                            request_timeout,
-                            &api_key,
-                            &response_format_str,
-                            &language_str,
-                            file_content,
-                        ),
-                    )
-                    .await
-                }
-                Err(err) => Err(err),
-            };
+            let result = metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                make_request(
+                    &client,
+                    &url,
+                    &model,
+                    &sample,
+                    request_timeout,
+                    &api_key,
+                    &response_format_str,
+                    &language_str,
+                ),
+            )
+            .await;
             let http_trace = connect_slot.trace();
             // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);

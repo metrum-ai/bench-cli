@@ -54,7 +54,7 @@ pub struct TelemetryArgs {
     #[arg(
         long,
         default_value_t = false,
-        help = "Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run"
+        help = "Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)"
     )]
     pub require_telemetry: bool,
 
