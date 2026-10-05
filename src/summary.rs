@@ -70,6 +70,20 @@ pub struct RunSummary {
     pub queue_delay_s: DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: DistSummary,
+    /// DNS lookup inside the connector (`0` = no lookup: pool hit or IP literal).
+    pub dns_s: DistSummary,
+    /// Response headers to last body chunk.
+    pub receive_s: DistSummary,
+    /// Request body bytes per request (headers excluded).
+    pub bytes_sent: DistSummary,
+    /// Response body bytes per request after content decoding (headers excluded).
+    pub bytes_received: DistSummary,
+    /// Response body chunks per request as yielded by the HTTP client.
+    pub chunks_received: DistSummary,
+    /// Successes that rode a pooled connection; null when no row carries the flag.
+    pub connections_reused: Option<usize>,
+    /// `connections_reused` over successes carrying the flag; null when none do.
+    pub connection_reuse_rate: Option<f64>,
     /// Per-request prefill rate `isl_tokens / min(first_reasoning_s, ttft_s)`; rows with both values
     /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: DistSummary,
@@ -235,6 +249,40 @@ pub struct EndpointSummary {
     pub osl_tokens_source: Option<&'static str>,
     pub reasoning_tokens: DistSummary,
     pub visible_completion_tokens: DistSummary,
+}
+
+/// HTTP phase trace aggregates over measured successes (#194). Rows from a
+/// path without the trace contribute no sample, so absent means `n = 0`.
+struct HttpTraceDists {
+    dns_s: DistSummary,
+    receive_s: DistSummary,
+    bytes_sent: DistSummary,
+    bytes_received: DistSummary,
+    chunks_received: DistSummary,
+    connections_reused: Option<usize>,
+    connection_reuse_rate: Option<f64>,
+}
+
+impl HttpTraceDists {
+    fn from_successes(successes: &[&RequestRecord]) -> Self {
+        let dist = |pick: fn(&RequestRecord) -> Option<f64>| {
+            DistSummary::from_values(&successes.iter().filter_map(|r| pick(r)).collect::<Vec<_>>())
+        };
+        let flags: Vec<bool> = successes
+            .iter()
+            .filter_map(|r| r.connection_reused)
+            .collect();
+        let reused = flags.iter().filter(|&&reused| reused).count();
+        Self {
+            dns_s: dist(|r| r.dns_s),
+            receive_s: dist(|r| r.receive_s),
+            bytes_sent: dist(|r| r.bytes_sent.map(|b| b as f64)),
+            bytes_received: dist(|r| r.bytes_received.map(|b| b as f64)),
+            chunks_received: dist(|r| r.chunks_received.map(|c| c as f64)),
+            connections_reused: (!flags.is_empty()).then_some(reused),
+            connection_reuse_rate: (!flags.is_empty()).then(|| reused as f64 / flags.len() as f64),
+        }
+    }
 }
 
 /// Distributions over fields already recorded per request (#191).
@@ -505,6 +553,7 @@ impl RunSummary {
         };
         let per_endpoint = endpoint_summaries(&pool);
         let recorded = RecordedFieldDists::from_successes(&successes);
+        let http = HttpTraceDists::from_successes(&successes);
         let bins = throughput_bins(&successes, window, bin_seconds);
         let completion_tokens_per_second = completion_tokens_total.map(|t| t as f64 / window);
         let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / window);
@@ -544,6 +593,13 @@ impl RunSummary {
             first_byte_s: recorded.first_byte_s,
             queue_delay_s: recorded.queue_delay_s,
             first_reasoning_s: recorded.first_reasoning_s,
+            dns_s: http.dns_s,
+            receive_s: http.receive_s,
+            bytes_sent: http.bytes_sent,
+            bytes_received: http.bytes_received,
+            chunks_received: http.chunks_received,
+            connections_reused: http.connections_reused,
+            connection_reuse_rate: http.connection_reuse_rate,
             prefill_tps_per_user: recorded.prefill_tps_per_user,
             time_to_second_token_s: recorded.time_to_second_token_s,
             user_tps: recorded.user_tps,
@@ -778,6 +834,25 @@ pub fn print_run_summary(summary: &RunSummary) {
     }
     if summary.first_reasoning_s.n > 0 {
         print_dist("First reasoning", &summary.first_reasoning_s);
+    }
+    if summary.receive_s.n > 0 {
+        print_dist("Receive", &summary.receive_s);
+    }
+    if summary.dns_s.n > 0 {
+        print_dist("DNS", &summary.dns_s);
+    }
+    for (label, dist) in [
+        ("Bytes sent", &summary.bytes_sent),
+        ("Bytes received", &summary.bytes_received),
+        ("Chunks received", &summary.chunks_received),
+    ] {
+        if dist.n > 0 {
+            print_dist_unit(label, dist, "");
+        }
+    }
+    if let (Some(reused), Some(rate)) = (summary.connections_reused, summary.connection_reuse_rate)
+    {
+        println!("  Connections reused: {reused} ({:.1}%)", rate * 100.0);
     }
     if summary.isl_tokens.n > 0 {
         print_dist_unit(
@@ -1604,6 +1679,40 @@ mod tests {
         assert_eq!(mixed.osl_tokens.avg, Some(10.0));
         assert_eq!(mixed.osl_tokens_source, Some("mixed"));
         assert_eq!(mixed.isl_tokens_source, Some("mixed"));
+    }
+
+    #[test]
+    fn http_trace_aggregates_skip_untraced_rows() {
+        let trace = |reused: bool, received: u64| crate::connect_timing::HttpTrace {
+            connect_s: if reused { 0.0 } else { 0.004 },
+            connection_reused: reused,
+            dns_s: if reused { 0.0 } else { 0.001 },
+            bytes_sent: Some(100),
+            receive_s: Some(0.2),
+            bytes_received: Some(received),
+            chunks_received: Some(received / 10),
+        };
+        let first = ok(0, 500, 120, 20, &[20; 19]).with_http_trace(trace(false, 300));
+        let second = ok(1, 500, 120, 20, &[20; 19]).with_http_trace(trace(true, 500));
+        let untraced = ok(2, 500, 120, 20, &[20; 19]);
+        let summary = RunSummary::from_records(&[first, second, untraced.clone()], 1.0, false);
+        assert_eq!(summary.connections_reused, Some(1));
+        assert_eq!(summary.connection_reuse_rate, Some(0.5));
+        assert_eq!(summary.bytes_received.n, 2);
+        assert_eq!(summary.bytes_received.avg, Some(400.0));
+        assert_eq!(summary.chunks_received.avg, Some(40.0));
+        assert_eq!(summary.bytes_sent.n, 2);
+        assert_eq!(summary.receive_s.n, 2);
+        assert_eq!(summary.dns_s.n, 2);
+        assert_eq!(summary.dns_s.max, Some(0.001));
+        // No traced row: not applicable, so n = 0 and null rather than 0.
+        let none = RunSummary::from_records(&[untraced], 1.0, false);
+        assert_eq!(none.connections_reused, None);
+        assert_eq!(none.connection_reuse_rate, None);
+        assert_eq!(none.receive_s.n, 0);
+        let value = serde_json::to_value(&none).unwrap();
+        assert!(value["connection_reuse_rate"].is_null());
+        assert_eq!(value["bytes_received"]["n"], 0);
     }
 
     #[test]

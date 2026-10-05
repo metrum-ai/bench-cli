@@ -486,6 +486,12 @@ mod tests {
                 warmup: false,
                 first_reasoning_s: None,
                 reasoning_tokens: None,
+                connection_reused: None,
+                dns_s: None,
+                bytes_sent: None,
+                receive_s: None,
+                bytes_received: None,
+                chunks_received: None,
             };
             w.serialize(&record).unwrap();
         }

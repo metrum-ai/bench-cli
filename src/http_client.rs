@@ -3,9 +3,10 @@
 
 //! Shared reqwest client construction for the modality binaries.
 
-use crate::connect_timing::ConnectTimingLayer;
+use crate::connect_timing::{ConnectTimingLayer, TimedResolver};
 use reqwest::Client;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Options for [`build_http_client`]. Timeouts and pool settings mirror the
@@ -23,14 +24,16 @@ pub struct HttpClientOptions<'a> {
 
 /// Build a rustls-backed HTTP client with optional private CA and insecure TLS.
 ///
-/// Installs [`ConnectTimingLayer`] so per-request [`crate::connect_timing::ConnectSlot`]
-/// can observe TCP/TLS connect duration (pool hits report `0.0`).
+/// Installs [`ConnectTimingLayer`] and [`TimedResolver`] so a per-request
+/// [`crate::connect_timing::ConnectSlot`] can observe connect and DNS time and
+/// connection reuse (pool hits report `0.0`).
 pub fn build_http_client(opts: HttpClientOptions<'_>) -> anyhow::Result<Client> {
     let mut builder = Client::builder()
         .connect_timeout(opts.connect_timeout)
         .pool_max_idle_per_host(opts.pool_max_idle_per_host)
         .pool_idle_timeout(opts.pool_idle_timeout)
         .tcp_keepalive(opts.tcp_keepalive)
+        .dns_resolver(Arc::new(TimedResolver))
         .connector_layer(ConnectTimingLayer);
 
     if let Some(timeout) = opts.request_timeout {

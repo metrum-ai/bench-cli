@@ -39,6 +39,7 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 | `-error-rate` | 0 | Probability of 503 / mid-stream error |
 | `-split-sse` | false | Flush mid-event SSE frames |
 | `-omit-done` | false | Omit trailing `data: [DONE]` |
+| `-done-tail` | 0 | Delay between `data: [DONE]` and the end of the stream body (e.g. `20ms`) |
 | `-role-only` | false | Stream role delta only |
 | `-reasoning` | false | Emit `delta.reasoning_content` before content |
 | `-reasoning-tokens` | 0 | Emit N reasoning chunks, add N to `completion_tokens`, and report `usage.completion_tokens_details.reasoning_tokens` (non-streaming too); 0 = off |

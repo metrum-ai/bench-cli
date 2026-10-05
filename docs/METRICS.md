@@ -27,10 +27,69 @@ Workload section. This page focuses on measured fields.
   A value of `0` means the client reused a pooled connection (pool hit).
   Fresh connects include DNS plus TCP and, for HTTPS, TLS. TTFT still includes
   connect/TLS/queue by design; use `connect_s` with `first_byte_s` / `ttft_s`
-  to attribute slow TTFT to network setup vs server queue/prefill.
+  to attribute slow TTFT to network setup vs server queue/prefill. LLM, VLM,
+  ASR, imagegen, and strategic all record it (#194; before, only LLM and
+  strategic did). For imagegen with retries, the HTTP phase fields describe
+  the last attempt (the successful one on success).
+- **Connection reused** (`connection_reused`, bool): true when no connector
+  call for this request finished before its response headers, that is the
+  pool supplied a live connection. When the client starts a connect and a
+  pooled connection frees up first, the losing connect keeps running in the
+  background: work it finishes after the headers is not booked to the row
+  (`connection_reused = true`, and it adds nothing to `connect_s` or
+  `dns_s`). If it finishes before the headers, the row still reads `false`
+  and carries that connect and DNS time, which also lowers `prefill_s`. This
+  mostly affects ramp-up and open-loop stages. Requests with no response
+  headers (failures) read `false` whenever a connect was attempted. Summary `connections_reused` (integer) counts measured successes
+  with `connection_reused = true`; `connection_reuse_rate` is
+  `connections_reused / successes carrying the flag`. Both are `null` when no
+  measured success carries the flag (#194).
+- **DNS** (`dns_s`, seconds): time in name resolution inside the connector.
+  The shared client installs a timed resolver that resolves with
+  `getaddrinfo` on a blocking thread (tokio `lookup_host`), the same path as
+  reqwest's default resolver. `0.0` when no lookup ran (pool hit or
+  IP-literal host). `dns_s` is part of `connect_s`, not added to it (#194).
+  When one request triggers more than one connector call (for example a
+  reconnect after a stale pooled connection), both `connect_s` and `dns_s`
+  sum those calls, so `dns_s <= connect_s` holds on successes. A failed
+  lookup still records its time, so a DNS-failure row can show `dns_s > 0`
+  with `connect_s = 0.0` (the connector never completed). A lookup cancelled
+  by `connect_timeout` also keeps its elapsed time. On a row that got
+  headers, resolver time counts only when its connect finished before the
+  headers, so a pooled row (`connection_reused = true`) always reads
+  `dns_s = 0.0`.
+- **TCP and TLS are not split.** reqwest runs TCP connect and the TLS
+  handshake inside one opaque connector future, and Bench times that future
+  as a whole (`connector_layer`). Only their sum is observable:
+  `connect_s - dns_s`. Bench does not report separate `tcp_s` / `tls_s`
+  fields (#194).
+- **Receive** (`receive_s`, seconds): response headers received to last
+  response body chunk. Successes only (#194). Streaming clients read the body
+  to its end after `data: [DONE]` (bounded at 250 ms and 64 KiB) so the
+  connection returns to the pool; that tail is in `receive_s` but not in
+  `latency_s`, so `first_byte_s + receive_s` can exceed `latency_s` when a
+  server holds the stream open after `[DONE]`.
+- **Bytes sent** (`bytes_sent`, bytes): request body bytes, headers excluded.
+  Taken from the in-memory body, or from the `Content-Length` header for
+  multipart bodies. Absent when the length is unknown (#194).
+- **Bytes received** (`bytes_received`, bytes): response body bytes after
+  content decoding (for example gzip), headers excluded. Successes only
+  (#194).
+- **Chunks received** (`chunks_received`, count): response body chunks as
+  yielded by the HTTP client. These are transport reads, not SSE events, so
+  one chunk may hold several events or part of one. Successes only (#194).
+- Failed requests keep `connect_s`, `connection_reused`, `dns_s`, and
+  `bytes_sent` but omit `receive_s`, `bytes_received`, and
+  `chunks_received`, because an error body may not be read through the
+  trace. Summary `dns_s`, `receive_s`, `bytes_sent`, `bytes_received`, and
+  `chunks_received` are type-7 distributions over measured successes that
+  carry the field (`n=0` when none). ASR `modality_metrics.bytes_sent` /
+  `bytes_received` are unchanged and differ from these wire fields: they are
+  the audio file bytes and the response text length.
 - **Prefill (proxy)**: `prefill_s`. When `connect_s` is present,
   `max(0, ttft_s - connect_s)`; otherwise `ttft_s`. This is a client-side
-  proxy, not a server engine prefill trace.
+  proxy, not a server engine prefill trace. VLM now records `connect_s`, so
+  VLM `prefill_s` is `ttft_s - connect_s` like LLM (#194).
 - **Decode**: `decode_s = max(0, e2e - ttft)` on streaming successes.
   `decode_tok_s = completion_tokens / decode_s` (strategic uses
   `output_tokens / decode_s`).

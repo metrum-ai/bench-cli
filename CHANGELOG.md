@@ -142,6 +142,24 @@
   `scripts/tests/serve_sut_test.sh` runs in CI and checks
   `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
   summary/request schema change (#203).
+- HTTP phase trace (#194, additive, no schema version bump). `request.v3`
+  gains optional `connection_reused` (no connector call finished
+  before the response headers, so a pooled connection carried it), `dns_s` (resolver time inside `connect_s`, `0.0` on a pool hit
+  or IP-literal host), `bytes_sent` (request body bytes), and, for successes
+  only, `receive_s` (headers to last body chunk), `bytes_received` (body bytes
+  after content decoding), and `chunks_received` (HTTP client body chunks,
+  not SSE events). Each is omitted when absent. TCP connect and TLS
+  handshake are not split because reqwest runs both in one connector future;
+  `connect_s - dns_s` is their sum (see `docs/METRICS.md`).
+- `summary.v3` and strategic sweep points gain `dns_s`, `receive_s`,
+  `bytes_sent`, `bytes_received`, and `chunks_received` type-7 distributions
+  (`n=0` when none) plus `connections_reused` and `connection_reuse_rate`
+  (`null` when no measured success carries `connection_reused`). The console
+  prints Receive, DNS, Bytes sent/received, Chunks received, and Connections
+  reused lines when present. The strategic request CSV gains trailing
+  optional `connection_reused`, `dns_s`, `bytes_sent`, `receive_s`,
+  `bytes_received`, and `chunks_received` columns after `reasoning_tokens`
+  (#194).
 - `docs/queries/analyze.py` computes the `docs/telemetry/ANALYSIS.md`
   derived metrics per measured stage: `gpu_util_mean`, `sm_active_p50`,
   `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`,
@@ -173,6 +191,13 @@
   (#199).
 
 ### Changed
+- VLM, ASR, and imagegen now record `connect_s` and the HTTP phase trace
+  (before, only LLM and strategic recorded `connect_s`). VLM `prefill_s` is
+  now `ttft_s - connect_s`, as for LLM, so it can read lower than in earlier
+  VLM runs. Imagegen with retries records the last attempt. ASR
+  `modality_metrics.bytes_sent` / `bytes_received` (audio file bytes and
+  response text length) are unchanged and differ from the new top-level wire
+  body byte fields (#194).
 - Strategic knee detection now needs at least 5 measured stages, that is
   stages with a p95 (`KNEE_MIN_POINTS`: both endpoints plus 3 interior
   candidates). Stages without a p95 do not count, so interior gaps cannot
@@ -191,6 +216,28 @@
   `docs/STRATEGIC_BENCHMARKING.md` (#190).
 
 ### Fixed
+- Streaming clients (LLM, VLM, strategic chat, preflight) now read the body
+  to its end after `data: [DONE]`. They used to stop at `[DONE]` and drop the
+  body before the terminating HTTP chunk arrived, so hyper discarded the
+  connection instead of returning it to the pool. Against servers that flush
+  `[DONE]` and the stream end in separate writes, about half the requests
+  (the parity mock at concurrency 4: 35 of 64) opened a fresh TCP/TLS
+  connection, and that connect time landed inside their TTFT. The drain is
+  bounded (250 ms, 64 KiB) so a server that holds the stream open cannot hang
+  the client, and it runs after `latency_s`, TTFT, and ITL are fixed. Earlier
+  streaming runs may include connect time in TTFT for many requests and
+  should be re-measured before comparing TTFT. `receive_s`,
+  `bytes_received`, and `chunks_received` now include the drained tail. No
+  schema change (PR #222 review).
+- `dns_s` books resolver time only with a connect that completes before the
+  response headers, so a losing background connect can no longer leave
+  `dns_s > 0` on a row with `connect_s = 0.0` and `connection_reused = true`.
+  A lookup cancelled by `connect_timeout` keeps its elapsed time instead of
+  reading `0.0`. The response body counter no longer takes the trace lock per
+  chunk; it writes chunks, bytes, and body end once (PR #222 review).
+- dummy-model-server gains `-done-tail DURATION`, a delay between
+  `data: [DONE]` and the end of the stream body, used by the connection-reuse
+  e2e test.
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
   and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,
   and strategic released the semaphore permit before the in-flight guard, so

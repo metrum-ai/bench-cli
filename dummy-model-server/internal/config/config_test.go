@@ -61,3 +61,16 @@ func TestParseFlagsStrictMedia(t *testing.T) {
 		t.Fatal("-strict-media=false should clear StrictMedia")
 	}
 }
+
+func TestParseFlagsDoneTail(t *testing.T) {
+	cfg, err := config.ParseFlags([]string{"-done-tail", "20ms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DoneTail != 20*time.Millisecond {
+		t.Fatalf("DoneTail = %v", cfg.DoneTail)
+	}
+	if _, err := config.ParseFlags([]string{"-done-tail", "-5ms"}); err == nil {
+		t.Fatal("negative -done-tail must be rejected")
+	}
+}
