@@ -46,8 +46,12 @@ impl ImageCache {
         if !self.map.contains_key(key) {
             return None;
         }
-        if let Some(pos) = self.order.iter().position(|k| k == key) {
-            let k = self.order.remove(pos).expect("index from position");
+        if let Some(k) = self
+            .order
+            .iter()
+            .position(|k| k == key)
+            .and_then(|pos| self.order.remove(pos))
+        {
             self.order.push_back(k);
         }
         self.map.get(key).cloned()
@@ -148,14 +152,15 @@ impl ImageCache {
                 .into_dimensions()
                 .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
 
-        let oversized =
-            max_dimension.is_some_and(|max_dim| source_width > max_dim || source_height > max_dim);
+        // The limit, only when the image exceeds it.
+        let resize_to =
+            max_dimension.filter(|max_dim| source_width > *max_dim || source_height > *max_dim);
+        let oversized = resize_to.is_some();
 
         let (encoded, width, height) = if oversized || reencode_jpeg {
             let mut img = image::load_from_memory(&image_data)
                 .map_err(|e| format!("Failed to decode image from '{}': {}", label, e))?;
-            if oversized {
-                let max_dim = max_dimension.expect("oversized implies a limit");
+            if let Some(max_dim) = resize_to {
                 let scale = max_dim as f32 / source_width.max(source_height) as f32;
                 let new_width = (source_width as f32 * scale) as u32;
                 let new_height = (source_height as f32 * scale) as u32;
@@ -328,11 +333,124 @@ pub fn build_request_body(
         }
     }
 
-    let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
-    if body_str.contains("base64") {
-        debug!("Built request body: (redacted: contains image data)");
-    } else {
-        debug!("Built request body: {}", body_str);
+    // Pretty-printing a body with base64 images is costly; only when logged.
+    if log::log_enabled!(log::Level::Debug) {
+        let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
+        if body_str.contains("base64") {
+            debug!("Built request body: (redacted: contains image data)");
+        } else {
+            debug!("Built request body: {}", body_str);
+        }
     }
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(url: &str, bytes: u64) -> ImageData {
+        ImageData {
+            base64_data: "QUJD".into(),
+            mime_type: "image/png".into(),
+            width: 2,
+            height: 2,
+            size_bytes: bytes,
+            url: url.into(),
+        }
+    }
+
+    #[test]
+    fn body_has_system_text_images_and_controls() {
+        let body = build_request_body(
+            "m",
+            16,
+            0.5,
+            "describe",
+            &[image("a.png", 3)],
+            "high",
+            false,
+            true,
+            true,
+            Some(4),
+            Some(r#"{"top_p":0.9}"#),
+            None,
+        )
+        .expect("body");
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages[0]["role"], "system");
+        let content = messages[1]["content"].as_array().expect("content");
+        assert_eq!(content[0]["text"], "describe");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,QUJD");
+        assert_eq!(content[1]["image_url"]["detail"], "high");
+        assert_eq!(body["max_tokens"], 16);
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["stream_options"]["include_usage"], true);
+        assert_eq!(body["ignore_eos"], true);
+        assert_eq!(body["min_tokens"], 4);
+        assert_eq!(body["top_p"], 0.9);
+    }
+
+    #[test]
+    fn empty_system_prompt_is_omitted_and_server_side_download_keeps_url() {
+        let body = build_request_body(
+            "m",
+            8,
+            0.1,
+            "",
+            &[image("https://x/a.png", 3)],
+            "low",
+            true,
+            false,
+            false,
+            None,
+            None,
+            Some(""),
+        )
+        .expect("body");
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 1);
+        let content = messages[0]["content"].as_array().expect("content");
+        assert_eq!(content.len(), 1, "no empty text part");
+        assert_eq!(content[0]["image_url"]["url"], "https://x/a.png");
+        assert!(body.get("stream_options").is_none());
+        assert!(build_request_body(
+            "m",
+            8,
+            0.1,
+            "x",
+            &[],
+            "low",
+            false,
+            false,
+            false,
+            None,
+            Some("{"),
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn cache_evicts_least_recently_used() {
+        assert!(ImageCache::new(0).is_err());
+        let mut cache = ImageCache::new(2).expect("cache");
+        cache.put("a".into(), image("a", 1));
+        cache.put("b".into(), image("b", 2));
+        assert!(cache.get("a").is_some(), "touch a");
+        cache.put("c".into(), image("c", 3));
+        assert!(cache.get("b").is_none(), "b was least recently used");
+        assert_eq!(cache.get("a").map(|i| i.size_bytes), Some(1));
+        assert_eq!(cache.get("c").map(|i| i.size_bytes), Some(3));
+        cache.put("a".into(), image("a", 9));
+        assert_eq!(cache.get("a").map(|i| i.size_bytes), Some(9));
+    }
+
+    #[test]
+    fn format_image_content_defaults_to_base64() {
+        let part = format_image_content(&image("a.png", 3), &ImageContentOptions::default());
+        assert_eq!(part["type"], "image_url");
+        assert_eq!(part["image_url"]["detail"], "low");
+        assert_eq!(part["image_url"]["url"], "data:image/png;base64,QUJD");
+    }
 }

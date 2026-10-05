@@ -382,6 +382,15 @@ struct Input {
     upload: Option<Arc<AudioUpload>>,
     /// `--kind vlm`: image count and payload bytes in `body`.
     images: Option<(usize, u64)>,
+    /// `--kind imagegen`: images asked for and whether `b64_json` images are
+    /// decoded, read from the body actually sent (after `--extra-body-json`).
+    imagegen: Option<ImagegenRequest>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ImagegenRequest {
+    requested: u32,
+    decode: bool,
 }
 
 /// One preloaded audio sample for `--kind asr`.
@@ -389,7 +398,8 @@ struct Input {
 struct AudioUpload {
     file_name: String,
     format: String,
-    bytes: Vec<u8>,
+    /// Shared with every request's multipart part; never copied per request.
+    bytes: bytes::Bytes,
     seconds: Option<f64>,
     reference: Option<String>,
 }
@@ -665,6 +675,21 @@ fn make_inputs(
     }])
 }
 
+/// What a generation body asks for, read after `--extra-body-json` is merged
+/// so an override of `n` or `response_format` is recorded as sent.
+fn imagegen_request(body: &Value) -> Result<ImagegenRequest> {
+    let requested = body["n"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .context("imagegen body field n must be a positive integer")?;
+    let decode = match body["response_format"].as_str() {
+        Some("b64_json") => true,
+        Some("url") => false,
+        other => bail!("imagegen response_format must be b64_json or url, got {other:?}"),
+    };
+    Ok(ImagegenRequest { requested, decode })
+}
+
 /// Reject flags that do not apply to `--kind` before any input is loaded.
 fn validate_kind_flags(args: &Args) -> Result<()> {
     let kind = args.kind;
@@ -673,6 +698,9 @@ fn validate_kind_flags(args: &Args) -> Result<()> {
     }
     if (args.audio_samples.is_some() || args.ground_truth.is_some()) && kind != EndpointKind::Asr {
         bail!("--audio-samples and --ground-truth are only valid for --kind asr");
+    }
+    if args.max_image_dimension.is_some() && kind != EndpointKind::Vlm {
+        bail!("--max-image-dimension is only valid for --kind vlm");
     }
     if kind.modality_keys().is_empty() {
         return Ok(());
@@ -685,6 +713,25 @@ fn validate_kind_flags(args: &Args) -> Result<()> {
     }
     if args.prompts.is_some() && kind == EndpointKind::Asr {
         bail!("--kind asr reads --audio-samples, not --prompts");
+    }
+    if !kind.chat_like() {
+        // Unary uploads and generations: these chat flags would do nothing.
+        for (set, flag) in [
+            (args.streaming, "--streaming"),
+            (args.max_tokens.is_some(), "--max-tokens"),
+            (args.shared_prefix.is_some(), "--shared-prefix"),
+            (
+                args.infer_ttft_from_first_byte,
+                "--infer-ttft-from-first-byte",
+            ),
+        ] {
+            if set {
+                bail!(
+                    "{flag} is not valid for --kind {}",
+                    format!("{kind:?}").to_ascii_lowercase()
+                );
+            }
+        }
     }
     validate_chat_controls(args)
 }
@@ -814,7 +861,7 @@ async fn asr_inputs(args: &Args) -> Result<Vec<Input>> {
             upload: Some(Arc::new(AudioUpload {
                 file_name,
                 format: sample.format,
-                bytes,
+                bytes: bytes::Bytes::from(bytes),
                 seconds: sample.duration,
                 reference,
             })),
@@ -841,24 +888,26 @@ fn imagegen_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
         None => vec![args.prompt.clone()],
     };
     shuffle_if(args, &mut prompts);
-    Ok(prompts
+    prompts
         .iter()
-        .map(|prompt| Input {
-            body: Arc::new(
-                metrum_ai_bench::imagegen::GenerationBody {
-                    model,
-                    prompt,
-                    n: args.images_per_request,
-                    size: &args.image_size,
-                    response_format: &args.image_response_format,
-                    extra: extra.as_ref().and_then(Value::as_object),
-                    ..Default::default()
-                }
-                .to_json(),
-            ),
-            ..Input::default()
+        .map(|prompt| {
+            let body = metrum_ai_bench::imagegen::GenerationBody {
+                model,
+                prompt,
+                n: args.images_per_request,
+                size: &args.image_size,
+                response_format: &args.image_response_format,
+                extra: extra.as_ref().and_then(Value::as_object),
+                ..Default::default()
+            }
+            .to_json();
+            Ok(Input {
+                imagegen: Some(imagegen_request(&body)?),
+                body: Arc::new(body),
+                ..Input::default()
+            })
         })
-        .collect())
+        .collect()
 }
 
 fn add_structured(body: &mut Value, schema: Option<&Value>, tools: Option<&Value>) {
@@ -876,7 +925,7 @@ fn add_structured(body: &mut Value, schema: Option<&Value>, tools: Option<&Value
 
 fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
     match kind {
-        // ASR responses carry token usage only when the server reports it.
+        // ASR replies carry `usage` only when the server reports it.
         EndpointKind::Chat | EndpointKind::Vlm | EndpointKind::Asr => (
             response
                 .pointer("/usage/prompt_tokens")
@@ -937,6 +986,7 @@ fn spawn_one_request(
     ndjson: Option<metrum_ai_bench::telemetry::NdjsonWriter>,
     scheduled_offset: Option<Duration>,
     warmup: bool,
+    modality: Arc<ModalityOptions>,
 ) -> tokio::task::JoinHandle<(BenchRecord, ModalitySample)> {
     let client = client.clone();
     let url = url.to_string();
@@ -946,17 +996,21 @@ fn spawn_one_request(
     let streaming = args.streaming && kind.chat_like();
     let infer_ttft = args.infer_ttft_from_first_byte;
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
-    let modality = ModalityOptions {
-        model: args.model.clone().unwrap_or_default(),
-        asr_response_format: args.asr_response_format.clone(),
-        language: args.language.clone(),
-        normalizer: args.normalizer,
-        images_requested: args.images_per_request,
-        decode_images: args.image_response_format == "b64_json",
-    };
     tokio::spawn(async move {
-        // ASR uploads become a multipart form; everything else posts JSON.
-        // Built before the send clock so form assembly is never timed.
+        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
+            Arc::clone(&semaphore),
+            &inflight_tracker,
+        )
+        .await
+        .expect("semaphore closed");
+        let mut request_slot = Some(metrum_ai_bench::concurrency::InFlightSlot::new(
+            &inflight_tracker,
+            permit,
+        ));
+        let in_flight_at_send = request_slot.as_ref().map_or(0, |slot| slot.in_flight());
+        // JSON bodies serialize inside the send call, as before #197. An ASR
+        // form is assembled here, after the permit (only in-flight requests
+        // hold one) and before the send clock; the audio bytes are shared.
         let request = client.post(&url).bearer_auth(api_key);
         let request = match &input.upload {
             Some(upload) => metrum_ai_bench::asr::transcription_form(
@@ -969,19 +1023,8 @@ fn spawn_one_request(
             )
             .map(|form| request.multipart(form))
             .map_err(|err| anyhow::anyhow!("{err}")),
-            None => Ok(request.json(&*input.body)),
+            None => Ok(request),
         };
-        let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
-            Arc::clone(&semaphore),
-            &inflight_tracker,
-        )
-        .await
-        .expect("semaphore closed");
-        let mut request_slot = Some(metrum_ai_bench::concurrency::InFlightSlot::new(
-            &inflight_tracker,
-            permit,
-        ));
-        let in_flight_at_send = request_slot.as_ref().map_or(0, |slot| slot.in_flight());
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -1002,7 +1045,11 @@ fn spawn_one_request(
         let result = match request {
             Ok(request) => metrum_ai_bench::connect_timing::with_connect_slot(
                 Arc::clone(&connect_slot),
-                metrum_ai_bench::connect_timing::send(request),
+                metrum_ai_bench::connect_timing::send(if input.upload.is_some() {
+                    request
+                } else {
+                    request.json(&*input.body)
+                }),
             )
             .await
             .map_err(anyhow::Error::from),
@@ -1014,7 +1061,7 @@ fn spawn_one_request(
         let mut first_reasoning_s = None;
         let mut itl_s = Vec::new();
         let body_slot = Arc::clone(&connect_slot);
-        let result: Result<Value> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
+        let result: Result<Reply> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
             let response = result?;
             first_byte_s.replace(sent.elapsed().as_secs_f64());
             t_first_ns.replace(run_epoch.elapsed_ns());
@@ -1036,36 +1083,35 @@ fn spawn_one_request(
                 if let Some(reasoning) = stream.reasoning_tokens {
                     usage["completion_tokens_details"] = json!({"reasoning_tokens": reasoning});
                 }
-                Ok(json!({
+                Ok(Reply::Json(json!({
                     "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
                     "usage": usage
-                }))
-            } else if kind == EndpointKind::Asr {
+                })))
+            } else if kind.modality_keys().is_empty() || kind == EndpointKind::Vlm {
                 let body = metrum_ai_bench::connect_timing::read_body(response).await?;
-                let (text, server_time) = metrum_ai_bench::asr::parse_transcription(
-                    &modality.asr_response_format,
-                    &String::from_utf8_lossy(&body),
-                )
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-                Ok(json!({"text": text, "inference_time": server_time}))
+                Ok(Reply::Json(serde_json::from_slice::<Value>(&body)?))
             } else {
-                let body = metrum_ai_bench::connect_timing::read_body(response).await?;
-                Ok(serde_json::from_slice::<Value>(&body)?)
+                // ASR and imagegen: the clock stops once the body is read, as
+                // in their binaries; parsing happens after it.
+                Ok(Reply::Raw(metrum_ai_bench::connect_timing::read_body(response).await?))
             }
         })
         .await;
         let http_trace = connect_slot.trace();
         let completed = Instant::now();
         let t_done_ns = run_epoch.elapsed_ns();
-        // Image decoding and hashing are client work after the body is read:
-        // free the slot first so they never hold a concurrency permit.
-        if kind == EndpointKind::Imagegen {
+        // Modality parsing, WER/CER and image decoding are client work after
+        // the body is read: free the slot first so they never hold a permit.
+        if !kind.modality_keys().is_empty() {
             drop(request_slot.take());
         }
         let service_latency_s = completed.saturating_duration_since(sent).as_secs_f64();
         let (result, modality_sample) = match result {
-            Ok(value) => match modality.sample(kind, &input, &value, service_latency_s) {
-                Ok(sample) => (Ok(value), sample),
+            Ok(reply) => match modality
+                .finish(kind, &input, reply, service_latency_s)
+                .await
+            {
+                Ok((value, sample)) => (Ok(value), sample),
                 Err(err) => (Err(err), ModalitySample::default()),
             },
             Err(err) => (Err(err), ModalitySample::default()),
@@ -1190,55 +1236,93 @@ fn modality_config(args: &Args, inputs: &[Input]) -> Option<Value> {
     }
 }
 
-/// Per-request modality settings copied into each request task.
+/// A response as read inside the timed window.
+enum Reply {
+    /// Parsed in the window (chat, embeddings, rerank and vlm, as before #197).
+    Json(Value),
+    /// ASR and imagegen bodies, parsed after the clock stops.
+    Raw(bytes::Bytes),
+}
+
+/// Modality settings shared by every request of a run (built once).
 struct ModalityOptions {
     model: String,
     asr_response_format: String,
     language: String,
     normalizer: metrum_ai_bench::asr::Normalizer,
-    images_requested: u32,
-    decode_images: bool,
 }
 
 impl ModalityOptions {
-    /// Modality values for one successful response. An undecodable imagegen
-    /// response fails the request, as in metrum-ai-bench-cli-imagegen.
-    fn sample(
+    fn from_args(args: &Args) -> Self {
+        Self {
+            model: args.model.clone().unwrap_or_default(),
+            asr_response_format: args.asr_response_format.clone(),
+            language: args.language.clone(),
+            normalizer: args.normalizer,
+        }
+    }
+
+    /// Parse a reply and derive its modality values. An unparseable ASR body
+    /// or an undecodable imagegen image fails the request, as in their
+    /// binaries. Image decoding runs on the blocking pool so it never stalls
+    /// the runtime thread that polls other in-flight requests.
+    async fn finish(
         &self,
         kind: EndpointKind,
         input: &Input,
-        response: &Value,
+        reply: Reply,
         service_latency_s: f64,
-    ) -> Result<ModalitySample> {
-        Ok(match kind {
-            EndpointKind::Vlm => input
-                .images
-                .map(|(count, bytes)| ModalitySample::vlm(count, bytes))
-                .unwrap_or_default(),
-            EndpointKind::Asr => {
+    ) -> Result<(Value, ModalitySample)> {
+        match (kind, reply) {
+            (EndpointKind::Vlm, Reply::Json(value)) => {
+                let sample = input
+                    .images
+                    .map(|(count, bytes)| ModalitySample::vlm(count, bytes))
+                    .unwrap_or_default();
+                Ok((value, sample))
+            }
+            (EndpointKind::Asr, Reply::Raw(body)) => {
+                let parsed = metrum_ai_bench::asr::parse_transcription(
+                    &self.asr_response_format,
+                    &String::from_utf8_lossy(&body),
+                )
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
                 let upload = input.upload.as_deref();
-                ModalitySample::asr(
-                    response["text"].as_str().unwrap_or_default(),
+                let sample = ModalitySample::asr(
+                    &parsed.text,
                     upload.and_then(|u| u.reference.as_deref()),
                     self.normalizer,
                     upload.and_then(|u| u.seconds),
                     service_latency_s,
-                )
+                );
+                // Token usage only when the server reports it (json formats).
+                let value = parsed
+                    .usage
+                    .map_or(Value::Null, |usage| json!({ "usage": usage }));
+                Ok((value, sample))
             }
-            EndpointKind::Imagegen => {
-                let (returned, images) =
-                    metrum_ai_bench::imagegen::decode_response_images(response, self.decode_images)
-                        .map_err(|(kind, message)| anyhow::anyhow!("{kind}: {message}"))?;
-                ModalitySample::imagegen(
-                    self.images_requested,
-                    returned,
-                    images.into_iter().map(|image| image.sha256).collect(),
-                )
+            (EndpointKind::Imagegen, Reply::Raw(body)) => {
+                let request = input
+                    .imagegen
+                    .context("imagegen input without its request")?;
+                let (returned, digests) = tokio::task::spawn_blocking(move || {
+                    let parsed: Value = serde_json::from_slice(&body)
+                        .map_err(|err| anyhow::anyhow!("schema_error: {err}"))?;
+                    metrum_ai_bench::imagegen::response_image_digests(&parsed, request.decode)
+                        .map_err(|(kind, message)| anyhow::anyhow!("{kind}: {message}"))
+                })
+                .await
+                .context("image decode task failed")??;
+                Ok((
+                    Value::Null,
+                    ModalitySample::imagegen(request.requested, returned, digests),
+                ))
             }
-            EndpointKind::Chat | EndpointKind::Embeddings | EndpointKind::Rerank => {
-                ModalitySample::default()
+            (_, Reply::Json(value)) => Ok((value, ModalitySample::default())),
+            (_, Reply::Raw(body)) => {
+                Ok((serde_json::from_slice(&body)?, ModalitySample::default()))
             }
-        })
+        }
     }
 }
 
@@ -1270,6 +1354,7 @@ async fn run_stage(
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency as u32,
     ));
+    let modality = Arc::new(ModalityOptions::from_args(args));
     let capacity = args.warmup_requests.saturating_add(args.requests_per_stage) as usize;
     let mut records = Vec::with_capacity(capacity);
     let mut samples = Vec::with_capacity(capacity);
@@ -1302,6 +1387,7 @@ async fn run_stage(
                 ndjson.clone(),
                 None,
                 true,
+                Arc::clone(&modality),
             ));
         }
         for handle in warmup_handles {
@@ -1358,6 +1444,7 @@ async fn run_stage(
             ndjson.clone(),
             scheduled_offset,
             false,
+            Arc::clone(&modality),
         ));
     }
     for handle in measure_handles {
@@ -1443,6 +1530,8 @@ async fn main() -> Result<()> {
         .transpose()
         .context("serialize sut")?;
     let stages = parse_sweep(&args.sweep)?;
+    // Flag checks before any file is read, so a wrong flag says so first.
+    validate_kind_flags(&args)?;
     let schema = args.json_schema.as_deref().map(read_json).transpose()?;
     let tools = args.tools.as_deref().map(read_json).transpose()?;
     if schema.is_some() && tools.is_some() {
@@ -1453,7 +1542,6 @@ async fn main() -> Result<()> {
         (None, Some(tools)) => Some(Validity::tool_names(tools)?),
         _ => None,
     };
-    validate_kind_flags(&args)?;
     let inputs = match args.kind {
         EndpointKind::Vlm => vlm_inputs(&args, &model).await?,
         EndpointKind::Asr => asr_inputs(&args).await?,
@@ -1972,6 +2060,82 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn imagegen_input(decode: bool) -> Input {
+        Input {
+            imagegen: Some(ImagegenRequest {
+                requested: 1,
+                decode,
+            }),
+            ..Input::default()
+        }
+    }
+
+    fn options() -> ModalityOptions {
+        ModalityOptions {
+            model: "m".into(),
+            asr_response_format: "json".into(),
+            language: String::new(),
+            normalizer: metrum_ai_bench::asr::Normalizer::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn undecodable_image_fails_the_request() {
+        let reply = Reply::Raw(bytes::Bytes::from_static(
+            br#"{"data":[{"b64_json":"!!not base64"}]}"#,
+        ));
+        let err = options()
+            .finish(EndpointKind::Imagegen, &imagegen_input(true), reply, 0.1)
+            .await
+            .expect_err("decode error");
+        assert!(err.to_string().contains("decode_error"), "{err}");
+        let not_json = Reply::Raw(bytes::Bytes::from_static(b"<html>"));
+        let err = options()
+            .finish(EndpointKind::Imagegen, &imagegen_input(true), not_json, 0.1)
+            .await
+            .expect_err("schema error");
+        assert!(err.to_string().contains("schema_error"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn url_images_count_without_digests() {
+        let reply = Reply::Raw(bytes::Bytes::from_static(
+            br#"{"data":[{"url":"http://x/1.png"}]}"#,
+        ));
+        let (_, sample) = options()
+            .finish(EndpointKind::Imagegen, &imagegen_input(false), reply, 0.1)
+            .await
+            .expect("url reply");
+        assert_eq!(sample.metrics["images_returned"], 1.0);
+        assert!(sample.image_sha256.is_empty());
+    }
+
+    #[tokio::test]
+    async fn asr_reply_keeps_server_usage_only() {
+        let reply = Reply::Raw(bytes::Bytes::from_static(
+            br#"{"text":"hello","usage":{"prompt_tokens":3,"completion_tokens":2}}"#,
+        ));
+        let (value, _) = options()
+            .finish(EndpointKind::Asr, &Input::default(), reply, 0.1)
+            .await
+            .expect("asr reply");
+        assert_eq!(response_tokens(EndpointKind::Asr, &value), (3, 2));
+        let bare = Reply::Raw(bytes::Bytes::from_static(br#"{"text":"hello"}"#));
+        let (value, _) = options()
+            .finish(EndpointKind::Asr, &Input::default(), bare, 0.1)
+            .await
+            .expect("asr reply");
+        assert_eq!(response_tokens(EndpointKind::Asr, &value), (0, 0));
+    }
+
+    #[test]
+    fn imagegen_request_reads_the_sent_body() {
+        let request = imagegen_request(&json!({"n": 4, "response_format": "url"})).expect("ok");
+        assert_eq!((request.requested, request.decode), (4, false));
+        assert!(imagegen_request(&json!({"n": 1, "response_format": "png"})).is_err());
+        assert!(imagegen_request(&json!({"n": "two", "response_format": "url"})).is_err());
     }
 
     #[test]

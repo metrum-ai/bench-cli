@@ -80,39 +80,50 @@ pub struct DecodedImage {
 /// plus a message.
 pub type DecodeError = (&'static str, String);
 
-/// Count the response `data` items and, for `b64_json`, decode each image
-/// (base64, then image header) and digest its bytes. `url` responses return
-/// the count with no decoded images.
-pub fn decode_response_images(
-    parsed: &Value,
-    b64_json: bool,
-) -> Result<(usize, Vec<DecodedImage>), DecodeError> {
-    let data = parsed
+/// The response `data` array.
+pub fn response_items(parsed: &Value) -> Result<&Vec<Value>, DecodeError> {
+    parsed
         .get("data")
         .and_then(Value::as_array)
-        .ok_or(("schema_error", "response missing data array".to_string()))?;
-    let mut images = Vec::new();
-    if b64_json {
-        for item in data {
-            let b64 = item
-                .get("b64_json")
-                .and_then(Value::as_str)
-                .ok_or(("schema_error", "image item missing b64_json".to_string()))?;
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(b64)
-                .map_err(|e| ("decode_error", e.to_string()))?;
-            let img =
-                image::load_from_memory(&bytes).map_err(|e| ("decode_error", e.to_string()))?;
-            let (width, height) = img.dimensions();
-            images.push(DecodedImage {
-                sha256: hex_sha256(&bytes),
-                bytes,
-                width,
-                height,
-            });
-        }
-    }
-    Ok((data.len(), images))
+        .ok_or(("schema_error", "response missing data array".to_string()))
+}
+
+/// Decode one `b64_json` item (base64, then the image itself) and digest its
+/// bytes.
+pub fn decode_image_item(item: &Value) -> Result<DecodedImage, DecodeError> {
+    let b64 = item
+        .get("b64_json")
+        .and_then(Value::as_str)
+        .ok_or(("schema_error", "image item missing b64_json".to_string()))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| ("decode_error", e.to_string()))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| ("decode_error", e.to_string()))?;
+    let (width, height) = img.dimensions();
+    Ok(DecodedImage {
+        sha256: hex_sha256(&bytes),
+        bytes,
+        width,
+        height,
+    })
+}
+
+/// Count the response `data` items and, for `b64_json`, the digest of each
+/// decoded image (bytes are dropped as soon as they are hashed). `url`
+/// responses return the count with no digests.
+pub fn response_image_digests(
+    parsed: &Value,
+    b64_json: bool,
+) -> Result<(usize, Vec<String>), DecodeError> {
+    let data = response_items(parsed)?;
+    let digests = if b64_json {
+        data.iter()
+            .map(|item| decode_image_item(item).map(|image| image.sha256))
+            .collect::<Result<_, _>>()?
+    } else {
+        Vec::new()
+    };
+    Ok((data.len(), digests))
 }
 
 #[cfg(test)]
@@ -155,26 +166,29 @@ mod tests {
         let png = tiny_png();
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
         let parsed = json!({"data": [{"b64_json": b64}, {"b64_json": b64}]});
-        let (count, images) = decode_response_images(&parsed, true).expect("decode");
+        let (count, digests) = response_image_digests(&parsed, true).expect("decode");
         assert_eq!(count, 2);
-        assert_eq!(images[0].sha256, hex_sha256(&png));
-        assert_eq!(images[0].sha256, images[1].sha256);
-        assert_eq!((images[0].width, images[0].height), (2, 3));
+        assert_eq!(digests, vec![hex_sha256(&png), hex_sha256(&png)]);
+        let image = decode_image_item(&parsed["data"][0]).expect("item");
+        assert_eq!((image.width, image.height), (2, 3));
+        assert_eq!(image.bytes, png);
     }
 
     #[test]
     fn url_responses_count_without_decoding() {
         let parsed = json!({"data": [{"url": "http://x/1.png"}]});
-        let (count, images) = decode_response_images(&parsed, false).expect("count");
+        let (count, digests) = response_image_digests(&parsed, false).expect("count");
         assert_eq!(count, 1);
-        assert!(images.is_empty());
+        assert!(digests.is_empty());
     }
 
     #[test]
     fn decode_errors_are_typed() {
-        let missing = decode_response_images(&json!({}), true).unwrap_err();
+        let missing = response_image_digests(&json!({}), true).unwrap_err();
         assert_eq!(missing.0, "schema_error");
-        let bad = decode_response_images(&json!({"data": [{"b64_json": "!!"}]}), true).unwrap_err();
+        let bad = response_image_digests(&json!({"data": [{"b64_json": "!!"}]}), true).unwrap_err();
         assert_eq!(bad.0, "decode_error");
+        let no_b64 = response_image_digests(&json!({"data": [{"url": "u"}]}), true).unwrap_err();
+        assert_eq!(no_b64.0, "schema_error");
     }
 }

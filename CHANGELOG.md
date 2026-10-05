@@ -217,9 +217,15 @@
   `--images-per-request`, and `--image-response-format`. `--extra-body-json`
   now also works for vlm and imagegen, and `--ignore-eos` / `--min-tokens`
   for vlm. ASR audio and VLM images load before the first request, so file
-  I/O is not in latency; imagegen decode and hash run after the body is read
-  and the concurrency slot is released, and an undecodable `b64_json` image
-  fails the request.
+  I/O is not in latency. For asr and imagegen the clock stops when the body is
+  read (as in their binaries); parsing, WER/CER and image decode/hash run
+  after it and after the concurrency slot is released, and an undecodable
+  `b64_json` image fails the request. Flags that would do nothing for a kind
+  (`--streaming`, `--max-tokens`, `--shared-prefix`,
+  `--infer-ttft-from-first-byte` for asr and imagegen; `--image`,
+  `--max-image-dimension` outside vlm; `--json-schema`, `--tools`,
+  `--sessions` for modality kinds) are rejected. The imagegen binary still
+  writes each image as it decodes.
 - Strategic sweep points gain `modality_metrics` (key to type-7
   distribution over measured successes, same names as modality `request.v3`:
   VLM `image_count`, `image_bytes`; ASR `wer`, `cer`, `rtfx_client`,

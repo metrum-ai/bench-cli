@@ -324,17 +324,21 @@ pub fn load_ground_truth(
 /// Build the OpenAI `/v1/audio/transcriptions` multipart form: `file`,
 /// `model`, `response_format`, optional `language`, and word timestamps for
 /// the JSON formats. `file_name` should be a basename (never a full path).
+/// `file_content` is shared, not copied, so a preloaded sample can be sent
+/// many times.
 pub fn transcription_form(
     model: &str,
     response_format: &str,
     language: &str,
     file_name: String,
     format: &str,
-    file_content: Vec<u8>,
+    file_content: bytes::Bytes,
 ) -> Result<reqwest::multipart::Form, Box<dyn Error + Send + Sync>> {
-    let file_part = reqwest::multipart::Part::bytes(file_content)
-        .file_name(file_name)
-        .mime_str(mime_for_format(format))?;
+    let length = file_content.len() as u64;
+    let file_part =
+        reqwest::multipart::Part::stream_with_length(reqwest::Body::from(file_content), length)
+            .file_name(file_name)
+            .mime_str(mime_for_format(format))?;
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("model", model.to_string())
@@ -349,13 +353,23 @@ pub fn transcription_form(
     Ok(form)
 }
 
-/// Transcript text and the server-reported `inference_time` (seconds) when it
-/// is present, finite and non-negative. Text, SRT and VTT bodies are the
-/// transcript itself and carry no server time.
+/// A parsed transcription response.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Transcription {
+    pub text: String,
+    /// Server-reported `inference_time` (seconds) when present, finite and
+    /// non-negative; `None` otherwise (callers fall back to the client clock).
+    pub server_time: Option<f64>,
+    /// The response `usage` object when the server sends one (JSON formats).
+    pub usage: Option<Value>,
+}
+
+/// Parse a transcription body. Text, SRT and VTT bodies are the transcript
+/// itself and carry no server time or usage.
 pub fn parse_transcription(
     response_format: &str,
     body: &str,
-) -> Result<(String, Option<f64>), Box<dyn Error + Send + Sync>> {
+) -> Result<Transcription, Box<dyn Error + Send + Sync>> {
     match response_format {
         "verbose_json" | "json" => {
             let json_resp: Value = serde_json::from_str(body)?;
@@ -369,9 +383,17 @@ pub fn parse_transcription(
                 .get("inference_time")
                 .and_then(Value::as_f64)
                 .filter(|t| t.is_finite() && *t >= 0.0);
-            Ok((text, server_time))
+            Ok(Transcription {
+                text,
+                server_time,
+                usage: json_resp.get("usage").cloned(),
+            })
         }
-        "text" | "srt" | "vtt" => Ok((body.to_string(), None)),
+        "text" | "srt" | "vtt" => Ok(Transcription {
+            text: body.to_string(),
+            server_time: None,
+            usage: None,
+        }),
         _ => Err(format!("Unsupported response format: {}", response_format).into()),
     }
 }
@@ -379,6 +401,73 @@ pub fn parse_transcription(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_transcription_json_text_and_errors() {
+        let parsed = parse_transcription(
+            "verbose_json",
+            r#"{"text":"hi there","inference_time":0.25,"usage":{"type":"duration","seconds":2}}"#,
+        )
+        .expect("json");
+        assert_eq!(parsed.text, "hi there");
+        assert_eq!(parsed.server_time, Some(0.25));
+        assert_eq!(parsed.usage.expect("usage")["seconds"], 2);
+        let legacy = parse_transcription("json", r#"{"transcription":"x","inference_time":-1}"#)
+            .expect("legacy field");
+        assert_eq!(legacy.text, "x");
+        assert_eq!(
+            legacy.server_time, None,
+            "negative time is not a server time"
+        );
+        let text = parse_transcription("text", "plain words").expect("text");
+        assert_eq!(text.text, "plain words");
+        assert!(text.server_time.is_none() && text.usage.is_none());
+        assert!(parse_transcription("json", r#"{"other":1}"#).is_err());
+        assert!(parse_transcription("json", "not json").is_err());
+        assert!(parse_transcription("xml", "x").is_err());
+    }
+
+    #[test]
+    fn transcription_form_builds_for_every_format() {
+        for format in ["verbose_json", "json", "text"] {
+            let form = transcription_form(
+                "m",
+                format,
+                "en",
+                "a.wav".into(),
+                "wav",
+                bytes::Bytes::from_static(b"RIFF"),
+            )
+            .expect("form");
+            assert!(!form.boundary().is_empty());
+        }
+        assert_eq!(mime_for_format("FLAC"), "audio/flac");
+        assert_eq!(mime_for_format("unknown"), "audio/mpeg");
+    }
+
+    #[test]
+    fn loads_audio_samples_and_ground_truth() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let samples = dir.path().join("audio.jsonl");
+        std::fs::write(
+            &samples,
+            "{\"id\":\"a\",\"path\":\"a.wav\",\"format\":\"wav\",\"duration\":1.5}\n\n{\"id\":\"b\",\"url\":\"http://x/b.mp3\"}\n",
+        )
+        .expect("write");
+        let loaded = load_audio_samples(samples.to_str().unwrap()).expect("samples");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].local_file_path.as_deref(), Some("a.wav"));
+        assert_eq!(loaded[0].duration, Some(1.5));
+        assert_eq!(loaded[1].format, "unknown");
+        assert!(loaded[1].local_file_path.is_none());
+        let bad = dir.path().join("bad.jsonl");
+        std::fs::write(&bad, "{\"id\":\"c\"}\n").expect("write");
+        assert!(load_audio_samples(bad.to_str().unwrap()).is_err());
+        let refs = dir.path().join("refs.jsonl");
+        std::fs::write(&refs, "{\"id\":\"a\",\"transcript\":\"hello\"}\n").expect("write");
+        let truth = load_ground_truth(refs.to_str().unwrap()).expect("refs");
+        assert_eq!(truth["a"], "hello");
+    }
 
     #[test]
     fn whisper_normalizer_ignores_case_punctuation_and_fillers() {

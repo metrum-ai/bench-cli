@@ -216,7 +216,9 @@ modality binaries use on `request.v3` records. VLM: `image_count`,
 `distinct`) for decoded `b64_json` images. A key with no measured value is
 `n = 0`, never a fabricated number. VLM also reports the chat TTFT and token
 metrics; ASR and imagegen are unary, so their `ttft_s` is `n = 0`.
-`config.modality` records the kind settings. Telemetry (`--telemetry`,
+`config.modality` records the kind settings. For asr and imagegen, latency
+ends when the response body is read; parsing, WER/CER and image decoding run
+after it and never hold a concurrency slot. Telemetry (`--telemetry`,
 `--ndjson`) works the same for every kind. Per-request modality values are
 not written to the CSV, which keeps its columns for every kind.
 

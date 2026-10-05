@@ -1236,38 +1236,41 @@ async fn make_image_request(
         )
         .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
     }
-    let (returned, decoded) = metrum_ai_bench::imagegen::decode_response_images(
-        &parsed,
-        args.response_format == ResponseFormat::B64Json,
-    )
-    .map_err(|(kind, message)| (kind.to_string(), Some(status), message))?;
+    let data = metrum_ai_bench::imagegen::response_items(&parsed)
+        .map_err(|(kind, message)| (kind.to_string(), Some(status), message))?;
     let mut artifacts = Vec::new();
-    for (idx, image) in decoded.into_iter().enumerate() {
-        let path =
-            Path::new(&args.artifact_dir).join(format!("{:06}-{}.png", request_index + 1, idx));
-        if !args.no_save_images {
-            fs::write(&path, &image.bytes)
-                .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
+    if args.response_format == ResponseFormat::B64Json {
+        // Decode and write one image at a time, as before the move into the
+        // library: earlier images reach disk even if a later one fails.
+        for (idx, item) in data.iter().enumerate() {
+            let image = metrum_ai_bench::imagegen::decode_image_item(item)
+                .map_err(|(kind, message)| (kind.to_string(), Some(status), message))?;
+            let path =
+                Path::new(&args.artifact_dir).join(format!("{:06}-{}.png", request_index + 1, idx));
+            if !args.no_save_images {
+                fs::write(&path, &image.bytes)
+                    .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
+            }
+            artifacts.push(ImageArtifact {
+                index: idx,
+                path: if args.no_save_images {
+                    String::new()
+                } else {
+                    path.to_string_lossy().to_string()
+                },
+                sha256: image.sha256,
+                bytes: image.bytes.len(),
+                mime_type: "image/png".to_string(),
+                width: image.width,
+                height: image.height,
+            });
         }
-        artifacts.push(ImageArtifact {
-            index: idx,
-            path: if args.no_save_images {
-                String::new()
-            } else {
-                path.to_string_lossy().to_string()
-            },
-            sha256: image.sha256,
-            bytes: image.bytes.len(),
-            mime_type: "image/png".to_string(),
-            width: image.width,
-            height: image.height,
-        });
     }
     Ok((
         status,
         artifacts,
         response_bytes,
-        returned as u32,
+        data.len() as u32,
         first_byte,
         service_latency,
     ))

@@ -325,6 +325,33 @@ fn strategic_imagegen_sweep_with_telemetry() {
 }
 
 #[test]
+fn strategic_imagegen_url_responses_have_no_digests() {
+    let Some((mock, dummy)) = start() else { return };
+    let sweep = Sweep::new();
+    let summary = run_sweep(
+        &sweep,
+        &dummy.url("/v1/images/generations"),
+        "imagegen",
+        mock.address,
+        &[
+            "--prompt",
+            "a green square",
+            "--image-size",
+            "64x64",
+            "--image-response-format",
+            "url",
+        ],
+    );
+    for point in summary["points"].as_array().unwrap() {
+        assert_eq!(point["modality_metrics"]["images_returned"]["min"], 1.0);
+        assert_eq!(
+            point["image_digests"],
+            serde_json::json!({"images": 0, "distinct": 0})
+        );
+    }
+}
+
+#[test]
 fn chat_sweep_output_has_no_modality_fields() {
     let mock = spawn_mock(&["--latency-ms", "5"]);
     let sweep = Sweep::new();
@@ -377,6 +404,23 @@ fn modality_flags_rejected_for_other_kinds() {
         (
             &["--kind", "rerank", "--temperature", "0.5"],
             "--temperature",
+        ),
+        (
+            &["--kind", "vlm", "--json-schema", "s.json"],
+            "--json-schema",
+        ),
+        (
+            &["--kind", "imagegen", "--sessions", "s.jsonl"],
+            "--sessions",
+        ),
+        (
+            &["--kind", "asr", "--streaming", "--audio-samples", "a.jsonl"],
+            "--streaming",
+        ),
+        (&["--kind", "imagegen", "--max-tokens", "8"], "--max-tokens"),
+        (
+            &["--kind", "chat", "--max-image-dimension", "64"],
+            "--max-image-dimension",
         ),
     ];
     for (flags, needle) in cases {

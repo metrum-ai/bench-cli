@@ -221,7 +221,7 @@ async fn make_request(
         language,
         basename,
         &audio_sample.format,
-        file_content,
+        bytes::Bytes::from(file_content),
     )?;
 
     let response = match metrum_ai_bench::connect_timing::send(
@@ -259,9 +259,9 @@ async fn make_request(
 
     // Parse response based on format; a missing or invalid server
     // inference_time falls back to the client clock.
-    let (transcription, server_time) =
-        metrum_ai_bench::asr::parse_transcription(response_format, &response_text)?;
-    let (inference_time, inference_time_source) = match server_time {
+    let parsed = metrum_ai_bench::asr::parse_transcription(response_format, &response_text)?;
+    let transcription = parsed.text;
+    let (inference_time, inference_time_source) = match parsed.server_time {
         Some(t) => (t, "server"),
         None => (start_time.elapsed().as_secs_f64(), "client"),
     };

@@ -9,6 +9,10 @@
 //! Values are only recorded when measured: a request without a reference
 //! transcript has no `wer`, a sample without a duration has no
 //! `rtfx_client`, and the stage summary for that key is then `n = 0`.
+//!
+//! One deliberate difference from `metrum-ai-bench-cli-asr`: when the
+//! reference normalizes to empty and the transcript does not, WER/CER are
+//! undefined. The sweep records no value; the ASR binary records `1.0`.
 
 use crate::stats::DistSummary;
 use crate::strategic::BenchRecord;
