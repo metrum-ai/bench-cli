@@ -114,7 +114,13 @@ Workload section. This page focuses on measured fields.
     successful completion, so no success is clipped. Strategic uses the same
     rule over the stage rows (first measured send to latest successful
     `sent + service_latency_s`), which can differ slightly from the stage
-    window behind `throughput`. Intervals are clipped to the window.
+    window behind `throughput`. Intervals are clipped to the window. AIPerf
+    ends its window at the final response of any outcome; Bench ends it at
+    the last successful completion, like `window_seconds`.
+  - **Failures are excluded.** Under errors or timeouts the server was also
+    busy with the failed requests, so `effective_concurrency` understates
+    server busyness. Compare it with `observed_concurrency`, which counts
+    failed requests while they are in flight.
   - **Phase split**: at the first generated token,
     `min(first_reasoning_s, ttft_s)` (the same prefill end as
     `prefill_tps_per_user`), clamped into `[0, latency_s]`. Rows with
@@ -133,8 +139,12 @@ Workload section. This page focuses on measured fields.
     not `observed_concurrency`, the client semaphore gauge sampled at each
     send, which is unchanged.
   - **`effective_prefill_concurrency`** (requests): requests between send and
-    first generated token. Includes network, connect, and server queue time,
-    like `prefill_s`.
+    first generated token. Includes network, connect, and server queue time.
+    This prefill is not the per-request `prefill_s`: that is
+    `ttft_s - connect_s` (visible TTFT, connect removed), while this split
+    keeps connect time and ends at the first generated token, reasoning
+    included. On streaming runs without reasoning the two differ only by
+    connect time (0.18% on the parity mock).
   - **`effective_decode_concurrency`** (requests): requests between first
     generated token and completion.
   - **`tokens_in_flight`** (tokens): KV-cache occupancy proxy. During prefill
@@ -149,7 +159,8 @@ Workload section. This page focuses on measured fields.
     `avg = in-window prompt tokens / window_seconds`.
   - **`effective_decode_throughput`** (tokens/second): each request's output
     tokens (`completion_tokens`, reasoning included) spread uniformly over
-    its decode. `avg` over the full window equals output tokens of split rows
+    its decode. Decode tokens include each request's first token, which
+    arrives at the split point, so the full `completion_tokens` counts. `avg` over the full window equals output tokens of split rows
     divided by `window_seconds`, so when every success streams and has a
     positive decode time it matches `completion_tokens_per_second`;
     otherwise it is lower. `active_avg` is the rate while at least

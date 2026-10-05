@@ -1884,6 +1884,34 @@ mod tests {
         }
     }
 
+    /// #223 review: a thinking row splits prefill and decode at its first
+    /// reasoning token, not at visible TTFT.
+    #[test]
+    fn time_weighted_split_at_first_reasoning_token() {
+        // Send 0, done 2 s, reasoning at 0.5 s, visible content at 1.5 s.
+        let mut row = ok(0, 2000, 1500, 30, &[]);
+        row.send_offset_s = Some(0.0);
+        row.first_reasoning_s = Some(0.5);
+        row.prompt_tokens = 100;
+        row.total_tokens = 130;
+        let summary = RunSummary::from_records(&[row], 2.0, false);
+        let tw = &summary.time_weighted;
+        let close = |got: Option<f64>, want: f64| {
+            let got = got.expect("value");
+            assert!((got - want).abs() < 1e-12, "{got} != {want}");
+        };
+        // Prefill [0, 0.5), decode [0.5, 2): a TTFT split would give 0.75 / 0.25.
+        close(tw.effective_prefill_concurrency.avg, 0.25);
+        close(tw.effective_prefill_concurrency.active_s, 0.5);
+        close(tw.effective_decode_concurrency.avg, 0.75);
+        close(tw.effective_decode_concurrency.active_s, 1.5);
+        // 100 prompt tokens over 0.5 s; 30 output tokens over 1.5 s.
+        close(tw.effective_prefill_throughput.max, 200.0);
+        close(tw.effective_decode_throughput.max, 20.0);
+        // 100 * 2 + 30 * 1.5 / 2 = 222.5 token-seconds over 2 s.
+        close(tw.tokens_in_flight.avg, 111.25);
+    }
+
     #[test]
     fn time_weighted_blocks_null_without_successes() {
         let summary = RunSummary::from_records(&[], 0.0, false);
