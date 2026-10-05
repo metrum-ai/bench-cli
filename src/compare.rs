@@ -484,6 +484,7 @@ mod tests {
                 turn: None,
                 error: None,
                 warmup: false,
+                first_reasoning_s: None,
             };
             w.serialize(&record).unwrap();
         }
