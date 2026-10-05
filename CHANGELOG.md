@@ -120,6 +120,22 @@
   `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
   summary/request schema change (#203).
 
+### Changed
+- Strategic knee detection now needs at least 5 measured stages
+  (`KNEE_MIN_POINTS`). With 3 stages Kneedle has one interior candidate and
+  always returned the middle stage, so 3- and 4-stage sweeps that used to
+  report a knee now report `"knee": null`. Plan sweeps with 5 or more loads
+  when the knee matters (#190).
+- Strategic stdout JSON (`metrum-ai-bench-cli.strategic.v1`) gains an
+  always-present `knee_detection` object: `index` (integer or null),
+  `reason` (`insufficient_points`, `missing_latency`, `flat_curve`, or null),
+  `points`, and `min_points` (5). `reason` is null exactly when `index` is
+  set. Additive; `knee` is unchanged in shape. The CLI prints
+  `note: no knee: ...` on stderr and the HTML report shows the same sentence.
+  `scripts/e2e/write_aiperf_comparison.py` prints the reason next to a
+  missing knee. See `docs/OUTPUT_SCHEMA.md` and
+  `docs/STRATEGIC_BENCHMARKING.md` (#190).
+
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
   and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,

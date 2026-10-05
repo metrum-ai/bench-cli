@@ -6,9 +6,9 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use metrum_ai_bench::strategic::{
-    controlled_messages, detect_knee, export_csv, export_html, export_mlperf, load_sessions,
-    now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord, MlperfScenario,
-    PrefixControl, ServerMetrics, Validity,
+    controlled_messages, detect_knee_with_reason, export_csv, export_html, export_mlperf,
+    load_sessions, now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord,
+    MlperfScenario, PrefixControl, ServerMetrics, Validity,
 };
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -1216,13 +1216,16 @@ async fn main() -> Result<()> {
     }
     let duration_s = started.elapsed().as_secs_f64();
     let server = aggregate_server(&server_samples.lock().await);
-    let knee = detect_knee(&points);
+    let knee = detect_knee_with_reason(&points);
+    if let Some(note) = knee.note() {
+        eprintln!("note: {note}");
+    }
     export_csv(&args.csv, &all_records)?;
     export_html(
         &args.html,
         "Metrum AI Bench strategic sweep",
         &points,
-        knee,
+        &knee,
         &server,
         sut_json.as_ref(),
     )?;
@@ -1285,7 +1288,8 @@ async fn main() -> Result<()> {
             "environment": environment,
             "config": redacted_config,
             "points": points,
-            "knee": knee.map(|index| &points[index]),
+            "knee": knee.index.map(|index| &points[index]),
+            "knee_detection": knee,
             "server_metrics": server,
             "sut": sut_json,
             "records_csv": args.csv,
