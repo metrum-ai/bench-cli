@@ -1,38 +1,16 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+mod common;
+
 use serde_json::Value;
 use std::fs;
-use std::net::{TcpListener, TcpStream};
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+use std::process::Command;
 
 #[test]
 fn strategic_sweep_exports_all_formats() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args(["--listen", &address.to_string(), "--latency-ms", "10"])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let _server = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    let server = common::spawn_mock(&["--latency-ms", "10"]);
+    let address = server.address;
 
     let directory = tempfile::tempdir().expect("temporary output directory");
     let html = directory.path().join("report.html");
@@ -154,20 +132,8 @@ fn strategic_sweep_exports_all_formats() {
 
 #[test]
 fn strategic_prompts_and_warmup_exclude_from_aggregates() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args(["--listen", &address.to_string(), "--latency-ms", "5"])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let _server = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    let server = common::spawn_mock(&["--latency-ms", "5"]);
+    let address = server.address;
 
     let directory = tempfile::tempdir().expect("temporary output directory");
     let prompts = directory.path().join("prompts.jsonl");
@@ -239,20 +205,8 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
 
 #[test]
 fn strategic_ignore_eos_stamped_in_config() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args(["--listen", &address.to_string(), "--latency-ms", "5"])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let _server = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    let server = common::spawn_mock(&["--latency-ms", "5"]);
+    let address = server.address;
 
     let directory = tempfile::tempdir().expect("temporary output directory");
     let html = directory.path().join("report.html");
@@ -289,8 +243,6 @@ fn strategic_ignore_eos_stamped_in_config() {
     assert_eq!(summary["config"]["min_tokens"], 16);
     assert_eq!(summary["points"][0]["config"]["ignore_eos"], true);
 }
-
-mod common;
 
 #[test]
 fn strategic_sessions_measure_ttft_only_when_streaming() {

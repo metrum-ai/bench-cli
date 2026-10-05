@@ -29,7 +29,7 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-port` | 8000 | Listen port |
+| `-port` | 8000 | Listen port (`0` picks a free port; the startup log line reports it) |
 | `-model` | dummy | Model id |
 | `-latency` | 0 | Delay before first token / non-stream body |
 | `-chunk-interval` | 0 | Delay between stream token events |

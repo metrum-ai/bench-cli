@@ -3,43 +3,21 @@
 
 //! Wave 4 UX: preflight, sut init, compare.
 
+mod common;
+
 use serde_json::json;
 use std::fs;
-use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+use std::process::Command;
 
 fn cli_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli"))
 }
 
-fn start_mock() -> (ChildGuard, String) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args(["--listen", &address.to_string(), "--latency-ms", "5"])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let guard = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
-    (guard, format!("http://{address}"))
+fn start_mock() -> (common::Mock, String) {
+    let server = common::spawn_mock(&["--latency-ms", "5"]);
+    let address = server.address;
+    (server, format!("http://{address}"))
 }
 
 #[test]
