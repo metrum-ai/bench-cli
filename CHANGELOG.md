@@ -131,16 +131,22 @@
   `DCGM_FI_PROF_PIPE_TENSOR_ACTIVE`, and `DCGM_FI_PROF_GR_ENGINE_ACTIVE`
   minus `DCGM_FI_PROF_SM_ACTIVE` for hollow). A metric with no source series
   is null, never 0. Engine histogram p50/p95 come from bucket deltas with
-  Prometheus `histogram_quantile` interpolation. An optional second argument
-  (the strategic stdout JSON) adds `kv_cache_util_at_knee`, read from
-  `knee_detection` (#190) and null with a reason when there is no knee;
-  older outputs fall back to the legacy `knee` field, ignored below 5 points.
+  Prometheus `histogram_quantile` interpolation; a label set is dropped
+  whole if any of its buckets resets in the stage. An optional second
+  argument (the strategic stdout JSON) adds `kv_cache_util_at_knee`, read
+  from `knee_detection` (#190) and null with a reason when there is no knee
+  (`knee_index_out_of_range` when `knee_detection.index` is outside the
+  points). Older outputs fall back to the legacy `knee` field, ignored when
+  fewer than 5 points have a `p95_s` (matching #190).
   `--json` prints machine-readable output (#199).
 - Recorded fixtures `docs/queries/fixtures/sweep5` and `sweep3` (`.ndjson`
   plus trimmed `.stdout.json`, from strategic against
-  `metrum-ai-bench-cli-mock-server --telemetry-fixture`; `record.sh`
+  `metrum-ai-bench-cli-mock-server --telemetry-fixture`, with a build that
+  includes #190 so the stdout carries `knee_detection`; `record.sh`
   re-records them) and a stdlib `unittest` suite
-  `docs/queries/test_analyze.py`, now run in CI. No Rust or schema change
+  `docs/queries/test_analyze.py`, now run in CI. The mock energy counter
+  advances by a fixed step per scrape, so J/token from these fixtures is not
+  meaningful (see `docs/telemetry/ANALYSIS.md`). No Rust or schema change
   (#199).
 
 ### Changed
@@ -205,6 +211,17 @@
   `percentile_nearest` is renamed `percentile_type7`; it already computed
   Hyndman-Fan type 7 and only the name was wrong, so the rename changes no
   values (#199).
+- `docs/queries/analyze.py` no longer doubles GPU power and energy when one
+  GPU is scraped by more than one exporter. It summed every matching row, so
+  a GPU seen by both all-smi and DCGM read twice the power and energy. It
+  now picks one power source and one energy counter per stage, all-smi first
+  (`all_smi_gpu_power_consumption_watts`,
+  `all_smi_gpu_energy_hw_millijoules_total`), then DCGM
+  (`DCGM_FI_DEV_POWER_USAGE`, `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION`), then
+  other GPU series, with the name-based match only when none of those is
+  present. Chassis, node, `ipmi`, and `redfish` meters are never counted as
+  GPU power. The chosen series are reported as `sources.power` and
+  `sources.energy_counter`. The doubling predates the derived metrics (#199).
 
 ## 1.5.3 (2026-10-02)
 

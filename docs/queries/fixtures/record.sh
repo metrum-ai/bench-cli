@@ -6,6 +6,9 @@
 # Usage: BIN_DIR=/path/to/target/release docs/queries/fixtures/record.sh
 # Writes sweep5.{ndjson,stdout.json} (5 stages, knee) and
 # sweep3.{ndjson,stdout.json} (3 stages, no knee) next to this script.
+# The generated .ndjson and .stdout.json fixtures are Copyright (c) 2026
+# Metrum AI, Inc., SPDX-License-Identifier: Apache-2.0. They carry no comment
+# header because JSON and NDJSON have no comment syntax.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

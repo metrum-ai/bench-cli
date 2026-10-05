@@ -27,28 +27,31 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 
-POWER_METRICS = {
-    "DCGM_FI_DEV_POWER_USAGE",
+# One GPU power source and one GPU energy source per stage, in preference
+# order (all-smi first, DCGM fallback, like the derived-metric families below).
+# Summing two exporters that report the same GPU doubles power and energy.
+# Node and chassis meters (ipmi_*, redfish_*, *chassis*) are wall power, not
+# GPU power, and are never mixed in. Other names are a fallback only when none
+# of these is present (see pick_metric).
+POWER_PREFERENCE = [
     "all_smi_gpu_power_consumption_watts",
+    "DCGM_FI_DEV_POWER_USAGE",
     "nvidia_smi_power_draw_watts",
+    "nv_gpu_power_usage",
     "gpu_power_usage",
     "gpu_package_power",
     "hw_power",
-    "ipmi_dcmi_power_consumption_current_watts",
-    "ipmi_power_watts",
-    "nv_gpu_power_usage",
-    "redfish_chassis_power_average_consumed_watts",
-}
+]
 
-ENERGY_METRICS = {
-    "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION",
+ENERGY_PREFERENCE = [
     "all_smi_gpu_energy_hw_millijoules_total",
+    "DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION",
     "nvidia_smi_energy_joules_total",
+    "nv_energy_consumption",
     "gpu_energy_consumed",
     "hw_energy",
     "habanalabs_energy",
-    "nv_energy_consumption",
-}
+]
 
 # Derived-metric sources, in preference order: the first metric with samples in
 # the stage window wins. Value is the scale to a [0, 1] ratio. all-smi names
@@ -91,21 +94,46 @@ PREEMPTIONS = ["vllm:num_preemptions_total", "sglang:num_preemptions_total"]
 KNEE_MIN_POINTS = 5
 
 
-# Power-named gauges that are configuration, not draw. The name fallback below
-# must skip them: all-smi exports power_limit_{current,max}_watts next to
-# power_consumption_watts, and summing them reported ~992 W on a 350 W H100.
-NOT_POWER_DRAW = re.compile(r"limit|cap|max|min|threshold|default|enforced", re.IGNORECASE)
+# Power-named gauges that are configuration, not draw, or that meter the whole
+# node. The name fallback below must skip them: all-smi exports
+# power_limit_{current,max}_watts next to power_consumption_watts, and summing
+# them reported ~992 W on a 350 W H100.
+NOT_POWER_DRAW = re.compile(
+    r"limit|cap|max|min|threshold|default|enforced|chassis|node|ipmi|redfish",
+    re.IGNORECASE,
+)
 
 
 def is_power_draw(row: Dict[str, Any]) -> bool:
     metric = row.get("metric", "")
-    if metric in POWER_METRICS:
+    if metric in POWER_PREFERENCE:
         return True
     return (
         "power" in metric.lower()
         and row.get("unit") == "W"
         and not NOT_POWER_DRAW.search(metric)
     )
+
+
+def is_energy_counter(row: Dict[str, Any]) -> bool:
+    metric = row.get("metric", "")
+    if metric in ENERGY_PREFERENCE:
+        return True
+    return (
+        "energy" in metric.lower()
+        and row.get("unit") == "J"
+        and not NOT_POWER_DRAW.search(metric)
+    )
+
+
+def pick_metric(window: List[Dict[str, Any]], preferred: List[str], matches) -> Optional[str]:
+    """First `preferred` metric with rows in the window, else the
+    lexicographically first other metric that `matches` (deterministic)."""
+    present = {r.get("metric", "") for r in window if matches(r)}
+    for metric in preferred:
+        if metric in present:
+            return metric
+    return min(present) if present else None
 
 
 def energy_joules(row: Dict[str, Any]) -> float:
@@ -235,13 +263,27 @@ def stage_histogram_quantile(
         if r.get("metric") != metric + "_bucket":
             continue
         by_series[series_key(r)].append((r["t_ns"] / 1e9, float(r["value"])))
-    by_le: Dict[float, float] = defaultdict(float)
+    # Group buckets by label set without `le`. A reset in any bucket drops the
+    # whole label set: a partial histogram would skew the quantile.
+    by_set: Dict[Any, Dict[float, float]] = defaultdict(dict)
+    bad: set = set()
     for key, samples in by_series.items():
-        le = dict(key[2]).get("le")
-        d = counter_delta(samples)
-        if le is None or d is None:
+        labels = dict(key[2])
+        le = labels.pop("le", None)
+        if le is None:
             continue
-        by_le[float(le)] += d
+        label_set = (key[0], tuple(sorted(labels.items())))
+        d = counter_delta(samples)
+        if d is None:
+            bad.add(label_set)
+            continue
+        by_set[label_set][float(le)] = d
+    by_le: Dict[float, float] = defaultdict(float)
+    for label_set, buckets in by_set.items():
+        if label_set in bad:
+            continue
+        for le, d in buckets.items():
+            by_le[le] += d
     return histogram_quantile(list(by_le.items()), q)
 
 
@@ -359,13 +401,19 @@ def resolve_knee(stdout: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                     "source": "knee_detection",
                     "note": f"no knee: {det.get('reason')} "
                             f"({det.get('points')} points, min {det.get('min_points')})"}
+        if not isinstance(index, int) or not 0 <= index < len(points):
+            return {"load": None, "index": None, "reason": "knee_index_out_of_range",
+                    "source": "knee_detection",
+                    "note": f"knee_detection.index {index!r} is outside points[0..{len(points)})"}
         return {"load": points[index].get("load"), "index": index, "reason": None,
                 "source": "knee_detection", "note": None}
     legacy = "knee_detection absent (output predates #190); used the legacy knee field"
-    if len(points) < KNEE_MIN_POINTS:
+    # Like #190, count only points with a p95 latency.
+    usable = sum(1 for p in points if p.get("p95_s") is not None)
+    if usable < KNEE_MIN_POINTS:
         return {"load": None, "index": None, "reason": "insufficient_points",
                 "source": "legacy_knee",
-                "note": f"{legacy}; {len(points)} points < {KNEE_MIN_POINTS}, "
+                "note": f"{legacy}; {usable} points with p95_s < {KNEE_MIN_POINTS}, "
                         "so any legacy knee is ignored"}
     knee = stdout.get("knee")
     if knee is None:
@@ -393,11 +441,13 @@ def analyze(rows: List[Dict[str, Any]], stdout: Optional[Dict[str, Any]] = None)
             r for r in tele if r.get("run_id") == s.get("run_id") and t0 <= r["t_ns"] < t1
         ]
 
-        # Sum multi-GPU power at the same t_ns (board total), then time-weight.
+        # One power source; sum its GPUs at the same t_ns (board total), then
+        # time-weight.
+        power_metric = pick_metric(window, POWER_PREFERENCE, is_power_draw)
         power_by_t: Dict[int, float] = defaultdict(float)
         power_values: List[float] = []
         for r in window:
-            if is_power_draw(r):
+            if r.get("metric") == power_metric:
                 power_by_t[r["t_ns"]] += float(r["value"])
                 power_values.append(float(r["value"]))
         power_series = [(t / 1e9, v) for t, v in sorted(power_by_t.items())]
@@ -405,11 +455,11 @@ def analyze(rows: List[Dict[str, Any]], stdout: Optional[Dict[str, Any]] = None)
         power_p95 = percentile_type7([v for _, v in power_series] or power_values, 95.0)
         energy_trap = trapezoid_energy_j(power_series)
 
-        # Energy counters: Δ per series, then sum series (multi-GPU).
+        # One energy counter source: Δ per series, then sum series (multi-GPU).
+        energy_metric = pick_metric(window, ENERGY_PREFERENCE, is_energy_counter)
         energy_by_series: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
         for r in window:
-            metric = r.get("metric", "")
-            if metric in ENERGY_METRICS or (r.get("unit") == "J" and "energy" in metric.lower()):
+            if r.get("metric") == energy_metric:
                 energy_by_series[series_key(r)].append((r["t_ns"] / 1e9, energy_joules(r)))
         energy_counter = 0.0
         energy_counter_ok = False
@@ -432,6 +482,10 @@ def analyze(rows: List[Dict[str, Any]], stdout: Optional[Dict[str, Any]] = None)
             if energy_for_jtok is not None and out_tokens > 0
             else None
         )
+        derived = derived_metrics(window)
+        derived["sources"] = {
+            "power": power_metric, "energy_counter": energy_metric, **derived["sources"]
+        }
         out_stages.append({
             "run_id": s.get("run_id"),
             "stage": s.get("stage"),
@@ -443,7 +497,7 @@ def analyze(rows: List[Dict[str, Any]], stdout: Optional[Dict[str, Any]] = None)
             "energy_trap_j": energy_trap,
             "out_tokens": out_tokens,
             "j_per_output_token": j_per,
-            **derived_metrics(window),
+            **derived,
         })
 
     knee = resolve_knee(stdout)
@@ -500,7 +554,7 @@ def render(result: Dict[str, Any]) -> None:
         for k, v in s["sources"].items():
             sources[k].add(v or "absent")
     print("\n## sources")
-    for k in cols[2:]:
+    for k in ["power", "energy_counter"] + cols[2:]:
         print(f"{k}\t{', '.join(sorted(sources[k])) or 'absent'}")
 
     hist_rows = [(s, m, q) for s in result["stages"] for m, q in s["engine_histograms"].items()]

@@ -70,6 +70,56 @@ class Percentiles(unittest.TestCase):
         self.assertEqual(analyze.stage_histogram_quantile(rows, m, 0.95), 0.5)
 
 
+    def test_stage_histogram_drops_label_set_with_reset(self):
+        m = "vllm:e2e_request_latency_seconds"
+        rows = []
+        # engine 0 is clean; engine 1 resets its 0.5 bucket mid-window.
+        for t, e0, e1 in ((0.0, (0, 10, 10), (50, 60, 60)), (1.0, (0, 10, 20), (55, 1, 70))):
+            for engine, counts in (("0", e0), ("1", e1)):
+                for le, c in zip(("0.1", "0.5", "+Inf"), counts):
+                    rows.append(tele(m + "_bucket", t, c, le=le, engine=engine))
+        # Only engine 0 counts: deltas 0, 0, 10, so every rank is in +Inf.
+        self.assertEqual(analyze.stage_histogram_quantile(rows, m, 0.5), 0.5)
+
+
+class PowerEnergySources(unittest.TestCase):
+    def test_one_power_and_energy_source_per_stage(self):
+        rows = []
+        for t, e in ((0.0, 0.0), (1.0, 300.0)):
+            rows += [
+                tele("all_smi_gpu_power_consumption_watts", t, 300.0),
+                tele("DCGM_FI_DEV_POWER_USAGE", t, 300.0),
+                tele("all_smi_chassis_power_consumption_watts", t, 900.0, unit="W"),
+                tele("all_smi_gpu_energy_hw_millijoules_total", t, e * 1000.0),
+                tele("DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION", t, e, unit="J"),
+                tele("all_smi_energy_consumed_joules_total", t, e, unit="J"),
+            ]
+        for r in rows:
+            r["unit"] = r["labels"].pop("unit", None)
+        stage = {"kind": "stage", "run_id": "r", "stage": 1, "load": 1,
+                 "phase": "measure", "t_start_ns": 0, "t_end_ns": int(2e9)}
+        s = analyze.analyze(rows + [stage])["stages"][0]
+        self.assertAlmostEqual(s["power_mean_w"], 300.0)
+        self.assertAlmostEqual(s["energy_counter_j"], 300.0)
+        self.assertAlmostEqual(s["energy_trap_j"], 300.0)
+        self.assertEqual(s["sources"]["power"], "all_smi_gpu_power_consumption_watts")
+        self.assertEqual(s["sources"]["energy_counter"],
+                         "all_smi_gpu_energy_hw_millijoules_total")
+
+    def test_dcgm_fallback_and_node_meters_excluded(self):
+        rows = [
+            {"metric": "DCGM_FI_DEV_POWER_USAGE", "unit": "W"},
+            {"metric": "ipmi_power_watts", "unit": "W"},
+            {"metric": "redfish_chassis_power_average_consumed_watts", "unit": "W"},
+            {"metric": "node_power_watts", "unit": "W"},
+        ]
+        self.assertEqual(
+            analyze.pick_metric(rows, analyze.POWER_PREFERENCE, analyze.is_power_draw),
+            "DCGM_FI_DEV_POWER_USAGE")
+        self.assertIsNone(
+            analyze.pick_metric(rows[1:], analyze.POWER_PREFERENCE, analyze.is_power_draw))
+
+
 class DerivedMetrics(unittest.TestCase):
     def test_all_smi_names_exist_on_recorded_fork_page(self):
         with open(ALL_SMI_PAGE, encoding="utf-8") as f:
@@ -140,6 +190,48 @@ class RecordedSweeps(unittest.TestCase):
         stages = [r for r in rows if r.get("kind") == "stage" and r.get("phase") == "measure"]
         self.assertGreaterEqual(len(stdout["points"]), analyze.KNEE_MIN_POINTS)
         self.assertEqual(len(stages), len(stdout["points"]))
+
+    def test_recorded_stdout_has_knee_detection(self):
+        _, s5 = load_fixture("sweep5")
+        _, s3 = load_fixture("sweep3")
+        for stdout in (s5, s3):
+            self.assertIn("knee_detection", stdout)
+            self.assertEqual(stdout["knee_detection"]["min_points"], analyze.KNEE_MIN_POINTS)
+        det = s5["knee_detection"]
+        self.assertTrue(det["index"] is not None or det["reason"])
+        self.assertEqual(s3["knee_detection"]["index"], None)
+        self.assertEqual(s3["knee_detection"]["reason"], "insufficient_points")
+        self.assertIsNone(s3["knee"])
+
+    def test_sweep5_power_is_one_gpu(self):
+        # The mock serves the same 200..249 W on DCGM and all-smi; summing both
+        # exporters would read 400+ W.
+        rows, stdout = load_fixture("sweep5")
+        for s in analyze.analyze(rows, stdout)["stages"]:
+            self.assertGreaterEqual(s["power_mean_w"], 200.0)
+            self.assertLess(s["power_mean_w"], 250.0)
+            self.assertEqual(s["sources"]["power"], "all_smi_gpu_power_consumption_watts")
+
+    def test_knee_index_out_of_range(self):
+        rows, stdout = load_fixture("sweep5")
+        stdout = copy.deepcopy(stdout)
+        stdout["knee_detection"] = {"index": 9, "reason": None, "points": 5, "min_points": 5}
+        res = analyze.analyze(rows, stdout)
+        self.assertIsNone(res["kv_cache_util_at_knee"])
+        self.assertEqual(res["kv_cache_util_at_knee_reason"], "knee_index_out_of_range")
+
+    def test_legacy_fallback_counts_points_with_p95(self):
+        rows, stdout = load_fixture("sweep5")
+        legacy = copy.deepcopy(stdout)
+        del legacy["knee_detection"]
+        legacy["knee"] = legacy["points"][2]
+        res = analyze.analyze(rows, legacy)
+        self.assertEqual(res["knee"]["source"], "legacy_knee")
+        self.assertEqual(res["knee"]["load"], legacy["points"][2]["load"])
+        legacy["points"][4]["p95_s"] = None
+        res = analyze.analyze(rows, legacy)
+        self.assertIsNone(res["kv_cache_util_at_knee"])
+        self.assertEqual(res["kv_cache_util_at_knee_reason"], "insufficient_points")
 
     def test_sweep5_stage_metrics(self):
         rows, stdout = load_fixture("sweep5")

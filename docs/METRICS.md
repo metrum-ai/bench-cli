@@ -176,9 +176,13 @@ inside modality `--data-log` request rows.
 
 - **Shared epoch**: every `*_ns` field is nanoseconds from one run-start
   `Instant`. `run.t0_wall` is ISO 8601 UTC metadata.
-- **Power / energy (offline)**: prefer DCGM `DCGM_FI_DEV_POWER_USAGE` and
-  `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION` (mJ, often scaled to J at ingest), else
-  `all_smi_gpu_power_consumption_watts`. Energy is counter Δ in a measured
+- **Power / energy (offline)**: one GPU power source and one energy counter
+  per stage, never summed across exporters. Prefer the Metrum all-smi fork
+  (`all_smi_gpu_power_consumption_watts`,
+  `all_smi_gpu_energy_hw_millijoules_total` in mJ), else DCGM
+  (`DCGM_FI_DEV_POWER_USAGE`, `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION` in mJ,
+  often scaled to J at ingest). Chassis, node, IPMI and Redfish meters are wall
+  power and never count as GPU power. Energy is counter Δ in a measured
   stage window, else trapezoid ∫ power (also when the energy counter resets
   inside the window). `j_per_output_token` divides that energy by successful
   output tokens in the stage.

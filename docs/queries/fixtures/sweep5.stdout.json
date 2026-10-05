@@ -1,6 +1,7 @@
 {
   "knee": {
-    "completion_tokens_per_second": 68.8786906470862,
+    "completion_tokens_per_second": 33.27011526756742,
+    "completion_tokens_total": 108,
     "config": {
       "extra_body_json": null,
       "ignore_eos": false,
@@ -30,20 +31,20 @@
       "warmup_requests": 0
     },
     "connect_s": {
-      "avg": 2.341482142857143e-05,
+      "avg": 6.149851851851852e-06,
       "mad": 0.0,
-      "max": 0.00050007,
+      "max": 0.000166046,
       "min": 0.0,
-      "n": 28,
+      "n": 27,
       "p50": 0.0,
       "p90": 0.0,
       "p90_unreliable": false,
-      "p95": 0.00010110424999999977,
+      "p95": 0.0,
       "p95_unreliable": false,
-      "p99": 0.00040704825000000016,
+      "p99": 0.00012287403999999973,
       "p99_unreliable": true,
       "percentile_method": "hyndman_fan_type7",
-      "std": 9.792535777487516e-05
+      "std": 3.195556759928686e-05
     },
     "cost_per_million_output_tokens": null,
     "decode_s": {
@@ -78,23 +79,23 @@
       "percentile_method": "hyndman_fan_type7",
       "std": null
     },
-    "error_rate": 0.125,
-    "errors": 4,
+    "error_rate": 0.15625,
+    "errors": 5,
     "first_byte_s": {
-      "avg": 0.20298803596428575,
-      "mad": 0.0006166665000000016,
-      "max": 0.20788734,
-      "min": 0.201278994,
-      "n": 28,
-      "p50": 0.202478393,
-      "p90": 0.2045810311,
+      "avg": 0.20280515377777777,
+      "mad": 0.0010436730000000227,
+      "max": 0.211041261,
+      "min": 0.200537624,
+      "n": 27,
+      "p50": 0.202053002,
+      "p90": 0.20624187459999999,
       "p90_unreliable": false,
-      "p95": 0.20735648715,
+      "p95": 0.20833836369999997,
       "p95_unreliable": false,
-      "p99": 0.20787932721000002,
+      "p99": 0.21035003852,
       "p99_unreliable": true,
       "percentile_method": "hyndman_fan_type7",
-      "std": 0.001702658300479262
+      "std": 0.002613713857528026
     },
     "first_reasoning_s": {
       "avg": null,
@@ -112,14 +113,15 @@
       "percentile_method": "hyndman_fan_type7",
       "std": null
     },
-    "goodput": 17.21967266177155,
+    "goodput": 8.317528816891855,
     "goodput_equals_throughput": true,
+    "input_tokens_per_second": 66.54023053513484,
     "isl_tokens": {
       "avg": 8.0,
       "mad": 0.0,
       "max": 8.0,
       "min": 8.0,
-      "n": 28,
+      "n": 27,
       "p50": 8.0,
       "p90": 8.0,
       "p90_unreliable": false,
@@ -131,38 +133,38 @@
       "std": 0.0
     },
     "latency_s": {
-      "avg": 0.20300507150000005,
-      "mad": 0.0006136010000000053,
-      "max": 0.207907588,
-      "min": 0.201298341,
-      "n": 28,
-      "p50": 0.202493056,
-      "p90": 0.2046272615,
+      "avg": 0.2028218204074074,
+      "mad": 0.0010558760000000111,
+      "max": 0.21106708,
+      "min": 0.200549607,
+      "n": 27,
+      "p50": 0.202076747,
+      "p90": 0.20626127760000001,
       "p90_unreliable": false,
-      "p95": 0.20737110339999998,
+      "p95": 0.2083496391,
       "p95_unreliable": false,
-      "p99": 0.20789730856,
+      "p99": 0.21037135874000001,
       "p99_unreliable": true,
       "percentile_method": "hyndman_fan_type7",
-      "std": 0.0017029315587783387
+      "std": 0.002614811994887975
     },
-    "load": 4.0,
+    "load": 2.0,
     "n": 32,
     "observed_concurrency": {
       "acquire_count": 32,
-      "cap": 4,
-      "cap_engagement_fraction": 0.875,
-      "in_flight_max": 4.0,
-      "in_flight_mean": 3.1875,
-      "in_flight_p50": 3.0,
-      "wait_count": 28
+      "cap": 2,
+      "cap_engagement_fraction": 0.9375,
+      "in_flight_max": 2.0,
+      "in_flight_mean": 1.625,
+      "in_flight_p50": 2.0,
+      "wait_count": 30
     },
     "osl_tokens": {
       "avg": 4.0,
       "mad": 0.0,
       "max": 4.0,
       "min": 4.0,
-      "n": 28,
+      "n": 27,
       "p50": 4.0,
       "p90": 4.0,
       "p90_unreliable": false,
@@ -173,9 +175,9 @@
       "percentile_method": "hyndman_fan_type7",
       "std": 0.0
     },
-    "p50_s": 0.202493056,
-    "p95_s": 0.20737110339999998,
-    "p99_s": 0.20789730856,
+    "p50_s": 0.202076747,
+    "p95_s": 0.2083496391,
+    "p99_s": 0.21037135874000001,
     "p99_unreliable": true,
     "prefill_s": {
       "avg": null,
@@ -193,6 +195,23 @@
       "percentile_method": "hyndman_fan_type7",
       "std": null
     },
+    "prefill_tps_per_user": {
+      "avg": null,
+      "mad": null,
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p90_unreliable": true,
+      "p95": null,
+      "p95_unreliable": true,
+      "p99": null,
+      "p99_unreliable": true,
+      "percentile_method": "hyndman_fan_type7",
+      "std": null
+    },
+    "prompt_tokens_total": 216,
     "queue_delay_s": {
       "avg": null,
       "mad": null,
@@ -226,7 +245,24 @@
       "std": null
     },
     "reasoning_tokens_total": null,
-    "throughput": 17.21967266177155,
+    "throughput": 8.317528816891855,
+    "time_to_second_token_s": {
+      "avg": null,
+      "mad": null,
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p90_unreliable": true,
+      "p95": null,
+      "p95_unreliable": true,
+      "p99": null,
+      "p99_unreliable": true,
+      "percentile_method": "hyndman_fan_type7",
+      "std": null
+    },
+    "total_tokens_per_second": 99.81034580270227,
     "ttft_s": {
       "avg": null,
       "mad": null,
@@ -245,20 +281,20 @@
     },
     "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
     "user_tps": {
-      "avg": 19.70525752409628,
-      "mad": 0.059843461204408754,
-      "max": 19.871003308467408,
-      "min": 19.2393170373368,
-      "n": 28,
-      "p50": 19.753764178898887,
-      "p90": 19.844388600040794,
+      "avg": 19.724829792648595,
+      "mad": 0.10397176520353213,
+      "max": 19.945189920018144,
+      "min": 18.95132106816468,
+      "n": 27,
+      "p50": 19.794459577281298,
+      "p90": 19.919525991582397,
       "p90_unreliable": false,
-      "p95": 19.8553474131649,
+      "p95": 19.937261027967594,
       "p95_unreliable": false,
-      "p99": 19.867089265744326,
+      "p99": 19.945097687281724,
       "p99_unreliable": true,
       "percentile_method": "hyndman_fan_type7",
-      "std": 0.1627317447238462
+      "std": 0.2485927199457193
     },
     "users_at_slo": null,
     "users_meeting_user_tps": null,
@@ -281,10 +317,17 @@
     },
     "visible_completion_tokens_total": null
   },
+  "knee_detection": {
+    "index": 1,
+    "min_points": 5,
+    "points": 5,
+    "reason": null
+  },
   "partial": false,
   "points": [
     {
-      "completion_tokens_per_second": 18.514589048017598,
+      "completion_tokens_per_second": 17.372128967593838,
+      "completion_tokens_total": 112,
       "config": {
         "extra_body_json": null,
         "ignore_eos": false,
@@ -314,9 +357,9 @@
         "warmup_requests": 0
       },
       "connect_s": {
-        "avg": 1.4608107142857144e-05,
+        "avg": 3.373535714285714e-06,
         "mad": 0.0,
-        "max": 0.000409027,
+        "max": 9.4459e-05,
         "min": 0.0,
         "n": 28,
         "p50": 0.0,
@@ -324,10 +367,10 @@
         "p90_unreliable": false,
         "p95": 0.0,
         "p95_unreliable": false,
-        "p99": 0.0002985897100000002,
+        "p99": 6.895507000000004e-05,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 7.72988372507726e-05
+        "std": 1.7851073077989297e-05
       },
       "cost_per_million_output_tokens": null,
       "decode_s": {
@@ -365,20 +408,20 @@
       "error_rate": 0.125,
       "errors": 4,
       "first_byte_s": {
-        "avg": 0.20171517135714287,
-        "mad": 0.000307959999999996,
-        "max": 0.205095315,
-        "min": 0.20066153,
+        "avg": 0.20146546014285716,
+        "mad": 0.00039570600000000955,
+        "max": 0.204147048,
+        "min": 0.200539416,
         "n": 28,
-        "p50": 0.201651446,
-        "p90": 0.20208258799999998,
+        "p50": 0.201570745,
+        "p90": 0.2019747834,
         "p90_unreliable": false,
-        "p95": 0.20343721810000004,
+        "p95": 0.20202374715000002,
         "p95_unreliable": false,
-        "p99": 0.20482583448000002,
+        "p99": 0.20357881167,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0009253819691380798
+        "std": 0.0007218769445078443
       },
       "first_reasoning_s": {
         "avg": null,
@@ -396,8 +439,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
-      "goodput": 4.6286472620043995,
+      "goodput": 4.3430322418984595,
       "goodput_equals_throughput": true,
+      "input_tokens_per_second": 34.744257935187676,
       "isl_tokens": {
         "avg": 8.0,
         "mad": 0.0,
@@ -415,20 +459,20 @@
         "std": 0.0
       },
       "latency_s": {
-        "avg": 0.20173385785714287,
-        "mad": 0.0003136754999999991,
-        "max": 0.205116145,
-        "min": 0.200672411,
+        "avg": 0.20148187032142864,
+        "mad": 0.0003979955000000118,
+        "max": 0.204170132,
+        "min": 0.200559404,
         "n": 28,
-        "p50": 0.2016774805,
-        "p90": 0.20210176160000004,
+        "p50": 0.20158437099999998,
+        "p90": 0.2019921738,
         "p90_unreliable": false,
-        "p95": 0.2034600443,
+        "p95": 0.20204355035,
         "p95_unreliable": false,
-        "p99": 0.204847603,
+        "p99": 0.20360090288000002,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0009266652192312317
+        "std": 0.0007232607244493807
       },
       "load": 1.0,
       "n": 32,
@@ -457,9 +501,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": 0.0
       },
-      "p50_s": 0.2016774805,
-      "p95_s": 0.2034600443,
-      "p99_s": 0.204847603,
+      "p50_s": 0.20158437099999998,
+      "p95_s": 0.20204355035,
+      "p99_s": 0.20360090288000002,
       "p99_unreliable": true,
       "prefill_s": {
         "avg": null,
@@ -477,6 +521,23 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
+      "prefill_tps_per_user": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "prompt_tokens_total": 224,
       "queue_delay_s": {
         "avg": null,
         "mad": null,
@@ -510,7 +571,24 @@
         "std": null
       },
       "reasoning_tokens_total": null,
-      "throughput": 4.6286472620043995,
+      "throughput": 4.3430322418984595,
+      "time_to_second_token_s": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "total_tokens_per_second": 52.116386902781514,
       "ttft_s": {
         "avg": null,
         "mad": null,
@@ -529,20 +607,20 @@
       },
       "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
       "user_tps": {
-        "avg": 19.828503788111806,
-        "mad": 0.03084334996715299,
-        "max": 19.932984210769263,
-        "min": 19.50114653334578,
+        "avg": 19.853148140452742,
+        "mad": 0.03909931701643643,
+        "max": 19.94421562999858,
+        "min": 19.591504206893493,
         "n": 28,
-        "p50": 19.833648198855165,
-        "p90": 19.907449860489596,
+        "p50": 19.842808273722873,
+        "p90": 19.929786515615056,
         "p90_unreliable": false,
-        "p95": 19.92223131562426,
+        "p95": 19.93590381760973,
         "p95_unreliable": false,
-        "p99": 19.931212946038514,
+        "p99": 19.942838115093974,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.09016279333832955
+        "std": 0.07086065420363018
       },
       "users_at_slo": null,
       "users_meeting_user_tps": null,
@@ -566,7 +644,8 @@
       "visible_completion_tokens_total": null
     },
     {
-      "completion_tokens_per_second": 33.20745591080286,
+      "completion_tokens_per_second": 33.27011526756742,
+      "completion_tokens_total": 108,
       "config": {
         "extra_body_json": null,
         "ignore_eos": false,
@@ -596,9 +675,9 @@
         "warmup_requests": 0
       },
       "connect_s": {
-        "avg": 1.0111407407407406e-05,
+        "avg": 6.149851851851852e-06,
         "mad": 0.0,
-        "max": 0.000273008,
+        "max": 0.000166046,
         "min": 0.0,
         "n": 27,
         "p50": 0.0,
@@ -606,10 +685,10 @@
         "p90_unreliable": false,
         "p95": 0.0,
         "p95_unreliable": false,
-        "p99": 0.00020202591999999957,
+        "p99": 0.00012287403999999973,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 5.254041409697379e-05
+        "std": 3.195556759928686e-05
       },
       "cost_per_million_output_tokens": null,
       "decode_s": {
@@ -647,20 +726,20 @@
       "error_rate": 0.15625,
       "errors": 5,
       "first_byte_s": {
-        "avg": 0.20305050666666669,
-        "mad": 0.0005117920000000109,
-        "max": 0.211806445,
-        "min": 0.201208921,
+        "avg": 0.20280515377777777,
+        "mad": 0.0010436730000000227,
+        "max": 0.211041261,
+        "min": 0.200537624,
         "n": 27,
-        "p50": 0.202151221,
-        "p90": 0.2056975124,
+        "p50": 0.202053002,
+        "p90": 0.20624187459999999,
         "p90_unreliable": false,
-        "p95": 0.2072402157,
+        "p95": 0.20833836369999997,
         "p95_unreliable": false,
-        "p99": 0.21063608048000002,
+        "p99": 0.21035003852,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0023904530847412265
+        "std": 0.002613713857528026
       },
       "first_reasoning_s": {
         "avg": null,
@@ -678,8 +757,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
-      "goodput": 8.301863977700714,
+      "goodput": 8.317528816891855,
       "goodput_equals_throughput": true,
+      "input_tokens_per_second": 66.54023053513484,
       "isl_tokens": {
         "avg": 8.0,
         "mad": 0.0,
@@ -697,20 +777,20 @@
         "std": 0.0
       },
       "latency_s": {
-        "avg": 0.20306757533333336,
-        "mad": 0.0005247170000000079,
-        "max": 0.211823688,
-        "min": 0.201218028,
+        "avg": 0.2028218204074074,
+        "mad": 0.0010558760000000111,
+        "max": 0.21106708,
+        "min": 0.200549607,
         "n": 27,
-        "p50": 0.202162432,
-        "p90": 0.2057213436,
+        "p50": 0.202076747,
+        "p90": 0.20626127760000001,
         "p90_unreliable": false,
-        "p95": 0.2072524107,
+        "p95": 0.2083496391,
         "p95_unreliable": false,
-        "p99": 0.21065078873999998,
+        "p99": 0.21037135874000001,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.002389941597631417
+        "std": 0.002614811994887975
       },
       "load": 2.0,
       "n": 32,
@@ -719,7 +799,7 @@
         "cap": 2,
         "cap_engagement_fraction": 0.9375,
         "in_flight_max": 2.0,
-        "in_flight_mean": 1.6875,
+        "in_flight_mean": 1.625,
         "in_flight_p50": 2.0,
         "wait_count": 30
       },
@@ -739,9 +819,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": 0.0
       },
-      "p50_s": 0.202162432,
-      "p95_s": 0.2072524107,
-      "p99_s": 0.21065078873999998,
+      "p50_s": 0.202076747,
+      "p95_s": 0.2083496391,
+      "p99_s": 0.21037135874000001,
       "p99_unreliable": true,
       "prefill_s": {
         "avg": null,
@@ -759,6 +839,23 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
+      "prefill_tps_per_user": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "prompt_tokens_total": 216,
       "queue_delay_s": {
         "avg": null,
         "mad": null,
@@ -792,7 +889,24 @@
         "std": null
       },
       "reasoning_tokens_total": null,
-      "throughput": 8.301863977700714,
+      "throughput": 8.317528816891855,
+      "time_to_second_token_s": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "total_tokens_per_second": 99.81034580270227,
       "ttft_s": {
         "avg": null,
         "mad": null,
@@ -811,20 +925,20 @@
       },
       "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
       "user_tps": {
-        "avg": 19.70043808782946,
-        "mad": 0.05122222727564818,
-        "max": 19.878934505808793,
-        "min": 18.8836292945669,
+        "avg": 19.724829792648595,
+        "mad": 0.10397176520353213,
+        "max": 19.945189920018144,
+        "min": 18.95132106816468,
         "n": 27,
-        "p50": 19.7860698470426,
-        "p90": 19.8572196405442,
+        "p50": 19.794459577281298,
+        "p90": 19.919525991582397,
         "p90_unreliable": false,
-        "p95": 19.871422082609072,
+        "p95": 19.937261027967594,
         "p95_unreliable": false,
-        "p99": 19.877800093427958,
+        "p99": 19.945097687281724,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.22605995491926587
+        "std": 0.2485927199457193
       },
       "users_at_slo": null,
       "users_meeting_user_tps": null,
@@ -848,7 +962,8 @@
       "visible_completion_tokens_total": null
     },
     {
-      "completion_tokens_per_second": 68.8786906470862,
+      "completion_tokens_per_second": 68.78208668222925,
+      "completion_tokens_total": 112,
       "config": {
         "extra_body_json": null,
         "ignore_eos": false,
@@ -878,20 +993,20 @@
         "warmup_requests": 0
       },
       "connect_s": {
-        "avg": 2.341482142857143e-05,
+        "avg": 3.5344964285714285e-05,
         "mad": 0.0,
-        "max": 0.00050007,
+        "max": 0.00067412,
         "min": 0.0,
         "n": 28,
         "p50": 0.0,
         "p90": 0.0,
         "p90_unreliable": false,
-        "p95": 0.00010110424999999977,
+        "p95": 0.00020510034999999955,
         "p95_unreliable": false,
-        "p99": 0.00040704825000000016,
+        "p99": 0.0005773031300000002,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 9.792535777487516e-05
+        "std": 0.00013864732409312437
       },
       "cost_per_million_output_tokens": null,
       "decode_s": {
@@ -929,20 +1044,20 @@
       "error_rate": 0.125,
       "errors": 4,
       "first_byte_s": {
-        "avg": 0.20298803596428575,
-        "mad": 0.0006166665000000016,
-        "max": 0.20788734,
-        "min": 0.201278994,
+        "avg": 0.20335515117857142,
+        "mad": 0.0012732175000000068,
+        "max": 0.206098285,
+        "min": 0.200837954,
         "n": 28,
-        "p50": 0.202478393,
-        "p90": 0.2045810311,
+        "p50": 0.2032585415,
+        "p90": 0.2057757999,
         "p90_unreliable": false,
-        "p95": 0.20735648715,
+        "p95": 0.2060076026,
         "p95_unreliable": false,
-        "p99": 0.20787932721000002,
+        "p99": 0.20609343445,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.001702658300479262
+        "std": 0.0016621248876586543
       },
       "first_reasoning_s": {
         "avg": null,
@@ -960,8 +1075,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
-      "goodput": 17.21967266177155,
+      "goodput": 17.195521670557312,
       "goodput_equals_throughput": true,
+      "input_tokens_per_second": 137.5641733644585,
       "isl_tokens": {
         "avg": 8.0,
         "mad": 0.0,
@@ -979,20 +1095,20 @@
         "std": 0.0
       },
       "latency_s": {
-        "avg": 0.20300507150000005,
-        "mad": 0.0006136010000000053,
-        "max": 0.207907588,
-        "min": 0.201298341,
+        "avg": 0.20336994696428576,
+        "mad": 0.0012722114999999812,
+        "max": 0.206106691,
+        "min": 0.200847172,
         "n": 28,
-        "p50": 0.202493056,
-        "p90": 0.2046272615,
+        "p50": 0.20326833049999998,
+        "p90": 0.20578574330000002,
         "p90_unreliable": false,
-        "p95": 0.20737110339999998,
+        "p95": 0.2060148282,
         "p95_unreliable": false,
-        "p99": 0.20789730856,
+        "p99": 0.20610121027000003,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0017029315587783387
+        "std": 0.001661734587048317
       },
       "load": 4.0,
       "n": 32,
@@ -1001,7 +1117,7 @@
         "cap": 4,
         "cap_engagement_fraction": 0.875,
         "in_flight_max": 4.0,
-        "in_flight_mean": 3.1875,
+        "in_flight_mean": 2.96875,
         "in_flight_p50": 3.0,
         "wait_count": 28
       },
@@ -1021,9 +1137,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": 0.0
       },
-      "p50_s": 0.202493056,
-      "p95_s": 0.20737110339999998,
-      "p99_s": 0.20789730856,
+      "p50_s": 0.20326833049999998,
+      "p95_s": 0.2060148282,
+      "p99_s": 0.20610121027000003,
       "p99_unreliable": true,
       "prefill_s": {
         "avg": null,
@@ -1041,6 +1157,23 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
+      "prefill_tps_per_user": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "prompt_tokens_total": 224,
       "queue_delay_s": {
         "avg": null,
         "mad": null,
@@ -1074,7 +1207,24 @@
         "std": null
       },
       "reasoning_tokens_total": null,
-      "throughput": 17.21967266177155,
+      "throughput": 17.195521670557312,
+      "time_to_second_token_s": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "total_tokens_per_second": 206.34626004668772,
       "ttft_s": {
         "avg": null,
         "mad": null,
@@ -1093,20 +1243,20 @@
       },
       "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
       "user_tps": {
-        "avg": 19.70525752409628,
-        "mad": 0.059843461204408754,
-        "max": 19.871003308467408,
-        "min": 19.2393170373368,
+        "avg": 19.669852845354967,
+        "mad": 0.12393625984494072,
+        "max": 19.915640136571106,
+        "min": 19.407424283959806,
         "n": 28,
-        "p50": 19.753764178898887,
-        "p90": 19.844388600040794,
+        "p50": 19.678424441749453,
+        "p90": 19.84508665243393,
         "p90_unreliable": false,
-        "p95": 19.8553474131649,
+        "p95": 19.895488823227755,
         "p95_unreliable": false,
-        "p99": 19.867089265744326,
+        "p99": 19.912978667685206,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.1627317447238462
+        "std": 0.16034594837562532
       },
       "users_at_slo": null,
       "users_meeting_user_tps": null,
@@ -1130,7 +1280,8 @@
       "visible_completion_tokens_total": null
     },
     {
-      "completion_tokens_per_second": 132.71546240731857,
+      "completion_tokens_per_second": 130.31380638459706,
+      "completion_tokens_total": 108,
       "config": {
         "extra_body_json": null,
         "ignore_eos": false,
@@ -1160,20 +1311,20 @@
         "warmup_requests": 0
       },
       "connect_s": {
-        "avg": 2.7113333333333337e-05,
+        "avg": 9.410837037037036e-05,
         "mad": 0.0,
-        "max": 0.000224346,
+        "max": 0.000911631,
         "min": 0.0,
         "n": 27,
         "p50": 0.0,
-        "p90": 0.0001634244,
+        "p90": 0.000378519000000001,
         "p90_unreliable": false,
-        "p95": 0.00017576759999999997,
+        "p95": 0.0007434182,
         "p95_unreliable": false,
-        "p99": 0.00021286595999999992,
+        "p99": 0.0008763263799999998,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 6.696517263588473e-05
+        "std": 0.00025376133731537656
       },
       "cost_per_million_output_tokens": null,
       "decode_s": {
@@ -1211,20 +1362,20 @@
       "error_rate": 0.15625,
       "errors": 5,
       "first_byte_s": {
-        "avg": 0.2028365245925926,
-        "mad": 0.0006410079999999985,
-        "max": 0.206224631,
-        "min": 0.200806286,
+        "avg": 0.20710029259259258,
+        "mad": 0.0035757109999999814,
+        "max": 0.215271977,
+        "min": 0.201514149,
         "n": 27,
-        "p50": 0.202372091,
-        "p90": 0.20606267299999997,
+        "p50": 0.205883567,
+        "p90": 0.214604623,
         "p90_unreliable": false,
-        "p95": 0.2061119709,
+        "p95": 0.21473439379999998,
         "p95_unreliable": false,
-        "p99": 0.20619889672,
+        "p99": 0.21514511077999998,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0018308680230341358
+        "std": 0.005003091255530563
       },
       "first_reasoning_s": {
         "avg": null,
@@ -1242,8 +1393,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
-      "goodput": 33.17886560182964,
+      "goodput": 32.578451596149264,
       "goodput_equals_throughput": true,
+      "input_tokens_per_second": 260.6276127691941,
       "isl_tokens": {
         "avg": 8.0,
         "mad": 0.0,
@@ -1261,20 +1413,20 @@
         "std": 0.0
       },
       "latency_s": {
-        "avg": 0.20284853177777779,
-        "mad": 0.0006511969999999923,
-        "max": 0.206235792,
-        "min": 0.200814752,
+        "avg": 0.2071108326666666,
+        "mad": 0.0035761910000000063,
+        "max": 0.215280653,
+        "min": 0.201522124,
         "n": 27,
-        "p50": 0.202394834,
-        "p90": 0.20608837559999998,
+        "p50": 0.20589086,
+        "p90": 0.2146124578,
         "p90_unreliable": false,
-        "p95": 0.20612603559999998,
+        "p95": 0.21474123979999998,
         "p95_unreliable": false,
-        "p99": 0.20620921375999998,
+        "p99": 0.2151532946,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0018336814159915522
+        "std": 0.005002220142134218
       },
       "load": 8.0,
       "n": 32,
@@ -1283,7 +1435,7 @@
         "cap": 8,
         "cap_engagement_fraction": 0.75,
         "in_flight_max": 8.0,
-        "in_flight_mean": 5.6875,
+        "in_flight_mean": 5.53125,
         "in_flight_p50": 6.0,
         "wait_count": 24
       },
@@ -1303,9 +1455,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": 0.0
       },
-      "p50_s": 0.202394834,
-      "p95_s": 0.20612603559999998,
-      "p99_s": 0.20620921375999998,
+      "p50_s": 0.20589086,
+      "p95_s": 0.21474123979999998,
+      "p99_s": 0.2151532946,
       "p99_unreliable": true,
       "prefill_s": {
         "avg": null,
@@ -1323,6 +1475,23 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
+      "prefill_tps_per_user": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "prompt_tokens_total": 216,
       "queue_delay_s": {
         "avg": null,
         "mad": null,
@@ -1356,7 +1525,24 @@
         "std": null
       },
       "reasoning_tokens_total": null,
-      "throughput": 33.17886560182964,
+      "throughput": 32.578451596149264,
+      "time_to_second_token_s": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "total_tokens_per_second": 390.9414191537911,
       "ttft_s": {
         "avg": null,
         "mad": null,
@@ -1375,20 +1561,20 @@
       },
       "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
       "user_tps": {
-        "avg": 19.720684434707042,
-        "mad": 0.06379301278703764,
-        "max": 19.918855363773275,
-        "min": 19.39527548157111,
+        "avg": 19.32404667835568,
+        "mad": 0.3434126246133573,
+        "max": 19.84893728095085,
+        "min": 18.58039700390541,
         "n": 27,
-        "p50": 19.763350283930667,
-        "p90": 19.874513207215855,
+        "p50": 19.42776867316985,
+        "p90": 19.802190075600294,
         "p90_unreliable": false,
-        "p95": 19.894369029490193,
+        "p95": 19.836176732353405,
         "p95_unreliable": false,
-        "p99": 19.91421427896075,
+        "p99": 19.84843442590543,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.17663057316680653
+        "std": 0.4608137063056349
       },
       "users_at_slo": null,
       "users_meeting_user_tps": null,
@@ -1412,7 +1598,8 @@
       "visible_completion_tokens_total": null
     },
     {
-      "completion_tokens_per_second": 277.55835798299375,
+      "completion_tokens_per_second": 262.7488658726721,
+      "completion_tokens_total": 112,
       "config": {
         "extra_body_json": null,
         "ignore_eos": false,
@@ -1442,20 +1629,20 @@
         "warmup_requests": 0
       },
       "connect_s": {
-        "avg": 3.4014607142857145e-05,
+        "avg": 0.0003355496785714286,
         "mad": 0.0,
-        "max": 0.000156838,
+        "max": 0.001668658,
         "min": 0.0,
         "n": 28,
         "p50": 0.0,
-        "p90": 0.0001385658,
+        "p90": 0.0014740488,
         "p90_unreliable": false,
-        "p95": 0.0001485603,
+        "p95": 0.0015473389499999998,
         "p95_unreliable": false,
-        "p99": 0.00015519856,
+        "p99": 0.00164199928,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 6.047185413331915e-05
+        "std": 0.0006236182425145748
       },
       "cost_per_million_output_tokens": null,
       "decode_s": {
@@ -1493,20 +1680,20 @@
       "error_rate": 0.125,
       "errors": 4,
       "first_byte_s": {
-        "avg": 0.20166907278571425,
-        "mad": 0.00029439900000000074,
-        "max": 0.202104503,
-        "min": 0.201282531,
+        "avg": 0.2113754314285714,
+        "mad": 0.0069917584999999866,
+        "max": 0.218927599,
+        "min": 0.203712665,
         "n": 28,
-        "p50": 0.201639585,
-        "p90": 0.20204814699999998,
+        "p50": 0.211730657,
+        "p90": 0.2186005594,
         "p90_unreliable": false,
-        "p95": 0.20205545415,
+        "p95": 0.2188314033,
         "p95_unreliable": false,
-        "p99": 0.20209229468,
+        "p99": 0.21891169816,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.00031689070145542967
+        "std": 0.007090107390009844
       },
       "first_reasoning_s": {
         "avg": null,
@@ -1524,8 +1711,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
-      "goodput": 69.38958949574844,
+      "goodput": 65.68721646816803,
       "goodput_equals_throughput": true,
+      "input_tokens_per_second": 525.4977317453443,
       "isl_tokens": {
         "avg": 8.0,
         "mad": 0.0,
@@ -1543,20 +1731,20 @@
         "std": 0.0
       },
       "latency_s": {
-        "avg": 0.2016816326785714,
-        "mad": 0.000299473999999994,
-        "max": 0.202112488,
-        "min": 0.201289174,
+        "avg": 0.21138710135714286,
+        "mad": 0.0070010805000000065,
+        "max": 0.218938019,
+        "min": 0.203722153,
         "n": 28,
-        "p50": 0.201651207,
-        "p90": 0.20205911999999998,
+        "p50": 0.211750074,
+        "p90": 0.2186108768,
         "p90_unreliable": false,
-        "p95": 0.20206370744999996,
+        "p95": 0.21884528525000002,
         "p95_unreliable": false,
-        "p99": 0.20209991194000002,
+        "p99": 0.21892364663000002,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.0003166234848328639
+        "std": 0.0070916823735585055
       },
       "load": 16.0,
       "n": 32,
@@ -1565,8 +1753,8 @@
         "cap": 16,
         "cap_engagement_fraction": 0.5,
         "in_flight_max": 16.0,
-        "in_flight_mean": 11.625,
-        "in_flight_p50": 13.0,
+        "in_flight_mean": 10.625,
+        "in_flight_p50": 11.5,
         "wait_count": 16
       },
       "osl_tokens": {
@@ -1585,9 +1773,9 @@
         "percentile_method": "hyndman_fan_type7",
         "std": 0.0
       },
-      "p50_s": 0.201651207,
-      "p95_s": 0.20206370744999996,
-      "p99_s": 0.20209991194000002,
+      "p50_s": 0.211750074,
+      "p95_s": 0.21884528525000002,
+      "p99_s": 0.21892364663000002,
       "p99_unreliable": true,
       "prefill_s": {
         "avg": null,
@@ -1605,6 +1793,23 @@
         "percentile_method": "hyndman_fan_type7",
         "std": null
       },
+      "prefill_tps_per_user": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "prompt_tokens_total": 224,
       "queue_delay_s": {
         "avg": null,
         "mad": null,
@@ -1638,7 +1843,24 @@
         "std": null
       },
       "reasoning_tokens_total": null,
-      "throughput": 69.38958949574844,
+      "throughput": 65.68721646816803,
+      "time_to_second_token_s": {
+        "avg": null,
+        "mad": null,
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p90_unreliable": true,
+        "p95": null,
+        "p95_unreliable": true,
+        "p99": null,
+        "p99_unreliable": true,
+        "percentile_method": "hyndman_fan_type7",
+        "std": null
+      },
+      "total_tokens_per_second": 788.2465976180164,
       "ttft_s": {
         "avg": null,
         "mad": null,
@@ -1657,20 +1879,20 @@
       },
       "ttft_warning": "TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte",
       "user_tps": {
-        "avg": 19.83328602011275,
-        "mad": 0.029433246414493297,
-        "max": 19.871908262686798,
-        "min": 19.790959181107105,
+        "avg": 18.94319385476208,
+        "mad": 0.6246009948390299,
+        "max": 19.634585346248524,
+        "min": 18.27001092944026,
         "n": 28,
-        "p50": 19.836249373630473,
-        "p90": 19.868232560422307,
+        "p50": 18.903768961342507,
+        "p90": 19.615109134004978,
         "p90_unreliable": false,
-        "p95": 19.868669880407865,
+        "p95": 19.62502066850697,
         "p95_unreliable": false,
-        "p99": 19.871096786083932,
+        "p99": 19.632127136246282,
         "p99_unreliable": true,
         "percentile_method": "hyndman_fan_type7",
-        "std": 0.031134741349694853
+        "std": 0.6356573626507159
       },
       "users_at_slo": null,
       "users_meeting_user_tps": null,
