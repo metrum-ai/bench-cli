@@ -18,7 +18,7 @@ and the release workflow publishes it in the release notes.
 |---|---|---|---|---|---|---|---|
 | `summary.v3` run summary | 54 | 25 | 10 | 19 | 330 | 39 | 15 |
 | `summary.v3` `per_endpoint`, each endpoint | 14 | 11 | 0 | 3 | 113 | 14 | 0 |
-| Strategic sweep point (`points[]`) | 53 | 21 | 9 | 23 | 285 | 32 | 21 |
+| Strategic sweep point (`points[]`) | 62 | 29 | 10 | 23 | 367 | 32 | 30 |
 
 | Per-request output | Numeric fields | Always | Optional |
 |---|---|---|---|
@@ -34,6 +34,10 @@ and the release workflow publishes it in the release notes.
   fills, so it is not in the schema count. `metrum-ai-bench-cli-llm` writes
   2 keys on every success: `completion_words` and `prompt_words`. See `docs/OUTPUT_SCHEMA.md` for
   vlm, asr, and imagegen.
+- **Strategic modality keys:** the sweep-point row counts the
+  `modality_metrics` distributions of every `--kind` (vlm 2, asr 4, imagegen 2). One
+  sweep carries only its own kind's keys, plus `image_digests` for imagegen;
+  chat, embeddings, and rerank sweeps carry none.
 - **Counted separately:** `per_endpoint` (one block per endpoint, above) and
   `errors_by_type` (one count per observed error type). Never counted: run
   metadata (`config`, `environment`, `sut`, `schema_version`), strings,
@@ -88,6 +92,9 @@ and harness counts agree on what a quantity is.
 | `ndjson` | `--ndjson PATH`. |
 | `validation` | Strategic response validation (`--json-schema` or `--tools`). |
 | `measured-success` | The stage has at least one measured request or success. |
+| `vlm-sweep` | `metrum-ai-bench-cli-strategic --kind vlm`. |
+| `asr-sweep` | `metrum-ai-bench-cli-strategic --kind asr`. `wer` and `cer` are `n = 0` without `--ground-truth`; `audio_duration_s` and `rtfx_client` are `n = 0` without a sample `duration`. |
+| `imagegen-sweep` | `metrum-ai-bench-cli-strategic --kind imagegen`. `image_digests` counts decoded `b64_json` images (0 for `url` responses). |
 
 ## Plain llm run
 
@@ -208,11 +215,20 @@ numeric slot.
 | `first_byte_s` | distribution | 10 | always |
 | `first_reasoning_s` | distribution | 10 | always |
 | `goodput` | scalar | 1 | always |
+| `image_digests` | block | 2 | `imagegen-sweep` |
 | `input_tokens_per_second` | scalar | 1 | `usage` |
 | `isl_osl` | block | 11 | `isl-osl-targets` |
 | `isl_tokens` | distribution | 10 | always |
 | `latency_s` | distribution | 10 | always |
 | `load` | scalar | 1 | always |
+| `modality_metrics.audio_duration_s` | distribution | 10 | `asr-sweep` |
+| `modality_metrics.cer` | distribution | 10 | `asr-sweep` |
+| `modality_metrics.image_bytes` | distribution | 10 | `vlm-sweep` |
+| `modality_metrics.image_count` | distribution | 10 | `vlm-sweep` |
+| `modality_metrics.images_requested` | distribution | 10 | `imagegen-sweep` |
+| `modality_metrics.images_returned` | distribution | 10 | `imagegen-sweep` |
+| `modality_metrics.rtfx_client` | distribution | 10 | `asr-sweep` |
+| `modality_metrics.wer` | distribution | 10 | `asr-sweep` |
 | `n` | scalar | 1 | always |
 | `observed_concurrency` | block | 7 | `http` |
 | `osl_tokens` | distribution | 10 | always |

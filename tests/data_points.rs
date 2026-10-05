@@ -29,6 +29,7 @@ use metrum_ai_bench::record::{Phase, RequestRecord, SCHEMA_VERSION_REQUEST};
 use metrum_ai_bench::stats::DistSummary;
 use metrum_ai_bench::strategic::SweepPoint;
 use metrum_ai_bench::summary::{EndpointSummary, GoodputSummary, RunSummary, SloConfig};
+use metrum_ai_bench::sweep_modality::{self, ImageDigests};
 use metrum_ai_bench::telemetry::{RequestRow, TelemetryRunInfo};
 use metrum_ai_bench::time_weighted::{TimeWeightedMetrics, TimeWeightedStat};
 use serde_json::{json, Value};
@@ -77,6 +78,9 @@ enum Condition {
     Ndjson,
     Validation,
     MeasuredSuccess,
+    VlmSweep,
+    AsrSweep,
+    ImagegenSweep,
 }
 
 impl Condition {
@@ -97,6 +101,9 @@ impl Condition {
             Self::Ndjson => "ndjson",
             Self::Validation => "validation",
             Self::MeasuredSuccess => "measured-success",
+            Self::VlmSweep => "vlm-sweep",
+            Self::AsrSweep => "asr-sweep",
+            Self::ImagegenSweep => "imagegen-sweep",
         }
     }
 
@@ -133,6 +140,16 @@ impl Condition {
             Self::Ndjson => "`--ndjson PATH`.",
             Self::Validation => "Strategic response validation (`--json-schema` or `--tools`).",
             Self::MeasuredSuccess => "The stage has at least one measured request or success.",
+            Self::VlmSweep => "`metrum-ai-bench-cli-strategic --kind vlm`.",
+            Self::AsrSweep => {
+                "`metrum-ai-bench-cli-strategic --kind asr`. `wer` and `cer` are \
+                 `n = 0` without `--ground-truth`; `audio_duration_s` and \
+                 `rtfx_client` are `n = 0` without a sample `duration`."
+            }
+            Self::ImagegenSweep => {
+                "`metrum-ai-bench-cli-strategic --kind imagegen`. `image_digests` \
+                 counts decoded `b64_json` images (0 for `url` responses)."
+            }
         }
     }
 }
@@ -140,7 +157,7 @@ impl Condition {
 use Condition::*;
 
 /// Optional `summary.v3` quantities and when they fire.
-const SUMMARY_OPTIONAL: &[(&str, &[Condition])] = &[
+const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("completion_tokens_per_second", &[Usage, Tokenizer]),
     ("completion_tokens_total", &[Usage, Tokenizer]),
     ("connection_reuse_rate", &[HttpPath]),
@@ -159,7 +176,7 @@ const SUMMARY_OPTIONAL: &[(&str, &[Condition])] = &[
 ];
 
 /// Optional `request.v3` numeric fields and when they fire.
-const REQUEST_OPTIONAL: &[(&str, &[Condition])] = &[
+const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("bytes_received", &[HttpPath]),
     ("bytes_sent", &[HttpPath]),
     ("chunks_received", &[HttpPath]),
@@ -183,13 +200,14 @@ const REQUEST_OPTIONAL: &[(&str, &[Condition])] = &[
 ];
 
 /// Optional strategic sweep-point quantities and when they fire.
-const SWEEP_OPTIONAL: &[(&str, &[Condition])] = &[
+const SWEEP_ROWS: &[(&str, &[Condition])] = &[
     ("completion_tokens_per_second", &[Usage]),
     ("completion_tokens_total", &[Usage]),
     ("connection_reuse_rate", &[HttpPath]),
     ("connections_reused", &[HttpPath]),
     ("cost_per_million_output_tokens", &[Price]),
     ("error_rate", &[MeasuredSuccess]),
+    ("image_digests", &[ImagegenSweep]),
     ("input_tokens_per_second", &[Usage]),
     ("isl_osl", &[IslOslTargets]),
     ("observed_concurrency", &[HttpPath]),
@@ -208,11 +226,52 @@ const SWEEP_OPTIONAL: &[(&str, &[Condition])] = &[
 ];
 
 /// Optional telemetry NDJSON `request` row numeric fields and when they fire.
-const REQUEST_ROW_OPTIONAL: &[(&str, &[Condition])] = &[
+const REQUEST_ROW_ROWS: &[(&str, &[Condition])] = &[
     ("reasoning_tokens", &[ReasoningUsage]),
     ("t_first_ns", &[HttpPath]),
     ("ttft_s", &[Streaming, TtftApprox]),
 ];
+
+/// One optional field and the conditions that fire it.
+type Row = (String, &'static [Condition]);
+
+fn rows(table: &[(&str, &'static [Condition])]) -> Vec<Row> {
+    table.iter().map(|(k, c)| (k.to_string(), *c)).collect()
+}
+
+fn summary_optional() -> Vec<Row> {
+    rows(SUMMARY_ROWS)
+}
+
+fn request_optional() -> Vec<Row> {
+    rows(REQUEST_ROWS)
+}
+
+fn request_row_optional() -> Vec<Row> {
+    rows(REQUEST_ROW_ROWS)
+}
+
+/// Sweep-point rows plus one `modality_metrics.<key>` distribution per
+/// strategic modality key, read from `sweep_modality` (#197).
+fn sweep_optional() -> Vec<Row> {
+    let mut out = rows(SWEEP_ROWS);
+    for (keys, kind) in modality_kinds() {
+        out.extend(
+            keys.iter()
+                .map(|key| (format!("modality_metrics.{key}"), kind)),
+        );
+    }
+    out
+}
+
+/// Strategic modality key lists and the sweep kind that fills each.
+fn modality_kinds() -> [(&'static [&'static str], &'static [Condition]); 3] {
+    [
+        (sweep_modality::VLM_KEYS, &[VlmSweep]),
+        (sweep_modality::ASR_KEYS, &[AsrSweep]),
+        (sweep_modality::IMAGEGEN_KEYS, &[ImagegenSweep]),
+    ]
+}
 
 /// Conditions a plain closed-loop `--streaming` llm run against a server
 /// that reports usage meets (the parity harness `plain` scenario).
@@ -621,6 +680,15 @@ fn sweep_max() -> SweepPoint {
         ttft_approx_count: 1,
         ttft_warning: Some("approximated".into()),
         isl_osl: Some(isl_osl()),
+        modality_metrics: modality_kinds()
+            .iter()
+            .flat_map(|(keys, _)| keys.iter())
+            .map(|key| (key.to_string(), dist_full()))
+            .collect(),
+        image_digests: Some(ImageDigests {
+            images: 4,
+            distinct: 3,
+        }),
         config: None,
     }
 }
@@ -679,6 +747,8 @@ fn sweep_min() -> SweepPoint {
         ttft_approx_count: 0,
         ttft_warning: None,
         isl_osl: None,
+        modality_metrics: BTreeMap::new(),
+        image_digests: None,
         config: None,
     }
 }
@@ -898,7 +968,7 @@ impl QuantitySchema {
     }
 
     /// Quantities a run meeting `active` fires.
-    fn expected(&self, table: &[(&str, &[Condition])], active: &[Condition]) -> BTreeSet<String> {
+    fn expected(&self, table: &[Row], active: &[Condition]) -> BTreeSet<String> {
         self.all
             .keys()
             .filter(|k| !self.optional.contains(*k) || fires(table, k, active))
@@ -920,7 +990,7 @@ impl FieldSchema {
         Self { all, optional }
     }
 
-    fn expected(&self, table: &[(&str, &[Condition])], active: &[Condition]) -> BTreeSet<String> {
+    fn expected(&self, table: &[Row], active: &[Condition]) -> BTreeSet<String> {
         self.all
             .iter()
             .filter(|k| !self.optional.contains(*k) || fires(table, k, active))
@@ -929,15 +999,15 @@ impl FieldSchema {
     }
 }
 
-fn conditions_of<'a>(table: &'a [(&str, &'a [Condition])], key: &str) -> &'a [Condition] {
+fn conditions_of(table: &[Row], key: &str) -> &'static [Condition] {
     table
         .iter()
-        .find(|(name, _)| *name == key)
+        .find(|(name, _)| name == key)
         .map(|(_, conditions)| *conditions)
         .unwrap_or_else(|| panic!("optional field {key} has no documented condition"))
 }
 
-fn fires(table: &[(&str, &[Condition])], key: &str, active: &[Condition]) -> bool {
+fn fires(table: &[Row], key: &str, active: &[Condition]) -> bool {
     conditions_of(table, key)
         .iter()
         .any(|condition| active.contains(condition))
@@ -1001,7 +1071,7 @@ fn schemas() -> Schemas {
 
 // Rendering
 
-fn condition_cell(table: &[(&str, &[Condition])], key: &str, optional: bool) -> String {
+fn condition_cell(table: &[Row], key: &str, optional: bool) -> String {
     if !optional {
         return "always".into();
     }
@@ -1012,7 +1082,7 @@ fn condition_cell(table: &[(&str, &[Condition])], key: &str, optional: bool) -> 
         .join(" or ")
 }
 
-fn quantity_table(out: &mut String, schema: &QuantitySchema, table: &[(&str, &[Condition])]) {
+fn quantity_table(out: &mut String, schema: &QuantitySchema, table: &[Row]) {
     out.push_str("| Quantity | Shape | Values | Fires |\n|---|---|---|---|\n");
     for (name, q) in &schema.all {
         let _ = writeln!(
@@ -1025,7 +1095,7 @@ fn quantity_table(out: &mut String, schema: &QuantitySchema, table: &[(&str, &[C
     }
 }
 
-fn field_table(out: &mut String, schema: &FieldSchema, table: &[(&str, &[Condition])]) {
+fn field_table(out: &mut String, schema: &FieldSchema, table: &[Row]) {
     out.push_str("| Field | Fires |\n|---|---|\n");
     for name in &schema.all {
         let _ = writeln!(
@@ -1038,9 +1108,9 @@ fn field_table(out: &mut String, schema: &FieldSchema, table: &[(&str, &[Conditi
 
 fn render(s: &Schemas) -> String {
     let mut out = String::new();
-    let plain_quantities = s.summary.expected(SUMMARY_OPTIONAL, PLAIN_RUN).len();
+    let plain_quantities = s.summary.expected(&summary_optional(), PLAIN_RUN).len();
     let plain_fields =
-        s.request.expected(REQUEST_OPTIONAL, PLAIN_RUN).len() + LLM_MODALITY_KEYS.len();
+        s.request.expected(&request_optional(), PLAIN_RUN).len() + LLM_MODALITY_KEYS.len();
     let dist_names = s
         .dist_width
         .iter()
@@ -1085,6 +1155,10 @@ and the release workflow publishes it in the release notes.
   fills, so it is not in the schema count. `metrum-ai-bench-cli-llm` writes
   {n_llm} keys on every success: {llm_keys}. See `docs/OUTPUT_SCHEMA.md` for
   vlm, asr, and imagegen.
+- **Strategic modality keys:** the sweep-point row counts the
+  `modality_metrics` distributions of every `--kind` ({modality_split}). One
+  sweep carries only its own kind's keys, plus `image_digests` for imagegen;
+  chat, embeddings, and rerank sweeps carry none.
 - **Counted separately:** `per_endpoint` (one block per endpoint, above) and
   `errors_by_type` (one count per observed error type). Never counted: run
   metadata (`config`, `environment`, `sut`, `schema_version`), strings,
@@ -1158,16 +1232,25 @@ and harness counts agree on what a quantity is.
             .collect::<Vec<_>>()
             .join(" and "),
         n_llm = LLM_MODALITY_KEYS.len(),
+        modality_split = modality_kinds()
+            .iter()
+            .map(|(keys, kind)| format!(
+                "{} {}",
+                kind[0].name().trim_end_matches("-sweep"),
+                keys.len()
+            ))
+            .collect::<Vec<_>>()
+            .join(", "),
         dw = s.dist_width.len(),
         tw = s.time_weighted_width,
         th = s.thresholds,
     );
     let mut used: BTreeSet<Condition> = BTreeSet::new();
     for table in [
-        SUMMARY_OPTIONAL,
-        REQUEST_OPTIONAL,
-        SWEEP_OPTIONAL,
-        REQUEST_ROW_OPTIONAL,
+        summary_optional(),
+        request_optional(),
+        sweep_optional(),
+        request_row_optional(),
     ] {
         used.extend(table.iter().flat_map(|(_, c)| c.iter().copied()));
     }
@@ -1201,15 +1284,15 @@ numeric slot.
 
 "#
     );
-    quantity_table(&mut out, &s.summary, SUMMARY_OPTIONAL);
+    quantity_table(&mut out, &s.summary, &summary_optional());
     out.push_str("\n## `summary.v3` `per_endpoint` quantities (each endpoint)\n\n");
     quantity_table(&mut out, &s.per_endpoint, &[]);
     out.push_str("\n## Strategic sweep-point quantities\n\n");
-    quantity_table(&mut out, &s.sweep, SWEEP_OPTIONAL);
+    quantity_table(&mut out, &s.sweep, &sweep_optional());
     out.push_str("\n## `request.v3` fields\n\n");
-    field_table(&mut out, &s.request, REQUEST_OPTIONAL);
+    field_table(&mut out, &s.request, &request_optional());
     out.push_str("\n## `telemetry.v1` `request` row fields (`--ndjson`)\n\n");
-    field_table(&mut out, &s.request_row, REQUEST_ROW_OPTIONAL);
+    field_table(&mut out, &s.request_row, &request_row_optional());
     out
 }
 
@@ -1281,8 +1364,8 @@ fn serialized_names(path: &str, name: &str) -> BTreeSet<String> {
 }
 
 /// Every schema struct and nested block the counts walk, with its maximal
-/// fixture and the keys that fixture may leave unset or `null` (run
-/// metadata, never counted).
+/// fixture and its uncounted keys: run metadata and error data that the
+/// fixture may leave unset or `null`, and that are not type-checked.
 fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static str])> {
     let summary = to_json(&summary_max());
     vec![
@@ -1290,13 +1373,13 @@ fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static
             "src/summary.rs",
             "RunSummary",
             summary.clone(),
-            &["config", "sut"],
+            &["config", "sut", "environment"],
         ),
         (
             "src/record.rs",
             "RequestRecord",
             to_json(&request_max()),
-            &[],
+            &["error"],
         ),
         (
             "src/strategic.rs",
@@ -1308,7 +1391,7 @@ fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static
             "src/telemetry/row.rs",
             "RequestRow",
             to_json(&request_row_max()),
-            &[],
+            &["error"],
         ),
         ("src/stats.rs", "DistSummary", to_json(&dist_full()), &[]),
         (
@@ -1347,26 +1430,89 @@ fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static
             to_json(&telemetry_info()),
             &[],
         ),
+        (
+            "src/sweep_modality.rs",
+            "ImageDigests",
+            to_json(&ImageDigests {
+                images: 4,
+                distinct: 3,
+            }),
+            &[],
+        ),
     ]
+}
+
+/// Map value types that make a field an open map of scalars, not a block.
+const SCALAR_TYPES: &[&str] = &["f64", "u64", "usize", "String"];
+
+/// The struct a field serializes as when it is an object: `Option<T>` and
+/// `BTreeMap<String, T>` unwrap to `T`. `None` for a map of scalars.
+fn object_type(ty: &str) -> Option<&str> {
+    let mut ty = ty.trim();
+    if let Some(inner) = ty.strip_prefix("Option<") {
+        ty = inner.strip_suffix('>').expect("Option<..>");
+    }
+    if ty.contains("BTreeMap<") {
+        let (_, value) = ty.rsplit_once(", ").expect("BTreeMap<K, V>");
+        ty = value.strip_suffix('>').expect("BTreeMap<..>");
+    }
+    let base = ty.rsplit("::").next().unwrap_or(ty);
+    (!SCALAR_TYPES.contains(&base)).then_some(base)
+}
+
+/// Path of the first `null` anywhere under `value`, skipping open maps.
+fn first_null(value: &Value, path: &str) -> Option<String> {
+    match value {
+        Value::Null => Some(path.to_string()),
+        Value::Object(map) => map
+            .iter()
+            .filter(|(k, _)| !REQUEST_OPEN_MAPS.contains(&k.as_str()) && *k != "telemetry_at_done")
+            .find_map(|(k, v)| first_null(v, &format!("{path}.{k}"))),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(i, v)| first_null(v, &format!("{path}[{i}]"))),
+        _ => None,
+    }
 }
 
 #[test]
 fn schema_fixtures_cover_every_field() {
-    for (path, name, json, unset) in maximal_cases() {
+    let cases = maximal_cases();
+    let mut registered: BTreeSet<&str> = cases.iter().map(|(_, name, _, _)| *name).collect();
+    registered.insert("TimeWeightedMetrics"); // flattened; its blocks are registered
+    for (path, name, json, uncounted) in &cases {
         let keys: BTreeSet<String> = json.as_object().expect("object").keys().cloned().collect();
         let expected: BTreeSet<String> = serialized_names(path, name)
             .into_iter()
-            .filter(|k| !unset.contains(&k.as_str()) || json.get(k).is_some())
+            .filter(|k| !uncounted.contains(&k.as_str()) || json.get(k).is_some())
             .collect();
         assert_eq!(
             keys, expected,
             "{name}: the maximal fixture must serialize every field; set each Option to Some"
         );
         for (key, value) in json.as_object().unwrap() {
-            assert!(
-                unset.contains(&key.as_str()) || !value.is_null(),
-                "{name}.{key} is null in the maximal fixture"
-            );
+            if uncounted.contains(&key.as_str()) {
+                continue;
+            }
+            if let Some(null) = first_null(value, &format!("{name}.{key}")) {
+                panic!("{null} is null in the maximal fixture");
+            }
+        }
+        // A nested block must have its own maximal case, or its fields
+        // would be counted without a coverage check.
+        for field in declared_fields(path, name) {
+            let is_object = json.get(&field.name).is_some_and(Value::is_object);
+            if field.flatten || !is_object || uncounted.contains(&field.name.as_str()) {
+                continue;
+            }
+            if let Some(ty) = object_type(&field.ty) {
+                assert!(
+                    registered.contains(ty),
+                    "{name}.{}: register {ty} in maximal_cases()",
+                    field.name
+                );
+            }
         }
     }
 }
@@ -1407,21 +1553,21 @@ fn minimal_fixtures_leave_every_option_unset() {
 #[test]
 fn every_optional_field_has_a_condition_and_no_stale_rows() {
     let s = schemas();
-    let check = |label: &str, optional: &BTreeSet<String>, table: &[(&str, &[Condition])]| {
-        let documented: BTreeSet<String> = table.iter().map(|(k, _)| k.to_string()).collect();
+    let check = |label: &str, optional: &BTreeSet<String>, table: &[Row]| {
+        let documented: BTreeSet<String> = table.iter().map(|(k, _)| k.clone()).collect();
         assert_eq!(
             optional, &documented,
             "{label}: optional set derived from the schema != documented conditions"
         );
         assert!(table.iter().all(|(_, c)| !c.is_empty()), "{label}");
     };
-    check("summary.v3", &s.summary.optional, SUMMARY_OPTIONAL);
-    check("request.v3", &s.request.optional, REQUEST_OPTIONAL);
-    check("sweep point", &s.sweep.optional, SWEEP_OPTIONAL);
+    check("summary.v3", &s.summary.optional, &summary_optional());
+    check("request.v3", &s.request.optional, &request_optional());
+    check("sweep point", &s.sweep.optional, &sweep_optional());
     check(
         "telemetry request row",
         &s.request_row.optional,
-        REQUEST_ROW_OPTIONAL,
+        &request_row_optional(),
     );
     assert!(s.per_endpoint.optional.is_empty());
 }
@@ -1553,10 +1699,10 @@ fn published_counts_match_real_llm_runs() {
     let (quantities, per_request) = fired(&plain);
     assert_eq!(
         quantities,
-        s.summary.expected(SUMMARY_OPTIONAL, PLAIN_RUN),
+        s.summary.expected(&summary_optional(), PLAIN_RUN),
         "plain summary quantities"
     );
-    let mut expected_fields = s.request.expected(REQUEST_OPTIONAL, PLAIN_RUN);
+    let mut expected_fields = s.request.expected(&request_optional(), PLAIN_RUN);
     expected_fields.extend(modality_fields());
     assert_eq!(per_request, expected_fields, "plain per-request fields");
     let doc = render(&s);
@@ -1602,10 +1748,10 @@ fn published_counts_match_real_llm_runs() {
     let (quantities, per_request) = fired(&full);
     assert_eq!(
         quantities,
-        s.summary.expected(SUMMARY_OPTIONAL, &active),
+        s.summary.expected(&summary_optional(), &active),
         "full-run summary quantities"
     );
-    let mut expected_fields = s.request.expected(REQUEST_OPTIONAL, &active);
+    let mut expected_fields = s.request.expected(&request_optional(), &active);
     expected_fields.extend(modality_fields());
     assert_eq!(per_request, expected_fields, "full-run per-request fields");
 
@@ -1625,7 +1771,7 @@ fn published_counts_match_real_llm_runs() {
     }
     assert_eq!(
         row_fields,
-        s.request_row.expected(REQUEST_ROW_OPTIONAL, &active),
+        s.request_row.expected(&request_row_optional(), &active),
         "telemetry request-row fields"
     );
 }
