@@ -762,8 +762,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let tracker_task = Arc::clone(&inflight_tracker);
 
         let handle = tokio::spawn(async move {
-            let inflight_guard = tracker_task.guard();
-            let in_flight_at_send = inflight_guard.in_flight;
+            let request_slot =
+                metrum_ai_bench::concurrency::InFlightSlot::new(&tracker_task, permit);
+            let in_flight_at_send = request_slot.in_flight();
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
@@ -778,9 +779,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &language_str,
             )
             .await;
-            drop(permit);
+            // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
-            drop(inflight_guard);
+            drop(request_slot);
 
             let record = match result {
                 Ok((
