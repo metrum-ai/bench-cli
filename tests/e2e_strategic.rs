@@ -71,6 +71,19 @@ fn strategic_sweep_exports_all_formats() {
         .iter()
         .all(|point| point["validity_rate"] == 1.0));
     assert!(summary["server_metrics"]["kv_cache_usage"].is_number());
+    // Three stages are below the 5-point knee minimum (#190).
+    assert!(summary["knee"].is_null());
+    assert_eq!(
+        summary["knee_detection"],
+        serde_json::json!({
+            "index": null,
+            "reason": "insufficient_points",
+            "points": 3,
+            "min_points": 5
+        })
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("note: no knee: 3 measured sweep stage(s) (stages with a p95), knee detection needs at least 5"));
     assert!(fs::read_to_string(&html)
         .expect("HTML report")
         .contains("Throughput (req/s)"));
