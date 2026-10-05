@@ -32,9 +32,19 @@ fn reported_port<R: Read + Send + 'static>(
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut tx = Some(tx);
-        for line in BufReader::new(stream).lines() {
-            let Ok(line) = line else { break };
+        let mut reader = BufReader::new(stream);
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            // Raw bytes, not `lines()`: a non-UTF-8 log line (the dummy logs
+            // decoded URL paths) must not stop the drain, or the server dies
+            // of SIGPIPE on its next write. `read_until` retries on EINTR.
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
             let Some(sender) = tx.as_ref() else { continue };
+            let line = String::from_utf8_lossy(&buf);
             let port = line.split_once(marker).and_then(|(_, rest)| {
                 rest.split_whitespace()
                     .next()
