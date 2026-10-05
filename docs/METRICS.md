@@ -169,8 +169,8 @@ Workload section. This page focuses on measured fields.
     length or zero tokens have no defined rate and are skipped (`n`
     excludes them).
   - **Strategic tokens**: `input_tokens` / `output_tokens` from server usage
-    only; rows reporting neither are skipped. Embeddings and rerank stages
-    have no output, so `tokens_in_flight` and `effective_decode_throughput`
+    only; rows reporting neither are skipped. Embeddings, rerank, and
+    imagegen stages have no output, so `tokens_in_flight` and `effective_decode_throughput`
     are `n=0` for them.
 - **ISL/OSL validation**: optional `--isl-target` / `--osl-target` (or
   `--prompt-mix-report` metadata) compared to measured prompt/completion
@@ -190,7 +190,7 @@ Workload section. This page focuses on measured fields.
   used the tokenizer, where `*_tokens_source` would say `mixed`. Strategic
   sweep points use server usage only (no tokenizer fallback) and skip rows
   whose input and output tokens are both zero. Strategic `osl_tokens` is `n=0`
-  for embeddings and rerank stages; rerank `isl_tokens` is `usage.total_tokens`
+  for embeddings, rerank, and imagegen stages; rerank `isl_tokens` is `usage.total_tokens`
   (all input).
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
@@ -270,7 +270,7 @@ Workload section. This page focuses on measured fields.
   successes that report usage (`input_tokens > 0` or `output_tokens > 0`) and
   divided by the stage window. Strategic `completion_tokens_total` (and so
   `total_tokens_per_second`) is `null` for stages that generate no output
-  (`--kind embeddings`, `--kind rerank`); rerank `prompt_tokens_total` sums
+  (`--kind embeddings`, `--kind rerank`, `--kind imagegen`); rerank `prompt_tokens_total` sums
   `usage.total_tokens` (all input). A strategic total whose field sums to 0
   (no row reported it) is `null`, as on the summary. The pre-existing
   strategic `completion_tokens_per_second` is unchanged: it reads `0.0`, not
@@ -303,6 +303,30 @@ Workload section. This page focuses on measured fields.
   requested; either way the payload size reflects what the server received.
   VLM honors `--system-prompt` (empty disables), `--min-tokens`, and
   `--tokenizer` like the LLM binary.
+- **Strategic modality sweeps** (`--kind vlm|asr|imagegen`, #197): requests
+  are built with the same library builders as the modality binaries.
+  `SweepPoint.modality_metrics` holds one type-7 distribution per key over
+  measured successes, with the same names and definitions as modality
+  `request.v3` `modality_metrics`: VLM `image_count` (count) and
+  `image_bytes` (bytes); ASR `wer`, `cer` (ratios, as above),
+  `rtfx_client` (`audio_duration_s / service_latency_s`), and
+  `audio_duration_s` (seconds); imagegen `images_requested` and
+  `images_returned` (count). A key is `n=0` when no measured success has a
+  value (no `--ground-truth` for WER/CER, no duration in the sample row for
+  `audio_duration_s` / `rtfx_client`). Imagegen `image_digests` counts
+  decoded `b64_json` images (`images`) and distinct SHA-256 digests
+  (`distinct`) over measured successes; both are 0 for `url` responses.
+  - Timing: ASR audio and VLM images are loaded before the first request, so
+    file I/O is not in latency. Imagegen decode and hash run after the body
+    is read and after the concurrency slot is released, so they are outside
+    latency and do not hold a slot; an undecodable `b64_json` image fails the
+    request, as in the imagegen binary.
+  - Tokens: vlm and asr stages report `osl_tokens` and
+    `completion_tokens_total` from server usage (asr only when the server
+    reports usage); imagegen generates no tokens, so `osl_tokens` is `n=0`
+    and `completion_tokens_total` is `null`, as for embeddings and rerank.
+    TTFT is measured only for streaming chat and vlm; asr and imagegen
+    stages report `ttft_s` with `n=0`.
 
 ## Thinking models: TTFT vs first reasoning
 

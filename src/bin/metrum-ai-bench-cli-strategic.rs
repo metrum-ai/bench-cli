@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Unified strategic benchmark runner for chat, embeddings and reranking.
+//! Unified strategic benchmark runner for chat, embeddings, reranking, VLM,
+//! ASR and image generation. Metrum AI.
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
@@ -10,6 +11,7 @@ use metrum_ai_bench::strategic::{
     load_sessions, now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord,
     MlperfScenario, PrefixControl, ServerMetrics, Validity,
 };
+use metrum_ai_bench::sweep_modality::ModalitySample;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -24,11 +26,54 @@ use tokio::sync::{Mutex, Semaphore};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum EndpointKind {
     Chat,
     Embeddings,
     Rerank,
+    /// Chat completions with `image_url` parts (metrum-ai-bench-cli-vlm bodies).
+    Vlm,
+    /// `/v1/audio/transcriptions` multipart uploads (metrum-ai-bench-cli-asr forms).
+    Asr,
+    /// `/v1/images/generations` (metrum-ai-bench-cli-imagegen bodies).
+    Imagegen,
+}
+
+impl EndpointKind {
+    /// Chat completions bodies: streaming, TTFT, reasoning and chat controls.
+    fn chat_like(self) -> bool {
+        matches!(self, Self::Chat | Self::Vlm)
+    }
+
+    /// Kinds whose `usage` output tokens are generated text (#191 `osl_tokens`).
+    fn generates_output(self) -> bool {
+        matches!(self, Self::Chat | Self::Vlm | Self::Asr)
+    }
+
+    /// Stage `modality_metrics` keys; empty for chat, embeddings and rerank.
+    fn modality_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Vlm => metrum_ai_bench::sweep_modality::VLM_KEYS,
+            Self::Asr => metrum_ai_bench::sweep_modality::ASR_KEYS,
+            Self::Imagegen => metrum_ai_bench::sweep_modality::IMAGEGEN_KEYS,
+            Self::Chat | Self::Embeddings | Self::Rerank => &[],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ImageDetail {
+    Low,
+    High,
+}
+
+impl ImageDetail {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::High => "high",
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -51,7 +96,7 @@ struct Args {
     #[arg(
         long,
         conflicts_with = "tools",
-        help = "Stream chat responses to measure TTFT; embeddings and rerank remain JSON"
+        help = "Stream chat and vlm responses to measure TTFT; embeddings, rerank, asr and imagegen remain unary"
     )]
     streaming: bool,
     #[arg(
@@ -82,12 +127,12 @@ struct Args {
     #[arg(
         long,
         conflicts_with = "sessions",
-        help = "JSONL prompt file or http(s) URL (objects with \"prompt\"); cycles across requests"
+        help = "JSONL prompt file (objects with \"prompt\"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests"
     )]
     prompts: Option<String>,
     #[arg(
         long,
-        help = "Max completion tokens for chat bodies; required when --prompts is set, recommended for all chat sweeps"
+        help = "Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps"
     )]
     max_tokens: Option<u32>,
     #[arg(
@@ -105,9 +150,85 @@ struct Args {
     #[arg(
         long,
         value_name = "JSON",
-        help = "Merge extra JSON object fields into chat request bodies"
+        help = "Merge extra JSON object fields into chat, vlm or imagegen request bodies"
     )]
     extra_body_json: Option<String>,
+    #[arg(
+        long,
+        help = "Sampling temperature for chat and vlm bodies; omitted from chat bodies when unset, vlm defaults to 0.1 as metrum-ai-bench-cli-vlm"
+    )]
+    temperature: Option<f32>,
+    #[arg(
+        long = "image",
+        value_name = "PATH_OR_URL",
+        help = "--kind vlm: image attached to --prompt (repeatable; local path, http(s) or data: URL); ignored with --prompts"
+    )]
+    images: Vec<String>,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "low",
+        help = "--kind vlm: image_url detail"
+    )]
+    image_detail: ImageDetail,
+    #[arg(
+        long,
+        value_name = "PIXELS",
+        help = "--kind vlm: downscale images whose longer side exceeds PIXELS (re-encoded as PNG)"
+    )]
+    max_image_dimension: Option<u32>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "--kind asr: audio samples JSONL (id, path or url, format, optional duration), as metrum-ai-bench-cli-asr --input"
+    )]
+    audio_samples: Option<String>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "--kind asr: reference transcripts JSONL (id, transcript) for stage WER/CER"
+    )]
+    ground_truth: Option<String>,
+    #[arg(
+        long,
+        default_value = "verbose_json",
+        value_parser = ["verbose_json", "json", "text", "srt", "vtt"],
+        help = "--kind asr: transcription response_format"
+    )]
+    asr_response_format: String,
+    #[arg(
+        long,
+        default_value = "en",
+        help = "--kind asr: language form field (empty to omit)"
+    )]
+    language: String,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        help = "--kind asr: text normalization applied to both sides of WER/CER"
+    )]
+    normalizer: metrum_ai_bench::asr::Normalizer,
+    #[arg(
+        long,
+        default_value = "1024x1024",
+        help = "--kind imagegen: image size"
+    )]
+    image_size: String,
+    #[arg(
+        long,
+        default_value_t = 1,
+        value_parser = clap::value_parser!(u32).range(1..),
+        help = "--kind imagegen: images per request (n)"
+    )]
+    images_per_request: u32,
+    #[arg(
+        long,
+        default_value = "b64_json",
+        value_parser = ["b64_json", "url"],
+        help = "--kind imagegen: response_format; b64_json images are decoded and digested"
+    )]
+    image_response_format: String,
     #[arg(
         long,
         default_value_t = 0,
@@ -250,11 +371,27 @@ enum SweepBy {
     Rate,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct Input {
-    body: Value,
+    /// JSON request body (`Null` for ASR multipart uploads). Shared so large
+    /// VLM bodies are not copied per request.
+    body: Arc<Value>,
     session_id: Option<String>,
     turn: Option<usize>,
+    /// `--kind asr`: the audio upload sent as multipart instead of `body`.
+    upload: Option<Arc<AudioUpload>>,
+    /// `--kind vlm`: image count and payload bytes in `body`.
+    images: Option<(usize, u64)>,
+}
+
+/// One preloaded audio sample for `--kind asr`.
+#[derive(Debug)]
+struct AudioUpload {
+    file_name: String,
+    format: String,
+    bytes: Vec<u8>,
+    seconds: Option<f64>,
+    reference: Option<String>,
 }
 
 fn parse_sweep(value: &str) -> Result<Vec<f64>> {
@@ -294,6 +431,7 @@ struct ChatBodyOpts<'a> {
     max_tokens: Option<u32>,
     ignore_eos: bool,
     min_tokens: Option<u32>,
+    temperature: Option<f32>,
     extra_body: Option<&'a Value>,
     shared_prefix: Option<&'a str>,
     prefix_control: PrefixControl,
@@ -307,10 +445,14 @@ fn apply_chat_controls(
     max_tokens: Option<u32>,
     ignore_eos: bool,
     min_tokens: Option<u32>,
+    temperature: Option<f32>,
     extra_body: Option<&Value>,
 ) -> Result<()> {
     if let Some(max_tokens) = max_tokens {
         body["max_tokens"] = json!(max_tokens);
+    }
+    if let Some(temperature) = temperature {
+        body["temperature"] = json!(decimal_f32(temperature));
     }
     if ignore_eos {
         body["ignore_eos"] = json!(true);
@@ -348,10 +490,17 @@ fn chat_body(opts: ChatBodyOpts<'_>) -> Result<Value> {
         opts.max_tokens,
         opts.ignore_eos,
         opts.min_tokens,
+        opts.temperature,
         opts.extra_body,
     )?;
     add_structured(&mut body, opts.schema, opts.tools);
     Ok(body)
+}
+
+/// An `f32` flag as the `f64` with the same shortest decimal form, so `0.1`
+/// stays `0.1` in JSON instead of `0.10000000149011612`.
+fn decimal_f32(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
 }
 
 fn parse_extra_body(raw: Option<&str>) -> Result<Option<Value>> {
@@ -369,10 +518,19 @@ fn parse_extra_body(raw: Option<&str>) -> Result<Option<Value>> {
 }
 
 fn validate_chat_controls(args: &Args) -> Result<()> {
-    if (args.ignore_eos || args.min_tokens.is_some() || args.extra_body_json.is_some())
-        && !matches!(args.kind, EndpointKind::Chat)
+    if (args.ignore_eos || args.min_tokens.is_some()) && !args.kind.chat_like() {
+        bail!("--ignore-eos and --min-tokens are only valid for --kind chat or vlm");
+    }
+    if args.extra_body_json.is_some()
+        && !matches!(
+            args.kind,
+            EndpointKind::Chat | EndpointKind::Vlm | EndpointKind::Imagegen
+        )
     {
-        bail!("--ignore-eos, --min-tokens, and --extra-body-json are only valid for --kind chat");
+        bail!("--extra-body-json is only valid for --kind chat, vlm or imagegen");
+    }
+    if args.temperature.is_some() && !args.kind.chat_like() {
+        bail!("--temperature is only valid for --kind chat or vlm");
     }
     if let (Some(min_tokens), Some(max_tokens)) = (args.min_tokens, args.max_tokens) {
         if min_tokens > max_tokens {
@@ -427,13 +585,15 @@ fn make_inputs(
                     args.max_tokens,
                     args.ignore_eos,
                     args.min_tokens,
+                    args.temperature,
                     extra_body.as_ref(),
                 )?;
                 add_structured(&mut body, schema, tools);
                 inputs.push(Input {
-                    body,
+                    body: Arc::new(body),
                     session_id: Some(session.session_id.clone()),
                     turn: Some(turn),
+                    ..Input::default()
                 });
             }
         }
@@ -454,22 +614,22 @@ fn make_inputs(
         for (index, prompt) in prompts.iter().enumerate() {
             let session_key = format!("prompt-{index}");
             inputs.push(Input {
-                body: chat_body(ChatBodyOpts {
+                body: Arc::new(chat_body(ChatBodyOpts {
                     model,
                     prompt,
                     streaming: args.streaming,
                     max_tokens: args.max_tokens,
                     ignore_eos: args.ignore_eos,
                     min_tokens: args.min_tokens,
+                    temperature: args.temperature,
                     extra_body: extra_body.as_ref(),
                     shared_prefix: args.shared_prefix.as_deref(),
                     prefix_control: args.prefix_control,
                     session_key: &session_key,
                     schema,
                     tools,
-                })?,
-                session_id: None,
-                turn: None,
+                })?),
+                ..Input::default()
             });
         }
         return Ok(inputs);
@@ -482,6 +642,7 @@ fn make_inputs(
             max_tokens: args.max_tokens,
             ignore_eos: args.ignore_eos,
             min_tokens: args.min_tokens,
+            temperature: args.temperature,
             extra_body: extra_body.as_ref(),
             shared_prefix: args.shared_prefix.as_deref(),
             prefix_control: args.prefix_control,
@@ -494,12 +655,210 @@ fn make_inputs(
             let documents: Vec<_> = args.prompt.split('|').map(str::trim).collect();
             json!({"model":model,"query":documents.first().copied().unwrap_or(""),"documents":documents.iter().skip(1).collect::<Vec<_>>()})
         }
+        EndpointKind::Vlm | EndpointKind::Asr | EndpointKind::Imagegen => {
+            bail!("--kind vlm, asr and imagegen inputs are built by their own loaders")
+        }
     };
     Ok(vec![Input {
-        body,
-        session_id: None,
-        turn: None,
+        body: Arc::new(body),
+        ..Input::default()
     }])
+}
+
+/// Reject flags that do not apply to `--kind` before any input is loaded.
+fn validate_kind_flags(args: &Args) -> Result<()> {
+    let kind = args.kind;
+    if !args.images.is_empty() && kind != EndpointKind::Vlm {
+        bail!("--image is only valid for --kind vlm");
+    }
+    if (args.audio_samples.is_some() || args.ground_truth.is_some()) && kind != EndpointKind::Asr {
+        bail!("--audio-samples and --ground-truth are only valid for --kind asr");
+    }
+    if kind.modality_keys().is_empty() {
+        return Ok(());
+    }
+    if args.json_schema.is_some() || args.tools.is_some() {
+        bail!("--json-schema and --tools are only valid for --kind chat");
+    }
+    if args.sessions.is_some() {
+        bail!("--sessions is only valid for chat endpoints");
+    }
+    if args.prompts.is_some() && kind == EndpointKind::Asr {
+        bail!("--kind asr reads --audio-samples, not --prompts");
+    }
+    validate_chat_controls(args)
+}
+
+fn shuffle_if<T>(args: &Args, items: &mut [T]) {
+    if args.shuffle_prompts {
+        items.shuffle(&mut StdRng::seed_from_u64(args.seed));
+    }
+}
+
+/// `--kind vlm`: one chat body per prompt row, built with the
+/// metrum-ai-bench-cli-vlm request builder. Images load once, before any
+/// request, so image I/O never enters a measured latency.
+async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
+    let max_tokens = args.max_tokens.context(
+        "--kind vlm requires --max-tokens (bounds OSL, as metrum-ai-bench-cli-vlm requires)",
+    )?;
+    let mut records = match &args.prompts {
+        Some(path) => metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_vlm_records(path)
+            .map_err(|err| anyhow::anyhow!("{err}"))?,
+        None => {
+            if args.images.is_empty() {
+                bail!("--kind vlm needs --prompts (VLM JSONL) or at least one --image");
+            }
+            vec![(args.prompt.clone(), args.images.clone())]
+        }
+    };
+    if records.is_empty() {
+        bail!("--kind vlm: no prompt rows loaded");
+    }
+    shuffle_if(args, &mut records);
+    let refs = records
+        .iter()
+        .map(|(_, images)| images.len())
+        .sum::<usize>();
+    let mut cache = metrum_ai_bench::vlm::ImageCache::new(refs.max(1))
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    let client = reqwest::Client::new();
+    let mut inputs = Vec::with_capacity(records.len());
+    for (prompt, refs) in &records {
+        let mut images = Vec::with_capacity(refs.len());
+        for image_ref in refs {
+            let image = cache
+                .get_or_load(
+                    &client,
+                    image_ref,
+                    args.max_image_dimension,
+                    args.timeout_seconds,
+                    false,
+                )
+                .await
+                .map_err(|err| {
+                    anyhow::anyhow!(
+                        "image {}: {err}",
+                        metrum_ai_bench::prompt_inputs::image_ref_key(image_ref)
+                    )
+                })?;
+            images.push(image);
+        }
+        let body = metrum_ai_bench::vlm::build_request_body(
+            model,
+            max_tokens,
+            args.temperature.unwrap_or(0.1),
+            prompt,
+            &images,
+            args.image_detail.as_str(),
+            false,
+            args.streaming,
+            args.ignore_eos,
+            args.min_tokens,
+            args.extra_body_json.as_deref(),
+            None,
+        )
+        .map_err(|err| anyhow::anyhow!("vlm body: {err}"))?;
+        inputs.push(Input {
+            body: Arc::new(body),
+            images: Some((
+                images.len(),
+                images.iter().map(|image| image.size_bytes).sum(),
+            )),
+            ..Input::default()
+        });
+    }
+    Ok(inputs)
+}
+
+/// `--kind asr`: audio samples (downloaded once when given by URL) read into
+/// memory before any request, with their reference transcripts.
+async fn asr_inputs(args: &Args) -> Result<Vec<Input>> {
+    let path = args.audio_samples.as_deref().context(
+        "--kind asr requires --audio-samples JSONL (id, path or url, format, optional duration)",
+    )?;
+    let mut samples =
+        metrum_ai_bench::asr::load_audio_samples(path).map_err(|err| anyhow::anyhow!("{err}"))?;
+    if samples.is_empty() {
+        bail!("--kind asr: no audio samples in {path}");
+    }
+    let references = args
+        .ground_truth
+        .as_deref()
+        .map(metrum_ai_bench::asr::load_ground_truth)
+        .transpose()
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    shuffle_if(args, &mut samples);
+    let client = reqwest::Client::new();
+    let mut inputs = Vec::with_capacity(samples.len());
+    for sample in samples {
+        let local = match (&sample.local_file_path, &sample.url) {
+            (Some(local), _) => local.clone(),
+            (None, Some(url)) => {
+                metrum_ai_bench::asr::download_audio_file(&client, url, &sample.format)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("download {}: {err}", sample.id))?
+            }
+            (None, None) => bail!("audio sample {} has no path or url", sample.id),
+        };
+        let bytes = std::fs::read(&local).with_context(|| format!("read audio {local}"))?;
+        // Basename only: the multipart filename never leaks a local path.
+        let file_name = Path::new(&local)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("audio.{}", sample.format));
+        let reference = references
+            .as_ref()
+            .and_then(|map| map.get(&sample.id).cloned());
+        inputs.push(Input {
+            upload: Some(Arc::new(AudioUpload {
+                file_name,
+                format: sample.format,
+                bytes,
+                seconds: sample.duration,
+                reference,
+            })),
+            ..Input::default()
+        });
+    }
+    if references.is_some()
+        && inputs
+            .iter()
+            .all(|input| input.upload.as_ref().is_some_and(|u| u.reference.is_none()))
+    {
+        eprintln!("warning: --ground-truth matched no sample id; stage wer/cer will be n = 0");
+    }
+    Ok(inputs)
+}
+
+/// `--kind imagegen`: one generation body per prompt, built with the
+/// metrum-ai-bench-cli-imagegen request builder.
+fn imagegen_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
+    let extra = parse_extra_body(args.extra_body_json.as_deref())?;
+    let mut prompts = match &args.prompts {
+        Some(path) => metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts(path)
+            .map_err(|err| anyhow::anyhow!("{err}"))?,
+        None => vec![args.prompt.clone()],
+    };
+    shuffle_if(args, &mut prompts);
+    Ok(prompts
+        .iter()
+        .map(|prompt| Input {
+            body: Arc::new(
+                metrum_ai_bench::imagegen::GenerationBody {
+                    model,
+                    prompt,
+                    n: args.images_per_request,
+                    size: &args.image_size,
+                    response_format: &args.image_response_format,
+                    extra: extra.as_ref().and_then(Value::as_object),
+                    ..Default::default()
+                }
+                .to_json(),
+            ),
+            ..Input::default()
+        })
+        .collect())
 }
 
 fn add_structured(body: &mut Value, schema: Option<&Value>, tools: Option<&Value>) {
@@ -517,7 +876,8 @@ fn add_structured(body: &mut Value, schema: Option<&Value>, tools: Option<&Value
 
 fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
     match kind {
-        EndpointKind::Chat => (
+        // ASR responses carry token usage only when the server reports it.
+        EndpointKind::Chat | EndpointKind::Vlm | EndpointKind::Asr => (
             response
                 .pointer("/usage/prompt_tokens")
                 .and_then(Value::as_u64)
@@ -541,17 +901,21 @@ fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
                 .unwrap_or(0),
             0,
         ),
+        EndpointKind::Imagegen => (0, 0),
     }
 }
 
-/// Server-reported reasoning tokens for chat responses; `None` when absent
-/// and for embeddings or rerank, which do not generate (#192).
+/// Server-reported reasoning tokens for chat and vlm responses; `None` when
+/// absent and for the other kinds (#192).
 fn response_reasoning_tokens(kind: EndpointKind, response: &Value) -> Option<u64> {
     match kind {
-        EndpointKind::Chat => response
+        EndpointKind::Chat | EndpointKind::Vlm => response
             .get("usage")
             .and_then(metrum_ai_bench::usage::reasoning_tokens),
-        EndpointKind::Embeddings | EndpointKind::Rerank => None,
+        EndpointKind::Embeddings
+        | EndpointKind::Rerank
+        | EndpointKind::Asr
+        | EndpointKind::Imagegen => None,
     }
 }
 
@@ -573,25 +937,51 @@ fn spawn_one_request(
     ndjson: Option<metrum_ai_bench::telemetry::NdjsonWriter>,
     scheduled_offset: Option<Duration>,
     warmup: bool,
-) -> tokio::task::JoinHandle<BenchRecord> {
+) -> tokio::task::JoinHandle<(BenchRecord, ModalitySample)> {
     let client = client.clone();
     let url = url.to_string();
     let api_key = args.api_key.clone();
     let validator = validator.cloned();
     let kind = args.kind;
-    let streaming = args.streaming && matches!(kind, EndpointKind::Chat);
+    let streaming = args.streaming && kind.chat_like();
     let infer_ttft = args.infer_ttft_from_first_byte;
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
+    let modality = ModalityOptions {
+        model: args.model.clone().unwrap_or_default(),
+        asr_response_format: args.asr_response_format.clone(),
+        language: args.language.clone(),
+        normalizer: args.normalizer,
+        images_requested: args.images_per_request,
+        decode_images: args.image_response_format == "b64_json",
+    };
     tokio::spawn(async move {
+        // ASR uploads become a multipart form; everything else posts JSON.
+        // Built before the send clock so form assembly is never timed.
+        let request = client.post(&url).bearer_auth(api_key);
+        let request = match &input.upload {
+            Some(upload) => metrum_ai_bench::asr::transcription_form(
+                &modality.model,
+                &modality.asr_response_format,
+                &modality.language,
+                upload.file_name.clone(),
+                &upload.format,
+                upload.bytes.clone(),
+            )
+            .map(|form| request.multipart(form))
+            .map_err(|err| anyhow::anyhow!("{err}")),
+            None => Ok(request.json(&*input.body)),
+        };
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
             Arc::clone(&semaphore),
             &inflight_tracker,
         )
         .await
         .expect("semaphore closed");
-        let request_slot =
-            metrum_ai_bench::concurrency::InFlightSlot::new(&inflight_tracker, permit);
-        let in_flight_at_send = request_slot.in_flight();
+        let mut request_slot = Some(metrum_ai_bench::concurrency::InFlightSlot::new(
+            &inflight_tracker,
+            permit,
+        ));
+        let in_flight_at_send = request_slot.as_ref().map_or(0, |slot| slot.in_flight());
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -609,13 +999,15 @@ fn spawn_one_request(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(t_sent_ns);
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
-        let result = metrum_ai_bench::connect_timing::with_connect_slot(
-            Arc::clone(&connect_slot),
-            metrum_ai_bench::connect_timing::send(
-                client.post(&url).bearer_auth(api_key).json(&input.body),
-            ),
-        )
-        .await;
+        let result = match request {
+            Ok(request) => metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                metrum_ai_bench::connect_timing::send(request),
+            )
+            .await
+            .map_err(anyhow::Error::from),
+            Err(err) => Err(err),
+        };
         let mut first_byte_s = None;
         let mut t_first_ns = None;
         let mut stream_ttft_s = None;
@@ -648,6 +1040,14 @@ fn spawn_one_request(
                     "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
                     "usage": usage
                 }))
+            } else if kind == EndpointKind::Asr {
+                let body = metrum_ai_bench::connect_timing::read_body(response).await?;
+                let (text, server_time) = metrum_ai_bench::asr::parse_transcription(
+                    &modality.asr_response_format,
+                    &String::from_utf8_lossy(&body),
+                )
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+                Ok(json!({"text": text, "inference_time": server_time}))
             } else {
                 let body = metrum_ai_bench::connect_timing::read_body(response).await?;
                 Ok(serde_json::from_slice::<Value>(&body)?)
@@ -657,6 +1057,19 @@ fn spawn_one_request(
         let http_trace = connect_slot.trace();
         let completed = Instant::now();
         let t_done_ns = run_epoch.elapsed_ns();
+        // Image decoding and hashing are client work after the body is read:
+        // free the slot first so they never hold a concurrency permit.
+        if kind == EndpointKind::Imagegen {
+            drop(request_slot.take());
+        }
+        let service_latency_s = completed.saturating_duration_since(sent).as_secs_f64();
+        let (result, modality_sample) = match result {
+            Ok(value) => match modality.sample(kind, &input, &value, service_latency_s) {
+                Ok(sample) => (Ok(value), sample),
+                Err(err) => (Err(err), ModalitySample::default()),
+            },
+            Err(err) => (Err(err), ModalitySample::default()),
+        };
         let (success, valid, input_tokens, output_tokens, reasoning_tokens, error) = match result {
             Ok(value) => {
                 let (input_tokens, output_tokens) = response_tokens(kind, &value);
@@ -687,7 +1100,7 @@ fn spawn_one_request(
             sent_unix_ns,
             latency_s: completed.saturating_duration_since(scheduled).as_secs_f64(),
             queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
-            service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
+            service_latency_s,
             first_byte_s,
             connect_s: Some(http_trace.connect_s),
             ttft_s: resolved.ttft_s,
@@ -743,8 +1156,90 @@ fn spawn_one_request(
                 ))
                 .await;
         }
-        record
+        (record, modality_sample)
     })
+}
+
+/// Modality settings stamped as `config.modality` (#197); `None` for chat,
+/// embeddings and rerank.
+fn modality_config(args: &Args, inputs: &[Input]) -> Option<Value> {
+    match args.kind {
+        EndpointKind::Vlm => Some(json!({
+            "pool_images": inputs.iter().filter_map(|input| input.images).map(|(count, _)| count).sum::<usize>(),
+            "image_detail": args.image_detail.as_str(),
+            "max_image_dimension": args.max_image_dimension,
+            "temperature": decimal_f32(args.temperature.unwrap_or(0.1)),
+        })),
+        EndpointKind::Asr => Some(json!({
+            "audio_samples": args.audio_samples,
+            "ground_truth": args.ground_truth,
+            "references_matched": inputs
+                .iter()
+                .filter(|input| input.upload.as_ref().is_some_and(|u| u.reference.is_some()))
+                .count(),
+            "response_format": args.asr_response_format,
+            "language": args.language,
+            "normalizer": args.normalizer.to_string(),
+        })),
+        EndpointKind::Imagegen => Some(json!({
+            "image_size": args.image_size,
+            "images_per_request": args.images_per_request,
+            "image_response_format": args.image_response_format,
+        })),
+        EndpointKind::Chat | EndpointKind::Embeddings | EndpointKind::Rerank => None,
+    }
+}
+
+/// Per-request modality settings copied into each request task.
+struct ModalityOptions {
+    model: String,
+    asr_response_format: String,
+    language: String,
+    normalizer: metrum_ai_bench::asr::Normalizer,
+    images_requested: u32,
+    decode_images: bool,
+}
+
+impl ModalityOptions {
+    /// Modality values for one successful response. An undecodable imagegen
+    /// response fails the request, as in metrum-ai-bench-cli-imagegen.
+    fn sample(
+        &self,
+        kind: EndpointKind,
+        input: &Input,
+        response: &Value,
+        service_latency_s: f64,
+    ) -> Result<ModalitySample> {
+        Ok(match kind {
+            EndpointKind::Vlm => input
+                .images
+                .map(|(count, bytes)| ModalitySample::vlm(count, bytes))
+                .unwrap_or_default(),
+            EndpointKind::Asr => {
+                let upload = input.upload.as_deref();
+                ModalitySample::asr(
+                    response["text"].as_str().unwrap_or_default(),
+                    upload.and_then(|u| u.reference.as_deref()),
+                    self.normalizer,
+                    upload.and_then(|u| u.seconds),
+                    service_latency_s,
+                )
+            }
+            EndpointKind::Imagegen => {
+                let (returned, images) =
+                    metrum_ai_bench::imagegen::decode_response_images(response, self.decode_images)
+                        .map_err(|(kind, message)| anyhow::anyhow!("{kind}: {message}"))?;
+                ModalitySample::imagegen(
+                    self.images_requested,
+                    returned,
+                    images.into_iter().map(|image| image.sha256).collect(),
+                )
+            }
+            EndpointKind::Chat | EndpointKind::Embeddings | EndpointKind::Rerank => {
+                ModalitySample::default()
+            }
+        })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -762,6 +1257,7 @@ async fn run_stage(
     stop: &metrum_ai_bench::runner::StopFlag,
 ) -> Result<(
     Vec<BenchRecord>,
+    Vec<ModalitySample>,
     f64,
     metrum_ai_bench::concurrency::ObservedConcurrency,
 )> {
@@ -774,8 +1270,9 @@ async fn run_stage(
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency as u32,
     ));
-    let mut records =
-        Vec::with_capacity(args.warmup_requests.saturating_add(args.requests_per_stage) as usize);
+    let capacity = args.warmup_requests.saturating_add(args.requests_per_stage) as usize;
+    let mut records = Vec::with_capacity(capacity);
+    let mut samples = Vec::with_capacity(capacity);
 
     // Phase 1: fully complete warmup before measurement begins.
     if args.warmup_requests > 0 && !stop.is_stopped() {
@@ -808,7 +1305,9 @@ async fn run_stage(
             ));
         }
         for handle in warmup_handles {
-            records.push(handle.await.context("warmup request task failed")?);
+            let (record, sample) = handle.await.context("warmup request task failed")?;
+            records.push(record);
+            samples.push(sample);
         }
         let t_end_ns = run_epoch.elapsed_ns();
         if let Some(writer) = &ndjson {
@@ -862,7 +1361,9 @@ async fn run_stage(
         ));
     }
     for handle in measure_handles {
-        records.push(handle.await.context("request task failed")?);
+        let (record, sample) = handle.await.context("request task failed")?;
+        records.push(record);
+        samples.push(sample);
     }
     let t_end_ns = run_epoch.elapsed_ns();
     if let Some(writer) = &ndjson {
@@ -890,7 +1391,12 @@ async fn run_stage(
             measure_epoch.elapsed().as_secs_f64()
         }
     };
-    Ok((records, measured_seconds, inflight_tracker.snapshot()))
+    Ok((
+        records,
+        samples,
+        measured_seconds,
+        inflight_tracker.snapshot(),
+    ))
 }
 
 fn aggregate_server(samples: &[ServerMetrics]) -> ServerMetrics {
@@ -947,7 +1453,15 @@ async fn main() -> Result<()> {
         (None, Some(tools)) => Some(Validity::tool_names(tools)?),
         _ => None,
     };
-    let inputs = make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?;
+    validate_kind_flags(&args)?;
+    let inputs = match args.kind {
+        EndpointKind::Vlm => vlm_inputs(&args, &model).await?,
+        EndpointKind::Asr => asr_inputs(&args).await?,
+        EndpointKind::Imagegen => imagegen_inputs(&args, &model)?,
+        EndpointKind::Chat | EndpointKind::Embeddings | EndpointKind::Rerank => {
+            make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?
+        }
+    };
     let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
     let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
     let stop = metrum_ai_bench::runner::StopFlag::new();
@@ -1059,7 +1573,7 @@ async fn main() -> Result<()> {
     let price =
         metrum_ai_bench::summary::resolve_price_per_hour(args.price_per_hour, sut_block.as_ref());
     let price_per_hour = price.map(|(value, _)| value);
-    let redacted_config = json!({
+    let mut redacted_config = json!({
         "url": url,
         "model": model,
         "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
@@ -1088,6 +1602,13 @@ async fn main() -> Result<()> {
         "ndjson": args.ndjson,
         // Secrets intentionally omitted (api_key never stamped).
     });
+    // Additive keys only when used, so chat/embeddings/rerank configs are unchanged.
+    if let Some(temperature) = args.temperature {
+        redacted_config["temperature"] = json!(decimal_f32(temperature));
+    }
+    if let Some(modality) = modality_config(&args, &inputs) {
+        redacted_config["modality"] = modality;
+    }
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -1121,7 +1642,7 @@ async fn main() -> Result<()> {
             stop_scrapers.store(true, Ordering::Relaxed);
             break;
         }
-        let (records, seconds, observed) = run_stage(
+        let (records, samples, seconds, observed) = run_stage(
             &args,
             &url,
             stage,
@@ -1172,8 +1693,7 @@ async fn main() -> Result<()> {
                         .is_some_and(|msg| msg.contains("no output token"))
             })
             .count();
-        let chat_kind = matches!(args.kind, EndpointKind::Chat);
-        let ttft_audit = if chat_kind {
+        let ttft_audit = if args.kind.chat_like() {
             metrum_ai_bench::measurement::audit_chat_ttft(
                 args.streaming,
                 args.infer_ttft_from_first_byte,
@@ -1197,8 +1717,18 @@ async fn main() -> Result<()> {
             price_per_hour,
             Some(observed),
             isl_osl,
-            matches!(args.kind, EndpointKind::Chat),
+            args.kind.generates_output(),
         );
+        point.modality_metrics = metrum_ai_bench::sweep_modality::stage_metrics(
+            args.kind.modality_keys(),
+            &records,
+            &samples,
+        );
+        if args.kind == EndpointKind::Imagegen {
+            point.image_digests = Some(metrum_ai_bench::sweep_modality::stage_image_digests(
+                &records, &samples,
+            ));
+        }
         point.ttft_approx_count = ttft_audit.approx_count;
         point.ttft_warning = ttft_audit.warning;
         points.push(point);
@@ -1445,6 +1975,25 @@ mod tests {
     }
 
     #[test]
+    fn temperature_keeps_its_decimal_form() {
+        assert_eq!(decimal_f32(0.1), 0.1);
+        let args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://localhost",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            "8",
+            "--temperature",
+            "0.7",
+        ])
+        .expect("args");
+        let inputs = make_inputs(&args, "dummy", None, None).expect("inputs");
+        assert_eq!(inputs[0].body["temperature"], 0.7);
+    }
+
+    #[test]
     fn sweep_parser_rejects_invalid_values() {
         assert_eq!(parse_sweep("1,2.5,4").unwrap(), vec![1.0, 2.5, 4.0]);
         assert!(parse_sweep("1,0").is_err());
@@ -1461,6 +2010,7 @@ mod tests {
             max_tokens: Some(16),
             ignore_eos: false,
             min_tokens: None,
+            temperature: None,
             extra_body: None,
             shared_prefix: None,
             prefix_control: PrefixControl::None,

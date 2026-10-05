@@ -206,6 +206,33 @@
   advances by a fixed step per scrape, so J/token from these fixtures is not
   meaningful (see `docs/telemetry/ANALYSIS.md`). No Rust or schema change
   (#199).
+- Strategic `--kind vlm`, `--kind asr`, and `--kind imagegen` sweeps (#197,
+  additive, schema stays `metrum-ai-bench-cli.strategic.v1`). Requests use
+  the modality binaries' builders, now in the library (`src/vlm.rs`,
+  `src/asr.rs`, `src/imagegen.rs`); modality binary output is unchanged. New
+  flags: `--temperature` (chat and vlm; omitted from chat bodies when unset,
+  vlm default 0.1), `--image` (repeatable), `--image-detail`,
+  `--max-image-dimension`, `--audio-samples`, `--ground-truth`,
+  `--asr-response-format`, `--language`, `--normalizer`, `--image-size`,
+  `--images-per-request`, and `--image-response-format`. `--extra-body-json`
+  now also works for vlm and imagegen, and `--ignore-eos` / `--min-tokens`
+  for vlm. ASR audio and VLM images load before the first request, so file
+  I/O is not in latency; imagegen decode and hash run after the body is read
+  and the concurrency slot is released, and an undecodable `b64_json` image
+  fails the request.
+- Strategic sweep points gain `modality_metrics` (key to type-7
+  distribution over measured successes, same names as modality `request.v3`:
+  VLM `image_count`, `image_bytes`; ASR `wer`, `cer`, `rtfx_client`,
+  `audio_duration_s`; imagegen `images_requested`, `images_returned`; `n=0`
+  when unmeasured, omitted for chat, embeddings, and rerank) and, for
+  imagegen only, `image_digests` `{images, distinct}` (0/0 for `url`
+  responses). Strategic `config` gains a `modality` object for modality kinds
+  and `temperature` when `--temperature` is set. `osl_tokens` and
+  `completion_tokens_total` come from usage for vlm and asr and are
+  `n=0` / `null` for imagegen; `ttft_s` is `n=0` for asr and imagegen. The
+  telemetry NDJSON `run` row `config.kind` can be `vlm`, `asr`, or
+  `imagegen`. Request CSV columns and chat, embeddings, and rerank output are
+  unchanged (#197).
 
 ### Changed
 - VLM, ASR, and imagegen now record `connect_s` and the HTTP phase trace

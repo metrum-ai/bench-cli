@@ -26,6 +26,7 @@ pub mod stats;
 pub mod strategic;
 pub mod summary;
 pub mod sut;
+pub mod sweep_modality;
 pub mod telemetry;
 pub mod time_weighted;
 pub mod tokenizer;
