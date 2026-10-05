@@ -20,6 +20,16 @@ const REQUESTS: usize = 4;
 const CHUNK_INTERVAL_S: f64 = 0.010;
 
 fn run_llm(url: &str, dir: &Path, streaming: bool) -> PathBuf {
+    run_llm_with(url, dir, streaming, REQUESTS, 1)
+}
+
+fn run_llm_with(
+    url: &str,
+    dir: &Path,
+    streaming: bool,
+    requests: usize,
+    concurrency: u32,
+) -> PathBuf {
     let prompts = dir.join("prompts.jsonl");
     std::fs::write(&prompts, "{\"prompt\":\"Name three rivers.\"}\n").expect("prompts");
     let data_log = dir.join(if streaming {
@@ -36,9 +46,9 @@ fn run_llm(url: &str, dir: &Path, streaming: bool) -> PathBuf {
         "--scenario",
         "http-trace",
         "--num-requests",
-        &REQUESTS.to_string(),
+        &requests.to_string(),
         "--concurrency",
-        "1",
+        &concurrency.to_string(),
         "--prompts",
         prompts.to_str().expect("utf8"),
         "--mode",
@@ -169,6 +179,48 @@ fn llm_records_http_phase_trace_and_pool_reuse() {
     let host_dir = tempfile::tempdir().expect("tmpdir");
     let host_url = ip_url.replacen("127.0.0.1", "localhost", 1);
     assert_trace(&run_llm(&host_url, host_dir.path(), true), true, true);
+}
+
+/// PR #222 review: the client must read the stream to its end after
+/// `[DONE]`. Dropping the body before the terminating chunk discards the
+/// connection, and about half the requests then paid a fresh connect inside
+/// TTFT. At concurrency 4 the pool should open 4 connections and reuse them.
+#[test]
+fn llm_streaming_reuses_pooled_connections_at_concurrency() {
+    const CONCURRENCY: u32 = 4;
+    const MANY: usize = 32;
+    // `-done-tail` flushes `[DONE]` and the terminating chunk in separate
+    // reads, as the parity mock and many real servers do.
+    let Some(dummy) = spawn_dummy(&[
+        "-latency",
+        "20ms",
+        "-chunk-interval",
+        "5ms",
+        "-done-tail",
+        "20ms",
+    ]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let url = dummy.url("/v1/chat/completions");
+    let data_log = run_llm_with(&url, dir.path(), true, MANY, CONCURRENCY);
+    let records = request_records(&data_log);
+    assert_eq!(records.len(), MANY);
+    let fresh = records
+        .iter()
+        .filter(|r| r["connection_reused"] == Value::Bool(false))
+        .count();
+    // One connection per concurrency slot. The pool can briefly see a
+    // returned connection a moment after the next send on that slot, so
+    // allow one extra connect per slot; the pre-fix churn was about MANY / 2.
+    let bound = 2 * CONCURRENCY as usize;
+    assert!(
+        fresh >= CONCURRENCY as usize && fresh <= bound,
+        "fresh connections {fresh} (expected {CONCURRENCY}..={bound})"
+    );
+    let summary = summary_record(&data_log).expect("summary");
+    assert_eq!(summary["connections_reused"], MANY - fresh);
 }
 
 #[test]

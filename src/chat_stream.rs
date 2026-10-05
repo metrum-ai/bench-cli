@@ -6,6 +6,7 @@
 use crate::error::RequestError;
 use crate::sse::SseParser;
 use futures_util::{Stream, StreamExt};
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -156,7 +157,40 @@ where
             break;
         }
     }
-    consumer.finish(started.elapsed(), allow_missing_ttft)
+    // Latency, TTFT and ITL are fixed here, before any post-`[DONE]` drain.
+    let result = consumer.finish(started.elapsed(), allow_missing_ttft);
+    if result.is_ok() {
+        drain_after_done(stream).await;
+    }
+    result
+}
+
+/// Longest wait for the body end after `[DONE]`.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+/// Most bytes read after `[DONE]` before giving up on the connection.
+const DRAIN_BYTE_CAP: usize = 64 * 1024;
+
+/// Read the body to its end after `[DONE]` so hyper sees the terminating
+/// chunk and returns the connection to the pool. Dropping the body early
+/// discards the connection, and the next request on that slot pays a fresh
+/// TCP/TLS connect inside its TTFT. Bounded by [`DRAIN_TIMEOUT`] and
+/// [`DRAIN_BYTE_CAP`] so a server that keeps the stream open cannot hang the
+/// client; on either limit the connection is dropped as before.
+async fn drain_after_done<S, B, E>(mut stream: Pin<&mut S>)
+where
+    S: Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+{
+    let drain = async {
+        let mut drained = 0usize;
+        while let Some(Ok(bytes)) = stream.next().await {
+            drained += bytes.as_ref().len();
+            if drained > DRAIN_BYTE_CAP {
+                break;
+            }
+        }
+    };
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, drain).await;
 }
 
 #[cfg(test)]
@@ -317,5 +351,35 @@ mod tests {
             .await
             .expect("stream");
         assert_eq!(result.completion_text, "hi");
+    }
+
+    /// PR #222 review: the body is read to its end after `[DONE]` so the
+    /// connection can return to the pool, and the tail is not in latency.
+    #[tokio::test]
+    async fn consume_drains_body_after_done_outside_latency() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let ended = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ended);
+        let head = futures_util::stream::iter(vec![Ok::<_, reqwest::Error>(Vec::from(
+            &b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"[..],
+        ))]);
+        let tail = futures_util::stream::once(async {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            Ok(Vec::new())
+        })
+        .chain(futures_util::stream::poll_fn(move |_| {
+            flag.store(true, Ordering::SeqCst);
+            std::task::Poll::Ready(None)
+        }));
+        let result = consume(head.chain(tail), Instant::now())
+            .await
+            .expect("stream");
+        assert!(ended.load(Ordering::SeqCst), "body end was not read");
+        assert!(
+            result.latency < Duration::from_millis(30),
+            "{:?}",
+            result.latency
+        );
     }
 }

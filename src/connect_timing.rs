@@ -12,13 +12,15 @@
 //!   DNS and, for HTTPS, the TLS handshake run inside this one connector call.
 //!   Connector or resolver work that finishes after the response headers (a
 //!   background connect that lost the race to a pooled connection) is not
-//!   booked to the request.
+//!   booked to the request. Resolver time is held as pending and becomes
+//!   `dns_s` only when its connect completes before the headers.
 //! - [`TimedResolver`] (reqwest `dns_resolver`) times name resolution inside
 //!   the connector. It resolves with `getaddrinfo` on a blocking thread, the
 //!   same path as reqwest's default resolver. IP-literal hosts skip it.
 //! - [`send`] records request body bytes and the response-headers instant.
 //! - [`counted`] / [`read_body`] count response body chunks and bytes and the
-//!   last-chunk instant, so `receive_s` is headers to body end.
+//!   body-end instant, so `receive_s` is headers to body end. Counting is
+//!   lock-free per chunk; the slot is written once at body end or on drop.
 //!
 //! TCP connect and TLS handshake are not split: reqwest runs both inside one
 //! opaque connector future, so only their sum (`connect_s - dns_s`) is known.
@@ -46,6 +48,8 @@ struct TraceState {
     connect_completed: bool,
     connect: Option<Duration>,
     dns: Option<Duration>,
+    /// Resolver time not yet tied to a connect that carried this request.
+    pending_dns: Option<Duration>,
     bytes_sent: Option<u64>,
     headers_at: Option<Instant>,
     body_end_at: Option<Instant>,
@@ -97,21 +101,28 @@ impl ConnectSlot {
 
     /// Add connector time. Work that finishes after the response headers did
     /// not carry this request (a connect that lost the race to a pooled
-    /// connection), so it is not booked here.
+    /// connection), so it is not booked here. A connect that finishes first
+    /// also books the resolver time held as pending.
     fn record(&self, elapsed: Duration) {
         self.with_state(|s| {
             if s.headers_at.is_none() {
                 s.connect_completed = true;
                 s.connect = Some(s.connect.unwrap_or_default() + elapsed);
+                if let Some(pending) = s.pending_dns.take() {
+                    s.dns = Some(s.dns.unwrap_or_default() + pending);
+                }
             }
         });
     }
 
-    /// Add resolver time, with the same late-work rule as [`Self::record`].
+    /// Hold resolver time as pending. It becomes `dns_s` only when its connect
+    /// completes before the headers (see [`Self::record`]), so a losing
+    /// background lookup never shows `dns_s > 0` on a pooled request. A
+    /// request that never got headers (lookup or connect failed) keeps it.
     fn record_dns(&self, elapsed: Duration) {
         self.with_state(|s| {
             if s.headers_at.is_none() {
-                s.dns = Some(s.dns.unwrap_or_default() + elapsed);
+                s.pending_dns = Some(s.pending_dns.unwrap_or_default() + elapsed);
             }
         });
     }
@@ -140,7 +151,12 @@ impl ConnectSlot {
                 } else {
                     !s.connect_attempted
                 },
-                dns_s: s.dns.map_or(0.0, |d| d.as_secs_f64()),
+                // Without headers the request failed; its lookups were its own.
+                dns_s: (s.dns.unwrap_or_default()
+                    + s.headers_at
+                        .map_or(s.pending_dns, |_| None)
+                        .unwrap_or_default())
+                .as_secs_f64(),
                 bytes_sent: s.bytes_sent,
                 receive_s,
                 bytes_received: body_read.then_some(s.bytes_received),
@@ -191,11 +207,47 @@ pub async fn send(builder: reqwest::RequestBuilder) -> reqwest::Result<reqwest::
 }
 
 pin_project! {
-    /// Body stream that counts chunks and bytes into the task-local slot.
+    /// Body stream that counts chunks and bytes, then writes them to the
+    /// task-local slot once, at body end or on drop. Counting stays in plain
+    /// fields so the per-chunk (per-token, for SSE) path takes no lock.
     pub struct Counted<S> {
         #[pin]
         inner: S,
         slot: Option<Arc<ConnectSlot>>,
+        chunks: u64,
+        bytes: u64,
+        last_at: Option<Instant>,
+        flushed: bool,
+    }
+
+    impl<S> PinnedDrop for Counted<S> {
+        fn drop(this: Pin<&mut Self>) {
+            let this = this.project();
+            // Dropped before the body end: book what was read, ending at the last chunk.
+            if let Some(end) = *this.last_at {
+                flush_body(this.slot, this.flushed, *this.chunks, *this.bytes, end);
+            }
+        }
+    }
+}
+
+/// Write body counters into the slot once.
+fn flush_body(
+    slot: &Option<Arc<ConnectSlot>>,
+    flushed: &mut bool,
+    chunks: u64,
+    bytes: u64,
+    end: Instant,
+) {
+    if std::mem::replace(flushed, true) {
+        return;
+    }
+    if let Some(slot) = slot {
+        slot.with_state(|s| {
+            s.chunks_received += chunks;
+            s.bytes_received += bytes;
+            s.body_end_at = Some(end);
+        });
     }
 }
 
@@ -209,16 +261,21 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
         let polled = this.inner.poll_next(cx);
-        if let (Poll::Ready(item), Some(slot)) = (&polled, this.slot.as_ref()) {
-            let now = Instant::now();
-            match item {
-                Some(Ok(chunk)) => slot.with_state(|s| {
-                    s.chunks_received += 1;
-                    s.bytes_received += chunk.as_ref().len() as u64;
-                    s.body_end_at = Some(now);
-                }),
-                None => slot.with_state(|s| s.body_end_at = Some(now)),
-                Some(Err(_)) => {}
+        if this.slot.is_some() {
+            match &polled {
+                Poll::Ready(Some(Ok(chunk))) => {
+                    *this.chunks += 1;
+                    *this.bytes += chunk.as_ref().len() as u64;
+                    *this.last_at = Some(Instant::now());
+                }
+                Poll::Ready(None) => flush_body(
+                    this.slot,
+                    this.flushed,
+                    *this.chunks,
+                    *this.bytes,
+                    Instant::now(),
+                ),
+                Poll::Ready(Some(Err(_))) | Poll::Pending => {}
             }
         }
         polled
@@ -230,6 +287,10 @@ pub fn counted<S>(stream: S) -> Counted<S> {
     Counted {
         inner: stream,
         slot: current_slot(),
+        chunks: 0,
+        bytes: 0,
+        last_at: None,
+        flushed: false,
     }
 }
 
@@ -259,16 +320,32 @@ impl reqwest::dns::Resolve for TimedResolver {
         let slot = current_slot();
         let host = name.as_str().to_owned();
         Box::pin(async move {
-            let start = Instant::now();
+            // The guard records on drop, so a failed lookup and one cancelled
+            // by `connect_timeout` both keep their time.
+            let timer = DnsTimer {
+                slot,
+                start: Instant::now(),
+            };
             let resolved = tokio::net::lookup_host((host.as_str(), 0)).await;
-            // Record before error handling so failed lookups keep their time.
-            if let Some(slot) = slot {
-                slot.record_dns(start.elapsed());
-            }
+            drop(timer);
             let addrs: Vec<SocketAddr> = resolved?.collect();
             let addrs: reqwest::dns::Addrs = Box::new(addrs.into_iter());
             Ok(addrs)
         })
+    }
+}
+
+/// Records resolver elapsed time into the slot when dropped.
+struct DnsTimer {
+    slot: Option<Arc<ConnectSlot>>,
+    start: Instant,
+}
+
+impl Drop for DnsTimer {
+    fn drop(&mut self) {
+        if let Some(slot) = &self.slot {
+            slot.record_dns(self.start.elapsed());
+        }
     }
 }
 
@@ -425,6 +502,41 @@ mod tests {
         assert_eq!(trace.connect_s, 0.0);
     }
 
+    /// PR #222 review: a lookup whose connect loses the race to a pooled
+    /// connection (connect completes after the headers) books no DNS time.
+    #[tokio::test]
+    async fn losing_background_lookup_books_no_dns() {
+        let slot = ConnectSlot::new();
+        slot.with_state(|s| s.connect_attempted = true);
+        slot.record_dns(Duration::from_millis(3));
+        slot.with_state(|s| s.headers_at = Some(Instant::now()));
+        slot.record(Duration::from_millis(9));
+        let trace = slot.trace();
+        assert_eq!(trace.dns_s, 0.0);
+        assert_eq!(trace.connect_s, 0.0);
+        assert!(trace.connection_reused);
+    }
+
+    /// PR #222 review: a lookup cancelled by `connect_timeout` keeps its time.
+    #[tokio::test]
+    async fn cancelled_lookup_keeps_dns_time() {
+        let slot = ConnectSlot::new();
+        with_connect_slot(Arc::clone(&slot), async {
+            let timer = DnsTimer {
+                slot: current_slot(),
+                start: Instant::now() - Duration::from_millis(5),
+            };
+            let lookup = async move {
+                let _timer = timer;
+                std::future::pending::<()>().await;
+            };
+            let timed_out = tokio::time::timeout(Duration::from_millis(1), lookup).await;
+            assert!(timed_out.is_err());
+        })
+        .await;
+        assert!(slot.trace().dns_s >= 0.005, "{}", slot.trace().dns_s);
+    }
+
     #[tokio::test]
     async fn failed_lookup_keeps_dns_time() {
         let slot = ConnectSlot::new();
@@ -469,6 +581,25 @@ mod tests {
         assert_eq!(trace.chunks_received, Some(2));
         assert_eq!(trace.bytes_received, Some(5));
         assert!(trace.receive_s.expect("receive") >= 0.0);
+    }
+
+    /// A body dropped before its end books the chunks read so far.
+    #[tokio::test]
+    async fn dropped_stream_books_chunks_read() {
+        let slot = ConnectSlot::new();
+        with_connect_slot(Arc::clone(&slot), async {
+            let chunks: Vec<Result<Bytes, ()>> = vec![
+                Ok(Bytes::from_static(b"abc")),
+                Ok(Bytes::from_static(b"de")),
+            ];
+            let stream = counted(futures_util::stream::iter(chunks));
+            futures_util::pin_mut!(stream);
+            assert!(stream.next().await.is_some());
+        })
+        .await;
+        let trace = slot.trace();
+        assert_eq!(trace.chunks_received, Some(1));
+        assert_eq!(trace.bytes_received, Some(3));
     }
 
     #[tokio::test]

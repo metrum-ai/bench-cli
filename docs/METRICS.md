@@ -53,14 +53,22 @@ Workload section. This page focuses on measured fields.
   reconnect after a stale pooled connection), both `connect_s` and `dns_s`
   sum those calls, so `dns_s <= connect_s` holds on successes. A failed
   lookup still records its time, so a DNS-failure row can show `dns_s > 0`
-  with `connect_s = 0.0` (the connector never completed).
+  with `connect_s = 0.0` (the connector never completed). A lookup cancelled
+  by `connect_timeout` also keeps its elapsed time. On a row that got
+  headers, resolver time counts only when its connect finished before the
+  headers, so a pooled row (`connection_reused = true`) always reads
+  `dns_s = 0.0`.
 - **TCP and TLS are not split.** reqwest runs TCP connect and the TLS
   handshake inside one opaque connector future, and Bench times that future
   as a whole (`connector_layer`). Only their sum is observable:
   `connect_s - dns_s`. Bench does not report separate `tcp_s` / `tls_s`
   fields (#194).
 - **Receive** (`receive_s`, seconds): response headers received to last
-  response body chunk. Successes only (#194).
+  response body chunk. Successes only (#194). Streaming clients read the body
+  to its end after `data: [DONE]` (bounded at 250 ms and 64 KiB) so the
+  connection returns to the pool; that tail is in `receive_s` but not in
+  `latency_s`, so `first_byte_s + receive_s` can exceed `latency_s` when a
+  server holds the stream open after `[DONE]`.
 - **Bytes sent** (`bytes_sent`, bytes): request body bytes, headers excluded.
   Taken from the in-memory body, or from the `Content-Length` header for
   multipart bodies. Absent when the length is unknown (#194).

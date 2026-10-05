@@ -40,6 +40,8 @@ Each line is a complete JSON object and carries `schema_version`.
   - `bytes_sent` (bytes) - request body bytes, headers excluded; absent when
     the length is unknown.
   - `receive_s` (seconds) - response headers received to last body chunk.
+    Streaming rows include the bounded read after `data: [DONE]` that returns
+    the connection to the pool; `latency_s` stops at `[DONE]`.
   - `bytes_received` (bytes) - response body bytes after content decoding,
     headers excluded.
   - `chunks_received` (count) - response body chunks yielded by the HTTP
@@ -170,7 +172,10 @@ Additional v3 fields:
   `cap_engagement_fraction` (acquires that blocked on the semaphore),
   `acquire_count`, `wait_count`
 - `connect_s` / `prefill_s` / `decode_s` / `decode_tok_s` - type-7
-  distributions over measured successes (empty `n=0` when absent)
+  distributions over measured successes (empty `n=0` when absent). VLM
+  summaries with a non-null `connection_reuse_rate` (after #194) build
+  `prefill_s` from `ttft_s - connect_s`, so rows on fresh connections no
+  longer fold connect time into prefill; older VLM summaries used `ttft_s`.
 - `first_byte_s` / `queue_delay_s` / `first_reasoning_s` - type-7
   distributions in seconds over measured successes, built only from requests
   that recorded the field (#191). Always present; `n=0` with null stats when no

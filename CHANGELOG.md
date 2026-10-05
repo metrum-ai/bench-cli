@@ -216,6 +216,28 @@
   `docs/STRATEGIC_BENCHMARKING.md` (#190).
 
 ### Fixed
+- Streaming clients (LLM, VLM, strategic chat, preflight) now read the body
+  to its end after `data: [DONE]`. They used to stop at `[DONE]` and drop the
+  body before the terminating HTTP chunk arrived, so hyper discarded the
+  connection instead of returning it to the pool. Against servers that flush
+  `[DONE]` and the stream end in separate writes, about half the requests
+  (the parity mock at concurrency 4: 35 of 64) opened a fresh TCP/TLS
+  connection, and that connect time landed inside their TTFT. The drain is
+  bounded (250 ms, 64 KiB) so a server that holds the stream open cannot hang
+  the client, and it runs after `latency_s`, TTFT, and ITL are fixed. Earlier
+  streaming runs may include connect time in TTFT for many requests and
+  should be re-measured before comparing TTFT. `receive_s`,
+  `bytes_received`, and `chunks_received` now include the drained tail. No
+  schema change (PR #222 review).
+- `dns_s` books resolver time only with a connect that completes before the
+  response headers, so a losing background connect can no longer leave
+  `dns_s > 0` on a row with `connect_s = 0.0` and `connection_reused = true`.
+  A lookup cancelled by `connect_timeout` keeps its elapsed time instead of
+  reading `0.0`. The response body counter no longer takes the trace lock per
+  chunk; it writes chunks, bytes, and body end once (PR #222 review).
+- dummy-model-server gains `-done-tail DURATION`, a delay between
+  `data: [DONE]` and the end of the stream body, used by the connection-reuse
+  e2e test.
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
   and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,
   and strategic released the semaphore permit before the in-flight guard, so
