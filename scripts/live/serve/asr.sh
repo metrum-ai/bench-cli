@@ -4,7 +4,7 @@
 #
 # Metrum AI Bench CLI live smoke: serve openai/whisper-large-v3-turbo for
 # POST /v1/audio/transcriptions, 1 GPU.
-# Usage: [ASR_STACK=vllm|omni] scripts/live/serve/asr.sh [start|stop|print|logs]
+# Usage: [ASR_STACK=vllm|omni] scripts/live/serve/asr.sh [start|stop|print|logs|sut]
 #
 # Engine map (docs/SERVING.md): vLLM-Omni is the intended ASR stack, but
 # ASR_STACK defaults to `vllm` (vllm/vllm-openai:v0.30.0, vLLM speech-to-text)
@@ -34,7 +34,8 @@
 # Do not force soundfile on the stock image (it is absent there). See docs/ASR.md.
 set -euo pipefail
 MODALITY=asr
-MODEL="${MODEL:-openai/whisper-large-v3-turbo}"
+DEFAULT_MODEL=openai/whisper-large-v3-turbo
+MODEL="${MODEL:-${DEFAULT_MODEL}}"
 DOCKER_ENV=()
 case "${ASR_STACK:-vllm}" in
   vllm)
