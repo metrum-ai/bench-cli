@@ -119,8 +119,33 @@
   `scripts/tests/serve_sut_test.sh` runs in CI and checks
   `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
   summary/request schema change (#203).
+- HTTP phase trace (#194, additive, no schema version bump). `request.v3`
+  gains optional `connection_reused` (connector not invoked, pooled
+  connection), `dns_s` (resolver time inside `connect_s`, `0.0` on a pool hit
+  or IP-literal host), `bytes_sent` (request body bytes), and, for successes
+  only, `receive_s` (headers to last body chunk), `bytes_received` (body bytes
+  after content decoding), and `chunks_received` (HTTP client body chunks,
+  not SSE events). Each is omitted when absent. TCP connect and TLS
+  handshake are not split because reqwest runs both in one connector future;
+  `connect_s - dns_s` is their sum (see `docs/METRICS.md`).
+- `summary.v3` and strategic sweep points gain `dns_s`, `receive_s`,
+  `bytes_sent`, `bytes_received`, and `chunks_received` type-7 distributions
+  (`n=0` when none) plus `connections_reused` and `connection_reuse_rate`
+  (`null` when no measured success carries `connection_reused`). The console
+  prints Receive, DNS, Bytes sent/received, Chunks received, and Connections
+  reused lines when present. The strategic request CSV gains trailing
+  optional `connection_reused`, `dns_s`, `bytes_sent`, `receive_s`,
+  `bytes_received`, and `chunks_received` columns after `reasoning_tokens`
+  (#194).
 
 ### Changed
+- VLM, ASR, and imagegen now record `connect_s` and the HTTP phase trace
+  (before, only LLM and strategic recorded `connect_s`). VLM `prefill_s` is
+  now `ttft_s - connect_s`, as for LLM, so it can read lower than in earlier
+  VLM runs. Imagegen with retries records the last attempt. ASR
+  `modality_metrics.bytes_sent` / `bytes_received` (audio file bytes and
+  response text length) are unchanged and differ from the new top-level wire
+  body byte fields (#194).
 - Strategic knee detection now needs at least 5 measured stages, that is
   stages with a p95 (`KNEE_MIN_POINTS`: both endpoints plus 3 interior
   candidates). Stages without a p95 do not count, so interior gaps cannot

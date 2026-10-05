@@ -245,13 +245,14 @@ async fn make_request(
         form = form.text("timestamp_granularities[]", "word");
     }
 
-    let response = match client
-        .post(url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .multipart(form)
-        .timeout(Duration::from_secs(request_timeout))
-        .send()
-        .await
+    let response = match metrum_ai_bench::connect_timing::send(
+        client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .multipart(form)
+            .timeout(Duration::from_secs(request_timeout)),
+    )
+    .await
     {
         Ok(resp) => resp,
         Err(e) => return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into()),
@@ -272,7 +273,8 @@ async fn make_request(
     }
 
     // Get the response text and track bytes received
-    let response_text = response.text().await?;
+    let body = metrum_ai_bench::connect_timing::read_body(response).await?;
+    let response_text = String::from_utf8_lossy(&body).into_owned();
     let response_size = response_text.len();
     debug!("Response body size: {} bytes", response_size);
 
@@ -768,17 +770,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
-            let result = make_request(
-                &client,
-                &url,
-                &model,
-                &sample,
-                request_timeout,
-                &api_key,
-                &response_format_str,
-                &language_str,
+            let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+            let result = metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                make_request(
+                    &client,
+                    &url,
+                    &model,
+                    &sample,
+                    request_timeout,
+                    &api_key,
+                    &response_format_str,
+                    &language_str,
+                ),
             )
             .await;
+            let http_trace = connect_slot.trace();
             // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
             drop(request_slot);
@@ -837,6 +844,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         0,
                     )
                     .with_first_byte(first_byte)
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
@@ -917,6 +925,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         latency,
                         request_error,
                     )
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {

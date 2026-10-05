@@ -31,6 +31,23 @@ Each line is a complete JSON object and carries `schema_version`.
   `completion_tokens`. Always `null` for ASR and imagegen, and for failed
   requests whose stream ended in an error (including `no_output_token`).
   `completion_tokens` is unchanged and still includes reasoning tokens.
+- HTTP phase trace (additive, #194), each omitted from JSON when absent:
+  - `connection_reused` (bool) - true when the HTTP connector was not invoked
+    (pooled connection).
+  - `dns_s` (seconds) - DNS time inside the connector, included in
+    `connect_s`; `0.0` when no lookup ran (pool hit or IP-literal host).
+  - `bytes_sent` (bytes) - request body bytes, headers excluded; absent when
+    the length is unknown.
+  - `receive_s` (seconds) - response headers received to last body chunk.
+  - `bytes_received` (bytes) - response body bytes after content decoding,
+    headers excluded.
+  - `chunks_received` (count) - response body chunks yielded by the HTTP
+    client (not SSE events).
+  `receive_s`, `bytes_received`, and `chunks_received` are set on successes
+  only. Failed requests keep `connect_s`, `connection_reused`, `dns_s`, and
+  `bytes_sent`. All modality binaries (LLM, VLM, ASR, imagegen) record these
+  fields and `connect_s`; imagegen with retries records the last attempt.
+  Definitions in [METRICS.md](METRICS.md).
 - typed `error`, `partial`, modality-specific numeric metrics, and optional
   string `modality_labels` (e.g. imagegen `artifact_0_sha256`)
 
@@ -39,7 +56,7 @@ Each line is a complete JSON object and carries `schema_version`.
 | Binary | Keys |
 |--------|------|
 | VLM | `image_count`, `image_bytes` (bytes actually sent per request) |
-| ASR | `rtfx_client`, `wer`, `cer`, `inference_seconds_{server,client}` |
+| ASR | `rtfx_client`, `wer`, `cer`, `inference_seconds_{server,client}`, `bytes_sent` (audio file bytes), `bytes_received` (response text length); not the top-level wire `bytes_sent` / `bytes_received` |
 | Imagegen | `images_requested`, `images_returned`, `response_bytes`, `artifact_N_bytes` |
 
 Imagegen artifact SHA-256 digests live in `modality_labels.artifact_N_sha256`
@@ -50,7 +67,9 @@ headers are received (after a successful `.send()`). It is distinct from
 `ttft_s` (first visible user token), which includes connect/TLS/queue.
 
 `connect_s` is the HTTP connector duration for establishing a new TCP/TLS
-session (DNS + TCP + TLS). `0.0` means a pooled connection was reused. Prefill
+session (DNS + TCP + TLS). `0.0` means a pooled connection was reused. TCP and
+TLS are not split; `connect_s - dns_s` is their sum (see
+[METRICS.md](METRICS.md)). Prefill
 and decode proxies: `prefill_s ≈ ttft_s - connect_s` (or `ttft_s` when connect
 is absent); `decode_s = max(0, latency_s - ttft_s)`;
 `decode_tok_s = completion_tokens / decode_s`.
@@ -148,6 +167,15 @@ Additional v3 fields:
 - `completion_tokens_per_second`, `osl_tokens`, and
   `cost_per_million_output_tokens` still count reasoning tokens as output
   (they use server `completion_tokens`).
+- `dns_s` / `receive_s` (seconds), `bytes_sent` / `bytes_received` (bytes),
+  `chunks_received` (count) - type-7 distributions over measured successes
+  whose request row carries the field (#194). Always present; `n=0` with null
+  stats when none. Top level only, not in `per_endpoint`.
+- `connections_reused` (integer) - measured successes with
+  `connection_reused = true`; `null` when no measured success carries the
+  flag (#194).
+- `connection_reuse_rate` (fraction 0 to 1) - `connections_reused` divided by
+  measured successes carrying the flag; `null` when none (#194).
 - `isl_osl` - optional runtime ISL/OSL validation vs `--isl-target` /
   `--osl-target` or `--prompt-mix-report`: targets, tolerances, measured
   mean/p50, mismatch counts, and `length_basis` (`server_usage` or
@@ -199,11 +227,22 @@ embeddings` and `--kind rerank` never report reasoning):
 - `visible_completion_tokens_total` (integer tokens) - sum of those samples;
   `null` when `visible_completion_tokens` has `n=0`.
 
+HTTP phase trace fields (additive, #194), same definitions and null rules as
+`summary.v3`: `dns_s`, `receive_s`, `bytes_sent`, `bytes_received`, and
+`chunks_received` (`DistSummary`, `n=0` when none), plus `connections_reused`
+(integer) and `connection_reuse_rate` (fraction), both `null` when no measured
+success carries `connection_reused`.
+
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
-trailing optional columns, in this order: `first_reasoning_s` (seconds), then
-`reasoning_tokens` (integer tokens, #192, last column). The `first_reasoning_s`
-cell is empty when the request streamed no reasoning delta; the
-`reasoning_tokens` cell is empty when the server did not report reasoning.
+trailing optional columns, in this order: `first_reasoning_s` (seconds),
+`reasoning_tokens` (integer tokens, #192), then the HTTP phase trace columns
+(#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
+`receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
+(count). The `first_reasoning_s` cell is empty when the request streamed no
+reasoning delta; the `reasoning_tokens` cell is empty when the server did not
+report reasoning. A trace cell is empty when the value is absent;
+`receive_s`, `bytes_received`, and `chunks_received` are empty for failed
+requests.
 Existing columns keep their order, and CSVs written before these columns
 existed still load (missing cells read as empty).
 

@@ -76,6 +76,25 @@ pub struct BenchRecord {
     /// Appended after `first_reasoning_s` so older CSV readers keep positions (#192).
     #[serde(default)]
     pub reasoning_tokens: Option<u64>,
+    /// HTTP phase trace (#194), appended after `reasoning_tokens` so older CSV
+    /// readers keep positions. True when a pooled connection was reused.
+    #[serde(default)]
+    pub connection_reused: Option<bool>,
+    /// DNS seconds inside the connector; `0.0` when no lookup ran.
+    #[serde(default)]
+    pub dns_s: Option<f64>,
+    /// Request body bytes; empty when the length is unknown.
+    #[serde(default)]
+    pub bytes_sent: Option<u64>,
+    /// Response headers to last body chunk; successes only.
+    #[serde(default)]
+    pub receive_s: Option<f64>,
+    /// Response body bytes after content decoding; successes only.
+    #[serde(default)]
+    pub bytes_received: Option<u64>,
+    /// Response body chunks yielded by the HTTP client; successes only.
+    #[serde(default)]
+    pub chunks_received: Option<u64>,
 }
 
 fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -193,6 +212,27 @@ pub struct SweepPoint {
     pub queue_delay_s: crate::stats::DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: crate::stats::DistSummary,
+    /// DNS lookup inside the connector over measured successes (#194).
+    #[serde(default)]
+    pub dns_s: crate::stats::DistSummary,
+    /// Response headers to last body chunk over measured successes (#194).
+    #[serde(default)]
+    pub receive_s: crate::stats::DistSummary,
+    /// Request body bytes per measured success (#194).
+    #[serde(default)]
+    pub bytes_sent: crate::stats::DistSummary,
+    /// Response body bytes per measured success (#194).
+    #[serde(default)]
+    pub bytes_received: crate::stats::DistSummary,
+    /// Response body chunks per measured success (#194).
+    #[serde(default)]
+    pub chunks_received: crate::stats::DistSummary,
+    /// Measured successes on a pooled connection; null when no row carries the flag.
+    #[serde(default)]
+    pub connections_reused: Option<usize>,
+    /// `connections_reused` over successes carrying the flag; null when none do.
+    #[serde(default)]
+    pub connection_reuse_rate: Option<f64>,
     /// Per-request input tokens from server `usage` (no tokenizer fallback).
     pub isl_tokens: crate::stats::DistSummary,
     /// Per-request output tokens from server `usage` (no tokenizer fallback).
@@ -304,6 +344,20 @@ pub fn summarize_stage_with_options(
         .filter(|record| record.success)
         .collect();
     let success_lats: Vec<f64> = success_rows.iter().map(|record| record.latency_s).collect();
+    // HTTP phase trace (#194): rows without the trace contribute no sample.
+    let trace_dist = |pick: fn(&BenchRecord) -> Option<f64>| {
+        crate::stats::DistSummary::from_values(
+            &success_rows
+                .iter()
+                .filter_map(|r| pick(r))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let reuse_flags: Vec<bool> = success_rows
+        .iter()
+        .filter_map(|record| record.connection_reused)
+        .collect();
+    let reused = reuse_flags.iter().filter(|&&flag| flag).count();
     let latency_s = crate::stats::DistSummary::from_values(&success_lats);
     let successes = success_lats.len();
     let errors = measured.len().saturating_sub(successes);
@@ -469,6 +523,14 @@ pub fn summarize_stage_with_options(
         first_byte_s: crate::stats::DistSummary::from_values(&first_byte),
         queue_delay_s: crate::stats::DistSummary::from_values(&queue_delay),
         first_reasoning_s: crate::stats::DistSummary::from_values(&first_reasoning),
+        dns_s: trace_dist(|r| r.dns_s),
+        receive_s: trace_dist(|r| r.receive_s),
+        bytes_sent: trace_dist(|r| r.bytes_sent.map(|b| b as f64)),
+        bytes_received: trace_dist(|r| r.bytes_received.map(|b| b as f64)),
+        chunks_received: trace_dist(|r| r.chunks_received.map(|c| c as f64)),
+        connections_reused: (!reuse_flags.is_empty()).then_some(reused),
+        connection_reuse_rate: (!reuse_flags.is_empty())
+            .then(|| reused as f64 / reuse_flags.len() as f64),
         isl_tokens: crate::stats::DistSummary::from_values(&isl),
         osl_tokens: crate::stats::DistSummary::from_values(&osl),
         reasoning_tokens: crate::stats::DistSummary::from_values(
@@ -1253,6 +1315,13 @@ mod tests {
             first_byte_s: crate::stats::DistSummary::from_values(&[]),
             queue_delay_s: crate::stats::DistSummary::from_values(&[]),
             first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
+            dns_s: crate::stats::DistSummary::from_values(&[]),
+            receive_s: crate::stats::DistSummary::from_values(&[]),
+            bytes_sent: crate::stats::DistSummary::from_values(&[]),
+            bytes_received: crate::stats::DistSummary::from_values(&[]),
+            chunks_received: crate::stats::DistSummary::from_values(&[]),
+            connections_reused: None,
+            connection_reuse_rate: None,
             isl_tokens: crate::stats::DistSummary::from_values(&[]),
             osl_tokens: crate::stats::DistSummary::from_values(&[]),
             reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
@@ -1429,6 +1498,13 @@ mod tests {
             first_byte_s: crate::stats::DistSummary::from_values(&[]),
             queue_delay_s: crate::stats::DistSummary::from_values(&[]),
             first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
+            dns_s: crate::stats::DistSummary::from_values(&[]),
+            receive_s: crate::stats::DistSummary::from_values(&[]),
+            bytes_sent: crate::stats::DistSummary::from_values(&[]),
+            bytes_received: crate::stats::DistSummary::from_values(&[]),
+            chunks_received: crate::stats::DistSummary::from_values(&[]),
+            connections_reused: None,
+            connection_reuse_rate: None,
             isl_tokens: crate::stats::DistSummary::from_values(&[]),
             osl_tokens: crate::stats::DistSummary::from_values(&[]),
             reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
@@ -1550,6 +1626,12 @@ mod tests {
             warmup: false,
             first_reasoning_s: Some(0.06),
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         let slos = crate::summary::SloConfig::default();
         // Closed loop: scheduled == sent on every row, queue delay not applicable.
@@ -1559,6 +1641,28 @@ mod tests {
         assert_eq!(closed.isl_tokens.avg, Some(64.0));
         assert_eq!(closed.osl_tokens.avg, Some(16.0));
         assert_eq!(closed.queue_delay_s.n, 0);
+        // HTTP phase trace (#194): rows without the trace give n = 0 and null.
+        assert_eq!(closed.receive_s.n, 0);
+        assert_eq!(closed.connections_reused, None);
+        assert_eq!(closed.connection_reuse_rate, None);
+        let mut traced = base.clone();
+        traced.connection_reused = Some(false);
+        traced.dns_s = Some(0.001);
+        traced.bytes_sent = Some(120);
+        traced.receive_s = Some(0.3);
+        traced.bytes_received = Some(900);
+        traced.chunks_received = Some(9);
+        let mut pooled = traced.clone();
+        pooled.connection_reused = Some(true);
+        pooled.dns_s = Some(0.0);
+        let trace_point = summarize_stage(2.0, &[traced, pooled], 1.0, &slos, None);
+        assert_eq!(trace_point.connections_reused, Some(1));
+        assert_eq!(trace_point.connection_reuse_rate, Some(0.5));
+        assert_eq!(trace_point.bytes_received.avg, Some(900.0));
+        assert_eq!(trace_point.chunks_received.n, 2);
+        assert_eq!(trace_point.bytes_sent.n, 2);
+        assert_eq!(trace_point.receive_s.n, 2);
+        assert_eq!(trace_point.dns_s.n, 2);
         // Open loop: a delayed send marks the stage, every success contributes.
         let mut late = base.clone();
         late.sent_unix_ns = 3_000_005;
@@ -1606,6 +1710,12 @@ mod tests {
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         let point = summarize_stage_with_options(
             1.0,
@@ -1654,6 +1764,12 @@ mod tests {
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: Some(5),
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         let mut other = row.clone();
         other.reasoning_tokens = Some(7);
@@ -1746,6 +1862,12 @@ true,,64,16,,,,false\n";
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         let mut cold = measured.clone();
         cold.seq = 0;
@@ -1794,6 +1916,12 @@ true,,64,16,,,,false\n";
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -1866,6 +1994,12 @@ true,,64,16,,,,false\n";
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
         assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
@@ -1931,6 +2065,12 @@ true,,64,16,,,,false\n";
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -2010,6 +2150,12 @@ true,,64,16,,,,false\n";
             warmup: false,
             first_reasoning_s: None,
             reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
         };
         export_otlp(
             &reqwest::Client::new(),

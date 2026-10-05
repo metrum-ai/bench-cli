@@ -260,14 +260,15 @@ async fn make_request(
         debug!("Request payload: {}", payload_str);
     }
 
-    let response = match client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&payload)
-        .timeout(Duration::from_secs(request_timeout))
-        .send()
-        .await
+    let response = match metrum_ai_bench::connect_timing::send(
+        client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&payload)
+            .timeout(Duration::from_secs(request_timeout)),
+    )
+    .await
     {
         Ok(resp) => resp,
         Err(e) => return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into()),
@@ -295,7 +296,7 @@ async fn make_request(
 
     if streaming {
         let stream = metrum_ai_bench::chat_stream::consume_with_options(
-            response.bytes_stream(),
+            metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
             allow_missing_ttft,
         )
@@ -315,7 +316,8 @@ async fn make_request(
         ));
     }
 
-    let response_text = response.text().await?;
+    let body = metrum_ai_bench::connect_timing::read_body(response).await?;
+    let response_text = String::from_utf8_lossy(&body).into_owned();
     if response_text.contains("base64") {
         debug!("Response body: (redacted: contains image data)");
     } else {
@@ -1195,17 +1197,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
-            let result = make_request(
-                &client_loop,
-                &url,
-                request_body,
-                request_timeout,
-                &api_key,
-                &selected_images_clone,
-                streaming,
-                infer_ttft,
+            let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+            let result = metrum_ai_bench::connect_timing::with_connect_slot(
+                Arc::clone(&connect_slot),
+                make_request(
+                    &client_loop,
+                    &url,
+                    request_body,
+                    request_timeout,
+                    &api_key,
+                    &selected_images_clone,
+                    streaming,
+                    infer_ttft,
+                ),
             )
             .await;
+            let http_trace = connect_slot.trace();
             // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
             drop(request_slot);
@@ -1261,6 +1268,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_reasoning_tokens(reasoning_tokens)
                     .with_first_byte(first_byte)
                     .with_resolved_ttft(resolved)
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
@@ -1326,6 +1334,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         latency,
                         request_error,
                     )
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {

@@ -88,6 +88,26 @@ pub struct RequestRecord {
     /// request path did not install connect timing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connect_s: Option<f64>,
+    /// True when the request rode a pooled connection (the connector was not
+    /// invoked). Absent when the request path did not install the HTTP trace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_reused: Option<bool>,
+    /// Seconds in DNS resolution inside the connector; `0.0` when no lookup
+    /// ran (pool hit or IP-literal host). Included in `connect_s`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_s: Option<f64>,
+    /// Request body bytes (headers excluded). Absent when the length is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_sent: Option<u64>,
+    /// Seconds from response headers to the last body chunk. Successes only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receive_s: Option<f64>,
+    /// Response body bytes after content decoding (headers excluded). Successes only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_received: Option<u64>,
+    /// Response body chunks yielded by the HTTP client. Successes only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunks_received: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
     /// Provenance for `ttft_s`: `stream` or `first_byte_approx`.
@@ -168,6 +188,12 @@ impl RequestRecord {
             latency_s: latency.as_secs_f64(),
             first_byte_s: None,
             connect_s: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -215,6 +241,12 @@ impl RequestRecord {
             latency_s: latency.as_secs_f64(),
             first_byte_s: None,
             connect_s: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
@@ -258,6 +290,21 @@ impl RequestRecord {
         self.ttft_s = resolved.ttft_s;
         self.ttft_source = resolved.source;
         self.with_phase_metrics()
+    }
+
+    /// Apply a request's HTTP phase trace: connect, reuse, DNS, and bytes sent
+    /// always; body receive time, bytes, and chunks for successes only, since
+    /// a failed request's body may not have been read through the trace.
+    pub fn with_http_trace(mut self, trace: crate::connect_timing::HttpTrace) -> Self {
+        self.connection_reused = Some(trace.connection_reused);
+        self.dns_s = Some(trace.dns_s);
+        self.bytes_sent = trace.bytes_sent;
+        if self.is_success() {
+            self.receive_s = trace.receive_s;
+            self.bytes_received = trace.bytes_received;
+            self.chunks_received = trace.chunks_received;
+        }
+        self.with_connect(trace.connect_s)
     }
 
     pub fn with_connect(mut self, connect_s: f64) -> Self {
@@ -376,6 +423,57 @@ mod tests {
         assert!((rec.prefill_s.unwrap() - 0.100).abs() < 1e-9);
         assert!((rec.decode_s.unwrap() - 0.380).abs() < 1e-9);
         assert!((rec.decode_tok_s.unwrap() - (20.0 / 0.380)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn http_trace_body_fields_only_on_success() {
+        let started = Utc::now();
+        let latency = Duration::from_millis(100);
+        let trace = crate::connect_timing::HttpTrace {
+            connect_s: 0.0,
+            connection_reused: true,
+            dns_s: 0.0,
+            bytes_sent: Some(42),
+            receive_s: Some(0.05),
+            bytes_received: Some(900),
+            chunks_received: Some(9),
+        };
+        let ok = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "ep".into(),
+            started,
+            started + chrono::Duration::from_std(latency).unwrap(),
+            latency,
+            None,
+            None,
+            vec![],
+            1,
+            1,
+            2,
+        )
+        .with_http_trace(trace);
+        assert_eq!(ok.connection_reused, Some(true));
+        assert_eq!(ok.connect_s, Some(0.0));
+        assert_eq!(ok.bytes_sent, Some(42));
+        assert_eq!(ok.receive_s, Some(0.05));
+        assert_eq!(ok.bytes_received, Some(900));
+        assert_eq!(ok.chunks_received, Some(9));
+        let failed = RequestRecord::failed(
+            1,
+            Phase::Measure,
+            "ep".into(),
+            started,
+            started,
+            latency,
+            RequestError::Timeout,
+        )
+        .with_http_trace(trace);
+        assert_eq!(failed.connection_reused, Some(true));
+        assert_eq!(failed.bytes_sent, Some(42));
+        assert_eq!(failed.receive_s, None);
+        assert_eq!(failed.bytes_received, None);
+        assert_eq!(failed.chunks_received, None);
     }
 
     #[test]

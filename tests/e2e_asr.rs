@@ -128,6 +128,8 @@ fn asr_reports_rtfx_from_client_time_excluding_file_read() {
     let records = request_records(&fixture.data_log);
     assert_eq!(records.len(), 1);
     let record = &records[0];
+    // Multipart body length comes from the form's Content-Length.
+    common::assert_http_trace(record);
 
     let latency = record["latency_s"].as_f64().expect("latency_s");
     // The server sleeps 200ms; a timer that also covered the file read and

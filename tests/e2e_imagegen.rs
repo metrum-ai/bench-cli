@@ -117,6 +117,7 @@ fn imagegen_latency_is_monotonic_and_summary_is_shared() {
     );
     for record in &shared {
         assert!(record.get("error").is_none() || record["error"].is_null());
+        common::assert_http_trace(record);
         let latency_s = record["latency_s"].as_f64().expect("latency_s");
         assert!(
             (0.150..2.0).contains(&latency_s),

@@ -227,6 +227,35 @@ pub fn request_records(data_log: &std::path::Path) -> Vec<Value> {
         .collect()
 }
 
+/// #194: a successful request record carries the full HTTP phase trace.
+pub fn assert_http_trace(record: &Value) {
+    assert!(record["connection_reused"].is_boolean(), "{record}");
+    assert!(
+        record["dns_s"].as_f64().is_some_and(|v| v >= 0.0),
+        "{record}"
+    );
+    assert!(
+        record["connect_s"].as_f64().is_some_and(|v| v >= 0.0),
+        "{record}"
+    );
+    assert!(
+        record["bytes_sent"].as_u64().is_some_and(|v| v > 0),
+        "{record}"
+    );
+    assert!(
+        record["bytes_received"].as_u64().is_some_and(|v| v > 0),
+        "{record}"
+    );
+    assert!(
+        record["chunks_received"].as_u64().is_some_and(|v| v >= 1),
+        "{record}"
+    );
+    assert!(
+        record["receive_s"].as_f64().is_some_and(|v| v >= 0.0),
+        "{record}"
+    );
+}
+
 /// The `summary.v*` record from a `--data-log`, if the run wrote one.
 pub fn summary_record(data_log: &std::path::Path) -> Option<Value> {
     let text = std::fs::read_to_string(data_log).expect("read data log");

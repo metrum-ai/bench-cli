@@ -359,6 +359,8 @@ struct RequestOutcome {
     attempts: Vec<AttemptRecord>,
     error_type: Option<String>,
     error_message: Option<String>,
+    /// HTTP phase trace of the last attempt (the successful one on success).
+    http_trace: Option<metrum_ai_bench::connect_timing::HttpTrace>,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -572,6 +574,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 )
                 .with_in_flight(in_flight_at_send)
             };
+            if let Some(trace) = outcome.http_trace {
+                record = record.with_http_trace(trace);
+            }
             record = record.with_send_offset(send_offset);
             if record_schedule {
                 record = record.with_schedule(scheduled_delay, queue_delay);
@@ -951,6 +956,7 @@ async fn run_logical_request(
     let mut attempts = Vec::new();
     let mut last_error_type = None;
     let mut last_error_message = None;
+    let mut last_trace = None;
 
     for attempt_index in 0..=args.endpoint_retry_attempts {
         let random_index = request_index
@@ -961,17 +967,23 @@ async fn run_logical_request(
         let ep_rt = runtime.get(&ep.name).expect("endpoint runtime exists");
         ep_rt.inflight.fetch_add(1, Ordering::SeqCst);
         let attempt_start = Instant::now();
-        let result = make_image_request(
-            request_index,
-            attempt_index,
-            args,
-            client,
-            &ep,
-            &prompt,
-            seed,
-            &size,
+        // One trace slot per attempt, so a retry's phases are not mixed in.
+        let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+        let result = metrum_ai_bench::connect_timing::with_connect_slot(
+            Arc::clone(&connect_slot),
+            make_image_request(
+                request_index,
+                attempt_index,
+                args,
+                client,
+                &ep,
+                &prompt,
+                seed,
+                &size,
+            ),
         )
         .await;
+        last_trace = Some(connect_slot.trace());
         ep_rt.inflight.fetch_sub(1, Ordering::SeqCst);
         match result {
             Ok((status, artifacts, response_bytes, n_returned, first_byte, service_latency)) => {
@@ -1008,6 +1020,7 @@ async fn run_logical_request(
                     attempts,
                     error_type: None,
                     error_message: None,
+                    http_trace: last_trace,
                 };
             }
             Err((err_type, http_status, err_message)) => {
@@ -1067,6 +1080,7 @@ async fn run_logical_request(
         attempts,
         error_type: last_error_type,
         error_message: last_error_message,
+        http_trace: last_trace,
     }
 }
 
@@ -1179,37 +1193,40 @@ async fn make_image_request(
     }
 
     let send_start = Instant::now();
-    let resp = client
-        .post(&url)
-        .bearer_auth(&endpoint.api_key)
-        .json(&Value::Object(body))
-        .timeout(Duration::from_secs(args.request_timeout))
-        .send()
+    let resp = metrum_ai_bench::connect_timing::send(
+        client
+            .post(&url)
+            .bearer_auth(&endpoint.api_key)
+            .json(&Value::Object(body))
+            .timeout(Duration::from_secs(args.request_timeout)),
+    )
+    .await
+    .map_err(|e| {
+        let typed = metrum_ai_bench::error::RequestError::from_reqwest(&e);
+        let err_type = match typed {
+            metrum_ai_bench::error::RequestError::Timeout => "timeout",
+            metrum_ai_bench::error::RequestError::Connect => "connect",
+            _ => "request_error",
+        };
+        (
+            err_type.to_string(),
+            e.status().map(|s| s.as_u16()),
+            e.to_string(),
+        )
+    })?;
+    let first_byte = send_start.elapsed();
+    let status = resp.status().as_u16();
+    let bytes = metrum_ai_bench::connect_timing::read_body(resp)
         .await
         .map_err(|e| {
             let typed = metrum_ai_bench::error::RequestError::from_reqwest(&e);
             let err_type = match typed {
-                metrum_ai_bench::error::RequestError::Timeout => "timeout",
                 metrum_ai_bench::error::RequestError::Connect => "connect",
-                _ => "request_error",
+                metrum_ai_bench::error::RequestError::Timeout => "timeout",
+                _ => "connection_error",
             };
-            (
-                err_type.to_string(),
-                e.status().map(|s| s.as_u16()),
-                e.to_string(),
-            )
+            (err_type.to_string(), Some(status), e.to_string())
         })?;
-    let first_byte = send_start.elapsed();
-    let status = resp.status().as_u16();
-    let bytes = resp.bytes().await.map_err(|e| {
-        let typed = metrum_ai_bench::error::RequestError::from_reqwest(&e);
-        let err_type = match typed {
-            metrum_ai_bench::error::RequestError::Connect => "connect",
-            metrum_ai_bench::error::RequestError::Timeout => "timeout",
-            _ => "connection_error",
-        };
-        (err_type.to_string(), Some(status), e.to_string())
-    })?;
     // Service latency ends once the response body is fully read; decode/hash/write
     // below are client-side and excluded from the measured interval.
     let service_latency = send_start.elapsed();
