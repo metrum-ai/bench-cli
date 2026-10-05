@@ -35,6 +35,24 @@
   should be re-measured rather than compared directly with new runs. For
   example, publish-20261002T162512Z g5-a1 at cap 1 reported
   `in_flight_max` 2.0.
+- `scripts/live/serve/*.sh` SUTs now fill `model.quantization` instead of
+  leaving it null for quantized checkpoints. `scripts/live/serve/common.sh`
+  takes it from `QUANTIZATION` (`none` records null), else from
+  `--quantization` / `-q` in `SERVE_ARGS`, else from a quantizer token in the
+  `MODEL` name (for example `-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is
+  `gptq`), else null. New SUT field `extra.quantization_source` records which
+  one applied (`env`, `serve_args`, `model_name`, or `none`), and `notes` gains
+  a line when the value was derived from the model name (#203).
+- Each launcher sets `DEFAULT_MODEL`. `start` and `sut` now exit with an error
+  naming `SUT_NOTES_OVERRIDE` when `MODEL` differs from `DEFAULT_MODEL`
+  without it, so a SUT never carries serving notes researched for a different
+  model. A missing `SOURCES_OVERRIDE` in that case is a stderr warning (#203).
+- New launcher subcommand `sut` prints the SUT JSON to stdout without docker
+  or a GPU. `HF_HUB_OFFLINE=1` skips the Hub revision lookup
+  (`model.revision` is then null). The offline self-test
+  `scripts/tests/serve_sut_test.sh` runs in CI and checks
+  `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
+  summary/request schema change (#203).
 
 ## 1.5.3 (2026-10-02)
 

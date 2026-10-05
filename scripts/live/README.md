@@ -23,7 +23,13 @@ scripts/live/serve/asr.sh stop
 **Search first and reuse binaries.** Before each run, web-search the current
 vendor docs for the exact model and engine version, and override the launcher
 (`MODEL=`, `SERVE_ARGS_OVERRIDE=`, `SOURCES_OVERRIDE=`, `SUT_NOTES_OVERRIDE=`)
-when they differ from the pins here. The scripts resolve prebuilt binaries
+when they differ from the pins here. A launcher's notes and sources describe
+its default model only, so `start` exits with an error naming
+`SUT_NOTES_OVERRIDE` when `MODEL` is overridden without it. The SUT's
+`model.quantization` comes from `QUANTIZATION=` (`none` for null), then
+`--quantization`/`-q` in the serve flags, then a quantizer token in the
+`MODEL` name (`-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is `gptq`), else
+null; `extra.quantization_source` records which. The scripts resolve prebuilt binaries
 through `lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
 `target/release`, then `target/rel-user/release`, then `PATH`. They fail
 clearly instead of compiling. `local_smoke.sh` records the binary path,
@@ -55,7 +61,9 @@ which have no `--telemetry` flag).
 | imagegen | `serve/imagegen.sh` | vllm-omni 0.30.0, `Tongyi-MAI/Z-Image-Turbo`, `--omni` | 1024x1024, 9 steps, guidance 0.0 |
 
 Launchers take `start` (default), `stop`, `print` (show the docker command),
-and `logs`. `PORT`, `HF_HOME`, `HF_TOKEN` (passed by name, never written),
+`logs`, and `sut` (print the SUT JSON without docker; add `HF_HUB_OFFLINE=1`
+to skip the Hub revision lookup). `scripts/tests/serve_sut_test.sh` is the
+offline self-test for the SUT the launchers write. `PORT`, `HF_HOME`, `HF_TOKEN` (passed by name, never written),
 `GPU_DEVICES`, and `IMAGE`/`MODEL` overrides are read from the environment.
 The SUT they write records the exact docker command in `runtime.config`, the
 model revision SHA from the Hub, the GPU from `nvidia-smi`, and the source

@@ -34,7 +34,8 @@
 # Do not force soundfile on the stock image (it is absent there). See docs/ASR.md.
 set -euo pipefail
 MODALITY=asr
-MODEL="${MODEL:-openai/whisper-large-v3-turbo}"
+DEFAULT_MODEL=openai/whisper-large-v3-turbo
+MODEL="${MODEL:-${DEFAULT_MODEL}}"
 DOCKER_ENV=()
 case "${ASR_STACK:-vllm}" in
   vllm)

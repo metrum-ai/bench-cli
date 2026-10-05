@@ -22,7 +22,8 @@
 set -euo pipefail
 MODALITY=imagegen
 IMAGE="${IMAGE:-vllm/vllm-omni:v0.30.0}"
-MODEL="${MODEL:-Tongyi-MAI/Z-Image-Turbo}"
+DEFAULT_MODEL=Tongyi-MAI/Z-Image-Turbo
+MODEL="${MODEL:-${DEFAULT_MODEL}}"
 SERVE_ARGS=(--omni --port 8000)
 DOCKER_ENV=()
 ENTRYPOINT_CMD=(vllm serve)
