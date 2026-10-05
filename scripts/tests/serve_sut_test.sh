@@ -82,16 +82,17 @@ reject "imagegen override without notes" "set SUT_NOTES_OVERRIDE" imagegen.sh MO
 
 # #216: IMAGE and SERVE_ARGS_OVERRIDE follow the MODEL rule (#212), and every
 # override needs SOURCES_OVERRIDE.
-reject "MODEL with notes, no sources" "set SOURCES_OVERRIDE" llm.sh MODEL=Qwen/Qwen3-14B SUT_NOTES_OVERRIDE=n
+reject "MODEL with notes, no sources" "set SOURCES_OVERRIDE (source URLs) for" llm.sh MODEL=Qwen/Qwen3-14B SUT_NOTES_OVERRIDE=n
 reject "MODEL error names the model" "MODEL=Qwen/Qwen3-14B overrides the default Qwen/Qwen3-8B" llm.sh MODEL=Qwen/Qwen3-14B
+reject "MODEL with sources, no notes" "set SUT_NOTES_OVERRIDE (researched notes) for" llm.sh MODEL=Qwen/Qwen3-14B SOURCES_OVERRIDE=s
 check "MODEL with notes and sources" '.model.id == "Qwen/Qwen3-14B" and .notes == "n" and .extra.launcher_sources == "s"' \
   llm.sh MODEL=Qwen/Qwen3-14B SUT_NOTES_OVERRIDE=n SOURCES_OVERRIDE=s
 
-reject "IMAGE without notes" "set SUT_NOTES_OVERRIDE and SOURCES_OVERRIDE" llm.sh IMAGE=vllm/vllm-openai:v0.31.0
+reject "IMAGE without notes" "set SUT_NOTES_OVERRIDE (researched notes) and SOURCES_OVERRIDE (source URLs) for" llm.sh IMAGE=vllm/vllm-openai:v0.31.0
 reject "IMAGE error names the image" "IMAGE=vllm/vllm-openai:v0.31.0 overrides the default vllm/vllm-openai:v0.30.0" \
   llm.sh IMAGE=vllm/vllm-openai:v0.31.0
-reject "IMAGE with sources, no notes" "set SUT_NOTES_OVERRIDE" llm.sh IMAGE=vllm/vllm-openai:v0.31.0 SOURCES_OVERRIDE=s
-reject "IMAGE with notes, no sources" "set SOURCES_OVERRIDE" llm.sh IMAGE=vllm/vllm-openai:v0.31.0 SUT_NOTES_OVERRIDE=n
+reject "IMAGE with sources, no notes" "set SUT_NOTES_OVERRIDE (researched notes) for" llm.sh IMAGE=vllm/vllm-openai:v0.31.0 SOURCES_OVERRIDE=s
+reject "IMAGE with notes, no sources" "set SOURCES_OVERRIDE (source URLs) for" llm.sh IMAGE=vllm/vllm-openai:v0.31.0 SUT_NOTES_OVERRIDE=n
 check "IMAGE with notes and sources" '.runtime.version == "v0.31.0" and .extra.image == "vllm/vllm-openai:v0.31.0" and .notes == "n" and .extra.launcher_sources == "s"' \
   llm.sh IMAGE=vllm/vllm-openai:v0.31.0 SUT_NOTES_OVERRIDE=n SOURCES_OVERRIDE=s
 for l in vlm asr imagegen; do
@@ -102,11 +103,11 @@ check "IMAGE equal to the default" '.extra.image == "vllm/vllm-openai:v0.30.0" a
   llm.sh IMAGE=vllm/vllm-openai:v0.30.0
 check "asr omni default image" '.extra.image == "vllm/vllm-omni:v0.30.0"' asr.sh ASR_STACK=omni
 
-reject "SERVE_ARGS_OVERRIDE without notes" "set SUT_NOTES_OVERRIDE and SOURCES_OVERRIDE" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384"
+reject "SERVE_ARGS_OVERRIDE without notes" "set SUT_NOTES_OVERRIDE (researched notes) and SOURCES_OVERRIDE (source URLs) for" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384"
 reject "SERVE_ARGS_OVERRIDE error names the flags" "overrides the default '--reasoning-parser qwen3 --max-model-len 32768'" \
   llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384"
-reject "SERVE_ARGS_OVERRIDE with sources, no notes" "set SUT_NOTES_OVERRIDE" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384" SOURCES_OVERRIDE=s
-reject "SERVE_ARGS_OVERRIDE with notes, no sources" "set SOURCES_OVERRIDE" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384" SUT_NOTES_OVERRIDE=n
+reject "SERVE_ARGS_OVERRIDE with sources, no notes" "set SUT_NOTES_OVERRIDE (researched notes) for" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384" SOURCES_OVERRIDE=s
+reject "SERVE_ARGS_OVERRIDE with notes, no sources" "set SOURCES_OVERRIDE (source URLs) for" llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384" SUT_NOTES_OVERRIDE=n
 check "SERVE_ARGS_OVERRIDE with notes and sources" '(.runtime.config | contains("--max-model-len 16384")) and .notes == "n"' \
   llm.sh "SERVE_ARGS_OVERRIDE=--max-model-len 16384" SUT_NOTES_OVERRIDE=n SOURCES_OVERRIDE=s
 check "SERVE_ARGS_OVERRIDE equal to the default" '.notes | contains("Qwen3-8B")' \

@@ -371,21 +371,14 @@
   one word, and treats `none` / `null` in any case as null. New SUT field `extra.quantization_source` records which
   one applied (`env`, `serve_args`, `model_name`, or `none`), and `notes` gains
   a line when the value was derived from the model name (#203).
-- Each launcher sets `DEFAULT_MODEL`. `start` and `sut` now exit with an error
-  naming `SUT_NOTES_OVERRIDE` when `MODEL` differs from `DEFAULT_MODEL`
-  without it, so a SUT never carries serving notes researched for a different
-  model. A missing `SOURCES_OVERRIDE` in that case is a stderr warning (#203).
-- `scripts/live/serve/common.sh` applies that rule to `IMAGE` and
-  `SERVE_ARGS_OVERRIDE` too, so a SUT no longer keeps notes and sources
-  researched for the default image or flags. Each launcher also sets
-  `DEFAULT_IMAGE`. When `MODEL`, `IMAGE` (vs `DEFAULT_IMAGE`), or
-  `SERVE_ARGS_OVERRIDE` (vs the default flags) differs from the launcher
-  default, `start` and `sut` exit with an error naming each missing variable:
-  both `SUT_NOTES_OVERRIDE` and `SOURCES_OVERRIDE` are required. A missing
-  `SOURCES_OVERRIDE` is now an error, not a warning. An override equal to the
-  default is not an override. `print`, `stop`, `logs`, and the default path
-  are unchanged. `scripts/tests/serve_sut_test.sh` covers each override with
-  and without notes and sources (#216).
+- Each launcher sets `DEFAULT_MODEL` and `DEFAULT_IMAGE`. When `MODEL`,
+  `IMAGE`, or `SERVE_ARGS_OVERRIDE` differs from the launcher default, `start`
+  and `sut` exit with an error naming each missing variable,
+  `SUT_NOTES_OVERRIDE` (researched notes) and `SOURCES_OVERRIDE` (source
+  URLs), so a SUT never carries serving notes or sources researched for a
+  different model, image, or flag set. An override equal to the default is
+  not an override. `print`, `stop`, `logs`, and the default path are
+  unchanged (#203, #216).
 - E2E tests no longer reserve a free port, drop it, and then start a server
   on it, which let another process take the port first. The
   `metrum-ai-bench-cli-mock-server` "listening on" line now prints the

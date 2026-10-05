@@ -165,14 +165,14 @@ serve_check_overrides() {
     [[ "${joined}" != "${default_args}" ]] && changed+=("SERVE_ARGS_OVERRIDE='${joined}' overrides the default '${default_args}'")
   fi
   (( ${#changed[@]} == 0 )) && return 0
-  [[ -z "${SUT_NOTES_OVERRIDE:-}" ]] && missing+=(SUT_NOTES_OVERRIDE)
-  [[ -z "${SOURCES_OVERRIDE:-}" ]] && missing+=(SOURCES_OVERRIDE)
+  [[ -z "${SUT_NOTES_OVERRIDE:-}" ]] && missing+=("SUT_NOTES_OVERRIDE (researched notes)")
+  [[ -z "${SOURCES_OVERRIDE:-}" ]] && missing+=("SOURCES_OVERRIDE (source URLs)")
   (( ${#missing[@]} == 0 )) && return 0
   local what why
   what="$(printf '%s; ' "${changed[@]}")"
   why="${missing[0]}"
   (( ${#missing[@]} > 1 )) && why="${missing[0]} and ${missing[1]}"
-  serve_die "${MODALITY} launcher: ${what}set ${why} to the researched notes and source URLs for this configuration (the launcher notes and sources describe ${DEFAULT_MODEL:-the default model} on ${DEFAULT_IMAGE:-the default image} with the default flags only)"
+  serve_die "${MODALITY} launcher: ${what}set ${why} for this configuration (the launcher notes and sources describe ${DEFAULT_MODEL:-the default model} on ${DEFAULT_IMAGE:-the default image} with the default flags only)"
 }
 
 serve_write_sut() {
