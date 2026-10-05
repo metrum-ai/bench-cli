@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use std::time::Instant;
 
-/// Shared monotonic epoch for one strategic run.
+/// Shared monotonic epoch for one benchmark run (any binary).
 ///
 /// All `*_ns` fields in NDJSON rows are nanoseconds since `mono`. Wall clock
 /// (`t0_wall`) is captured once at construction for ISO 8601 UTC anchoring.

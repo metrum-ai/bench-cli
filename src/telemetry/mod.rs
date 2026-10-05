@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Strategic-run telemetry: tagged NDJSON rows, shared monotonic epoch, and
-//! Prometheus exposition scraping.
+//! Run telemetry for every benchmark binary: tagged NDJSON rows, shared
+//! monotonic epoch, and Prometheus exposition scraping.
 
 mod config;
 mod epoch;
 mod parser;
 mod row;
 mod scraper;
+mod session;
 mod writer;
 
 pub use config::{
@@ -25,7 +26,11 @@ pub use scraper::{
     build_telemetry_client, default_require_failures, new_last_seen, probe_sources, spawn_scrapers,
     LastSeenMap, ProbeResult,
 };
-pub use writer::{NdjsonWriter, WriterStats, TELEMETRY_CHANNEL_CAPACITY};
+pub use session::{
+    close_session, request_row, RunStamp, SessionOptions, TelemetryArgs, TelemetryRunInfo,
+    TelemetrySession,
+};
+pub use writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats, TELEMETRY_CHANNEL_CAPACITY};
 
 #[cfg(test)]
 mod tests {

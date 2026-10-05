@@ -113,6 +113,9 @@ struct Args {
     #[command(flatten)]
     common: metrum_ai_bench::args_common::CommonBenchArgs,
 
+    #[command(flatten)]
+    telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
+
     #[arg(long, help = "Maximum number of tokens")]
     max_tokens: u32,
 
@@ -481,6 +484,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+    let telemetry_cfg = args.telemetry.resolve_config()?;
 
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);
 
@@ -632,6 +636,36 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut handles = vec![];
     let mut completed = 0;
     let mut last_percentage = 0;
+
+    // Telemetry starts before the run clock so source probes are not timed.
+    let mut telemetry = args
+        .telemetry
+        .start_session(
+            telemetry_cfg.as_ref(),
+            metrum_ai_bench::telemetry::RunStamp {
+                run_id: run_id.clone(),
+                tool_version: VERSION.to_string(),
+                sut: sut_block.as_ref().map(serde_json::to_value).transpose()?,
+                config: serde_json::json!({
+                    "binary": "metrum-ai-bench-cli-llm",
+                    "scenario": args.scenario,
+                    "model": args.model,
+                    "mode": format!("{:?}", args.mode).to_ascii_lowercase(),
+                    "streaming": args.streaming,
+                    "num_requests": args.num_requests,
+                    "concurrency": concurrency_limit,
+                    "request_rate": args.common.request_rate,
+                    "warmup_requests": args.common.warmup_requests,
+                    "data_log": args.data_log,
+                    "telemetry": args.telemetry.telemetry,
+                }),
+            },
+            Some(stop.clone()),
+        )
+        .await?;
+    if let Some(session) = telemetry.as_mut() {
+        session.set_load(args.common.request_rate.unwrap_or(concurrency_limit as f64));
+    }
 
     let start_time = Instant::now();
     let ramp_up_start = start_time;
@@ -840,6 +874,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
 
     while let Some(rec) = record_rx.recv().await {
+        if let Some(session) = telemetry.as_mut() {
+            session.record_request(&rec, start_time).await?;
+        }
         let _endpoint_name = rec.endpoint.clone();
         let phase = rec.phase;
         if rec.is_success() {
@@ -930,6 +967,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "Completed {} out of {} requests ({} errors)",
         completed, args.num_requests, errors
     );
+    let (telemetry_info, telemetry_verdict) =
+        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await?;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds
@@ -1030,6 +1069,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
     run_summary = run_summary
         .with_sut(sut_block)
+        .with_telemetry(telemetry_info)
         .with_price(price)
         .with_observed_concurrency(Some(inflight_tracker.snapshot()))
         .with_isl_osl(isl_osl.clone())
@@ -1038,6 +1078,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+    telemetry_verdict?;
 
     if let Some(ref validation) = isl_osl {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.common.fail_on_osl_mismatch)?;

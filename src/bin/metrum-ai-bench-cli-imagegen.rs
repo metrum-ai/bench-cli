@@ -226,6 +226,9 @@ struct Args {
     #[arg(long)]
     data_log: String,
 
+    #[command(flatten)]
+    telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
+
     #[arg(
         long,
         help = "Optional path to write summary.v3 JSON (same schema as the data-log summary line)"
@@ -398,6 +401,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.require_sut,
         args.redact_hostname,
     )?;
+    let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
     let endpoints = resolve_endpoints(&args)?;
@@ -441,10 +445,39 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
     ));
-    let run_start = Instant::now();
     let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
+    // Telemetry starts before the run clock so source probes are not timed.
+    let mut telemetry = args
+        .telemetry
+        .start_session(
+            telemetry_cfg.as_ref(),
+            metrum_ai_bench::telemetry::RunStamp {
+                run_id: run_id.clone(),
+                tool_version: VERSION.to_string(),
+                sut: sut_block.as_ref().map(serde_json::to_value).transpose()?,
+                config: json!({
+                    "binary": "metrum-ai-bench-cli-imagegen",
+                    "scenario": args.scenario,
+                    "model": args.model,
+                    "size": args.size,
+                    "n": args.n,
+                    "num_requests": args.num_requests,
+                    "concurrency": concurrency_cap,
+                    "request_rate": args.request_rate,
+                    "warmup_requests": args.warmup_requests,
+                    "data_log": args.data_log,
+                    "telemetry": args.telemetry.telemetry,
+                }),
+            },
+            Some(stop.clone()),
+        )
+        .await?;
+    if let Some(session) = telemetry.as_mut() {
+        session.set_load(args.request_rate.unwrap_or(f64::from(concurrency_cap)));
+    }
+    let run_start = Instant::now();
 
     let mut handles = Vec::new();
     use rand::SeedableRng;
@@ -616,11 +649,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let mut shared_records = Vec::new();
     while let Some(rec) = record_rx.recv().await {
+        if let Some(session) = telemetry.as_mut() {
+            session.record_request(&rec, run_start).await?;
+        }
         shared_records.push(rec);
     }
     for h in handles {
         h.await?;
     }
+    let (telemetry_info, telemetry_verdict) =
+        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await?;
 
     let metrics = metrics.lock().await;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);
@@ -706,6 +744,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         metrum_ai_bench::summary::resolve_price_per_hour(args.price_per_hour, sut_block.as_ref());
     shared_summary = shared_summary
         .with_sut(sut_block)
+        .with_telemetry(telemetry_info)
         .with_price(price)
         .with_observed_concurrency(Some(inflight_tracker.snapshot()));
     sink.write(&shared_summary)?;
@@ -713,6 +752,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(path) = &args.summary_json {
         fs::write(path, serde_json::to_string_pretty(&shared_summary)?)?;
     }
+    telemetry_verdict?;
     let failed = metrics
         .outcomes
         .iter()
