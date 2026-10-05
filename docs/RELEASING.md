@@ -64,6 +64,19 @@ the cell as "all-error measurements" in a results document is not triage.
 Campaign `matrix-20260915-195537` (0 of 472 ASR transcriptions succeeded) is
 the example this rule exists for.
 
+## Data-point counts in the release notes
+
+Every release states how many data points it tracks.
+[DATA_POINTS.md](DATA_POINTS.md) is generated from the serde schemas by
+`tests/data_points.rs`. Regenerate it with `scripts/render_data_points.sh`
+after any change to `summary.v3`, `request.v3`, the strategic sweep point,
+or the `telemetry.v1` request row. `cargo test` (CI) and the release `verify`
+job (`scripts/render_data_points.sh --check`) fail when the committed file is
+stale. The `github-release` job builds the release body itself: GitHub's
+generated notes, then the output of `scripts/release_notes_data_points.sh`.
+Both jobs check out the tag, also on `workflow_dispatch`. Telemetry series are selected
+by YAML `include` at run time, so no release states a series count.
+
 ## Never publish an rc
 
 Tags containing `-rc.` must never be published to crates.io. The `crates-io`
