@@ -8,29 +8,44 @@ Metrum AI for issue #204; the rules are the ones that reproduce the epic #184
 table (AIPerf 0.13.0 plain: 65 / 653 / 33).
 
   quantity     one reported measurement. AIPerf: each top-level block with a
-               "unit" in profile_export_aiperf.json. Bench: each DistSummary,
-               each top-level numeric scalar, and each other nested block with
-               numeric leaves (goodput, observed_concurrency, isl_osl, ...).
+               "unit" in profile_export_aiperf.json. Bench: every dict holding
+               n, p50 and p99 (a DistSummary) at any depth, named by its dotted
+               path (a DistSummary at summary["a"]["b"] is quantity "a.b"),
+               each top-level numeric scalar, and each top-level block whose
+               numeric leaves outside any DistSummary are non-empty (goodput,
+               observed_concurrency, ...). Those leftover leaves, including
+               leaves of nested non-distribution dicts, form the block.
   values       numeric leaves inside those quantities (booleans and strings
                never count; null never counts).
   per-request  distinct numeric fields on measured per-request records.
                AIPerf: metric names under "metrics" on profiling-phase rows of
-               profile_export.jsonl. Bench: non-null numeric leaves (a list
-               counts once) on phase=measure request.v3 rows, minus "seq".
+               profile_export.jsonl. Bench: non-null numeric leaves on
+               phase=measure request.v3 rows, minus "seq" and "error". Nested
+               dicts flatten to dotted names (modality_metrics.prompt_words);
+               a list of numbers (itl_s) counts once.
   duplicates   quantities whose numbers equal an earlier quantity's numbers
-               exactly (for example ttft vs time_to_first_output_token). They
-               still count as quantities; the column shows how many are copies.
+               (for example ttft vs time_to_first_output_token), compared
+               after rounding each number to 12 decimals. Quantities with a
+               single number are never compared: lone scalars collide on 0 or
+               1 by chance. Duplicates still count as quantities; the column
+               shows how many are copies.
   dists        quantities with a full distribution (AIPerf 15 numbers, Bench
                DistSummary 10); "blocks" are AIPerf time-weighted blocks
-               (8 numbers) or Bench nested non-distribution blocks.
+               (8 numbers) or Bench non-distribution blocks.
 
 Excluded on both sides: run metadata (Bench config/environment/sut, AIPerf
-input_config/run_info), warmup data, and Bench per_endpoint (a per-endpoint
-copy of headline distributions; reported as per_endpoint_quantities).
+input_config/run_info), warmup data, Bench per_endpoint (a per-endpoint copy
+of headline distributions; reported as per_endpoint_quantities), and
+error-shaped data whose presence depends on the error rate: Bench
+errors_by_type and per-request error.*, AIPerf error_summary and top-level
+error_* blocks. Those are reported as error_quantities instead, so the
+headline counts do not shift when a request fails.
 
-Pacing guard: if the median of TTFT / E2E across measured requests is above
---max-ttft-ratio (default 0.9), the mock returned the stream at once and the
-count is meaningless. The script exits 3 and prints why.
+Pacing guard: the run must carry a TTFT/E2E pair for every measured success
+(streaming on, fields present, AIPerf profile_export.jsonl present). Zero
+pairs, fewer pairs than successes, or a median TTFT/E2E above
+--max-ttft-ratio (default 0.9; the mock returned the stream at once) all exit
+3 with the reason. A missing input file is an error, not a skip.
 
 Subcommands:
   bench DATA_LOG.jsonl          count one Bench --data-log
@@ -53,9 +68,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 BENCH_EXCLUDE = {"config", "environment", "sut", "per_endpoint", "schema_version"}
+BENCH_ERROR_KEYS = {"errors_by_type"}
 AIPERF_EXCLUDE = {"input_config", "run_info", "warmup_metrics", "error_summary"}
 DIST_KEYS_BENCH = {"n", "p50", "p99"}
-REQUEST_SKIP = {"seq"}
+REQUEST_SKIP = {"seq", "error"}
 
 
 class PacingError(RuntimeError):
@@ -84,7 +100,10 @@ def numeric_leaves(node: Any) -> list[float]:
 
 
 def find_duplicates(quantities: dict[str, list[float]]) -> list[list[str]]:
-    """Groups of quantity names whose number vectors are identical (>= 2 numbers)."""
+    """Groups of quantity names whose number vectors are identical.
+
+    Numbers are rounded to 12 decimals before comparing; quantities with a
+    single number are skipped (see the module docstring)."""
     groups: dict[tuple, list[str]] = {}
     for name, vals in quantities.items():
         if len(vals) < 2:
@@ -93,10 +112,16 @@ def find_duplicates(quantities: dict[str, list[float]]) -> list[list[str]]:
     return [names for names in groups.values() if len(names) > 1]
 
 
-def pacing_check(pairs: Iterable[tuple[float, float]], limit: float, tool: str) -> float | None:
-    ratios = [t / e for t, e in pairs if t is not None and e and e > 0]
-    if not ratios:
-        return None
+def pacing_check(pairs: Iterable[tuple[Any, Any]], successes: int, limit: float, tool: str) -> float:
+    """Median TTFT/E2E over measured successes; PacingError when it cannot be trusted."""
+    ratios = [t / e for t, e in pairs if is_num(t) and is_num(e) and e > 0]
+    if successes == 0:
+        raise PacingError(f"{tool}: no measured successful requests, nothing to count.")
+    if len(ratios) < successes:
+        raise PacingError(
+            f"{tool}: only {len(ratios)} of {successes} measured successes carry a TTFT/E2E pair. "
+            "Streaming must be on and every success needs ttft and e2e, otherwise the pacing "
+            "guard cannot prove the stream was paced.")
     med = statistics.median(ratios)
     if med > limit:
         raise PacingError(
@@ -125,19 +150,21 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
     quantities: dict[str, list[float]] = {}
     dists = blocks = 0
     for key, val in summary.items():
-        if key in BENCH_EXCLUDE:
+        if key in BENCH_EXCLUDE or key in BENCH_ERROR_KEYS:
             continue
         if is_num(val):
             quantities[key] = [float(val)]
         elif isinstance(val, dict):
-            nums = numeric_leaves(val)
-            if not nums:
-                continue
-            quantities[key] = nums
-            if DIST_KEYS_BENCH <= set(val):
+            found: dict[str, list[float]] = {}
+            leftover = split_dists(val, key, found)
+            for name, nums in found.items():
+                quantities[name] = nums
                 dists += 1
-            else:
+            if leftover:
+                quantities[key] = leftover
                 blocks += 1
+    error_q = sum(1 for k in BENCH_ERROR_KEYS for v in (summary.get(k) or {}).values()
+                  if numeric_leaves(v))
     per_ep = summary.get("per_endpoint") or {}
     per_ep_q = sum(1 for ep in per_ep.values() if isinstance(ep, dict)
                    for v in ep.values() if is_num(v) or (isinstance(v, dict) and numeric_leaves(v)))
@@ -146,8 +173,8 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
     fields: set[str] = set()
     for r in measured:
         fields |= request_fields(r)
-    med = pacing_check(((r.get("ttft_s"), r.get("latency_s")) for r in measured if not r.get("error")),
-                       limit, "bench")
+    ok = [r for r in measured if not r.get("error")]
+    med = pacing_check(((r.get("ttft_s"), r.get("latency_s")) for r in ok), len(ok), limit, "bench")
     dups = find_duplicates(quantities)
     return {
         "tool": "bench",
@@ -160,11 +187,33 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
         "blocks": blocks,
         "measured_requests": len(measured),
         "per_endpoint_quantities": per_ep_q,
+        "error_quantities": error_q,
         "median_ttft_over_e2e": med,
         "duplicate_groups": dups,
         "quantity_names": sorted(quantities),
         "per_request_fields": sorted(fields),
     }
+
+
+def split_dists(node: dict, path: str, found: dict[str, list[float]]) -> list[float]:
+    """Record every DistSummary under node in found (by dotted path); return the
+    numeric leaves that are not inside any DistSummary."""
+    if DIST_KEYS_BENCH <= set(node):
+        found[path] = numeric_leaves(node)
+        return []
+    leftover: list[float] = []
+    for k, v in node.items():
+        if is_num(v):
+            leftover.append(float(v))
+        elif isinstance(v, dict):
+            leftover.extend(split_dists(v, f"{path}.{k}", found))
+        elif isinstance(v, list):
+            for i, item in enumerate(v):
+                if isinstance(item, dict):
+                    leftover.extend(split_dists(item, f"{path}.{k}[{i}]", found))
+                else:
+                    leftover.extend(numeric_leaves(item))
+    return leftover
 
 
 def request_fields(row: dict, prefix: str = "") -> set[str]:
@@ -189,9 +238,12 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
         raise SystemExit(f"{art}: missing profile_export_aiperf.json")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     quantities: dict[str, list[float]] = {}
-    dists = blocks = 0
+    dists = blocks = error_q = 0
     for key, val in summary.items():
         if key in AIPERF_EXCLUDE or not (isinstance(val, dict) and "unit" in val):
+            continue
+        if key.startswith("error_"):
+            error_q += 1
             continue
         nums = [float(x) for x in val.values() if is_num(x)]
         if not nums:
@@ -203,21 +255,24 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
             dists += 1
         else:
             blocks += 1
+    if not records_path.is_file():
+        raise SystemExit(f"{art}: missing profile_export.jsonl (per-request records); "
+                         "rerun AIPerf with the default --export-level")
     fields: set[str] = set()
     pairs = []
-    n_meas = 0
-    if records_path.is_file():
-        for r in read_jsonl(records_path):
-            if (r.get("metadata") or {}).get("benchmark_phase") != "profiling":
-                continue
-            n_meas += 1
-            metrics = r.get("metrics") or {}
-            fields |= {k for k, v in metrics.items() if isinstance(v, dict) and v.get("value") is not None}
-            ttft = (metrics.get("time_to_first_token") or {}).get("value")
-            e2e = (metrics.get("request_latency") or {}).get("value")
-            if ttft is not None and e2e:
-                pairs.append((ttft, e2e))
-    med = pacing_check(pairs, limit, "aiperf")
+    n_meas = n_ok = 0
+    for r in read_jsonl(records_path):
+        if (r.get("metadata") or {}).get("benchmark_phase") != "profiling":
+            continue
+        n_meas += 1
+        if r.get("error"):
+            continue
+        n_ok += 1
+        metrics = r.get("metrics") or {}
+        fields |= {k for k, v in metrics.items() if isinstance(v, dict) and v.get("value") is not None}
+        pairs.append(((metrics.get("time_to_first_token") or {}).get("value"),
+                      (metrics.get("request_latency") or {}).get("value")))
+    med = pacing_check(pairs, n_ok, limit, "aiperf")
     dups = find_duplicates(quantities)
     return {
         "tool": "aiperf",
@@ -229,6 +284,7 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
         "dists": dists,
         "blocks": blocks,
         "measured_requests": n_meas,
+        "error_quantities": error_q,
         "median_ttft_over_e2e": med,
         "duplicate_groups": dups,
         "quantity_names": sorted(quantities),

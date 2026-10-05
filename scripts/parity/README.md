@@ -30,8 +30,11 @@ scripts/parity/run_tele.sh live-results/parity      # optional: telemetry ingest
 The AIPerf column above is the harness output for AIPerf 0.13.0 at the
 defaults, and it matches the 2026-10-05 epic table. A second table lists
 distributions, nested blocks, duplicate quantities, measured requests, and
-the median TTFT/E2E ratio per run. If you run `run_tele.sh` into the same
-`OUT`, it appends a telemetry table to `OUT/counts.jsonl` and prints both.
+the median TTFT/E2E ratio per run.
+
+Both scripts share `OUT/counts.jsonl`, so they can run in either order.
+`run_pair.sh` replaces only the client-scenario rows, `run_tele.sh` replaces
+only the `telemetry` rows, and each prints every table present.
 
 Every run uses the same prompts, concurrency 4, and 64 measured requests plus
 4 warmup. A fresh mock is started for each tool, so `/metrics` starts at zero.
@@ -48,7 +51,14 @@ Every run uses the same prompts, concurrency 4, and 64 measured requests plus
   binary path, `--version`, and checkout into `OUT/sut.json` `notes`.
 - AIPerf 0.13.0. The harness uses `AIPERF=/path/to/aiperf`, else `aiperf` on
   `PATH`. With `PARITY_INSTALL_AIPERF=1` it pip installs `aiperf==0.13.0` into
-  `OUT/.aiperf-venv`.
+  `OUT/.aiperf-venv`. Upstream docs for the pieces used here (v0.13.0):
+  [CLI options](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/cli-options.md),
+  [`single_turn` custom dataset](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/custom-dataset.md),
+  [`--goodput`](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/goodput.md),
+  [`--server-metrics`](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md)
+  ([JSON schema](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics-json-schema.md)),
+  [profile exports](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/working-with-profile-exports.md)
+  ([JSON export schema](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/json-export-schema.md)).
 - AIPerf tokenizes client-side, as in the epic run, with
   `AIPERF_TOKENIZER=gpt2` by default. It needs Hugging Face Hub access or a
   local cache. The mock's words are single GPT-2 tokens, so server usage
@@ -87,9 +97,18 @@ every field, so a count against such a mock looks complete while every
 streaming number is meaningless. The Rust `metrum-ai-bench-cli-mock-server`
 works this way: it builds one response string. So never count against it.
 
-`count_points.py` enforces the rule. If the median TTFT/E2E over measured
-requests is above 0.9 (`--max-ttft-ratio`), it exits 3 and names the problem,
-and `run_pair.sh` stops. `mock_server.py` also refuses `--itl-ms 0`.
+`count_points.py` enforces the rule, and it fails closed. Every measured
+success must carry a TTFT/E2E pair (Bench `ttft_s` and `latency_s`, AIPerf
+`time_to_first_token` and `request_latency` in `profile_export.jsonl`).
+Zero pairs (for example no `--streaming`, or a renamed field), fewer pairs
+than successes, or a median TTFT/E2E above 0.9 (`--max-ttft-ratio`) all exit
+3 with the reason, and `run_pair.sh` stops. A missing `profile_export.jsonl`
+is an error, not a skip. `mock_server.py` also refuses `--itl-ms 0`.
+
+The launcher also refuses to measure a stale server. Before starting the
+mock or the fork page it checks that the port has no listener. The mock
+echoes a per-start nonce on `/health`, and the wait succeeds only for that
+nonce while the new PID is alive.
 
 ## Scenarios
 
@@ -106,10 +125,32 @@ The thresholds come from `SLO_TTFT_S`, `SLO_E2E_S` and `PRICE_PER_HOUR`.
 
 | Column      | AIPerf (`profile_export_aiperf.json`, `profile_export.jsonl`) | Bench (`--data-log` JSONL) |
 |-------------|------------------------------------------|----------------------------|
-| quantities  | each top-level block with a `unit` | each `DistSummary`, each top-level numeric scalar, each other nested block with numeric leaves (`goodput`, `observed_concurrency`, `isl_osl`) |
+| quantities  | each top-level block with a `unit` | every `DistSummary` (a dict with `n`, `p50` and `p99`) at any depth, named by its dotted path; each top-level numeric scalar; each top-level block whose numeric leaves outside any `DistSummary` are non-empty (`goodput`, `observed_concurrency`) |
 | values      | numeric leaves of those blocks | numeric leaves of those quantities |
-| per-request | metric names on `profiling` records | non-null numeric fields on `phase=measure` `request.v3` records (a list counts once), except `seq` |
-| duplicates  | quantities whose numbers equal an earlier quantity's exactly | same |
+| per-request | metric names on `profiling` records | non-null numeric fields on `phase=measure` `request.v3` records, except `seq` and `error` |
+| duplicates  | quantities whose numbers equal an earlier quantity's | same |
+
+A few details matter for before and after counts:
+
+- **Nested distributions.** A block that holds several distributions counts
+  each one as its own quantity, for example `a.b` for a `DistSummary` at
+  `summary["a"]["b"]`. The block itself counts once more only if numeric
+  leaves remain outside those distributions. Leaves of nested
+  non-distribution dicts (for example `goodput.thresholds_s`) join their
+  top-level block.
+- **Dotted names.** Per-request dicts flatten to dotted names
+  (`modality_metrics.prompt_words`), and each name is one field. A list of
+  numbers (`itl_s`) counts once.
+- **Duplicates.** Numbers are rounded to 12 decimals before comparing, and
+  quantities with a single number are never compared, because lone scalars
+  collide on 0 or 1 by chance. Duplicates still count as quantities; the
+  column shows how many are copies.
+- **Errors.** Data whose presence depends on the error rate is left out of
+  the headline counts and reported as `error_quantities`: Bench
+  `errors_by_type` and per-request `error`, AIPerf `error_summary` and
+  top-level `error_*` blocks. A failed request therefore does not change the
+  counts. Always-present rate fields (`errors`, `error_rate`,
+  `request_error_rate`) still count.
 
 Some things never count: booleans, strings, nulls, warmup data, run metadata
 (AIPerf `input_config`/`run_info`, Bench `config`/`environment`/`sut`), and

@@ -29,17 +29,23 @@ PRICE_PER_HOUR="${PRICE_PER_HOUR:-2.0}"
 mkdir -p "${OUT}"
 OUT="$(cd "${OUT}" && pwd)"
 COUNTS="${OUT}/counts.jsonl"
-: >"${COUNTS}"
+# Keep telemetry rows from run_tele.sh in the same OUT; replace client rows.
+if [[ -f "${COUNTS}" ]]; then
+  grep '"scenario": "telemetry' "${COUNTS}" >"${COUNTS}.keep" || true
+  mv "${COUNTS}.keep" "${COUNTS}"
+else
+  : >"${COUNTS}"
+fi
 
 parity_prompts "${OUT}"
 if parity_want bench; then
-    BENCH="$(parity_bench_bin metrum-ai-bench-cli-llm)"
-    parity_log "bench: $(parity_bench_identity "${BENCH}")"
-    parity_sut "${OUT}" "${BENCH}"
+  BENCH="$(parity_bench_bin metrum-ai-bench-cli-llm)"
+  parity_log "bench: $(parity_bench_identity "${BENCH}")"
+  parity_sut "${OUT}" "${BENCH}"
 fi
 if parity_want aiperf; then
-    AIPERF_BIN="$(parity_aiperf "${OUT}")"
-    parity_log "aiperf: ${AIPERF_BIN} $("${AIPERF_BIN}" --version 2>/dev/null | tail -n1)"
+  AIPERF_BIN="$(parity_aiperf "${OUT}")"
+  parity_log "aiperf: ${AIPERF_BIN} $("${AIPERF_BIN}" --version 2>/dev/null | tail -n1)"
 fi
 URL="http://127.0.0.1:${MOCK_PORT}"
 
@@ -55,8 +61,9 @@ for sc in "${SCENARIOS[@]}"; do
     slo)
       bench_extra=(--slo "ttft=${SLO_TTFT_S}" --slo "e2e=${SLO_E2E_S}" --price-per-hour "${PRICE_PER_HOUR}")
       # AIPerf goodput takes display units (ms). AIPerf has no cost metric.
-      ttft_ms="$("${PYTHON}" -c "print(${SLO_TTFT_S}*1000)")"
-      e2e_ms="$("${PYTHON}" -c "print(${SLO_E2E_S}*1000)")"
+      to_ms='import sys; print(f"{float(sys.argv[1]) * 1000:g}")'
+      ttft_ms="$("${PYTHON}" -c "${to_ms}" "${SLO_TTFT_S}")"
+      e2e_ms="$("${PYTHON}" -c "${to_ms}" "${SLO_E2E_S}")"
       aiperf_extra=(--goodput "time_to_first_token:${ttft_ms} request_latency:${e2e_ms}")
       ;;
     *) echo "error: unknown scenario ${sc} (plain|reasoning|slo)" >&2; exit 2 ;;

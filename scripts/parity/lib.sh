@@ -58,35 +58,61 @@ parity_stop_last() {
 # parity_want TOOL -> rc 0 when TOOL is in TOOLS (default: bench aiperf)
 parity_want() { [[ " ${TOOLS:-bench aiperf} " == *" $1 "* ]]; }
 
-# parity_wait_http URL [tries] -> rc 0 once URL answers 200
+# parity_port_free PORT -> rc 0 when nothing listens on 127.0.0.1:PORT.
+# A stale mock left on the port would otherwise be measured instead of ours.
+parity_port_free() {
+  if "${PYTHON}" -c 'import socket, sys
+s = socket.socket()
+s.settimeout(0.5)
+sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)' "$1"; then
+    echo "error: port $1 already has a listener (stale mock?). Stop it or set MOCK_PORT/FORK_PORT." >&2
+    return 1
+  fi
+}
+
+# parity_wait_http URL PID [MATCH] -> rc 0 once URL answers 200 (and its body
+# contains MATCH, when given) while PID, the process we started, is alive.
 parity_wait_http() {
-  local url="$1" tries="${2:-50}" i
-  for ((i = 0; i < tries; i++)); do
-    curl -fsS --max-time 1 -o /dev/null "${url}" 2>/dev/null && return 0
+  local url="$1" pid="$2" match="${3:-}" i body
+  for ((i = 0; i < 50; i++)); do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "error: helper for ${url} exited during startup (see its log)" >&2
+      return 1
+    fi
+    if body="$(curl -fsS --max-time 1 "${url}" 2>/dev/null)"; then
+      if [[ -z "${match}" || "${body}" == *"${match}"* ]]; then
+        kill -0 "${pid}" 2>/dev/null && return 0
+      fi
+    fi
     sleep 0.1
   done
-  echo "error: ${url} did not come up" >&2
+  echo "error: ${url} did not come up from pid ${pid}" >&2
   return 1
 }
 
-# parity_start_mock LOG [mock args...] -> starts the paced mock on MOCK_PORT
+# parity_start_mock LOG [mock args...] -> starts the paced mock on MOCK_PORT.
+# The mock echoes a per-start nonce on /health, so the wait only succeeds
+# against the process started here.
 parity_start_mock() {
-  local log="$1"
+  local log="$1" nonce
   shift
+  parity_port_free "${MOCK_PORT}"
+  nonce="parity-$$-${RANDOM}${RANDOM}"
   "${PYTHON}" "${PARITY_DIR}/mock_server.py" --port "${MOCK_PORT}" --model "${MODEL}" \
     --prefill-ms "${PREFILL_MS}" --per-prompt-token-ms "${PER_PROMPT_TOKEN_MS}" \
-    --itl-ms "${ITL_MS}" --seed "${MOCK_SEED}" "$@" >"${log}" 2>&1 &
+    --itl-ms "${ITL_MS}" --seed "${MOCK_SEED}" --nonce "${nonce}" "$@" >"${log}" 2>&1 &
   PARITY_PIDS+=("$!")
-  parity_wait_http "http://127.0.0.1:${MOCK_PORT}/v1/models"
+  parity_wait_http "http://127.0.0.1:${MOCK_PORT}/health" "$!" "${nonce}"
 }
 
 # parity_start_fork LOG -> replays the all-smi fork page on FORK_PORT
 parity_start_fork() {
   local log="$1"
+  parity_port_free "${FORK_PORT}"
   "${PYTHON}" "${PARITY_DIR}/fork_page.py" serve --port "${FORK_PORT}" \
     ${FORK_PAGE:+--page "${FORK_PAGE}"} >"${log}" 2>&1 &
   PARITY_PIDS+=("$!")
-  parity_wait_http "http://127.0.0.1:${FORK_PORT}/metrics"
+  parity_wait_http "http://127.0.0.1:${FORK_PORT}/metrics" "$!"
 }
 
 # parity_bench_bin NAME -> path. Default dir is the shared Rust lane build;
@@ -159,8 +185,13 @@ PY
 parity_sut() {
   local out="$1" bin="$2" ident
   ident="$(parity_bench_identity "${bin}")"
-  "${PYTHON}" - "${out}/sut.json" "${ident}" <<PY
+  # Values travel through argv, never pasted into Python source.
+  "${PYTHON}" - "${out}/sut.json" "${ident}" "${MODEL}" "${PREFILL_MS}" \
+    "${PER_PROMPT_TOKEN_MS}" "${ITL_MS}" "${MOCK_SEED}" <<'PY'
 import json, platform, sys
+path, ident, model = sys.argv[1:4]
+prefill, per_tok, itl = (float(v) for v in sys.argv[4:7])
+seed = int(sys.argv[7])
 json.dump({
   "provenance": "declared",
   "name": "parity-mock (scripts/parity/mock_server.py, no GPU)",
@@ -168,11 +199,11 @@ json.dump({
   "gpu": {"model": "none (CPU mock server)", "count": 1},
   "driver_version": "n/a (mock)",
   "runtime": {"name": "metrum-parity-mock", "version": "scripts/parity",
-              "config": "mock_server.py --prefill-ms ${PREFILL_MS} --per-prompt-token-ms "
-                        "${PER_PROMPT_TOKEN_MS} --itl-ms ${ITL_MS} --seed ${MOCK_SEED}"},
-  "model": {"id": "${MODEL}"},
+              "config": f"mock_server.py --prefill-ms {prefill:g} --per-prompt-token-ms "
+                        f"{per_tok:g} --itl-ms {itl:g} --seed {seed}"},
+  "model": {"id": model},
   "host_os": platform.platform(),
-  "notes": "Data-point count run (#204), not a performance result. Bench " + sys.argv[2],
-}, open(sys.argv[1], "w"), indent=2)
+  "notes": "Data-point count run (#204), not a performance result. Bench " + ident,
+}, open(path, "w"), indent=2)
 PY
 }

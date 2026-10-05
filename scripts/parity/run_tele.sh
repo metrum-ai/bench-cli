@@ -24,13 +24,19 @@ mkdir -p "${OUT}/telemetry"
 OUT="$(cd "${OUT}" && pwd)"
 dir="${OUT}/telemetry"
 COUNTS="${OUT}/counts.jsonl"
-touch "${COUNTS}"
+# Keep client rows from run_pair.sh in the same OUT; replace telemetry rows.
+if [[ -f "${COUNTS}" ]]; then
+  grep -v '"scenario": "telemetry' "${COUNTS}" >"${COUNTS}.keep" || true
+  mv "${COUNTS}.keep" "${COUNTS}"
+else
+  : >"${COUNTS}"
+fi
 
 parity_prompts "${OUT}"
 if parity_want bench; then
-    BENCH="$(parity_bench_bin metrum-ai-bench-cli-strategic)"
-    parity_log "bench: $(parity_bench_identity "${BENCH}")"
-    parity_sut "${OUT}" "${BENCH}"
+  BENCH="$(parity_bench_bin metrum-ai-bench-cli-strategic)"
+  parity_log "bench: $(parity_bench_identity "${BENCH}")"
+  parity_sut "${OUT}" "${BENCH}"
 fi
 if parity_want aiperf; then
   AIPERF_BIN="$(parity_aiperf "${OUT}")"

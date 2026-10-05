@@ -23,7 +23,7 @@ equals E2E and count_points.py refuses the run.
 Usage: mock_server.py [--host 127.0.0.1] [--port 8000] [--model parity-mock]
            [--prefill-ms 40] [--per-prompt-token-ms 0.05] [--itl-ms 8]
            [--min-frac 0.6] [--max-frac 1.0] [--seed 0]
-           [--reasoning] [--reasoning-frac 0.3]
+           [--reasoning] [--reasoning-frac 0.3] [--nonce TEXT]
 Standard library only.
 """
 
@@ -163,7 +163,7 @@ def make_handler(args: argparse.Namespace, stats: Stats):
                 self.send_json(200, {"object": "list", "data": [
                     {"id": args.model, "object": "model", "owned_by": "metrum-ai-parity"}]})
             elif path in ("/health", "/v1/health"):
-                self.send_json(200, {"status": "ok"})
+                self.send_json(200, {"status": "ok", "nonce": args.nonce})
             else:
                 self.send_json(404, {"error": {"message": f"no route {path}"}})
 
@@ -272,6 +272,8 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--reasoning", action="store_true", help="emit delta.reasoning_content first")
     ap.add_argument("--reasoning-frac", type=float, default=0.3, help="share of output tokens that reason")
+    ap.add_argument("--nonce", default="", help="echoed on /health so a launcher can tell "
+                    "its own process from a stale one on the port")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     if args.itl_ms <= 0:
