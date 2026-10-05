@@ -48,6 +48,29 @@
   single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
   TTFT into E2E and makes every streaming field meaningless.
 
+### Added
+- `summary.v3` (additive) summarizes per-request fields that were recorded
+  but not aggregated: `first_byte_s`, `queue_delay_s`, `first_reasoning_s`,
+  `isl_tokens`, and `osl_tokens` as type-7 `DistSummary` blocks, plus optional
+  `isl_tokens_source` / `osl_tokens_source` (`server_usage`,
+  `tokenizer_fallback`, or `mixed`; omitted when there are no samples). Each
+  `per_endpoint` entry carries the same seven fields. Only measured successes
+  count. `queue_delay_s` covers only open-loop (`--request-rate`) requests and
+  is `n=0` in closed loop. ISL/OSL prefer server usage, use tokenizer counts
+  only for `usage_missing` rows, and skip rows with no usage (ASR, imagegen)
+  rather than counting them as zero (#191).
+- Strategic sweep points JSON gains `first_byte_s`, `queue_delay_s`,
+  `first_reasoning_s`, `isl_tokens`, and `osl_tokens` distributions.
+  `queue_delay_s` is `n=0` for `--sweep-by concurrency` stages; ISL/OSL use
+  server usage only and skip rows with zero input and output tokens;
+  `osl_tokens` is `n=0` for embeddings and rerank stages, and rerank
+  `isl_tokens` is `usage.total_tokens` (all input). The
+  strategic request CSV gains a trailing optional `first_reasoning_s` column
+  (#191).
+- Console summary prints First byte, Queue delay, First reasoning, ISL tokens
+  (source), and OSL tokens (source) lines when the distribution has samples
+  (#191).
+
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
   and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,

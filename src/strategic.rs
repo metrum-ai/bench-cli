@@ -68,6 +68,10 @@ pub struct BenchRecord {
     /// Warmup requests are retained for audit but excluded from stage aggregates.
     #[serde(default)]
     pub warmup: bool,
+    /// Send-to-first-reasoning-chunk timing for streaming thinking models.
+    /// Last column so older CSV readers keep their positions.
+    #[serde(default)]
+    pub first_reasoning_s: Option<f64>,
 }
 
 fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -179,6 +183,16 @@ pub struct SweepPoint {
     /// Type-7 TTFT distribution over measured successes with a recorded TTFT.
     #[serde(default)]
     pub ttft_s: crate::stats::DistSummary,
+    /// Send to response headers over measured successes.
+    pub first_byte_s: crate::stats::DistSummary,
+    /// Scheduled-to-send delay; `n = 0` for closed-loop stages (not applicable).
+    pub queue_delay_s: crate::stats::DistSummary,
+    /// Send to first reasoning chunk; streaming thinking models only.
+    pub first_reasoning_s: crate::stats::DistSummary,
+    /// Per-request input tokens from server `usage` (no tokenizer fallback).
+    pub isl_tokens: crate::stats::DistSummary,
+    /// Per-request output tokens from server `usage` (no tokenizer fallback).
+    pub osl_tokens: crate::stats::DistSummary,
     /// Count of measured successes whose TTFT came from HTTP time-to-first-byte.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub ttft_approx_count: usize,
@@ -229,7 +243,7 @@ pub fn summarize_stage(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
 ) -> SweepPoint {
-    summarize_stage_with_options(load, records, seconds, slos, config, None, None, None)
+    summarize_stage_with_options(load, records, seconds, slos, config, None, None, None, true)
 }
 
 /// Like [`summarize_stage`] but optionally stamps `$ / 1M output tokens`.
@@ -250,10 +264,14 @@ pub fn summarize_stage_with_price(
         price_per_hour,
         None,
         None,
+        true,
     )
 }
 
 /// Full stage summary with optional price, observed concurrency, and ISL/OSL.
+///
+/// `generates_output` is false for embeddings and rerank stages: they produce
+/// no output tokens, so `osl_tokens` stays `n = 0` instead of a run of zeros.
 #[allow(clippy::too_many_arguments)]
 pub fn summarize_stage_with_options(
     load: f64,
@@ -264,6 +282,7 @@ pub fn summarize_stage_with_options(
     price_per_hour: Option<f64>,
     observed_concurrency: Option<crate::concurrency::ObservedConcurrency>,
     isl_osl: Option<crate::isl_osl::IslOslValidation>,
+    generates_output: bool,
 ) -> SweepPoint {
     // Warmup rows stay in the CSV for audit but never enter knee / HTML aggregates.
     let measured: Vec<&BenchRecord> = records.iter().filter(|record| !record.warmup).collect();
@@ -335,6 +354,45 @@ pub fn summarize_stage_with_options(
         .iter()
         .filter_map(|record| record.ttft_s)
         .collect();
+    let first_byte: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.first_byte_s)
+        .collect();
+    // Closed-loop sends set scheduled == sent by construction, so the queue
+    // delay is not measured there. Any row that differs marks an open-loop stage.
+    let open_loop = measured
+        .iter()
+        .any(|record| record.scheduled_unix_ns != record.sent_unix_ns);
+    let queue_delay: Vec<f64> = if open_loop {
+        success_rows
+            .iter()
+            .map(|record| record.queue_delay_s)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let first_reasoning: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| record.first_reasoning_s)
+        .collect();
+    // Rows with no reported usage are skipped, never counted as zero-token
+    // requests. Rerank `input_tokens` is `usage.total_tokens` (all input).
+    let token_rows: Vec<&&BenchRecord> = success_rows
+        .iter()
+        .filter(|record| record.input_tokens > 0 || record.output_tokens > 0)
+        .collect();
+    let isl: Vec<f64> = token_rows
+        .iter()
+        .map(|record| record.input_tokens as f64)
+        .collect();
+    let osl: Vec<f64> = if generates_output {
+        token_rows
+            .iter()
+            .map(|record| record.output_tokens as f64)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let ttft_approx_count = success_rows
         .iter()
         .filter(|record| {
@@ -386,6 +444,11 @@ pub fn summarize_stage_with_options(
         decode_s: crate::stats::DistSummary::from_values(&decode),
         decode_tok_s: crate::stats::DistSummary::from_values(&decode_tok),
         ttft_s: crate::stats::DistSummary::from_values(&ttft),
+        first_byte_s: crate::stats::DistSummary::from_values(&first_byte),
+        queue_delay_s: crate::stats::DistSummary::from_values(&queue_delay),
+        first_reasoning_s: crate::stats::DistSummary::from_values(&first_reasoning),
+        isl_tokens: crate::stats::DistSummary::from_values(&isl),
+        osl_tokens: crate::stats::DistSummary::from_values(&osl),
         ttft_approx_count,
         ttft_warning: None,
         isl_osl,
@@ -1068,6 +1131,11 @@ mod tests {
                     decode_s: crate::stats::DistSummary::from_values(&[]),
                     decode_tok_s: crate::stats::DistSummary::from_values(&[]),
                     ttft_s: crate::stats::DistSummary::from_values(&[]),
+                    first_byte_s: crate::stats::DistSummary::from_values(&[]),
+                    queue_delay_s: crate::stats::DistSummary::from_values(&[]),
+                    first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
+                    isl_tokens: crate::stats::DistSummary::from_values(&[]),
+                    osl_tokens: crate::stats::DistSummary::from_values(&[]),
                     ttft_approx_count: 0,
                     ttft_warning: None,
                     isl_osl: None,
@@ -1107,6 +1175,11 @@ mod tests {
             decode_s: crate::stats::DistSummary::from_values(&[]),
             decode_tok_s: crate::stats::DistSummary::from_values(&[]),
             ttft_s: crate::stats::DistSummary::from_values(&[]),
+            first_byte_s: crate::stats::DistSummary::from_values(&[]),
+            queue_delay_s: crate::stats::DistSummary::from_values(&[]),
+            first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
+            isl_tokens: crate::stats::DistSummary::from_values(&[]),
+            osl_tokens: crate::stats::DistSummary::from_values(&[]),
             ttft_approx_count: 0,
             ttft_warning: None,
             isl_osl: None,
@@ -1192,6 +1265,133 @@ mod tests {
     }
 
     #[test]
+    fn summarize_stage_reports_recorded_field_dists() {
+        let base = BenchRecord {
+            seq: 0,
+            stage: 2.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.5,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.5,
+            first_byte_s: Some(0.04),
+            connect_s: None,
+            ttft_s: Some(0.1),
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 64,
+            output_tokens: 16,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: Some(0.06),
+        };
+        let slos = crate::summary::SloConfig::default();
+        // Closed loop: scheduled == sent on every row, queue delay not applicable.
+        let closed = summarize_stage(2.0, &[base.clone(), base.clone()], 1.0, &slos, None);
+        assert_eq!(closed.first_byte_s.n, 2);
+        assert_eq!(closed.first_reasoning_s.n, 2);
+        assert_eq!(closed.isl_tokens.avg, Some(64.0));
+        assert_eq!(closed.osl_tokens.avg, Some(16.0));
+        assert_eq!(closed.queue_delay_s.n, 0);
+        // Open loop: a delayed send marks the stage, every success contributes.
+        let mut late = base.clone();
+        late.sent_unix_ns = 3_000_005;
+        late.queue_delay_s = 0.003;
+        let mut no_usage = base.clone();
+        no_usage.input_tokens = 0;
+        no_usage.output_tokens = 0;
+        no_usage.first_byte_s = None;
+        no_usage.first_reasoning_s = None;
+        let open = summarize_stage(2.0, &[base, late, no_usage], 1.0, &slos, None);
+        assert_eq!(open.queue_delay_s.n, 3);
+        assert_eq!(open.isl_tokens.n, 2);
+        assert_eq!(open.first_byte_s.n, 2);
+        assert_eq!(open.first_reasoning_s.n, 2);
+    }
+
+    #[test]
+    fn non_generating_stage_has_no_osl_tokens() {
+        // Embeddings shape: input usage reported, no output tokens.
+        let row = BenchRecord {
+            seq: 0,
+            stage: 1.0,
+            endpoint: "http://example.test/v1/embeddings".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.05,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.05,
+            first_byte_s: Some(0.04),
+            connect_s: None,
+            ttft_s: None,
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 12,
+            output_tokens: 0,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+        };
+        let point = summarize_stage_with_options(
+            1.0,
+            &[row.clone(), row],
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert_eq!(point.osl_tokens.n, 0);
+        assert!(point.osl_tokens.avg.is_none());
+        assert_eq!(point.isl_tokens.n, 2);
+        assert_eq!(point.isl_tokens.avg, Some(12.0));
+    }
+
+    #[test]
+    fn pre_191_csv_without_first_reasoning_column_still_loads() {
+        // Header and row as written before #191 (no trailing first_reasoning_s).
+        let old = "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,\
+service_latency_s,first_byte_s,connect_s,ttft_s,ttft_source,prefill_s,decode_s,decode_tok_s,\
+itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup\n\
+0,1.0,http://example.test,5,5,0.5,0.0,0.5,0.04,0.0,0.1,stream,0.1,0.4,40.0,0.01;0.02,1,\
+true,,64,16,,,,false\n";
+        let records: Vec<BenchRecord> = csv::Reader::from_reader(old.as_bytes())
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .expect("old CSV deserializes");
+        assert_eq!(records.len(), 1);
+        assert!(records[0].first_reasoning_s.is_none());
+        let point = summarize_stage(
+            1.0,
+            &records,
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert_eq!(point.first_reasoning_s.n, 0);
+        assert_eq!(point.first_byte_s.n, 1);
+    }
+
+    #[test]
     fn summarize_stage_excludes_warmup_records() {
         let measured = BenchRecord {
             seq: 1,
@@ -1219,6 +1419,7 @@ mod tests {
             turn: None,
             error: None,
             warmup: false,
+            first_reasoning_s: None,
         };
         let mut cold = measured.clone();
         cold.seq = 0;
@@ -1265,6 +1466,7 @@ mod tests {
             turn: None,
             error: None,
             warmup: false,
+            first_reasoning_s: None,
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -1335,6 +1537,7 @@ mod tests {
             turn: None,
             error: None,
             warmup: false,
+            first_reasoning_s: None,
         };
         assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
         assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
@@ -1398,6 +1601,7 @@ mod tests {
             turn: None,
             error: None,
             warmup: false,
+            first_reasoning_s: None,
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -1475,6 +1679,7 @@ mod tests {
             turn: None,
             error: None,
             warmup: false,
+            first_reasoning_s: None,
         };
         export_otlp(
             &reqwest::Client::new(),
