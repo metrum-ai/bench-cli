@@ -3,6 +3,15 @@
 
 # Metrum AI Bench CLI vs NVIDIA AIPerf (Shadeform bake-off)
 
+> **Dated history (2026-09-24, release 1.5.0).** This is a frozen snapshot of
+> one run: Metrum AI Bench CLI as of release 1.5.0 against AIPerf 0.11.0 on a
+> single Shadeform SUT. Both tools have changed since, so do not quote these
+> numbers as current. For current, reproducible counts against AIPerf, use the
+> parity harness in [`scripts/parity/README.md`](../../scripts/parity/README.md);
+> open gaps are tracked in epic [#184](https://github.com/metrum-ai/bench-cli/issues/184).
+> Re-running `scripts/e2e/run-shadeform.sh` regenerates this file with fresh
+> results and drops this note.
+
 Side-by-side study on one Shadeform GPU SUT serving Qwen via vLLM.
 This report is generated from the e2e artifact bundle; it does not invent metrics.
 

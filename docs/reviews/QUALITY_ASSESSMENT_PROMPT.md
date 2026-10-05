@@ -59,7 +59,9 @@ that a parity-checklist review would reach.
    report it honestly, and separately whether it can run the controlled case
    when the operator asks. Do not treat the controlled case as the default
    truth.
-3. **Comparison tools are context, not the standard.** GenAI-Perf (retired; see AIPerf), vLLM
+3. **Comparison tools are context, not the standard.** NVIDIA AIPerf (the
+   maintained NVIDIA load generator; `scripts/parity/README.md` counts the data
+   points it reports against this tool's for the same workload), vLLM
    `benchmark_serving.py`, guidellm, LLMPerf, MLPerf LoadGen, and InferenceX
    are references for what a metric name conventionally means. A missing
    feature relative to them is a finding only when one of the three personas
@@ -107,8 +109,13 @@ Read all of:
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`,
   `THIRD_PARTY_LICENSES`, and every file under `docs/` including
   `SMOKE_RESULTS.md`, `REPRODUCING.md`, `METRICS.md`,
-  `OUTPUT_SCHEMA.md`, `CLI.md`, `COMPARISON.md`, `STRATEGIC_BENCHMARKING.md`,
+  `OUTPUT_SCHEMA.md`, `CLI.md`, `STRATEGIC_BENCHMARKING.md`,
   `HISTORY_REWRITE.md`.
+- `scripts/parity/README.md`, the living comparison against AIPerf: a
+  reproducible count harness with the current per-scenario data-point counts.
+  Open parity gaps are tracked in epic
+  [#184](https://github.com/metrum-ai/bench-cli/issues/184). Treat
+  `artifacts/e2e/COMPARISON_AIPERF.md` as dated history, not current evidence.
 - `live-results/**` if present. It is gitignored and may hold real GPU runs
   from the campaign described in `scripts/live/README.md`. Use it as evidence of how
   the tool behaves against real vLLM and SGLang, and cross-check
