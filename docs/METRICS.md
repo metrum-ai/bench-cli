@@ -84,8 +84,10 @@ Workload section. This page focuses on measured fields.
   Only rows with ISL > 0 and TTFT > 0 contribute, so the distribution is
   `n=0` without streaming TTFT. TTFT includes connect time, TLS, and queueing
   on the server, so this is a lower bound on engine prefill speed, not a
-  server prefill trace. TTFT approximated from first byte
-  (`--infer-ttft-from-first-byte`) also feeds it.
+  server prefill trace. Rows whose TTFT was approximated from first byte
+  (`--infer-ttft-from-first-byte`, `ttft_source = first_byte_approx`) are
+  excluded: headers can arrive before prefill ends, which would inflate the
+  rate.
 - **Time to second token (`time_to_second_token_s`)**: per-request
   `time_to_second_token_s = ttft_s + itl_s[0]`, seconds (#193). Only rows with
   a TTFT and at least one ITL sample (two visible content chunks) contribute.
@@ -127,7 +129,12 @@ Workload section. This page focuses on measured fields.
   divided by the stage window. Strategic `completion_tokens_total` (and so
   `total_tokens_per_second`) is `null` for stages that generate no output
   (`--kind embeddings`, `--kind rerank`); rerank `prompt_tokens_total` sums
-  `usage.total_tokens` (all input).
+  `usage.total_tokens` (all input). A strategic total whose field sums to 0
+  (no row reported it) is `null`, as on the summary. The pre-existing
+  strategic `completion_tokens_per_second` is unchanged: it reads `0.0`, not
+  `null`, for any stage with successes but no reported output tokens
+  (including embeddings and rerank), so it can be `0.0` while
+  `completion_tokens_total` is `null`.
 - **Error rate**: measured failures divided by measured attempts.
 - **Goodput**: measured successes satisfying every configured TTFT, TPOT,
   E2E, and `user_tps` SLO divided by the window.

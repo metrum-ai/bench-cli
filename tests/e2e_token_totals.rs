@@ -225,8 +225,53 @@ fn strategic_points_report_token_totals_and_rates() {
         (prompt + completion) as f64 / window,
         "total rate",
     );
+    // Recompute from the request CSV rows (measured successes only).
+    let mut reader = csv::Reader::from_path(&csv).expect("csv");
+    let headers = reader.headers().expect("headers").clone();
+    let col = |row: &csv::StringRecord, name: &str| -> String {
+        let index = headers.iter().position(|h| h == name).expect(name);
+        row[index].to_string()
+    };
+    let rows: Vec<csv::StringRecord> = reader
+        .records()
+        .map(|row| row.expect("row"))
+        .filter(|row| col(row, "success") == "true" && col(row, "warmup") == "false")
+        .collect();
+    assert_eq!(rows.len(), 3);
+    let input: Vec<f64> = rows
+        .iter()
+        .map(|r| col(r, "input_tokens").parse().expect("input_tokens"))
+        .collect();
+    let ttft: Vec<f64> = rows
+        .iter()
+        .map(|r| col(r, "ttft_s").parse().expect("ttft_s"))
+        .collect();
+    let first_itl: Vec<f64> = rows
+        .iter()
+        .map(|r| {
+            col(r, "itl_s")
+                .split(';')
+                .next()
+                .expect("itl")
+                .parse()
+                .expect("first itl")
+        })
+        .collect();
+    assert_eq!(prompt as f64, input.iter().sum::<f64>());
+    let prefill: Vec<f64> = input.iter().zip(&ttft).map(|(i, t)| i / t).collect();
+    let second: Vec<f64> = ttft.iter().zip(&first_itl).map(|(t, i)| t + i).collect();
     assert_eq!(point["prefill_tps_per_user"]["n"], 3);
+    assert_close(
+        &point["prefill_tps_per_user"]["avg"],
+        mean(&prefill),
+        "prefill",
+    );
     assert_eq!(point["time_to_second_token_s"]["n"], 3);
+    assert_close(
+        &point["time_to_second_token_s"]["avg"],
+        mean(&second),
+        "ttst",
+    );
     assert!(
         f64_at(&point["time_to_second_token_s"], "avg") > f64_at(&point["ttft_s"], "avg"),
         "second token after first"

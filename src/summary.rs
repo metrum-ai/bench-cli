@@ -70,7 +70,8 @@ pub struct RunSummary {
     pub queue_delay_s: DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: DistSummary,
-    /// Per-request prefill rate `isl_tokens / ttft_s`; rows with both values only.
+    /// Per-request prefill rate `isl_tokens / ttft_s`; rows with both values
+    /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: DistSummary,
     /// Per-request `ttft_s + itl_s[0]`; streaming rows with at least two content chunks.
     pub time_to_second_token_s: DistSummary,
@@ -272,6 +273,7 @@ impl RecordedFieldDists {
             .collect();
         let prefill_rates: Vec<f64> = successes
             .iter()
+            .filter(|r| !ttft_is_first_byte_approx(r.ttft_source))
             .filter_map(|r| match (record_isl_tokens(r), r.ttft_s) {
                 (Some(isl), Some(ttft)) if isl > 0 && ttft > 0.0 => Some(isl as f64 / ttft),
                 _ => None,
@@ -339,6 +341,15 @@ impl TokenSamples {
             (false, false) => None,
         }
     }
+}
+
+/// First-byte TTFT can land before prefill ends, which would inflate an
+/// ISL / TTFT rate, so prefill rates use visible-token TTFT only.
+pub(crate) fn ttft_is_first_byte_approx(source: Option<crate::measurement::TtftSource>) -> bool {
+    matches!(
+        source,
+        Some(crate::measurement::TtftSource::FirstByteApprox)
+    )
 }
 
 /// Prompt tokens for one row with the same rule as `isl_tokens`: server
@@ -1546,6 +1557,14 @@ mod tests {
         assert_eq!(filled.completion_tokens_total, Some(8 + 12));
         assert_eq!(filled.total_tokens_per_second, Some(55.0 / 2.0));
         assert_eq!(filled.prefill_tps_per_user.n, 2);
+
+        // First-byte approximated TTFT is excluded from the prefill rate only.
+        let mut approx = ok(0, 500, 100, 20, &[]);
+        approx.ttft_source = Some(crate::measurement::TtftSource::FirstByteApprox);
+        let summary = RunSummary::from_records(&[approx], 1.0, false);
+        assert_eq!(summary.prefill_tps_per_user.n, 0);
+        assert_eq!(summary.ttft_s.n, 1);
+        assert_eq!(summary.prompt_tokens_total, Some(18));
     }
 
     #[test]

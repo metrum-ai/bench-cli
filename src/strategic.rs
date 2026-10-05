@@ -185,7 +185,8 @@ pub struct SweepPoint {
     pub input_tokens_per_second: Option<f64>,
     /// `(prompt_tokens_total + completion_tokens_total) / window`; null unless both totals exist.
     pub total_tokens_per_second: Option<f64>,
-    /// Per-request prefill rate `input_tokens / ttft_s` over successes with both.
+    /// Per-request prefill rate `input_tokens / ttft_s` over successes with both
+    /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: crate::stats::DistSummary,
     /// Per-request `ttft_s + itl_s[0]`; streaming successes with two or more content chunks.
     pub time_to_second_token_s: crate::stats::DistSummary,
@@ -419,19 +420,15 @@ pub fn summarize_stage_with_options(
     } else {
         Vec::new()
     };
-    let prompt_tokens_total = crate::summary::total(
-        &token_rows
-            .iter()
-            .map(|r| r.input_tokens)
-            .collect::<Vec<_>>(),
-    );
+    // A field no row reported (sum 0) is not applicable, never a 0 total;
+    // same rule as the modality summary.
+    let field_total = |pick: fn(&BenchRecord) -> u64| {
+        crate::summary::total(&token_rows.iter().map(|r| pick(r)).collect::<Vec<_>>())
+            .filter(|&tokens| tokens > 0)
+    };
+    let prompt_tokens_total = field_total(|r| r.input_tokens);
     let completion_tokens_total = if generates_output {
-        crate::summary::total(
-            &token_rows
-                .iter()
-                .map(|r| r.output_tokens)
-                .collect::<Vec<_>>(),
-        )
+        field_total(|r| r.output_tokens)
     } else {
         None
     };
@@ -442,6 +439,7 @@ pub fn summarize_stage_with_options(
     };
     let prefill_rates: Vec<f64> = success_rows
         .iter()
+        .filter(|record| !crate::summary::ttft_is_first_byte_approx(record.ttft_source))
         .filter_map(|record| match record.ttft_s {
             Some(ttft) if record.input_tokens > 0 && ttft > 0.0 => {
                 Some(record.input_tokens as f64 / ttft)
@@ -1790,6 +1788,21 @@ mod tests {
         assert!(empty.input_tokens_per_second.is_none());
         assert!(empty.total_tokens_per_second.is_none());
         assert_eq!(empty.prefill_tps_per_user.n, 0);
+        // Usage with output only: the prompt total is not applicable, not 0.
+        let mut output_only = base.clone();
+        output_only.input_tokens = 0;
+        let slos = crate::summary::SloConfig::default();
+        let point = summarize_stage(1.0, &[output_only], 1.0, &slos, None);
+        assert!(point.prompt_tokens_total.is_none());
+        assert!(point.input_tokens_per_second.is_none());
+        assert!(point.total_tokens_per_second.is_none());
+        assert_eq!(point.completion_tokens_total, Some(20));
+        // First-byte approximated TTFT never feeds the prefill rate.
+        let mut approx = base.clone();
+        approx.ttft_source = Some(crate::measurement::TtftSource::FirstByteApprox);
+        let point = summarize_stage(1.0, &[approx], 1.0, &slos, None);
+        assert_eq!(point.prefill_tps_per_user.n, 0);
+        assert_eq!(point.time_to_second_token_s.n, 1);
     }
 
     #[test]

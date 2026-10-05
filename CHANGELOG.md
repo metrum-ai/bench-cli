@@ -123,7 +123,8 @@
   `total_tokens_per_second = (prompt_tokens_total + completion_tokens_total) / window_seconds`
   (`null` unless both totals exist). It also gains type-7 distributions
   `prefill_tps_per_user` (`isl_tokens / ttft_s`, rows with ISL > 0 and
-  TTFT > 0; TTFT includes connect and queueing), `time_to_second_token_s`
+  visible-token TTFT > 0; first-byte approximations excluded; TTFT includes
+  connect and queueing), `time_to_second_token_s`
   (`ttft_s + itl_s[0]`, time to the second content chunk), and `user_tps`
   (`completion_tokens / latency_s`, the `user_tps=` SLO definition). The
   console prints the new lines when they have values.
@@ -131,8 +132,9 @@
   `completion_tokens_total`, `input_tokens_per_second`,
   `total_tokens_per_second`, `prefill_tps_per_user`
   (`input_tokens / ttft_s`), and `time_to_second_token_s`, from server usage
-  only. `completion_tokens_total` and `total_tokens_per_second` are `null`
-  for embeddings and rerank stages (#193).
+  only. A total is `null` when no success reported that field, and
+  `completion_tokens_total` and `total_tokens_per_second` are `null` for
+  embeddings and rerank stages (#193).
 - New launcher subcommand `sut` prints the SUT JSON to stdout without docker
   or a GPU. `HF_HUB_OFFLINE=1` skips the Hub revision lookup
   (`model.revision` is then null). The offline self-test
