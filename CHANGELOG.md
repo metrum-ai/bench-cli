@@ -319,6 +319,15 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
+  at the bucket edges (#231). A rank in the first finite bucket used to be
+  interpolated from 0, and a rank in `+Inf` used to return the highest finite
+  bound. Both now give a null `pN` with `pN_reason` (`below_first_bucket` /
+  `above_last_bucket`) and `pN_bound` (that bucket bound) in `--json`
+  `engine_histograms`; the text table prints `<=0.3` / `>60`. In-range
+  interpolation is unchanged. A live vLLM 0.31.0 run had reported
+  `request_prefill_time` p50/p95 = 0.15/0.285 in every stage because every
+  value was below the 0.3 s first bound.
 - `metrum-ai-bench-cli-asr` no longer records `rtfx_client: 0` for a sample
   whose `duration` is 0; like `audio_duration_s`, it is omitted (no usable
   duration, no real-time factor). Strategic `--kind asr` follows the same
