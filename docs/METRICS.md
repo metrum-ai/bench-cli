@@ -374,7 +374,8 @@ to a modality run's single `measure` stage as well.
   `Instant`, shared by request and telemetry rows. `run.t0_wall` is ISO 8601
   UTC metadata.
 - **Modality request timing**: a modality `request` row is derived from its
-  `request.v3` record: `t_sent_ns` is run start plus `send_offset_s`,
+  `request.v3` record: `t_sent_ns` is `send_offset_s` (same origin: the run
+  clock starts at the NDJSON epoch),
   `t_done_ns = t_sent_ns + latency_s`, `service_latency_s` is the record's
   `latency_s`, and the row's `latency_s = queue_delay_s + latency_s`
   (seconds). The `measure` stage window runs from the first measured send to

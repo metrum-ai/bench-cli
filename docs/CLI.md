@@ -150,7 +150,7 @@ Options:
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
       --require-telemetry
-          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+          Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run
       --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
           Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --max-tokens <MAX_TOKENS>
@@ -270,7 +270,7 @@ Options:
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
       --require-telemetry
-          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+          Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run
       --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
           Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --streaming
@@ -467,7 +467,7 @@ Options:
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
 
       --require-telemetry
-          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+          Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run
 
       --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
           Consecutive scrape failures before --require-telemetry aborts
@@ -645,7 +645,7 @@ Options:
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
       --require-telemetry
-          Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)
+          Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run
       --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
           Consecutive scrape failures before --require-telemetry aborts [default: 3]
       --summary-json <SUMMARY_JSON>

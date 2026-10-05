@@ -477,7 +477,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(session) = telemetry.as_mut() {
         session.set_load(args.request_rate.unwrap_or(f64::from(concurrency_cap)));
     }
-    let run_start = Instant::now();
+    // With --ndjson the run clock is the NDJSON epoch, so data-log
+    // send_offset_s / scheduled_offset_s equal t_sent_ns / t_sched_ns.
+    let run_start = telemetry
+        .as_ref()
+        .map_or_else(Instant::now, |session| session.run_start());
 
     let mut handles = Vec::new();
     use rand::SeedableRng;

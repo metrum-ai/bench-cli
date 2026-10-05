@@ -872,7 +872,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         );
     }
 
-    let start_time = Instant::now();
+    // With --ndjson the run clock is the NDJSON epoch, so data-log
+    // send_offset_s / scheduled_offset_s equal t_sent_ns / t_sched_ns.
+    let start_time = telemetry
+        .as_ref()
+        .map_or_else(Instant::now, |session| session.run_start());
     let ramp_up_start = start_time;
     let mut current_concurrency;
     let (record_tx, mut record_rx) =

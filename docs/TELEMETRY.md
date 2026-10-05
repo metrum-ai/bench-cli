@@ -155,7 +155,8 @@ A modality run is one stage. Its NDJSON holds:
   API keys.
 - One `request` row per `request.v3` record, written as each request
   completes, joined on `seq` and `run_id`. `t_sent_ns` is the record's
-  `send_offset_s` on the shared epoch, `t_done_ns = t_sent_ns + latency_s`,
+  `send_offset_s` in nanoseconds (the run clock starts at the NDJSON epoch,
+  after the telemetry probes, so both share one origin), `t_done_ns = t_sent_ns + latency_s`,
   `t_first_ns` is response headers (`first_byte_s`) as on strategic rows,
   and `t_sched_ns` comes from `scheduled_offset_s` in open-loop runs.
   `service_latency_s` is the record's `latency_s`; `latency_s` adds

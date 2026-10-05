@@ -215,7 +215,9 @@
   `telemetry`, `scrape_error`, `summary`), same
   `metrum-ai-bench-cli.telemetry.v1`, and one monotonic epoch shared by
   request and telemetry rows. Each `request.v3` record becomes a `request`
-  row (`t_sent_ns` from `send_offset_s`, `t_done_ns = t_sent_ns +
+  row (`t_sent_ns` equals `send_offset_s` in nanoseconds: with `--ndjson`
+  the run clock starts at the NDJSON epoch, after the telemetry probes, so
+  data-log offsets and `*_ns` fields share one origin; `t_done_ns = t_sent_ns +
   latency_s`, `service_latency_s` is the record's `latency_s`, row
   `latency_s` adds `queue_delay_s`); `warmup` and `measure` `stage` rows
   span the phase's first send to last completion and can overlap at

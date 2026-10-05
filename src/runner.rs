@@ -14,10 +14,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after).
+/// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after /
+/// telemetry abort).
+///
+/// Real signals are tracked apart from `stop`, so a run stopped by
+/// `--stop-after-seconds` or a `--require-telemetry` abort still drains and
+/// writes its summary on the first Ctrl-C or SIGTERM; only a second real
+/// signal exits immediately.
 #[derive(Clone, Default)]
 pub struct StopFlag {
     inner: Arc<AtomicBool>,
+    signaled: Arc<AtomicBool>,
 }
 
 impl StopFlag {
@@ -36,10 +43,19 @@ impl StopFlag {
     pub fn as_atomic(&self) -> Arc<AtomicBool> {
         self.inner.clone()
     }
+
+    /// Record a real SIGINT / SIGTERM and stop. Returns true when an earlier
+    /// signal was already received (the caller then exits without draining).
+    pub fn note_signal(&self) -> bool {
+        let repeated = self.signaled.swap(true, Ordering::SeqCst);
+        self.stop();
+        repeated
+    }
 }
 
 /// Install SIGINT and (on Unix) SIGTERM handlers that set `flag`.
-/// A second signal after stop is already set exits the process immediately.
+/// A second real signal exits the process immediately; a stop set by
+/// anything else (stop-after, telemetry abort) does not count as the first.
 pub fn install_stop_handlers(flag: StopFlag) {
     let flag_ctrl = flag.clone();
     tokio::spawn(async move {
@@ -47,12 +63,11 @@ pub fn install_stop_handlers(flag: StopFlag) {
             if tokio::signal::ctrl_c().await.is_err() {
                 break;
             }
-            if flag_ctrl.is_stopped() {
+            if flag_ctrl.note_signal() {
                 warn!("Second Ctrl-C; exiting without waiting for drain");
                 std::process::exit(130);
             }
             warn!("Ctrl-C received; stopping new requests and draining in-flight work");
-            flag_ctrl.stop();
         }
     });
 
@@ -68,12 +83,11 @@ pub fn install_stop_handlers(flag: StopFlag) {
                 if sigterm.recv().await.is_none() {
                     break;
                 }
-                if flag_term.is_stopped() {
+                if flag_term.note_signal() {
                     warn!("Second SIGTERM; exiting without waiting for drain");
                     std::process::exit(143);
                 }
                 warn!("SIGTERM received; stopping new requests and draining in-flight work");
-                flag_term.stop();
             }
         });
     }
@@ -144,6 +158,27 @@ mod tests {
     use super::*;
     use crate::record::RequestRecord;
     use chrono::TimeZone;
+
+    #[test]
+    fn non_signal_stop_does_not_count_as_first_signal() {
+        let flag = StopFlag::new();
+        // A telemetry abort (or stop-after) sets the stop flag...
+        flag.stop();
+        assert!(flag.is_stopped());
+        // ...but the first real signal still drains instead of hard-exiting.
+        assert!(!flag.note_signal());
+        assert!(flag.note_signal());
+        // Clones share both flags.
+        let clone = flag.clone();
+        assert!(clone.note_signal());
+    }
+
+    #[test]
+    fn first_signal_stops() {
+        let flag = StopFlag::new();
+        assert!(!flag.note_signal());
+        assert!(flag.is_stopped());
+    }
 
     fn sample(seq: u64, started: DateTime<Utc>, latency_ms: u64) -> RequestRecord {
         RequestRecord::success(

@@ -441,11 +441,13 @@ A modality run is one stage. Each `request.v3` record also becomes one
 `request` row, joined on `run_id` and `seq`, mapped as follows (full rules
 in [TELEMETRY.md](TELEMETRY.md#modality-binaries-llm-vlm-asr-imagegen)):
 
-- `t_sent_ns` - run start on the shared epoch plus `send_offset_s`.
+- `t_sent_ns` - `send_offset_s` in nanoseconds. With `--ndjson` the run clock
+  starts at the NDJSON epoch (after the telemetry probes), so the two share
+  one origin and join exactly; `run.t0_wall + t_sent_ns` is the send wall time.
 - `t_done_ns` - `t_sent_ns + latency_s` (the record's `latency_s`).
 - `t_first_ns` - `t_sent_ns + first_byte_s`; omitted when the record has no
   `first_byte_s`.
-- `t_sched_ns` - run start plus `scheduled_offset_s` when the record has it
+- `t_sched_ns` - `scheduled_offset_s` in nanoseconds when the record has it
   (open loop, `--request-rate`); equal to `t_sent_ns` otherwise.
 - `service_latency_s` - the record's `latency_s`; `latency_s` -
   `queue_delay_s + latency_s` (as on strategic rows).

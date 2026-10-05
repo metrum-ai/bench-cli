@@ -975,7 +975,7 @@ async fn main() -> Result<()> {
     let mut telemetry_session = match &args.ndjson {
         Some(path) => Some(
             metrum_ai_bench::telemetry::TelemetrySession::start(
-                Arc::clone(&run_epoch),
+                Some(Arc::clone(&run_epoch)),
                 metrum_ai_bench::telemetry::RunStamp {
                     run_id: (*run_id).clone(),
                     tool_version: VERSION.to_string(),

@@ -144,6 +144,10 @@ fn assert_joined(run: &Run, binary: &str) {
     assert_eq!(summary["telemetry_rows"], kinds["telemetry"]);
     let run_id = rows[0]["run_id"].as_str().expect("run_id");
     assert!(rows.iter().all(|row| row["run_id"] == run_id));
+    let t0_wall =
+        chrono::DateTime::parse_from_rfc3339(rows[0]["t0_wall"].as_str().expect("t0_wall"))
+            .expect("t0_wall RFC 3339")
+            .with_timezone(&chrono::Utc);
 
     // Request rows join request.v3 records on seq, with the same timing.
     let records: BTreeMap<u64, Value> = request_records(&run.data_log)
@@ -165,8 +169,29 @@ fn assert_joined(run: &Run, binary: &str) {
             (done as f64 - sent as f64 - latency_ns).abs() < 1_000.0,
             "t_done - t_sent must equal latency_s: {row} vs {record}"
         );
+        // One origin: the data-log offset is the NDJSON send time (1 us
+        // tolerance for the f64 seconds round trip).
         let offset_ns = record["send_offset_s"].as_f64().expect("send_offset_s") * 1e9;
-        assert!(sent as f64 >= offset_ns - 1_000.0, "base offset >= 0");
+        assert!(
+            (sent as f64 - offset_ns).abs() < 1_000.0,
+            "send_offset_s * 1e9 must equal t_sent_ns: {row} vs {record}"
+        );
+        // Wall clock: run.t0_wall + t_sent_ns lands on the record's
+        // started_at. t0_wall has millisecond precision; allow 5 ms.
+        let started_at = chrono::DateTime::parse_from_rfc3339(
+            record["started_at"].as_str().expect("started_at"),
+        )
+        .expect("started_at RFC 3339");
+        let sent_wall = t0_wall + chrono::Duration::nanoseconds(sent as i64);
+        let skew_ms = (sent_wall - started_at.with_timezone(&chrono::Utc))
+            .num_microseconds()
+            .expect("skew fits")
+            .abs() as f64
+            / 1_000.0;
+        assert!(
+            skew_ms < 5.0,
+            "t0_wall + t_sent_ns is {skew_ms} ms from started_at: {row} vs {record}"
+        );
     }
 
     // Stage windows bracket their requests, and telemetry lands inside the

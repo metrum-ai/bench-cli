@@ -54,7 +54,7 @@ pub struct TelemetryArgs {
     #[arg(
         long,
         default_value_t = false,
-        help = "Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)"
+        help = "Abort mid-run after N consecutive scrape failures on any source (default N=3); the startup probe always fails the run"
     )]
     pub require_telemetry: bool,
 
@@ -98,7 +98,7 @@ impl TelemetryArgs {
             require_failures: self.require_telemetry_failures,
             abort,
         };
-        TelemetrySession::start(Arc::new(RunEpoch::new()), stamp, options)
+        TelemetrySession::start(None, stamp, options)
             .await
             .map(Some)
     }
@@ -187,30 +187,20 @@ impl TelemetrySession {
     ///
     /// Any source that fails its startup probe fails the call before a
     /// request is sent, with or without `--require-telemetry`.
+    ///
+    /// `epoch: None` creates the epoch after the probes, so a modality binary
+    /// can start its run clock at [`Self::run_start`] and its data-log
+    /// `send_offset_s` / `scheduled_offset_s` share the NDJSON `*_ns` origin.
+    /// Strategic passes its own epoch, which already times its requests.
     pub async fn start(
-        epoch: Arc<RunEpoch>,
+        epoch: Option<Arc<RunEpoch>>,
         stamp: RunStamp,
         options: SessionOptions<'_>,
     ) -> Result<Self> {
         let (writer, handle) = NdjsonWriter::spawn(options.ndjson.clone())?;
-        let run_id = Arc::new(stamp.run_id);
-        let mut session = Self {
-            epoch,
-            run_id,
-            ndjson: options.ndjson,
-            writer,
-            handle,
-            scrapers: Vec::new(),
-            stop_scrapers: Arc::new(AtomicBool::new(false)),
-            require_telemetry: options.require_telemetry,
-            sources: 0,
-            load: None,
-            warmup: None,
-            measure: None,
-            write_error: None,
-        };
         let mut stamps: Vec<TelemetrySourceStamp> = Vec::new();
         let mut scrape_plan = None;
+        let mut source_count = 0;
         if let Some(cfg) = options.config {
             cfg.warn_fast_sources();
             let sources = cfg.compile()?;
@@ -219,10 +209,25 @@ impl TelemetrySession {
             let probes = probe_sources(&client, cfg, &sources).await.context(
                 "telemetry: a configured source could not be scraped at startup; no requests were sent",
             )?;
-            session.sources = sources.len() as u64;
+            source_count = sources.len() as u64;
             stamps = probes.into_iter().map(|p| p.stamp).collect();
             scrape_plan = Some((client, cfg.clone(), sources));
         }
+        let mut session = Self {
+            epoch: epoch.unwrap_or_else(|| Arc::new(RunEpoch::new())),
+            run_id: Arc::new(stamp.run_id),
+            ndjson: options.ndjson,
+            writer,
+            handle,
+            scrapers: Vec::new(),
+            stop_scrapers: Arc::new(AtomicBool::new(false)),
+            require_telemetry: options.require_telemetry,
+            sources: source_count,
+            load: None,
+            warmup: None,
+            measure: None,
+            write_error: None,
+        };
         // The run row goes first so readers see the epoch before any sample.
         session
             .writer
@@ -271,6 +276,12 @@ impl TelemetrySession {
                 .collect();
         }
         Ok(session)
+    }
+
+    /// Origin of every NDJSON `*_ns` field. Modality binaries start their
+    /// run clock here so data-log offsets and `t_sent_ns` share one origin.
+    pub fn run_start(&self) -> Instant {
+        self.epoch.mono()
     }
 
     /// Shared clock for request and stage timestamps.
@@ -665,7 +676,7 @@ mod tests {
         let path = dir.path().join("run.ndjson");
         let stop = StopFlag::new();
         let session = TelemetrySession::start(
-            Arc::new(RunEpoch::new()),
+            None,
             RunStamp {
                 run_id: "run-1".into(),
                 tool_version: "0.0.0".into(),
