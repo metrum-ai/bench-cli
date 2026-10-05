@@ -37,6 +37,13 @@
   `docs/reviews/QUALITY_ASSESSMENT_REPORT.md` gains a header pointer to epic
   #184 for current comparison work, and `artifacts/e2e/COMPARISON_AIPERF.md`
   is marked as dated history. No metric or schema change.
+- New design note `docs/design/AIPERF_INGEST.md` (#205), indexed from the new
+  `docs/design/README.md`. It maps AIPerf 0.11.0 and 0.13.0
+  `profile_export.jsonl` records to `request.v3` and `summary.v3` (including
+  the #191 distributions) and lists gaps in both directions. The importer
+  does not copy AIPerf's `cli_command`. It recommends a narrow
+  `metrum-ai-bench-cli import aiperf` after #192 to #195, with telemetry
+  joins after #196. Design only; no behavior change.
 
 ### Added
 - `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
