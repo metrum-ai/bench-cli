@@ -503,7 +503,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let slot = warmup_barrier
             .before_slot(slot, &mut handles, run_start)
             .await;
-        if stop.is_stopped() {
+        // A failed warmup task fails the run; skip the measured phase.
+        if stop.is_stopped() || warmup_barrier.join_errors() > 0 {
             break;
         }
         let wait = slot.scheduled_delay.saturating_sub(run_start.elapsed());
@@ -663,6 +664,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     for h in handles {
         h.await?;
     }
+    let (telemetry_info, telemetry_verdict) =
+        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
     if warmup_barrier.join_errors() > 0 {
         return Err(format!(
             "{} warmup task(s) failed to join",
@@ -670,8 +673,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         )
         .into());
     }
-    let (telemetry_info, telemetry_verdict) =
-        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
 
     let metrics = metrics.lock().await;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);

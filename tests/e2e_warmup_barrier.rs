@@ -214,12 +214,20 @@ fn llm_open_loop_measured_requests_wait_for_warmup() {
     assert_ok(&output, "llm open loop");
     assert_modality_barrier(&run);
 
-    // Constant 20 req/s keeps a 50 ms gap between measured sends after the
-    // barrier; without the shift they would all be overdue and queue.
-    let mut measured: Vec<Value> = request_records(&run.data_log)
-        .into_iter()
-        .filter(|r| r["phase"] == "measure")
-        .collect();
+    // Constant 20 req/s: the seeded 50 ms gaps survive the shift, the first
+    // measured slot is due no earlier than warmup drained, and no measured
+    // request inherits warmup time as queue delay. Without the shift every
+    // measured slot would be overdue at the barrier.
+    let records = request_records(&run.data_log);
+    let warm_done = records
+        .iter()
+        .filter(|r| r["phase"] == "warmup")
+        .map(|r| {
+            r["send_offset_s"].as_f64().expect("send_offset_s")
+                + r["latency_s"].as_f64().expect("latency_s")
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+    let mut measured: Vec<&Value> = records.iter().filter(|r| r["phase"] == "measure").collect();
     measured.sort_by_key(|r| r["seq"].as_u64().expect("seq"));
     let sched: Vec<f64> = measured
         .iter()
@@ -235,11 +243,15 @@ fn llm_open_loop_measured_requests_wait_for_warmup() {
             "measured schedule gap must stay 50 ms: {sched:?}"
         );
     }
-    let first_queue = measured[0]["queue_delay_s"].as_f64().unwrap_or(0.0);
     assert!(
-        first_queue < 0.05,
-        "first measured request must not inherit warmup time as queue delay: {first_queue}"
+        sched[0] + 1e-6 >= warm_done,
+        "first measured slot due before warmup drained: {} < {warm_done}",
+        sched[0]
     );
+    for r in &measured {
+        let queue = r["queue_delay_s"].as_f64().unwrap_or(0.0);
+        assert!(queue < 0.05, "measured queue delay counts warmup: {r}");
+    }
 }
 
 #[test]

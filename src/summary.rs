@@ -615,7 +615,7 @@ impl RunSummary {
         let per_endpoint = endpoint_summaries(&pool);
         let recorded = RecordedFieldDists::from_successes(&successes);
         let http = HttpTraceDists::from_successes(&successes);
-        let bins = throughput_bins(&successes, window, bin_seconds);
+        let bins = throughput_bins(&successes, open_loop_anchor(&pool), window, bin_seconds);
         let time_weighted = time_weighted(&pool, &successes, window_seconds);
         let completion_tokens_per_second = completion_tokens_total.map(|t| t as f64 / window);
         let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / window);
@@ -1169,7 +1169,21 @@ fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSu
         .collect()
 }
 
-fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) -> Vec<f64> {
+/// First measured `scheduled_offset_s` (successes and failures), the origin
+/// of open-loop throughput bins (#226).
+fn open_loop_anchor(measured: &[&RequestRecord]) -> Option<f64> {
+    measured
+        .iter()
+        .filter_map(|r| r.scheduled_offset_s)
+        .min_by(f64::total_cmp)
+}
+
+fn throughput_bins(
+    records: &[&RequestRecord],
+    open_loop_anchor: Option<f64>,
+    window: f64,
+    bin_seconds: f64,
+) -> Vec<f64> {
     if records.is_empty() || !bin_seconds.is_finite() || bin_seconds <= 0.0 {
         return Vec::new();
     }
@@ -1180,10 +1194,7 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
         // Open loop: bin by scheduled offset from the first measured slot, so
         // warmup (and the #226 barrier shift) cannot push measured requests
         // past the last bin.
-        let min_sched = records
-            .iter()
-            .filter_map(|r| r.scheduled_offset_s)
-            .fold(f64::INFINITY, f64::min);
+        let min_sched = open_loop_anchor.unwrap_or(0.0);
         for record in records {
             if let Some(offset) = record.scheduled_offset_s {
                 let index = ((offset - min_sched) / bin_seconds).floor() as usize;
@@ -1426,7 +1437,7 @@ mod tests {
             );
             records.last_mut().unwrap().started_at = t0;
         }
-        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 12.15, 10.0);
+        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), None, 12.15, 10.0);
         assert_eq!(bins.len(), 2);
         assert!(
             (bins[0] - 24.7).abs() < 0.5,
@@ -1454,12 +1465,32 @@ mod tests {
                     .with_schedule(at, Duration::ZERO)
             })
             .collect();
-        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 2.0, 1.0);
+        let measured: Vec<&RequestRecord> = records.iter().collect();
+        let bins = throughput_bins(&measured, open_loop_anchor(&measured), 2.0, 1.0);
         assert_eq!(bins.len(), 2);
         assert!(
             bins.iter().all(|rps| (rps - 10.0).abs() < 1e-6),
             "bins={bins:?}"
         );
+    }
+
+    #[test]
+    fn open_loop_anchor_includes_failed_first_slot() {
+        let started = Utc::now();
+        let latency = Duration::from_millis(10);
+        let failed = RequestRecord::failed(
+            0,
+            Phase::Measure,
+            "ep".into(),
+            started,
+            with_times(started, latency),
+            latency,
+            RequestError::RateLimit,
+        )
+        .with_schedule(Duration::from_secs(3), Duration::ZERO);
+        let later = ok(1, 50, 10, 4, &[]).with_schedule(Duration::from_secs(4), Duration::ZERO);
+        assert_eq!(open_loop_anchor(&[&failed, &later]), Some(3.0));
+        assert_eq!(open_loop_anchor(&[]), None);
     }
 
     #[test]
@@ -1473,7 +1504,7 @@ mod tests {
             })
             .collect();
         // Window 0.2 s with bin_seconds 1.0 must not report 10.0 / 1.0 = 10 rps.
-        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 0.2, 1.0);
+        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), None, 0.2, 1.0);
         assert_eq!(bins.len(), 1);
         assert!(
             (bins[0] - 50.0).abs() < 1e-6,

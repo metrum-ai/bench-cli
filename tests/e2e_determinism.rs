@@ -77,17 +77,24 @@ fn run_llm(url: &str, extra: &[&str]) -> Run {
 /// Scheduled offsets, phases and sequence numbers that depend only on `--seed`
 /// must repeat exactly across runs; timings are excluded since they are not
 /// reproducible by construction. Offsets are relative to the first scheduled
-/// slot of the same phase (in microseconds): the warmup barrier (#226) shifts
+/// slot of the same phase (in nanoseconds): the warmup barrier (#226) shifts
 /// the measured schedule by however long warmup took, and the seed fixes the
 /// gaps, not that shift.
 fn schedule_shape(data_log: &std::path::Path) -> Vec<(u64, String, Option<i64>)> {
     let records = request_records(data_log);
+    // Whole nanoseconds first, then integer subtraction: exact across runs.
+    let ns = |r: &serde_json::Value| {
+        r["scheduled_offset_s"]
+            .as_f64()
+            .map(|offset| (offset * 1e9).round() as i64)
+    };
     let phase_start = |phase: &str| {
         records
             .iter()
             .filter(|r| r["phase"] == phase)
-            .filter_map(|r| r["scheduled_offset_s"].as_f64())
-            .fold(f64::INFINITY, f64::min)
+            .filter_map(ns)
+            .min()
+            .unwrap_or(0)
     };
     let mut shape: Vec<(u64, String, Option<i64>)> = records
         .iter()
@@ -97,9 +104,7 @@ fn schedule_shape(data_log: &std::path::Path) -> Vec<(u64, String, Option<i64>)>
             (
                 record["seq"].as_u64().expect("seq"),
                 phase,
-                record["scheduled_offset_s"]
-                    .as_f64()
-                    .map(|offset| ((offset - start) * 1e6).round() as i64),
+                ns(record).map(|offset| offset - start),
             )
         })
         .collect();

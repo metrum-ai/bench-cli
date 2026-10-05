@@ -97,6 +97,7 @@ pub struct WarmupBarrier {
 }
 
 impl WarmupBarrier {
+    /// Barrier for the first `warmup_requests` slots; 0 disables it.
     pub fn new(warmup_requests: u32) -> Self {
         Self {
             warmup_requests: u64::from(warmup_requests),
@@ -205,6 +206,8 @@ pub fn completed_at_from_start(started_at: DateTime<Utc>, latency: Duration) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::record::RequestRecord;
+    use chrono::TimeZone;
 
     fn slot(seq: u64, ms: u64) -> RequestSlot {
         RequestSlot {
@@ -272,8 +275,6 @@ mod tests {
             .await;
         assert_eq!(barrier.join_errors(), 1);
     }
-    use crate::record::RequestRecord;
-    use chrono::TimeZone;
 
     fn sample(seq: u64, started: DateTime<Utc>, latency_ms: u64) -> RequestRecord {
         RequestRecord::success(
