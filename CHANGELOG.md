@@ -21,6 +21,16 @@
   `docs/TELEMETRY.md`, `docs/telemetry/exporters.md`,
   `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
   in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
+- Example telemetry YAML `include` defaults now cover more of the live
+  pages (#198). `docs/telemetry/examples/vllm.yaml` adds the TTFT, ITL, E2E,
+  queue, prefill, and decode histograms (`_bucket` / `_sum` / `_count`) and
+  the prefix-cache counters. `docs/telemetry/examples/all-smi.yaml` adds
+  chassis, energy, and NVLink topology series, drops per-core
+  `all_smi_cpu_core_utilization` through a CPU allowlist, and embeds the same
+  vLLM source as `vllm.yaml`. `all_smi_process_*` stays a commented-out
+  opt-in: those rows carry `user` and `command` labels and must not be used
+  in published runs. Matched series go from 82 to 66 on a recorded all-smi
+  metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
 - Comparison hygiene (#201). `docs/reviews/QUALITY_ASSESSMENT_PROMPT.md` now
   points reviewers at AIPerf and `scripts/parity/README.md` instead of the
   retired GenAI-Perf and the deleted `docs/COMPARISON.md`.

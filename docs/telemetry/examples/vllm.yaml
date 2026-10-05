@@ -3,6 +3,15 @@
 #
 # vLLM OpenAI server metrics (on by default).
 # scrape: http://127.0.0.1:8000/metrics
+#
+# Starting point only: curl the live page and adjust include before a run.
+# Names match vLLM v0.30.0 (vllm/v1/metrics/loggers.py) and a live
+# vllm/vllm-openai:latest page captured 2026-09-24. include matches the full
+# sample name, so histograms list _bucket/_sum/_count and counters _total
+# (the _created gauges stay out). gpu_cache_usage_perc is the pre-v1 name of
+# kv_cache_usage_perc and matches nothing on current releases.
+# Each histogram adds its buckets plus _sum and _count per scrape and per
+# engine/model label set (20 to 23 buckets each on the 2026-09-24 page).
 
 default_interval_ms: 1000
 timeout_ms: 800
@@ -11,4 +20,9 @@ sources:
     url: http://127.0.0.1:8000/metrics
     interval_ms: 1000
     include:
+      # Scheduler, KV cache, and token totals.
       - "^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$"
+      # Server-side TTFT, ITL, E2E, queue, prefill, and decode histograms.
+      - "^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds|request_queue_time_seconds|request_prefill_time_seconds|request_decode_time_seconds)_(bucket|sum|count)$"
+      # Prefix-cache counters (tokens queried and hit; external = KV connector).
+      - "^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$"
