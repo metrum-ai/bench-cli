@@ -8,10 +8,35 @@
   the live `/metrics` page (all-smi, the serving engine, and any other
   exporter) and set `include` from that response.
 - `docs/TELEMETRY.md` compares that open scrape with AIPerf. AIPerf's metrics
-  reference is a named client catalog plus inference `/metrics` and
-  DCGM/pynvml/amdsmi GPU telemetry. Bench CLI stores client JSONL plus whatever
-  live Prometheus pages the YAML selects. The publish-20261002 campaign is the
-  example (all-smi and the serving engine in one NDJSON per cell).
+  reference is a named client catalog. Its `--server-metrics` (on by default)
+  ingests any Prometheus page, including the Metrum all-smi fork, and it also
+  exports raw time-stamped scrapes (Parquet by default, opt-in JSONL, and
+  per-record GPU telemetry JSONL). Its power-efficiency family (avg only)
+  comes from `--gpu-telemetry` alone (DCGM, pynvml, amdsmi). Bench CLI writes
+  the series matched by the YAML `include` into one NDJSON next to the
+  per-request JSONL, so GPU series from any exporter can be correlated per
+  request. The publish-20261002 campaign is the example (all-smi and the
+  serving engine in one NDJSON per cell).
+- Remaining all-smi `v0.26.3-metrum.3` references in
+  `docs/TELEMETRY.md`, `docs/telemetry/exporters.md`,
+  `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
+  in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
+
+### Added
+- `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
+  NVIDIA AIPerf (#204). One command, `scripts/parity/run_pair.sh OUT`, runs
+  the `plain`, `reasoning`, and `slo` scenarios against a fresh paced mock
+  (`mock_server.py`, one flushed SSE chunk per token, vLLM-style `/metrics`
+  with one histogram) and prints quantities / values / per-request in the
+  epic format. Its AIPerf 0.13.0 column reproduces the epic #184 table
+  (65/653/33, 70/700/36, 68/656/34). It counts outputs and does not measure
+  performance. Optional `run_tele.sh` counts telemetry ingest against a
+  replayed Metrum all-smi fork `/metrics` page (`fork_page.py`,
+  `fixtures/all-smi-fork-h100.prom`). See `scripts/parity/README.md`.
+- `scripts/parity/count_points.py` refuses a run whose median TTFT/E2E over
+  measured requests is above 0.9 (`--max-ttft-ratio`) and exits 3, because a
+  single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
+  TTFT into E2E and makes every streaming field meaningless.
 
 ### Added
 - `summary.v3` (additive) summarizes per-request fields that were recorded

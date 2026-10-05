@@ -18,7 +18,7 @@ MAX_NUM_SEQS="${MAX_NUM_SEQS:-128}"
 VLLM_ENFORCE_EAGER="${VLLM_ENFORCE_EAGER:-1}"
 HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 ALL_SMI_REPO="${ALL_SMI_REPO:-https://github.com/chetan-metrum-ai/all-smi}"
-ALL_SMI_RELEASE="${ALL_SMI_RELEASE:-v0.26.3-metrum.3}"
+ALL_SMI_RELEASE="${ALL_SMI_RELEASE:-v0.26.3-metrum.4}"
 ALL_SMI_BIN_DIR="${ALL_SMI_BIN_DIR:-${HOME}/.local/bin}"
 
 log() { echo "[sut-setup $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
