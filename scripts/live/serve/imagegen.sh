@@ -21,7 +21,8 @@
 # covers offline Intel XPU only.
 set -euo pipefail
 MODALITY=imagegen
-IMAGE="${IMAGE:-vllm/vllm-omni:v0.30.0}"
+DEFAULT_IMAGE=vllm/vllm-omni:v0.30.0
+IMAGE="${IMAGE:-${DEFAULT_IMAGE}}"
 DEFAULT_MODEL=Tongyi-MAI/Z-Image-Turbo
 MODEL="${MODEL:-${DEFAULT_MODEL}}"
 SERVE_ARGS=(--omni --port 8000)

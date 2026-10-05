@@ -14,12 +14,14 @@
 # - --async-scheduling and OMP_NUM_THREADS=1.
 # - --mm-processor-cache-gb 0 because benchmark images are not reused.
 # Model card: https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct
-# These flags, SOURCES, and SUT_NOTES describe DEFAULT_MODEL only. With
-# MODEL=<other>, set SUT_NOTES_OVERRIDE (and usually SERVE_ARGS_OVERRIDE and
-# SOURCES_OVERRIDE) from a fresh search; start exits otherwise.
+# These flags, SOURCES, and SUT_NOTES describe DEFAULT_MODEL on DEFAULT_IMAGE
+# only. With MODEL=<other>, IMAGE=<other>, or a different SERVE_ARGS_OVERRIDE,
+# set SUT_NOTES_OVERRIDE and SOURCES_OVERRIDE from a fresh search; start and
+# sut exit otherwise.
 set -euo pipefail
 MODALITY=vlm
-IMAGE="${IMAGE:-vllm/vllm-openai:v0.30.0}"
+DEFAULT_IMAGE=vllm/vllm-openai:v0.30.0
+IMAGE="${IMAGE:-${DEFAULT_IMAGE}}"
 DEFAULT_MODEL=Qwen/Qwen3-VL-8B-Instruct
 MODEL="${MODEL:-${DEFAULT_MODEL}}"
 SERVE_ARGS=(--max-model-len 128000 --limit-mm-per-prompt.video 0 --async-scheduling --mm-processor-cache-gb 0)
