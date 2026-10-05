@@ -29,6 +29,20 @@
   single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
   TTFT into E2E and makes every streaming field meaningless.
 
+### Fixed
+- `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
+  and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,
+  and strategic released the semaphore permit before the in-flight guard, so
+  the next request could enter while the previous one still counted. The new
+  `metrum_ai_bench::concurrency::InFlightSlot` holds both and, by field drop
+  order, always leaves the gauge before freeing the permit, including when a
+  request task panics. Imagegen already released in that order. No schema
+  change (#189).
+- `observed_concurrency` values from 1.5.3 and earlier are biased upward and
+  should be re-measured rather than compared directly with new runs. For
+  example, publish-20261002T162512Z g5-a1 at cap 1 reported
+  `in_flight_max` 2.0.
+
 ## 1.5.3 (2026-10-02)
 
 ### Documentation

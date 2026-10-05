@@ -49,6 +49,11 @@ impl InFlightTracker {
         self.cap
     }
 
+    /// Requests currently inside the gauge.
+    pub fn current(&self) -> u64 {
+        self.current.load(Ordering::Acquire)
+    }
+
     /// Record whether this acquire blocked on the semaphore (cap engagement).
     pub fn note_acquire(&self, waited: bool) {
         self.acquires.fetch_add(1, Ordering::Relaxed);
@@ -123,6 +128,38 @@ impl Drop for InFlightGuard {
     }
 }
 
+/// One request's hold on the cap: its in-flight gauge entry plus its permit.
+///
+/// `guard` is declared before `permit`, and struct fields drop in declaration
+/// order, so the gauge is always left before the permit is freed: on a normal
+/// drop, an early return, a cancelled task, or a panic unwinding. Freeing the
+/// permit first would let the next waiter acquire it and enter the gauge while
+/// this request still counts, reading cap+1 and biasing
+/// `in_flight_{mean,p50,max}` upward (#189).
+///
+/// `P` is generic only so tests can observe drop order; binaries use the
+/// default [`tokio::sync::OwnedSemaphorePermit`].
+#[must_use = "dropping the slot releases the concurrency permit"]
+pub struct InFlightSlot<P = tokio::sync::OwnedSemaphorePermit> {
+    guard: InFlightGuard,
+    _permit: P,
+}
+
+impl<P> InFlightSlot<P> {
+    /// Enter the gauge for a request that already holds `permit`.
+    pub fn new(tracker: &Arc<InFlightTracker>, permit: P) -> Self {
+        Self {
+            guard: tracker.guard(),
+            _permit: permit,
+        }
+    }
+
+    /// Outstanding count including this request, sampled when it entered.
+    pub fn in_flight(&self) -> u64 {
+        self.guard.in_flight
+    }
+}
+
 /// Acquire a permit, counting cap engagement when `try_acquire` misses.
 pub async fn acquire_with_engagement(
     semaphore: Arc<tokio::sync::Semaphore>,
@@ -144,7 +181,7 @@ pub async fn acquire_with_engagement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::Semaphore;
+    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
     #[tokio::test]
     async fn tracks_occupancy_and_cap_engagement() {
@@ -153,20 +190,19 @@ mod tests {
         let p1 = acquire_with_engagement(Arc::clone(&sem), &tracker)
             .await
             .unwrap();
-        let g1 = tracker.guard();
-        assert_eq!(g1.in_flight, 1);
+        let s1 = InFlightSlot::new(&tracker, p1);
+        assert_eq!(s1.in_flight(), 1);
         let p2 = acquire_with_engagement(Arc::clone(&sem), &tracker)
             .await
             .unwrap();
-        let g2 = tracker.guard();
-        assert_eq!(g2.in_flight, 2);
+        let s2 = InFlightSlot::new(&tracker, p2);
+        assert_eq!(s2.in_flight(), 2);
         // Cap saturated: next acquire waits.
         let sem3 = Arc::clone(&sem);
         let tracker3 = Arc::clone(&tracker);
         let waiter = tokio::spawn(async move { acquire_with_engagement(sem3, &tracker3).await });
         tokio::task::yield_now().await;
-        drop(p1);
-        drop(g1);
+        drop(s1);
         let p3 = waiter.await.unwrap().unwrap();
         let snap = tracker.snapshot();
         assert_eq!(snap.cap, 2);
@@ -174,8 +210,108 @@ mod tests {
         assert_eq!(snap.wait_count, 1);
         assert_eq!(snap.acquire_count, 3);
         assert!((snap.cap_engagement_fraction.unwrap() - 1.0 / 3.0).abs() < 1e-12);
-        drop(p2);
-        drop(g2);
+        drop(s2);
         drop(p3);
+    }
+
+    /// Waiter that acquires a permit and enters the gauge, like a request task.
+    fn spawn_request(
+        sem: &Arc<Semaphore>,
+        tracker: &Arc<InFlightTracker>,
+    ) -> tokio::task::JoinHandle<InFlightSlot> {
+        let sem = Arc::clone(sem);
+        let tracker = Arc::clone(tracker);
+        tokio::spawn(async move {
+            let permit = acquire_with_engagement(sem, &tracker).await.unwrap();
+            InFlightSlot::new(&tracker, permit)
+        })
+    }
+
+    #[tokio::test]
+    async fn request_slot_keeps_occupancy_within_cap() {
+        for cap in [1u32, 4] {
+            let tracker = Arc::new(InFlightTracker::new(cap));
+            let sem = Arc::new(Semaphore::new(cap as usize));
+            let mut held = Vec::new();
+            for _ in 0..cap {
+                held.push(spawn_request(&sem, &tracker).await.unwrap());
+            }
+            // Every slot is busy; the next request waits on the semaphore.
+            let waiter = spawn_request(&sem, &tracker);
+            tokio::task::yield_now().await;
+            for slot in held {
+                drop(slot);
+                // Let the woken waiter run before anything else is released.
+                tokio::task::yield_now().await;
+            }
+            drop(waiter.await.unwrap());
+            let snap = tracker.snapshot();
+            let cap = f64::from(cap);
+            assert_eq!(snap.in_flight_max, Some(cap));
+            assert!(snap.in_flight_mean.unwrap() <= cap);
+            assert_eq!(snap.wait_count, 1);
+            assert_eq!(tracker.current(), 0);
+        }
+    }
+
+    /// Documents the #189 hazard: permit first lets the waiter enter at cap+1.
+    #[tokio::test]
+    async fn releasing_permit_before_guard_overcounts() {
+        let tracker = Arc::new(InFlightTracker::new(1));
+        let sem = Arc::new(Semaphore::new(1));
+        let permit: OwnedSemaphorePermit = Arc::clone(&sem).acquire_owned().await.unwrap();
+        let guard = tracker.guard();
+        let waiter = spawn_request(&sem, &tracker);
+        tokio::task::yield_now().await;
+        drop(permit);
+        tokio::task::yield_now().await;
+        drop(guard);
+        drop(waiter.await.unwrap());
+        assert_eq!(tracker.snapshot().in_flight_max, Some(2.0));
+    }
+
+    /// Stand-in permit that records the gauge at the moment it is released.
+    struct ProbePermit {
+        tracker: Arc<InFlightTracker>,
+        seen_at_release: Arc<Mutex<Option<u64>>>,
+    }
+
+    impl Drop for ProbePermit {
+        fn drop(&mut self) {
+            *self.seen_at_release.lock().unwrap() = Some(self.tracker.current());
+        }
+    }
+
+    fn probe_slot(
+        tracker: &Arc<InFlightTracker>,
+    ) -> (InFlightSlot<ProbePermit>, Arc<Mutex<Option<u64>>>) {
+        let seen = Arc::new(Mutex::new(None));
+        let permit = ProbePermit {
+            tracker: Arc::clone(tracker),
+            seen_at_release: Arc::clone(&seen),
+        };
+        (InFlightSlot::new(tracker, permit), seen)
+    }
+
+    #[test]
+    fn request_slot_leaves_gauge_before_releasing_permit() {
+        let tracker = Arc::new(InFlightTracker::new(1));
+        let (slot, seen) = probe_slot(&tracker);
+        assert_eq!(tracker.current(), 1);
+        drop(slot);
+        assert_eq!(*seen.lock().unwrap(), Some(0));
+    }
+
+    #[test]
+    fn request_slot_leaves_gauge_before_releasing_permit_on_panic() {
+        let tracker = Arc::new(InFlightTracker::new(1));
+        let (slot, seen) = probe_slot(&tracker);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _slot = slot;
+            panic!("request task panicked");
+        }));
+        assert!(result.is_err());
+        assert_eq!(*seen.lock().unwrap(), Some(0));
+        assert_eq!(tracker.current(), 0);
     }
 }
