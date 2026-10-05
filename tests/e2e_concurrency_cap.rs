@@ -14,11 +14,8 @@ mod common;
 use common::{sine_wav, skip, spawn_dummy, summary_record};
 use serde_json::Value;
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 /// Enough short requests that a permit-before-guard release races reliably.
 const REQUESTS: &str = "300";
@@ -237,31 +234,10 @@ fn imagegen_observed_concurrency_never_exceeds_cap() {
     }
 }
 
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 #[test]
 fn strategic_stage_observed_concurrency_never_exceeds_cap() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args(["--listen", &address.to_string(), "--latency-ms", "2"])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let _server = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    let server = common::spawn_mock(&["--latency-ms", "2"]);
+    let address = server.address;
 
     let dir = tempfile::tempdir().expect("tmpdir");
     let html = dir.path().join("report.html");

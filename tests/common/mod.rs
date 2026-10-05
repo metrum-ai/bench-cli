@@ -9,18 +9,79 @@
 #![allow(dead_code)]
 
 use serde_json::Value;
-use std::net::TcpListener;
+use std::io::{BufRead, BufReader, Read};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port()
+/// Wait up to `timeout` for a line on `stream` containing `marker` and return
+/// the port of the address that follows it (`127.0.0.1:41234` or `:41234`).
+///
+/// Servers are started on port 0 and announce the port they bound, so no test
+/// reserves a port and drops it before the server binds (#211). A background
+/// thread keeps draining the pipe afterwards so later writes never hit a
+/// closed pipe. Returns `None` on timeout or if the stream closes first.
+fn reported_port<R: Read + Send + 'static>(
+    stream: R,
+    marker: &'static str,
+    timeout: Duration,
+) -> Option<u16> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut tx = Some(tx);
+        for line in BufReader::new(stream).lines() {
+            let Ok(line) = line else { break };
+            let Some(sender) = tx.as_ref() else { continue };
+            let port = line.split_once(marker).and_then(|(_, rest)| {
+                rest.split_whitespace()
+                    .next()
+                    .and_then(|addr| addr.rsplit(':').next())
+                    .and_then(|port| port.parse::<u16>().ok())
+            });
+            if let Some(port) = port {
+                let _ = sender.send(port);
+                tx = None;
+            }
+        }
+    });
+    rx.recv_timeout(timeout).ok()
+}
+
+/// A running `metrum-ai-bench-cli-mock-server`, killed on drop.
+pub struct Mock {
+    child: Child,
+    pub address: SocketAddr,
+}
+
+impl Drop for Mock {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Start the Rust mock server on `127.0.0.1:0` with `extra_args` appended and
+/// return once it reports the port it bound.
+pub fn spawn_mock(extra_args: &[&str]) -> Mock {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
+        .args(["--listen", "127.0.0.1:0"])
+        .args(extra_args)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start mock server");
+    let stdout = child.stdout.take().expect("mock stdout");
+    let port = reported_port(stdout, "listening on ", Duration::from_secs(10));
+    // Wrap first so the child is killed if the assertion below panics.
+    let mut mock = Mock {
+        child,
+        address: SocketAddr::from(([127, 0, 0, 1], 0)),
+    };
+    mock.address
+        .set_port(port.expect("mock server did not report its listen address"));
+    mock
 }
 
 pub fn dummy_dir() -> PathBuf {
@@ -40,9 +101,22 @@ impl Dummy {
 
 impl Drop for Dummy {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        kill_go_run(&mut self.child);
     }
+}
+
+/// Kill a `go run` child and the server binary it started. Killing only
+/// `go run` leaves the compiled server orphaned, so on Unix its children are
+/// killed first. Without `pkill` this degrades to killing `go run` alone.
+fn kill_go_run(child: &mut Child) {
+    #[cfg(unix)]
+    let _ = Command::new("pkill")
+        .args(["-KILL", "-P", &child.id().to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn go_available() -> bool {
@@ -79,12 +153,11 @@ pub fn spawn_dummy_permissive(extra_args: &[&str]) -> Option<Dummy> {
         );
         return None;
     }
-    let port = free_port();
     let mut args: Vec<String> = vec![
         "run".into(),
         "./cmd/dummy-model-server".into(),
         "-port".into(),
-        port.to_string(),
+        "0".into(),
     ];
     args.extend(extra_args.iter().map(|a| a.to_string()));
 
@@ -92,26 +165,38 @@ pub fn spawn_dummy_permissive(extra_args: &[&str]) -> Option<Dummy> {
         .current_dir(dummy_dir())
         .args(&args)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn();
-    let child = match spawned {
+    let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
             assert!(!dummy_required(), "could not start dummy-model-server: {e}");
             return None;
         }
     };
+    // The startup log line (stderr) carries the port the server bound. The
+    // 60s budget covers `go run` compiling the server on a cold cache.
+    let start = Instant::now();
+    let budget = Duration::from_secs(60);
+    let stderr = child.stderr.take().expect("dummy stderr");
+    let Some(port) = reported_port(stderr, "dummy-model-server listening on ", budget) else {
+        kill_go_run(&mut child);
+        assert!(
+            !dummy_required(),
+            "dummy-model-server did not report its listen port within 60s"
+        );
+        return None;
+    };
     let mut dummy = Dummy { child, port };
 
     let url = format!("http://127.0.0.1:{port}/v1/models");
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(60) {
+    while start.elapsed() < budget {
         if reqwest::blocking::get(&url).is_ok_and(|resp| resp.status().is_success()) {
             return Some(dummy);
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let _ = dummy.child.kill();
+    kill_go_run(&mut dummy.child);
     assert!(
         !dummy_required(),
         "dummy-model-server did not become ready on port {port} within 60s"
