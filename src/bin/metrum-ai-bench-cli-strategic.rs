@@ -647,8 +647,8 @@ fn spawn_one_request(
             }
             Err(error) => (false, None, 0, 0, Some(error.to_string())),
         };
-        drop(permit);
-        drop(inflight_guard);
+        // Gauge before permit so the next request cannot read cap+1 (#189).
+        metrum_ai_bench::concurrency::release_slot(inflight_guard, permit);
         let resolved = metrum_ai_bench::measurement::resolve_ttft(
             streaming,
             stream_ttft_s,
