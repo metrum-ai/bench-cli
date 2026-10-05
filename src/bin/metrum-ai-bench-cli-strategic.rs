@@ -1169,6 +1169,7 @@ async fn main() -> Result<()> {
             price_per_hour,
             Some(observed),
             isl_osl,
+            matches!(args.kind, EndpointKind::Chat),
         );
         point.ttft_approx_count = ttft_audit.approx_count;
         point.ttft_warning = ttft_audit.warning;

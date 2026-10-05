@@ -52,7 +52,9 @@
 - Strategic sweep points JSON gains `first_byte_s`, `queue_delay_s`,
   `first_reasoning_s`, `isl_tokens`, and `osl_tokens` distributions.
   `queue_delay_s` is `n=0` for `--sweep-by concurrency` stages; ISL/OSL use
-  server usage only and skip rows with zero input and output tokens. The
+  server usage only and skip rows with zero input and output tokens;
+  `osl_tokens` is `n=0` for embeddings and rerank stages, and rerank
+  `isl_tokens` is `usage.total_tokens` (all input). The
   strategic request CSV gains a trailing optional `first_reasoning_s` column
   (#191).
 - Console summary prints First byte, Queue delay, First reasoning, ISL tokens

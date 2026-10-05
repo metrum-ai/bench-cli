@@ -51,9 +51,14 @@ Workload section. This page focuses on measured fields.
   fill only rows flagged `usage_missing`. Rows with no usage and no
   `usage_missing` flag (ASR, imagegen) are skipped, never counted as zero.
   `isl_tokens_source` / `osl_tokens_source` record `server_usage`,
-  `tokenizer_fallback`, or `mixed`, and are omitted when `n=0`. Strategic
+  `tokenizer_fallback`, or `mixed`, and are omitted when `n=0`.
+  `isl_osl.length_basis` `tokenizer` is the same provenance as
+  `tokenizer_fallback`; it reports `tokenizer` whenever any ISL or OSL sample
+  used the tokenizer, where `*_tokens_source` would say `mixed`. Strategic
   sweep points use server usage only (no tokenizer fallback) and skip rows
-  whose input and output tokens are both zero.
+  whose input and output tokens are both zero. Strategic `osl_tokens` is `n=0`
+  for embeddings and rerank stages; rerank `isl_tokens` is `usage.total_tokens`
+  (all input).
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at

@@ -243,7 +243,7 @@ pub fn summarize_stage(
     slos: &crate::summary::SloConfig,
     config: Option<Value>,
 ) -> SweepPoint {
-    summarize_stage_with_options(load, records, seconds, slos, config, None, None, None)
+    summarize_stage_with_options(load, records, seconds, slos, config, None, None, None, true)
 }
 
 /// Like [`summarize_stage`] but optionally stamps `$ / 1M output tokens`.
@@ -264,10 +264,14 @@ pub fn summarize_stage_with_price(
         price_per_hour,
         None,
         None,
+        true,
     )
 }
 
 /// Full stage summary with optional price, observed concurrency, and ISL/OSL.
+///
+/// `generates_output` is false for embeddings and rerank stages: they produce
+/// no output tokens, so `osl_tokens` stays `n = 0` instead of a run of zeros.
 #[allow(clippy::too_many_arguments)]
 pub fn summarize_stage_with_options(
     load: f64,
@@ -278,6 +282,7 @@ pub fn summarize_stage_with_options(
     price_per_hour: Option<f64>,
     observed_concurrency: Option<crate::concurrency::ObservedConcurrency>,
     isl_osl: Option<crate::isl_osl::IslOslValidation>,
+    generates_output: bool,
 ) -> SweepPoint {
     // Warmup rows stay in the CSV for audit but never enter knee / HTML aggregates.
     let measured: Vec<&BenchRecord> = records.iter().filter(|record| !record.warmup).collect();
@@ -370,8 +375,8 @@ pub fn summarize_stage_with_options(
         .iter()
         .filter_map(|record| record.first_reasoning_s)
         .collect();
-    // Rows with no reported usage (non-chat kinds without `usage`) are skipped,
-    // never counted as zero-token requests.
+    // Rows with no reported usage are skipped, never counted as zero-token
+    // requests. Rerank `input_tokens` is `usage.total_tokens` (all input).
     let token_rows: Vec<&&BenchRecord> = success_rows
         .iter()
         .filter(|record| record.input_tokens > 0 || record.output_tokens > 0)
@@ -380,10 +385,14 @@ pub fn summarize_stage_with_options(
         .iter()
         .map(|record| record.input_tokens as f64)
         .collect();
-    let osl: Vec<f64> = token_rows
-        .iter()
-        .map(|record| record.output_tokens as f64)
-        .collect();
+    let osl: Vec<f64> = if generates_output {
+        token_rows
+            .iter()
+            .map(|record| record.output_tokens as f64)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let ttft_approx_count = success_rows
         .iter()
         .filter(|record| {
@@ -1307,6 +1316,54 @@ mod tests {
         assert_eq!(open.isl_tokens.n, 2);
         assert_eq!(open.first_byte_s.n, 2);
         assert_eq!(open.first_reasoning_s.n, 2);
+    }
+
+    #[test]
+    fn non_generating_stage_has_no_osl_tokens() {
+        // Embeddings shape: input usage reported, no output tokens.
+        let row = BenchRecord {
+            seq: 0,
+            stage: 1.0,
+            endpoint: "http://example.test/v1/embeddings".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.05,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.05,
+            first_byte_s: Some(0.04),
+            connect_s: None,
+            ttft_s: None,
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 12,
+            output_tokens: 0,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+        };
+        let point = summarize_stage_with_options(
+            1.0,
+            &[row.clone(), row],
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert_eq!(point.osl_tokens.n, 0);
+        assert!(point.osl_tokens.avg.is_none());
+        assert_eq!(point.isl_tokens.n, 2);
+        assert_eq!(point.isl_tokens.avg, Some(12.0));
     }
 
     #[test]

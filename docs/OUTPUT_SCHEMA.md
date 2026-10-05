@@ -118,6 +118,9 @@ Additional v3 fields:
   the matching token distribution: `"server_usage"` (every sample from server
   usage), `"tokenizer_fallback"` (every sample from tokenizer counts), or
   `"mixed"` (both). Omitted from JSON when the distribution has no samples.
+  `isl_osl.length_basis` `tokenizer` is the same provenance as
+  `tokenizer_fallback`; it reports `tokenizer` whenever any ISL or OSL sample
+  used the tokenizer, where `*_tokens_source` would say `mixed`.
 - Each `per_endpoint` entry carries the same seven fields (`first_byte_s`,
   `queue_delay_s`, `first_reasoning_s`, `isl_tokens`, `osl_tokens`,
   `isl_tokens_source`, `osl_tokens_source`) computed over that endpoint's
@@ -154,7 +157,9 @@ gains these type-7 `DistSummary` fields over measured successes in the stage
 - `first_reasoning_s` (seconds) - requests that streamed a reasoning delta.
 - `isl_tokens` / `osl_tokens` (tokens) - per-request input/output tokens from
   server `usage` only (no tokenizer fallback). Rows with zero input and zero
-  output tokens are skipped.
+  output tokens are skipped. `osl_tokens` is `n=0` for `--kind embeddings` and
+  `--kind rerank` stages, which generate no output. Rerank `isl_tokens` is the
+  server's `usage.total_tokens` (query plus documents, all input).
 
 Each is always present; `n=0` with null stats when no request qualifies.
 
