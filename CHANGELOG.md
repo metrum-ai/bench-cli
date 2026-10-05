@@ -22,6 +22,22 @@
   `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
   in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
 
+### Added
+- `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
+  NVIDIA AIPerf (#204). One command, `scripts/parity/run_pair.sh OUT`, runs
+  the `plain`, `reasoning`, and `slo` scenarios against a fresh paced mock
+  (`mock_server.py`, one flushed SSE chunk per token, vLLM-style `/metrics`
+  with one histogram) and prints quantities / values / per-request in the
+  epic format. Its AIPerf 0.13.0 column reproduces the epic #184 table
+  (65/653/33, 70/700/36, 68/656/34). It counts outputs and does not measure
+  performance. Optional `run_tele.sh` counts telemetry ingest against a
+  replayed Metrum all-smi fork `/metrics` page (`fork_page.py`,
+  `fixtures/all-smi-fork-h100.prom`). See `scripts/parity/README.md`.
+- `scripts/parity/count_points.py` refuses a run whose median TTFT/E2E over
+  measured requests is above 0.9 (`--max-ttft-ratio`) and exits 3, because a
+  single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
+  TTFT into E2E and makes every streaming field meaningless.
+
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
   and per-request `in_flight_at_send` no longer read `cap + 1`. LLM, ASR, VLM,
