@@ -21,7 +21,11 @@ use std::time::Duration;
     about = "Deterministic mock inference server for local and CI benchmarks"
 )]
 struct Args {
-    #[arg(long, default_value = "127.0.0.1:8080")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1:8080",
+        help = "Address to bind; port 0 picks a free port, reported on the startup line"
+    )]
     listen: String,
     #[arg(long, default_value_t = 0)]
     latency_ms: u64,
@@ -286,9 +290,11 @@ async fn main() -> Result<()> {
         .route("/v1/rerank", post(infer))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
+    // Report the bound address, not the flag, so `--listen 127.0.0.1:0`
+    // tells callers which port the OS picked.
     println!(
         "metrum-ai-bench-cli-mock-server listening on {}",
-        args.listen
+        listener.local_addr()?
     );
     axum::serve(listener, app).await?;
     Ok(())

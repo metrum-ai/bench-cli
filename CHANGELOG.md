@@ -147,6 +147,16 @@
   naming `SUT_NOTES_OVERRIDE` when `MODEL` differs from `DEFAULT_MODEL`
   without it, so a SUT never carries serving notes researched for a different
   model. A missing `SOURCES_OVERRIDE` in that case is a stderr warning (#203).
+- E2E tests no longer reserve a free port, drop it, and then start a server
+  on it, which let another process take the port first. The
+  `metrum-ai-bench-cli-mock-server` "listening on" line now prints the
+  address it actually bound instead of repeating `--listen`, so `--listen
+  127.0.0.1:0` picks a free port and reports it. The Go
+  `dummy-model-server` binds before serving, `-port 0` picks a free port, and
+  the startup line and image URLs use the real port. The e2e helpers in
+  `tests/common/mod.rs` start both servers on port 0 and read the port from
+  that line, and they now also kill the server that `go run` starts instead
+  of orphaning it. No metric or schema change (#211).
 
 ## 1.5.3 (2026-10-02)
 

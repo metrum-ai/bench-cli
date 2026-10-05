@@ -3,44 +3,16 @@
 
 //! E2E: strategic sweep with --telemetry YAML against mock --telemetry-fixture.
 
+mod common;
+
 use serde_json::Value;
 use std::fs;
-use std::net::{TcpListener, TcpStream};
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+use std::process::Command;
 
 #[test]
 fn strategic_telemetry_ndjson_scrapes_fixture() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    let address = listener.local_addr().expect("local address");
-    drop(listener);
-    let server = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server"))
-        .args([
-            "--listen",
-            &address.to_string(),
-            "--latency-ms",
-            "5",
-            "--telemetry-fixture",
-        ])
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("start mock server");
-    let _server = ChildGuard(server);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(address).is_err() {
-        assert!(Instant::now() < deadline, "mock server did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    let server = common::spawn_mock(&["--latency-ms", "5", "--telemetry-fixture"]);
+    let address = server.address;
 
     let directory = tempfile::tempdir().expect("tmp");
     let ndjson = directory.path().join("run.ndjson");

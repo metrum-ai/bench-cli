@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,10 +23,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	h := server.New(cfg)
+	// Bind before building the handler so -port 0 picks a free port and
+	// cfg.Port holds the real one (image URLs embed it). Tests read the
+	// "listening on" line below to learn the port without a reserve/drop race.
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg.Port = ln.Addr().(*net.TCPAddr).Port
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	h := server.New(cfg)
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -37,7 +45,7 @@ func main() {
 		addr, cfg.Compat, cfg.Model, cfg.Latency, cfg.ChunkInterval, cfg.ReqPerSec, cfg.TokensPerSec)
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
