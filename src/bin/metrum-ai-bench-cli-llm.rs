@@ -657,8 +657,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &inflight_tracker,
         )
         .await?;
-        let inflight_guard = inflight_tracker.guard();
-        let in_flight_at_send = inflight_guard.in_flight;
+        let request_slot =
+            metrum_ai_bench::concurrency::InFlightSlot::new(&inflight_tracker, permit);
+        let in_flight_at_send = request_slot.in_flight();
         let ((url, api_key, endpoint_name), endpoint_lease) =
             endpoint_selector.select(&resolved_endpoints, args.common.load_balancer);
         let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
@@ -721,9 +722,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
             .await;
             let connect_s = connect_slot.take();
-            // Gauge before permit so the next request cannot read cap+1 (#189).
+            // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
-            metrum_ai_bench::concurrency::release_slot(inflight_guard, permit);
+            drop(request_slot);
 
             let tokenizer = match metrum_ai_bench::tokenizer::LocalTokenizer::from_file(
                 tokenizer_path.as_deref(),

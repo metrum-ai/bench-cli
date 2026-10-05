@@ -578,8 +578,9 @@ fn spawn_one_request(
         )
         .await
         .expect("semaphore closed");
-        let inflight_guard = inflight_tracker.guard();
-        let in_flight_at_send = inflight_guard.in_flight;
+        let request_slot =
+            metrum_ai_bench::concurrency::InFlightSlot::new(&inflight_tracker, permit);
+        let in_flight_at_send = request_slot.in_flight();
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -647,8 +648,8 @@ fn spawn_one_request(
             }
             Err(error) => (false, None, 0, 0, Some(error.to_string())),
         };
-        // Gauge before permit so the next request cannot read cap+1 (#189).
-        metrum_ai_bench::concurrency::release_slot(inflight_guard, permit);
+        // InFlightSlot leaves the gauge before freeing the permit (#189).
+        drop(request_slot);
         let resolved = metrum_ai_bench::measurement::resolve_ttft(
             streaming,
             stream_ttft_s,

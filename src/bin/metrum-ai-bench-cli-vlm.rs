@@ -1185,8 +1185,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let run_start = start_time;
         let tracker_task = Arc::clone(&inflight_tracker);
         let handle = tokio::spawn(async move {
-            let inflight_guard = tracker_task.guard();
-            let in_flight_at_send = inflight_guard.in_flight;
+            let request_slot =
+                metrum_ai_bench::concurrency::InFlightSlot::new(&tracker_task, permit);
+            let in_flight_at_send = request_slot.in_flight();
             let send_offset = run_start.elapsed();
             let started_at = Utc::now();
             let send_instant = Instant::now();
@@ -1201,9 +1202,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 infer_ttft,
             )
             .await;
-            // Gauge before permit so the next request cannot read cap+1 (#189).
+            // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
-            metrum_ai_bench::concurrency::release_slot(inflight_guard, permit);
+            drop(request_slot);
 
             let tokenizer = match metrum_ai_bench::tokenizer::LocalTokenizer::from_file(
                 tokenizer_path.as_deref(),
