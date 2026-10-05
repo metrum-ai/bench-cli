@@ -39,12 +39,22 @@ allowlist (`engine_include_patterns` in `src/telemetry/parser.rs`). Use
 [AIPerf](https://github.com/ai-dynamo/aiperf) is NVIDIA's replacement for
 GenAI-Perf. Its metrics reference is a named client catalog. `--server-metrics`
 (on by default) ingests any Prometheus page, not only the inference server's
-`/metrics`. On 2026-10-05 it ingested all 69 Metrum all-smi fork GPU series
-names. Its power-efficiency family comes only from `--gpu-telemetry` (DCGM,
-pynvml, and amdsmi), and it reports aggregated values rather than raw samples.
-The real difference is that Bench CLI keeps every matched raw series on the
-request clock, so GPU signals from any exporter line up with individual
-requests.
+`/metrics`, and the Metrum all-smi fork page works as a source. AIPerf also
+exports raw time-stamped scrapes: `server_metrics_export.parquet` by default
+(raw time series with deltas), `server_metrics_export.jsonl` with
+`timestamp_ns` per scrape when `--server-metrics-formats` includes `jsonl`,
+and `gpu_telemetry_export.jsonl` per record. Its JSON and CSV summaries are
+aggregates. See
+[server-metrics.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md)
+and
+[gpu-telemetry.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/kubernetes/gpu-telemetry.md).
+
+The difference is narrower. AIPerf derives its power-efficiency family (avg
+only) from `--gpu-telemetry` alone, meaning DCGM, pynvml, and amdsmi
+([gpu-telemetry-metrics-dataflow.md](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/gpu-telemetry-metrics-dataflow.md)).
+Bench CLI writes the series matched by the YAML `include` into one NDJSON next
+to the per-request JSONL, so GPU series from any exporter can be correlated
+per request.
 
 Bench CLI splits the same job differently. `request.v3` and `summary.v3` are
 the fixed client schema. Telemetry is not a second catalog in the binary:
