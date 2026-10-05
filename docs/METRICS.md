@@ -244,8 +244,21 @@ Workload section. This page focuses on measured fields.
   to recompute the window (an NTP step would otherwise inflate it).
   The window excludes warmup and includes drain for requests issued during
   measurement.
+- **Warmup barrier** (#226): with `--warmup-requests N`, measured requests
+  start only after all N warmup requests have completed (success or error),
+  so measurement sees a warmed, drained server. This holds in llm, vlm, asr,
+  imagegen and in every strategic stage. Every measured `t_sent_ns` is at or
+  after the last warmup `t_done_ns`, and the `warmup` and `measure` NDJSON
+  stage windows never overlap. Open loop (`--request-rate`): the measured
+  schedule shifts by the time the barrier added. The first measured request
+  is due when warmup drains, and the seeded inter-arrival gaps are kept, so
+  measured requests do not burst to catch up and `queue_delay_s` does not
+  count warmup time. Measured `scheduled_offset_s` / `t_sched_ns` carry the
+  shifted value on the run clock. Strategic restarts its measure clock per
+  stage instead.
 - **Throughput bins**: fixed-width bins over send offsets (open-loop:
-  `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
+  `scheduled_offset_s`; closed-loop: `send_offset_s`), measured from the
+  first measured request's offset. Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
 - **Effective max concurrency**: stamped on `summary.v3.config` as
   `effective_max_concurrency`: `--max-concurrency` when set, otherwise the

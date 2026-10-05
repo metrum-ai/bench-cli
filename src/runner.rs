@@ -6,13 +6,14 @@
 //! Modality binaries still own request construction; this module owns the
 //! bookkeeping that must not drift (F-01, F-02, F-04, F-18, F-19, N-02).
 
-use crate::load::ArrivalKind;
+use crate::load::{ArrivalKind, RequestSlot};
 use crate::record::{Phase, RequestRecord};
 use chrono::{DateTime, Utc};
-use log::warn;
+use log::{error, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 
 /// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after).
 #[derive(Clone, Default)]
@@ -79,6 +80,68 @@ pub fn install_stop_handlers(flag: StopFlag) {
     }
 }
 
+/// Barrier between the warmup and measure phases (#226).
+///
+/// Measured requests start only after every warmup request has completed, so
+/// the measure phase sees a warmed, drained server and the `warmup` and
+/// `measure` stage windows never overlap. Open-loop schedules keep their
+/// inter-arrival gaps: measured slots shift by the time the barrier added, so
+/// the first measured request is due at the barrier and none of them burst to
+/// catch up on time spent in warmup. Metrum AI Bench strategic sweeps apply the
+/// same rule per stage.
+#[derive(Debug, Default)]
+pub struct WarmupBarrier {
+    warmup_requests: u64,
+    shift: Duration,
+    join_errors: usize,
+}
+
+impl WarmupBarrier {
+    pub fn new(warmup_requests: u32) -> Self {
+        Self {
+            warmup_requests: u64::from(warmup_requests),
+            ..Self::default()
+        }
+    }
+
+    /// Call before dispatching `slot`. On the first measured slot this awaits
+    /// every handle in `handles` (all warmup tasks, since dispatch is in `seq`
+    /// order) and removes them, then returns the slot with its schedule
+    /// shifted. Other slots return with the shift already fixed (zero during
+    /// warmup).
+    pub async fn before_slot<T>(
+        &mut self,
+        slot: RequestSlot,
+        handles: &mut Vec<JoinHandle<T>>,
+        run_start: Instant,
+    ) -> RequestSlot {
+        if self.warmup_requests > 0 && slot.seq == self.warmup_requests {
+            for handle in handles.drain(..) {
+                if let Err(e) = handle.await {
+                    error!("Warmup task join error: {e}");
+                    self.join_errors += 1;
+                }
+            }
+            self.shift = run_start.elapsed().saturating_sub(slot.scheduled_delay);
+        }
+        self.shifted(slot)
+    }
+
+    /// `slot` with the barrier shift applied (identity before the barrier).
+    pub fn shifted(&self, slot: RequestSlot) -> RequestSlot {
+        RequestSlot {
+            seq: slot.seq,
+            scheduled_delay: slot.scheduled_delay.saturating_add(self.shift),
+        }
+    }
+
+    /// Warmup tasks that panicked or were cancelled while the barrier awaited
+    /// them; callers add these to their join-error count.
+    pub fn join_errors(&self) -> usize {
+        self.join_errors
+    }
+}
+
 /// Open-loop queue delay after the scheduled arrival; closed-loop is always zero.
 pub fn queue_delay_for_slot(
     kind: ArrivalKind,
@@ -142,6 +205,73 @@ pub fn completed_at_from_start(started_at: DateTime<Utc>, latency: Duration) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn slot(seq: u64, ms: u64) -> RequestSlot {
+        RequestSlot {
+            seq,
+            scheduled_delay: Duration::from_millis(ms),
+        }
+    }
+
+    #[tokio::test]
+    async fn warmup_barrier_awaits_warmup_tasks_before_first_measured_slot() {
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let mut handles = vec![tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            flag.store(true, Ordering::SeqCst);
+        })];
+        let mut barrier = WarmupBarrier::new(1);
+        let run_start = Instant::now();
+        let measured = barrier
+            .before_slot(slot(1, 0), &mut handles, run_start)
+            .await;
+        assert!(done.load(Ordering::SeqCst), "warmup must finish first");
+        assert!(handles.is_empty(), "warmup handles are consumed");
+        assert!(measured.scheduled_delay >= Duration::from_millis(30));
+        assert_eq!(barrier.join_errors(), 0);
+    }
+
+    #[tokio::test]
+    async fn warmup_barrier_keeps_open_loop_gaps_after_shift() {
+        let mut handles: Vec<JoinHandle<()>> = vec![tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        })];
+        let mut barrier = WarmupBarrier::new(1);
+        let run_start = Instant::now();
+        let first = barrier
+            .before_slot(slot(1, 5), &mut handles, run_start)
+            .await;
+        let second = barrier
+            .before_slot(slot(2, 105), &mut handles, run_start)
+            .await;
+        assert_eq!(
+            second.scheduled_delay - first.scheduled_delay,
+            Duration::from_millis(100)
+        );
+        assert!(first.scheduled_delay >= Duration::from_millis(20));
+    }
+
+    #[tokio::test]
+    async fn warmup_barrier_is_identity_without_warmup() {
+        let mut handles: Vec<JoinHandle<()>> = vec![tokio::spawn(async {})];
+        let mut barrier = WarmupBarrier::new(0);
+        let out = barrier
+            .before_slot(slot(0, 7), &mut handles, Instant::now())
+            .await;
+        assert_eq!(out.scheduled_delay, Duration::from_millis(7));
+        assert_eq!(handles.len(), 1, "no barrier, no drain");
+    }
+
+    #[tokio::test]
+    async fn warmup_barrier_counts_join_errors() {
+        let mut handles: Vec<JoinHandle<()>> = vec![tokio::spawn(async { panic!("boom") })];
+        let mut barrier = WarmupBarrier::new(1);
+        barrier
+            .before_slot(slot(1, 0), &mut handles, Instant::now())
+            .await;
+        assert_eq!(barrier.join_errors(), 1);
+    }
     use crate::record::RequestRecord;
     use chrono::TimeZone;
 

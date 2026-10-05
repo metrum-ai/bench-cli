@@ -512,6 +512,9 @@ in [TELEMETRY.md](TELEMETRY.md#modality-binaries-llm-vlm-asr-imagegen)):
 - `warmup` - `true` when the record's `phase` is `warmup`.
 
 Up to two `stage` rows (`warmup`, `measure`) are written at the end of the
-run. Each window runs from the phase's first send to its last completion;
-at concurrency above 1 the two windows can overlap. The run also stamps the
+run. Each window runs from the phase's first send to its last completion.
+Warmup is a barrier (#226): measured requests start only after every warmup
+request has completed, so the `warmup` window ends at or before the
+`measure` window starts, at any concurrency. See the warmup barrier entry in
+`docs/METRICS.md`. The run also stamps the
 additive `summary.v3.telemetry` block described above.

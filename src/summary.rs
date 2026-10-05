@@ -1177,9 +1177,16 @@ fn throughput_bins(records: &[&RequestRecord], window: f64, bin_seconds: f64) ->
     let mut bins = vec![0usize; count];
     let any_open_loop = records.iter().any(|r| r.scheduled_offset_s.is_some());
     if any_open_loop {
+        // Open loop: bin by scheduled offset from the first measured slot, so
+        // warmup (and the #226 barrier shift) cannot push measured requests
+        // past the last bin.
+        let min_sched = records
+            .iter()
+            .filter_map(|r| r.scheduled_offset_s)
+            .fold(f64::INFINITY, f64::min);
         for record in records {
             if let Some(offset) = record.scheduled_offset_s {
-                let index = (offset / bin_seconds).floor() as usize;
+                let index = ((offset - min_sched) / bin_seconds).floor() as usize;
                 if let Some(bin) = bins.get_mut(index) {
                     *bin += 1;
                 }
@@ -1431,6 +1438,27 @@ mod tests {
             "trailing bin rps={}, expected ~{}",
             bins[1],
             52.0 / 2.15
+        );
+    }
+
+    #[test]
+    fn open_loop_bins_start_at_first_measured_slot() {
+        // Measured slots scheduled after 5 s of warmup and barrier wait
+        // (#226): 10 req/s over a 2 s window must fill both bins, not fall
+        // past them.
+        let records: Vec<_> = (0..20)
+            .map(|i| {
+                let at = Duration::from_secs(5) + Duration::from_millis(i * 100);
+                ok(i, 50, 10, 4, &[])
+                    .with_send_offset(at)
+                    .with_schedule(at, Duration::ZERO)
+            })
+            .collect();
+        let bins = throughput_bins(&records.iter().collect::<Vec<_>>(), 2.0, 1.0);
+        assert_eq!(bins.len(), 2);
+        assert!(
+            bins.iter().all(|rps| (rps - 10.0).abs() < 1e-6),
+            "bins={bins:?}"
         );
     }
 
