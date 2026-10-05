@@ -1431,6 +1431,8 @@ async fn run_stage(
     }
 
     // Phase 2: reset measurement epoch; measured prompts restart at index 0.
+    // Observed concurrency covers measured slots only (#226).
+    inflight_tracker.reset_counts();
     let measure_epoch = Instant::now();
     let measure_unix_ns = now_unix_ns();
     let t_start_ns = run_epoch.elapsed_ns();

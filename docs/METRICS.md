@@ -97,7 +97,11 @@ Workload section. This page focuses on measured fields.
   is held. Summary fields `observed_concurrency.in_flight_{mean,p50,max}` and
   `cap_engagement_fraction` (fraction of acquires that blocked on the cap).
   Optional per-request `in_flight_at_send`. In-flight values never exceed
-  `cap`: a request leaves the gauge before its permit is released.
+  `cap`: a request leaves the gauge before its permit is released. Measured
+  phase only: the gauge resets at the warmup barrier (per stage in
+  strategic), so `in_flight_*`, `cap_engagement_fraction`, `acquire_count`
+  and `wait_count` exclude warmup and `acquire_count` equals the measured
+  requests dispatched (#226).
 - **Time-weighted metrics** (#195): six blocks, each an object
   `{n, avg, active_avg, max, active_s}`, built by a sweep line over
   per-request intervals. The design matches AIPerf
@@ -454,10 +458,13 @@ to a modality run's single `measure` stage as well.
   `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`,
   `kv_cache_util_mean` (ratios in [0, 1]), `preemptions_delta` (count), and
   engine histogram p50/p95 (seconds, Prometheus `histogram_quantile`
-  interpolation over bucket deltas). Given the strategic stdout JSON it also
-  reports `kv_cache_util_at_knee`. A metric with no source series in the
-  window, or a counter that resets, is null, never 0. These are computed
-  offline from the NDJSON and are not fields of any bench-cli record.
+  interpolation over bucket deltas; a rank in the first finite bucket or in
+  `+Inf` is not interpolated and is reported as null with a bound and a
+  reason, `below_first_bucket` or `above_last_bucket`, #231). Given the
+  strategic stdout JSON it also reports `kv_cache_util_at_knee`. A metric
+  with no source series in the window, or a counter that resets, is null,
+  never 0. These are computed offline from the NDJSON and are not fields of
+  any bench-cli record.
   Definitions, source series, and DCGM fallbacks:
   [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md#derived-metrics-per-measured-stage) (#199).
 - **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-

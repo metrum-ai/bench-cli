@@ -11,7 +11,7 @@
 
 mod common;
 
-use common::{request_records, sine_wav, skip, spawn_dummy, spawn_mock, tiny_png};
+use common::{request_records, sine_wav, skip, spawn_dummy, spawn_mock, summary_record, tiny_png};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -144,6 +144,20 @@ fn assert_modality_barrier(run: &Run) {
     for r in records.iter().filter(|r| r["phase"] == "measure") {
         assert!(offset(r) + 1e-6 >= warm_done, "data log: {r}");
     }
+    let summary = summary_record(&run.data_log).expect("summary");
+    assert_measured_only(&summary["observed_concurrency"], REQUESTS - WARMUP);
+}
+
+/// The tracker resets at the barrier, so `observed_concurrency` counts the
+/// measured slots only: one acquire per measured request, none for warmup.
+fn assert_measured_only(observed: &Value, measured: u64) {
+    assert_eq!(
+        observed["acquire_count"].as_u64(),
+        Some(measured),
+        "observed_concurrency counts warmup: {observed}"
+    );
+    let waits = observed["wait_count"].as_u64().expect("wait_count");
+    assert!(waits <= measured, "{observed}");
 }
 
 #[test]
@@ -389,6 +403,12 @@ fn strategic_per_stage_warmup_is_a_barrier() {
         .output()
         .expect("run strategic");
     assert_ok(&output, "strategic");
+    let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    let points = summary["points"].as_array().expect("points");
+    assert_eq!(points.len(), 2);
+    for point in points {
+        assert_measured_only(&point["observed_concurrency"], 6);
+    }
     let rows = ndjson_rows(&run.ndjson);
     let mut stage_ids: Vec<String> = rows
         .iter()

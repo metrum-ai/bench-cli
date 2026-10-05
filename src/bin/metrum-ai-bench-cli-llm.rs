@@ -677,7 +677,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
 
     let mut warmup_barrier =
-        metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests);
+        metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
+            .with_tracker(Arc::clone(&inflight_tracker));
     'request_loop: for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier

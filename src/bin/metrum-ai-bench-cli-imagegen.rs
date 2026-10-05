@@ -497,7 +497,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.request_rate.unwrap_or(0.0),
         &mut arrival_rng,
     );
-    let mut warmup_barrier = metrum_ai_bench::runner::WarmupBarrier::new(args.warmup_requests);
+    let mut warmup_barrier = metrum_ai_bench::runner::WarmupBarrier::new(args.warmup_requests)
+        .with_tracker(Arc::clone(&inflight_tracker));
     for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier

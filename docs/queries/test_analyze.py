@@ -50,14 +50,44 @@ class Percentiles(unittest.TestCase):
     def test_histogram_quantile_interpolates(self):
         # 10 obs <= 0.1, 20 more <= 0.5, 10 more <= 1.0, none above.
         b = [(0.1, 10), (0.5, 30), (1.0, 40), (float("inf"), 40)]
-        self.assertAlmostEqual(analyze.histogram_quantile(b, 0.5), 0.1 + 0.4 * 10 / 20)
-        self.assertAlmostEqual(analyze.histogram_quantile(b, 0.25), 0.1)
-        self.assertAlmostEqual(analyze.histogram_quantile(b, 0.95), 0.5 + 0.5 * 8 / 10)
+        hq = analyze.histogram_quantile
+        self.assertAlmostEqual(hq(b, 0.5)["value"], 0.1 + 0.4 * 10 / 20)
+        self.assertAlmostEqual(hq(b, 0.95)["value"], 0.5 + 0.5 * 8 / 10)
+        self.assertIsNone(hq(b, 0.5)["reason"])
+        self.assertIsNone(hq(b, 0.5)["bound"])
+
+    def test_histogram_quantile_all_mass_below_first_bound(self):
+        # The #231 live case: every request_prefill_time value is <= 0.3 s.
+        # Interpolating from 0 used to report p50/p95 = 0.15/0.285.
+        b = [(0.3, 40), (0.5, 40), (1.0, 40), (float("inf"), 40)]
+        for q in (0.5, 0.95):
+            self.assertEqual(
+                analyze.histogram_quantile(b, q),
+                {"value": None, "reason": "below_first_bucket", "bound": 0.3},
+            )
+
+    def test_histogram_quantile_spanning_buckets(self):
+        # 10 <= 0.1, 20 more <= 0.5, 10 above 1.0: one rank per region.
+        b = [(0.1, 10), (0.5, 30), (1.0, 30), (float("inf"), 40)]
+        hq = analyze.histogram_quantile
+        self.assertEqual(hq(b, 0.25), {"value": None, "reason": "below_first_bucket", "bound": 0.1})
+        self.assertAlmostEqual(hq(b, 0.5)["value"], 0.1 + 0.4 * 10 / 20)
+        self.assertEqual(hq(b, 0.95), {"value": None, "reason": "above_last_bucket", "bound": 1.0})
+
+    def test_histogram_quantile_all_mass_in_inf(self):
+        b = [(0.3, 0), (1.0, 0), (float("inf"), 10)]
+        for q in (0.5, 0.95):
+            self.assertEqual(
+                analyze.histogram_quantile(b, q),
+                {"value": None, "reason": "above_last_bucket", "bound": 1.0},
+            )
 
     def test_histogram_quantile_edges(self):
-        self.assertEqual(analyze.histogram_quantile([(1.0, 5), (float("inf"), 10)], 0.9), 1.0)
-        self.assertIsNone(analyze.histogram_quantile([(1.0, 0), (float("inf"), 0)], 0.5))
-        self.assertIsNone(analyze.histogram_quantile([], 0.5))
+        empty = {"value": None, "reason": None, "bound": None}
+        self.assertEqual(analyze.histogram_quantile([(1.0, 0), (float("inf"), 0)], 0.5), empty)
+        self.assertEqual(analyze.histogram_quantile([], 0.5), empty)
+        # Only +Inf: no finite bound to report.
+        self.assertEqual(analyze.histogram_quantile([(float("inf"), 5)], 0.5), empty)
 
     def test_stage_histogram_uses_bucket_deltas(self):
         m = "vllm:time_to_first_token_seconds"
@@ -66,9 +96,11 @@ class Percentiles(unittest.TestCase):
             for le, c in zip(("0.1", "0.5", "+Inf"), counts):
                 rows.append(tele(m + "_bucket", t, c, le=le, engine="0"))
         # Deltas: 0 <= 0.1, 10 <= 0.5, 20 total.
-        self.assertAlmostEqual(analyze.stage_histogram_quantile(rows, m, 0.5), 0.1 + 0.4 * 10 / 10)
-        self.assertEqual(analyze.stage_histogram_quantile(rows, m, 0.95), 0.5)
-
+        self.assertAlmostEqual(
+            analyze.stage_histogram_quantile(rows, m, 0.5)["value"], 0.1 + 0.4 * 10 / 10
+        )
+        p95 = analyze.stage_histogram_quantile(rows, m, 0.95)
+        self.assertEqual((p95["reason"], p95["bound"]), ("above_last_bucket", 0.5))
 
     def test_stage_histogram_drops_label_set_with_reset(self):
         m = "vllm:e2e_request_latency_seconds"
@@ -79,7 +111,25 @@ class Percentiles(unittest.TestCase):
                 for le, c in zip(("0.1", "0.5", "+Inf"), counts):
                     rows.append(tele(m + "_bucket", t, c, le=le, engine=engine))
         # Only engine 0 counts: deltas 0, 0, 10, so every rank is in +Inf.
-        self.assertEqual(analyze.stage_histogram_quantile(rows, m, 0.5), 0.5)
+        p50 = analyze.stage_histogram_quantile(rows, m, 0.5)
+        self.assertEqual((p50["value"], p50["reason"], p50["bound"]),
+                         (None, "above_last_bucket", 0.5))
+
+    def test_engine_histograms_text_and_json(self):
+        m = "vllm:request_prefill_time_seconds"
+        rows = [{"kind": "stage", "run_id": "r", "stage": "c1", "phase": "measure",
+                 "load": 1, "t_start_ns": 0, "t_end_ns": int(2e9)}]
+        for t, counts in ((0.5, (0, 0, 0)), (1.5, (40, 40, 40))):
+            for le, c in zip(("0.3", "0.5", "+Inf"), counts):
+                rows.append(tele(m + "_bucket", t, c, le=le, engine="0"))
+        res = analyze.analyze(rows)
+        h = res["stages"][0]["engine_histograms"][m]
+        self.assertEqual(h, {"p50": None, "p50_reason": "below_first_bucket", "p50_bound": 0.3,
+                             "p95": None, "p95_reason": "below_first_bucket", "p95_bound": 0.3})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            analyze.render(res)
+        self.assertIn(f"\t{m}\t<=0.3\t<=0.3\n", buf.getvalue())
 
 
 class PowerEnergySources(unittest.TestCase):

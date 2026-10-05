@@ -6,6 +6,7 @@
 //! Modality binaries still own request construction; this module owns the
 //! bookkeeping that must not drift (F-01, F-02, F-04, F-18, F-19, N-02).
 
+use crate::concurrency::InFlightTracker;
 use crate::load::{ArrivalKind, RequestSlot};
 use crate::record::{Phase, RequestRecord};
 use chrono::{DateTime, Utc};
@@ -94,6 +95,7 @@ pub struct WarmupBarrier {
     warmup_requests: u64,
     shift: Duration,
     join_errors: usize,
+    tracker: Option<Arc<InFlightTracker>>,
 }
 
 impl WarmupBarrier {
@@ -103,6 +105,13 @@ impl WarmupBarrier {
             warmup_requests: u64::from(warmup_requests),
             ..Self::default()
         }
+    }
+
+    /// Reset `tracker` at the barrier so `observed_concurrency` covers the
+    /// measured phase only (#226).
+    pub fn with_tracker(mut self, tracker: Arc<InFlightTracker>) -> Self {
+        self.tracker = Some(tracker);
+        self
     }
 
     /// Call before dispatching `slot`. On the first measured slot this awaits
@@ -124,6 +133,9 @@ impl WarmupBarrier {
                 }
             }
             self.shift = run_start.elapsed().saturating_sub(slot.scheduled_delay);
+            if let Some(tracker) = &self.tracker {
+                tracker.reset_counts();
+            }
         }
         self.shifted(slot)
     }

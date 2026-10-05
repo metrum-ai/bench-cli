@@ -172,10 +172,32 @@ are cumulative counters. For a stage:
    If any bucket of a label set (engine, model, ...) resets in the window,
    drop that whole label set: a partial histogram skews the quantile.
 2. Sum the Δ per `le` across the remaining label sets.
-3. Find the first bucket whose cumulative count reaches `q * total` and
-   interpolate linearly between the previous bound (0 for the first bucket)
-   and this one, as Prometheus `histogram_quantile` does. A rank in the
-   `+Inf` bucket returns the highest finite bound.
+3. Find the first bucket whose cumulative count reaches `q * total`. If it
+   has a finite bound on both sides, interpolate linearly between the
+   previous bound and this one, as Prometheus `histogram_quantile` does.
+4. Do not interpolate at the edges. This departs from Prometheus on purpose:
+   - A rank in the first finite bucket has no lower bound. Prometheus
+     interpolates from 0, which always gives `q * bound`. (A live vLLM 0.31.0
+     run reported `request_prefill_time` p50/p95 = 0.15/0.285 in every stage
+     because every value was below the 0.3 s first bound.) Report null with
+     reason `below_first_bucket` and `bound` = that first bound. The quantile
+     is `<= bound`.
+   - A rank in `+Inf` reports null with reason `above_last_bucket` and
+     `bound` = the highest finite bound. The quantile is `> bound`.
+   - A histogram with only a `+Inf` bucket, or with no observations, is null
+     with no reason.
+
+`analyze.py --json` writes `p50`, `p50_reason` and `p50_bound` per
+histogram, and the same three keys for `p95`. `p50_reason` and `p50_bound`
+are null when `p50` is an interpolated number. The text table prints
+`<=0.3` or `>60` in place of a number. To fix an edge result, use a server
+with finer buckets near the observed values or read the client-side
+percentiles. Do not use the bound as the percentile.
+
+When every observation of a stage falls in a single interior bucket, p50
+and p95 only locate that bucket: the interpolated values (for example live
+TTFT p50/p95 = 0.03/0.039 s) say the latency is in the 0.02 to 0.04 s
+bucket, not where inside it. Read them as that range.
 
 The result is bounded by bucket resolution. It is the server's view of
 latency; do not mix it with client-side type 7 percentiles.

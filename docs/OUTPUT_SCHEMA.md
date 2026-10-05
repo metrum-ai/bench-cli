@@ -173,7 +173,9 @@ Additional v3 fields:
 - `observed_concurrency` - optional client outstanding-request snapshot:
   `cap`, `in_flight_mean` / `in_flight_p50` / `in_flight_max`,
   `cap_engagement_fraction` (acquires that blocked on the semaphore),
-  `acquire_count`, `wait_count`
+  `acquire_count`, `wait_count`. Measured phase only: the tracker resets at
+  the warmup barrier (per stage in strategic), so warmup acquires and
+  occupancy are excluded (#226)
 - `effective_concurrency` / `effective_prefill_concurrency` /
   `effective_decode_concurrency` (requests), `tokens_in_flight` (tokens),
   `effective_prefill_throughput` / `effective_decode_throughput`
