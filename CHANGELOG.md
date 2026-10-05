@@ -119,6 +119,29 @@
   `scripts/tests/serve_sut_test.sh` runs in CI and checks
   `model.quantization`, `notes`, and the `MODEL` override guard. No Rust or
   summary/request schema change (#203).
+- `docs/queries/analyze.py` computes the `docs/telemetry/ANALYSIS.md`
+  derived metrics per measured stage: `gpu_util_mean`, `sm_active_p50`,
+  `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`,
+  `kv_cache_util_mean` (ratios 0 to 1), and `preemptions_delta`. GPU sources
+  are the Metrum all-smi fork gauges (`all_smi_gpu_utilization`,
+  `all_smi_gpu_sm_active_ratio`, `all_smi_gpu_sm_occupancy`,
+  `all_smi_gpu_tensor_active_ratio`,
+  `all_smi_gpu_hollow_utilization_ratio`) with DCGM PROF fallbacks
+  (`DCGM_FI_PROF_SM_ACTIVE`, `DCGM_FI_PROF_SM_OCCUPANCY`,
+  `DCGM_FI_PROF_PIPE_TENSOR_ACTIVE`, and `DCGM_FI_PROF_GR_ENGINE_ACTIVE`
+  minus `DCGM_FI_PROF_SM_ACTIVE` for hollow). A metric with no source series
+  is null, never 0. Engine histogram p50/p95 come from bucket deltas with
+  Prometheus `histogram_quantile` interpolation. An optional second argument
+  (the strategic stdout JSON) adds `kv_cache_util_at_knee`, read from
+  `knee_detection` (#190) and null with a reason when there is no knee;
+  older outputs fall back to the legacy `knee` field, ignored below 5 points.
+  `--json` prints machine-readable output (#199).
+- Recorded fixtures `docs/queries/fixtures/sweep5` and `sweep3` (`.ndjson`
+  plus trimmed `.stdout.json`, from strategic against
+  `metrum-ai-bench-cli-mock-server --telemetry-fixture`; `record.sh`
+  re-records them) and a stdlib `unittest` suite
+  `docs/queries/test_analyze.py`, now run in CI. No Rust or schema change
+  (#199).
 
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`
@@ -157,6 +180,13 @@
   `tests/common/mod.rs` start both servers on port 0 and read the port from
   that line, and they now also kill the server that `go run` starts instead
   of orphaning it. No metric or schema change (#211).
+- `docs/queries/analyze.py` `counter_delta` no longer returns last minus
+  first across a counter reset (any drop between samples), which understated
+  or went negative. It now returns null, so `energy_j` falls back to the
+  trapezoid over power and `preemptions_delta` is null. The helper
+  `percentile_nearest` is renamed `percentile_type7`; it already computed
+  Hyndman-Fan type 7 and only the name was wrong, so the rename changes no
+  values (#199).
 
 ## 1.5.3 (2026-10-02)
 

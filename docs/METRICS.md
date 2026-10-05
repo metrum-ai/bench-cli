@@ -179,10 +179,22 @@ inside modality `--data-log` request rows.
 - **Power / energy (offline)**: prefer DCGM `DCGM_FI_DEV_POWER_USAGE` and
   `DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION` (mJ, often scaled to J at ingest), else
   `all_smi_gpu_power_consumption_watts`. Energy is counter Δ in a measured
-  stage window, else trapezoid ∫ power. `j_per_output_token` divides that
-  energy by successful output tokens in the stage.
+  stage window, else trapezoid ∫ power (also when the energy counter resets
+  inside the window). `j_per_output_token` divides that energy by successful
+  output tokens in the stage.
 - **KV / queue**: `vllm:gpu_cache_usage_perc` (or kv alias),
   `vllm:num_requests_{running,waiting}`, `vllm:num_preemptions_total` (Δ).
+- **Derived GPU / KV metrics (offline)**: per measured stage,
+  `docs/queries/analyze.py` computes `gpu_util_mean`, `sm_active_p50`,
+  `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`,
+  `kv_cache_util_mean` (ratios in [0, 1]), `preemptions_delta` (count), and
+  engine histogram p50/p95 (seconds, Prometheus `histogram_quantile`
+  interpolation over bucket deltas). Given the strategic stdout JSON it also
+  reports `kv_cache_util_at_knee`. A metric with no source series in the
+  window, or a counter that resets, is null, never 0. These are computed
+  offline from the NDJSON and are not fields of any bench-cli record.
+  Definitions, source series, and DCGM fallbacks:
+  [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md#derived-metrics-per-measured-stage) (#199).
 - **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-
   weighted math must join long-format `telemetry` rows to `stage` windows.
 

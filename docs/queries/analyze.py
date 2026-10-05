@@ -4,10 +4,17 @@
 """Stdlib-only analysis recipes for strategic telemetry NDJSON.
 
 Usage:
-  python3 docs/queries/analyze.py /path/to/run.ndjson
+  python3 docs/queries/analyze.py RUN.ndjson [STRATEGIC_STDOUT.json] [--json]
 
-Prints row counts, per-measure-stage power (time-weighted mean), energy from
-counter delta when present, trapezoid energy from power gauges, and J/token.
+Prints row counts, then per measure stage: power (time-weighted mean, type 7
+p95), energy from counter delta and from the power trapezoid, J/token, and the
+docs/telemetry/ANALYSIS.md derived metrics (gpu_util_mean, sm_active_p50,
+sm_occupancy_p50, tensor_active_p50, hollow_util_mean, kv_cache_util_mean,
+preemptions_delta). Engine `_seconds` histograms get p50/p95 from bucket
+deltas. Pass the strategic stdout JSON to resolve the knee and report
+kv_cache_util_at_knee. --json prints the same result as one JSON object.
+
+Utilization-style outputs are ratios in [0, 1]; percent gauges are scaled.
 """
 
 from __future__ import annotations
@@ -42,6 +49,46 @@ ENERGY_METRICS = {
     "habanalabs_energy",
     "nv_energy_consumption",
 }
+
+# Derived-metric sources, in preference order: the first metric with samples in
+# the stage window wins. Value is the scale to a [0, 1] ratio. all-smi names
+# match the recorded Metrum fork page (scripts/parity/fixtures/
+# all-smi-fork-h100.prom, v0.26.3-metrum.4); DCGM PROF fields are the fallback
+# when only dcgm-exporter is scraped.
+GPU_UTIL = [
+    ("all_smi_gpu_utilization", 0.01),  # percent
+    ("DCGM_FI_DEV_GPU_UTIL", 0.01),  # percent
+    ("nvidia_smi_utilization_gpu_ratio", 1.0),
+    ("gpu_gfx_activity", 0.01),  # AMD, percent
+]
+SM_ACTIVE = [
+    ("all_smi_gpu_sm_active_ratio", 1.0),  # DCGM field 1002 via GPM
+    ("DCGM_FI_PROF_SM_ACTIVE", 1.0),
+]
+SM_OCCUPANCY = [
+    ("all_smi_gpu_sm_occupancy", 1.0),  # GPM, Hopper and later
+    ("DCGM_FI_PROF_SM_OCCUPANCY", 1.0),
+]
+TENSOR_ACTIVE = [
+    ("all_smi_gpu_tensor_active_ratio", 1.0),  # DCGM field 1004 via GPM
+    ("DCGM_FI_PROF_PIPE_TENSOR_ACTIVE", 1.0),
+]
+HOLLOW_UTIL = [("all_smi_gpu_hollow_utilization_ratio", 1.0)]
+# DCGM fallback for hollow utilization, same definition as the fork gauge:
+# graphics_active - sm_active, clamped at 0, paired per scrape and GPU.
+HOLLOW_DCGM = ("DCGM_FI_PROF_GR_ENGINE_ACTIVE", "DCGM_FI_PROF_SM_ACTIVE")
+# vLLM *_perc gauges are fractions (1.0 = full) despite the name.
+KV_CACHE = [
+    ("vllm:kv_cache_usage_perc", 1.0),
+    ("vllm:gpu_cache_usage_perc", 1.0),  # pre-v1 vLLM name
+    ("sglang:token_usage", 1.0),
+    ("trtllm_kv_cache_utilization", 1.0),
+    ("llamacpp:kv_cache_usage_ratio", 1.0),
+]
+PREEMPTIONS = ["vllm:num_preemptions_total", "sglang:num_preemptions_total"]
+
+# Matches #190: Kneedle needs at least this many sweep points.
+KNEE_MIN_POINTS = 5
 
 
 # Power-named gauges that are configuration, not draw. The name fallback below
@@ -123,19 +170,21 @@ def trapezoid_energy_j(samples: List[Tuple[float, float]]) -> Optional[float]:
 
 
 def counter_delta(samples: List[Tuple[float, float]]) -> Optional[float]:
+    """last - first. None with fewer than 2 samples or on a reset (any drop),
+    which ANALYSIS.md treats as an invalid stage for that series."""
     if len(samples) < 2:
         return None
     samples = sorted(samples)
+    if any(b[1] < a[1] for a, b in zip(samples, samples[1:])):
+        return None
     return samples[-1][1] - samples[0][1]
 
 
-def percentile_nearest(values: List[float], p: float) -> Optional[float]:
+def percentile_type7(values: List[float], p: float) -> Optional[float]:
+    """Hyndman-Fan type 7 (numpy default, src/stats.rs percentile_type7)."""
     if not values:
         return None
     xs = sorted(values)
-    if len(xs) == 1:
-        return xs[0]
-    # Hyndman-Fan type 7
     n = len(xs)
     h = (n - 1) * (p / 100.0)
     lo = int(math.floor(h))
@@ -145,40 +194,203 @@ def percentile_nearest(values: List[float], p: float) -> Optional[float]:
     return xs[lo] * (hi - h) + xs[hi] * (h - lo)
 
 
-def main(argv: List[str]) -> int:
-    if len(argv) != 2:
-        print("usage: analyze.py PATH.ndjson", file=sys.stderr)
-        return 2
-    path = argv[1]
-    rows = load_rows(path)
+def histogram_quantile(buckets: List[Tuple[float, float]], q: float) -> Optional[float]:
+    """Prometheus histogram_quantile on cumulative (le, count) buckets.
 
+    Linear interpolation inside the bucket that holds rank q * total. The first
+    bucket's lower bound is 0. A rank in the +Inf bucket returns the highest
+    finite bound. None when there are no observations.
+    """
+    if not buckets:
+        return None
+    bs = sorted(buckets)
+    total = bs[-1][1]
+    if total <= 0:
+        return None
+    rank = q * total
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in bs:
+        if count >= rank:
+            if math.isinf(le):
+                return prev_le if len(bs) > 1 else None
+            if count == prev_count:
+                return le
+            return prev_le + (le - prev_le) * (rank - prev_count) / (count - prev_count)
+        prev_le, prev_count = le, count
+    return prev_le
+
+
+def stage_histogram_quantile(
+    window: List[Dict[str, Any]], metric: str, q: float
+) -> Optional[float]:
+    """Quantile of `metric` (base name, no _bucket) observed inside a stage.
+
+    Buckets are counters: take the delta per series (last - first in the
+    window), sum deltas across non-`le` labels (engines, models), then apply
+    histogram_quantile.
+    """
+    by_series: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
+    for r in window:
+        if r.get("metric") != metric + "_bucket":
+            continue
+        by_series[series_key(r)].append((r["t_ns"] / 1e9, float(r["value"])))
+    by_le: Dict[float, float] = defaultdict(float)
+    for key, samples in by_series.items():
+        le = dict(key[2]).get("le")
+        d = counter_delta(samples)
+        if le is None or d is None:
+            continue
+        by_le[float(le)] += d
+    return histogram_quantile(list(by_le.items()), q)
+
+
+def pick_family(
+    window: List[Dict[str, Any]], family: List[Tuple[str, float]]
+) -> Tuple[Optional[str], Dict[Any, List[Tuple[float, float]]]]:
+    """First metric in `family` with samples in the window, as scaled series."""
+    for metric, scale in family:
+        series: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
+        for r in window:
+            if r.get("metric") == metric:
+                series[series_key(r)].append((r["t_ns"] / 1e9, float(r["value"]) * scale))
+        if series:
+            return metric, series
+    return None, {}
+
+
+def mean_over_series(series: Dict[Any, List[Tuple[float, float]]]) -> Optional[float]:
+    """Time-weighted mean per series (GPU), then the plain mean across them."""
+    means = [m for m in (time_weighted_mean(s) for s in series.values()) if m is not None]
+    return sum(means) / len(means) if means else None
+
+
+def pooled_p50(series: Dict[Any, List[Tuple[float, float]]]) -> Optional[float]:
+    """Type 7 median of all samples, pooled across GPUs."""
+    return percentile_type7([v for s in series.values() for _, v in s], 50.0)
+
+
+def hollow_from_dcgm(window: List[Dict[str, Any]]) -> Dict[Any, List[Tuple[float, float]]]:
+    gr_metric, sm_metric = HOLLOW_DCGM
+    by_gpu: Dict[Any, Dict[int, Dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    for r in window:
+        metric = r.get("metric")
+        if metric in HOLLOW_DCGM:
+            gpu = (r.get("src", ""), series_key(r)[2])
+            by_gpu[gpu][r["t_ns"]][metric] = float(r["value"])
+    series: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
+    for gpu, by_t in by_gpu.items():
+        for t_ns, vals in by_t.items():
+            if gr_metric in vals and sm_metric in vals:
+                series[gpu].append((t_ns / 1e9, max(0.0, vals[gr_metric] - vals[sm_metric])))
+    return series
+
+
+def derived_metrics(window: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """ANALYSIS.md derived metrics for one stage window. `sources` names the
+    metric each value came from (None when no candidate was scraped)."""
+    out: Dict[str, Any] = {}
+    sources: Dict[str, Optional[str]] = {}
+
+    src, series = pick_family(window, GPU_UTIL)
+    out["gpu_util_mean"], sources["gpu_util_mean"] = mean_over_series(series), src
+    for name, family in (
+        ("sm_active_p50", SM_ACTIVE),
+        ("sm_occupancy_p50", SM_OCCUPANCY),
+        ("tensor_active_p50", TENSOR_ACTIVE),
+    ):
+        src, series = pick_family(window, family)
+        out[name], sources[name] = pooled_p50(series), src
+
+    src, series = pick_family(window, HOLLOW_UTIL)
+    if not series:
+        series = hollow_from_dcgm(window)
+        src = f"{HOLLOW_DCGM[0]} - {HOLLOW_DCGM[1]}" if series else None
+    out["hollow_util_mean"], sources["hollow_util_mean"] = mean_over_series(series), src
+
+    src, series = pick_family(window, KV_CACHE)
+    out["kv_cache_util_mean"], sources["kv_cache_util_mean"] = mean_over_series(series), src
+
+    preempt: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
+    preempt_src = None
+    for metric in PREEMPTIONS:
+        for r in window:
+            if r.get("metric") == metric:
+                preempt[series_key(r)].append((r["t_ns"] / 1e9, float(r["value"])))
+        if preempt:
+            preempt_src = metric
+            break
+    deltas = [counter_delta(s) for s in preempt.values()]
+    out["preemptions_delta"] = (
+        sum(deltas) if deltas and all(d is not None for d in deltas) else None  # type: ignore[misc]
+    )
+    sources["preemptions_delta"] = preempt_src
+
+    hist: Dict[str, Dict[str, Optional[float]]] = {}
+    for base in sorted(
+        {r["metric"][: -len("_bucket")] for r in window
+         if r.get("metric", "").endswith("_seconds_bucket")}
+    ):
+        hist[base] = {
+            "p50": stage_histogram_quantile(window, base, 0.50),
+            "p95": stage_histogram_quantile(window, base, 0.95),
+        }
+    out["engine_histograms"] = hist
+    out["sources"] = sources
+    return out
+
+
+def resolve_knee(stdout: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Knee load from strategic stdout JSON.
+
+    Prefers `knee_detection` (#190). Older outputs lack it: fall back to the
+    `knee` field, but only for sweeps of at least KNEE_MIN_POINTS points,
+    since #190 marks 3- and 4-point knees as unreliable.
+    """
+    if stdout is None:
+        return {"load": None, "index": None, "reason": "no_strategic_stdout",
+                "source": None, "note": "pass the strategic stdout JSON to resolve the knee"}
+    points = stdout.get("points") or []
+    det = stdout.get("knee_detection")
+    if isinstance(det, dict):
+        index = det.get("index")
+        if index is None:
+            return {"load": None, "index": None, "reason": det.get("reason"),
+                    "source": "knee_detection",
+                    "note": f"no knee: {det.get('reason')} "
+                            f"({det.get('points')} points, min {det.get('min_points')})"}
+        return {"load": points[index].get("load"), "index": index, "reason": None,
+                "source": "knee_detection", "note": None}
+    legacy = "knee_detection absent (output predates #190); used the legacy knee field"
+    if len(points) < KNEE_MIN_POINTS:
+        return {"load": None, "index": None, "reason": "insufficient_points",
+                "source": "legacy_knee",
+                "note": f"{legacy}; {len(points)} points < {KNEE_MIN_POINTS}, "
+                        "so any legacy knee is ignored"}
+    knee = stdout.get("knee")
+    if knee is None:
+        return {"load": None, "index": None, "reason": "legacy_knee_null",
+                "source": "legacy_knee", "note": f"{legacy}; it is null and gives no reason"}
+    index = next((i for i, p in enumerate(points) if p.get("load") == knee.get("load")), None)
+    return {"load": knee.get("load"), "index": index, "reason": None,
+            "source": "legacy_knee", "note": legacy}
+
+
+def analyze(rows: List[Dict[str, Any]], stdout: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     by_kind: Dict[str, int] = defaultdict(int)
     for r in rows:
         by_kind[r.get("kind", "?")] += 1
-    print("## row counts")
-    for kind in sorted(by_kind):
-        print(f"{kind}\t{by_kind[kind]}")
 
-    stages = [
-        r
-        for r in rows
-        if r.get("kind") == "stage" and r.get("phase") == "measure"
-    ]
+    stages = [r for r in rows if r.get("kind") == "stage" and r.get("phase") == "measure"]
     tele = [r for r in rows if r.get("kind") == "telemetry"]
     reqs = [r for r in rows if r.get("kind") == "request" and not r.get("warmup")]
 
-    print("\n## stage power / energy")
-    print(
-        "stage\tload\tpower_n\tpower_mean_w\tpower_p95_w\t"
-        "energy_counter_j\tenergy_trap_j\tout_tokens\tj_per_out_tok"
-    )
+    out_stages: List[Dict[str, Any]] = []
     for s in sorted(stages, key=lambda x: (x.get("stage", 0), x.get("load", 0))):
         t0 = s["t_start_ns"]
         t1 = s["t_end_ns"]
         window = [
-            r
-            for r in tele
-            if r.get("run_id") == s.get("run_id") and t0 <= r["t_ns"] < t1
+            r for r in tele if r.get("run_id") == s.get("run_id") and t0 <= r["t_ns"] < t1
         ]
 
         # Sum multi-GPU power at the same t_ns (board total), then time-weight.
@@ -190,21 +402,15 @@ def main(argv: List[str]) -> int:
                 power_values.append(float(r["value"]))
         power_series = [(t / 1e9, v) for t, v in sorted(power_by_t.items())]
         power_mean = time_weighted_mean(power_series)
-        power_p95 = percentile_nearest(
-            [v for _, v in power_series] or power_values, 95.0
-        )
+        power_p95 = percentile_type7([v for _, v in power_series] or power_values, 95.0)
         energy_trap = trapezoid_energy_j(power_series)
 
         # Energy counters: Δ per series, then sum series (multi-GPU).
         energy_by_series: Dict[Any, List[Tuple[float, float]]] = defaultdict(list)
         for r in window:
             metric = r.get("metric", "")
-            if metric in ENERGY_METRICS or (
-                r.get("unit") == "J" and "energy" in metric.lower()
-            ):
-                energy_by_series[series_key(r)].append(
-                    (r["t_ns"] / 1e9, energy_joules(r))
-                )
+            if metric in ENERGY_METRICS or (r.get("unit") == "J" and "energy" in metric.lower()):
+                energy_by_series[series_key(r)].append((r["t_ns"] / 1e9, energy_joules(r)))
         energy_counter = 0.0
         energy_counter_ok = False
         for samples in energy_by_series.values():
@@ -214,36 +420,122 @@ def main(argv: List[str]) -> int:
                 energy_counter_ok = True
 
         stage_reqs = [
-            r
-            for r in reqs
+            r for r in reqs
             if r.get("run_id") == s.get("run_id")
             and r.get("stage") == s.get("stage")
             and r.get("success")
         ]
         out_tokens = sum(int(r.get("output_tokens") or 0) for r in stage_reqs)
-        energy_for_jtok = (
-            energy_counter
-            if energy_counter_ok
-            else (energy_trap if energy_trap is not None else None)
-        )
+        energy_for_jtok = energy_counter if energy_counter_ok else energy_trap
         j_per = (
             energy_for_jtok / out_tokens
             if energy_for_jtok is not None and out_tokens > 0
             else None
         )
+        out_stages.append({
+            "run_id": s.get("run_id"),
+            "stage": s.get("stage"),
+            "load": s.get("load"),
+            "power_n": len(power_series),
+            "power_mean_w": power_mean,
+            "power_p95_w": power_p95,
+            "energy_counter_j": energy_counter if energy_counter_ok else None,
+            "energy_trap_j": energy_trap,
+            "out_tokens": out_tokens,
+            "j_per_output_token": j_per,
+            **derived_metrics(window),
+        })
 
-        def fmt(x: Optional[float]) -> str:
-            if x is None or (isinstance(x, float) and not math.isfinite(x)):
-                return ""
-            return f"{x:.6g}"
+    knee = resolve_knee(stdout)
+    at_knee: Optional[float] = None
+    reason = knee["reason"]
+    if knee["load"] is not None:
+        match = [s for s in out_stages if s["load"] == knee["load"]]
+        if not match:
+            reason = "knee_stage_not_in_ndjson"
+        else:
+            at_knee = match[0]["kv_cache_util_mean"]
+            if at_knee is None:
+                reason = (
+                    "no_kv_cache_series" if match[0]["sources"]["kv_cache_util_mean"] is None
+                    else "insufficient_kv_samples"
+                )
+    return {
+        "row_counts": dict(sorted(by_kind.items())),
+        "stages": out_stages,
+        "knee": knee,
+        "kv_cache_util_at_knee": at_knee,
+        "kv_cache_util_at_knee_reason": reason,
+    }
 
-        print(
-            f"{s.get('stage')}\t{s.get('load')}\t{len(power_series)}\t"
-            f"{fmt(power_mean)}\t{fmt(power_p95)}\t"
-            f"{fmt(energy_counter if energy_counter_ok else None)}\t"
-            f"{fmt(energy_trap)}\t{out_tokens}\t{fmt(j_per)}"
-        )
 
+def fmt(x: Any) -> str:
+    if x is None or (isinstance(x, float) and not math.isfinite(x)):
+        return ""
+    if isinstance(x, float):
+        return f"{x:.6g}"
+    return str(x)
+
+
+def render(result: Dict[str, Any]) -> None:
+    print("## row counts")
+    for kind, n in result["row_counts"].items():
+        print(f"{kind}\t{n}")
+
+    print("\n## stage power / energy")
+    cols = ["stage", "load", "power_n", "power_mean_w", "power_p95_w",
+            "energy_counter_j", "energy_trap_j", "out_tokens", "j_per_output_token"]
+    print("\t".join(cols))
+    for s in result["stages"]:
+        print("\t".join(fmt(s[c]) for c in cols))
+
+    print("\n## stage utilization / KV (ratios 0-1)")
+    cols = ["stage", "load", "gpu_util_mean", "sm_active_p50", "sm_occupancy_p50",
+            "tensor_active_p50", "hollow_util_mean", "kv_cache_util_mean",
+            "preemptions_delta"]
+    print("\t".join(cols))
+    sources: Dict[str, set] = defaultdict(set)
+    for s in result["stages"]:
+        print("\t".join(fmt(s[c]) for c in cols))
+        for k, v in s["sources"].items():
+            sources[k].add(v or "absent")
+    print("\n## sources")
+    for k in cols[2:]:
+        print(f"{k}\t{', '.join(sorted(sources[k])) or 'absent'}")
+
+    hist_rows = [(s, m, q) for s in result["stages"] for m, q in s["engine_histograms"].items()]
+    if hist_rows:
+        print("\n## engine histograms (bucket deltas, seconds)")
+        print("stage\tload\tmetric\tp50\tp95")
+        for s, m, q in hist_rows:
+            print(f"{fmt(s['stage'])}\t{fmt(s['load'])}\t{m}\t{fmt(q['p50'])}\t{fmt(q['p95'])}")
+
+    knee = result["knee"]
+    print("\n## knee")
+    print(f"knee_load\t{fmt(knee['load'])}")
+    print(f"knee_source\t{knee['source'] or ''}")
+    at = result["kv_cache_util_at_knee"]
+    print(f"kv_cache_util_at_knee\t{'null' if at is None else fmt(at)}")
+    if result["kv_cache_util_at_knee_reason"]:
+        print(f"kv_cache_util_at_knee_reason\t{result['kv_cache_util_at_knee_reason']}")
+    if knee["note"]:
+        print(f"note\t{knee['note']}")
+
+
+def main(argv: List[str]) -> int:
+    args = [a for a in argv[1:] if a != "--json"]
+    if not 1 <= len(args) <= 2:
+        print("usage: analyze.py RUN.ndjson [STRATEGIC_STDOUT.json] [--json]", file=sys.stderr)
+        return 2
+    stdout = None
+    if len(args) == 2:
+        with open(args[1], encoding="utf-8") as f:
+            stdout = json.load(f)
+    result = analyze(load_rows(args[0]), stdout)
+    if "--json" in argv[1:]:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        render(result)
     return 0
 
 
