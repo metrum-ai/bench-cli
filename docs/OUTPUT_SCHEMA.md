@@ -102,6 +102,29 @@ Additional v3 fields:
   `acquire_count`, `wait_count`
 - `connect_s` / `prefill_s` / `decode_s` / `decode_tok_s` - type-7
   distributions over measured successes (empty `n=0` when absent)
+- `first_byte_s` / `queue_delay_s` / `first_reasoning_s` - type-7
+  distributions in seconds over measured successes, built only from requests
+  that recorded the field (#191). Always present; `n=0` with null stats when no
+  request recorded it. `queue_delay_s` covers only requests with an intended
+  arrival (open loop, `--request-rate`), so it is `n=0` for closed-loop runs.
+  `first_reasoning_s` is `n=0` unless the model streamed reasoning deltas.
+- `isl_tokens` / `osl_tokens` - type-7 distributions in tokens of per-request
+  input (prompt) and output (completion) token counts over measured successes
+  (#191). Server `usage` counts win; `tokenized_*` counts fill only rows
+  flagged `usage_missing`. Rows with neither usage nor a `usage_missing` flag
+  (ASR, imagegen) are skipped, never counted as zero. `n=0` when no row
+  qualifies.
+- `isl_tokens_source` / `osl_tokens_source` - optional string provenance for
+  the matching token distribution: `"server_usage"` (every sample from server
+  usage), `"tokenizer_fallback"` (every sample from tokenizer counts), or
+  `"mixed"` (both). Omitted from JSON when the distribution has no samples.
+  `isl_osl.length_basis` `tokenizer` is the same provenance as
+  `tokenizer_fallback`; it reports `tokenizer` whenever any ISL or OSL sample
+  used the tokenizer, where `*_tokens_source` would say `mixed`.
+- Each `per_endpoint` entry carries the same seven fields (`first_byte_s`,
+  `queue_delay_s`, `first_reasoning_s`, `isl_tokens`, `osl_tokens`,
+  `isl_tokens_source`, `osl_tokens_source`) computed over that endpoint's
+  measured successes with the same rules.
 - `isl_osl` - optional runtime ISL/OSL validation vs `--isl-target` /
   `--osl-target` or `--prompt-mix-report`: targets, tolerances, measured
   mean/p50, mismatch counts, and `length_basis` (`server_usage` or
@@ -121,6 +144,29 @@ and JSONL both derive from `RunSummary` / `DistSummary` (Hyndman–Fan type 7).
 Historical `request.v2` / `summary.v2` lines from 0.1.82 remain readable for
 regression audit (`record::accepts_audit_schema`); new campaign validation
 rejects any JSONL line without `schema_version`.
+
+## Strategic sweep points and request CSV
+
+`metrum-ai-bench-cli-strategic` sweep points JSON (one `SweepPoint` per stage)
+gains these type-7 `DistSummary` fields over measured successes in the stage
+(additive, #191):
+
+- `first_byte_s` (seconds) - requests that recorded a first-byte time.
+- `queue_delay_s` (seconds) - scheduled-to-send delay. `n=0` for closed-loop
+  stages (`--sweep-by concurrency`), where there is no intended arrival.
+- `first_reasoning_s` (seconds) - requests that streamed a reasoning delta.
+- `isl_tokens` / `osl_tokens` (tokens) - per-request input/output tokens from
+  server `usage` only (no tokenizer fallback). Rows with zero input and zero
+  output tokens are skipped. `osl_tokens` is `n=0` for `--kind embeddings` and
+  `--kind rerank` stages, which generate no output. Rerank `isl_tokens` is the
+  server's `usage.total_tokens` (query plus documents, all input).
+
+Each is always present; `n=0` with null stats when no request qualifies.
+
+The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains a
+trailing optional column `first_reasoning_s` (seconds, last column). The cell
+is empty when the request streamed no reasoning delta. Existing columns keep
+their order.
 
 ## Security and provenance
 

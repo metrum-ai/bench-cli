@@ -55,6 +55,22 @@ pub struct RunSummary {
     pub decode_s: DistSummary,
     /// Completion tokens per decode second.
     pub decode_tok_s: DistSummary,
+    /// Send to response headers (HTTP time to first byte).
+    pub first_byte_s: DistSummary,
+    /// Intended arrival to actual send; open-loop successes only (`n = 0` closed loop).
+    pub queue_delay_s: DistSummary,
+    /// Send to first reasoning chunk; streaming thinking models only.
+    pub first_reasoning_s: DistSummary,
+    /// Per-request input tokens (server `usage`, tokenizer fills `usage_missing` rows).
+    pub isl_tokens: DistSummary,
+    /// Provenance of `isl_tokens`: `server_usage`, `tokenizer_fallback`, or `mixed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isl_tokens_source: Option<&'static str>,
+    /// Per-request output tokens (server `usage`, tokenizer fills `usage_missing` rows).
+    pub osl_tokens: DistSummary,
+    /// Provenance of `osl_tokens`: `server_usage`, `tokenizer_fallback`, or `mixed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub osl_tokens_source: Option<&'static str>,
     pub throughput_bins_rps: DistSummary,
     pub goodput: GoodputSummary,
     pub pooled_mixture: bool,
@@ -184,6 +200,105 @@ pub struct EndpointSummary {
     pub ttft_s: DistSummary,
     pub tpot_s: DistSummary,
     pub itl_s: DistSummary,
+    pub first_byte_s: DistSummary,
+    pub queue_delay_s: DistSummary,
+    pub first_reasoning_s: DistSummary,
+    pub isl_tokens: DistSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isl_tokens_source: Option<&'static str>,
+    pub osl_tokens: DistSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub osl_tokens_source: Option<&'static str>,
+}
+
+/// Distributions over fields already recorded per request (#191).
+struct RecordedFieldDists {
+    first_byte_s: DistSummary,
+    queue_delay_s: DistSummary,
+    first_reasoning_s: DistSummary,
+    isl_tokens: DistSummary,
+    isl_tokens_source: Option<&'static str>,
+    osl_tokens: DistSummary,
+    osl_tokens_source: Option<&'static str>,
+}
+
+impl RecordedFieldDists {
+    /// Build from successful records. Never fabricates a value: absent
+    /// timings, closed-loop queue delay, and rows with no token accounting
+    /// (ASR, imagegen) contribute no sample.
+    fn from_successes(successes: &[&RequestRecord]) -> Self {
+        let first_byte: Vec<f64> = successes.iter().filter_map(|r| r.first_byte_s).collect();
+        // Queue delay is only measured when a request had an intended arrival.
+        let queue_delay: Vec<f64> = successes
+            .iter()
+            .filter(|r| r.scheduled_offset_s.is_some())
+            .map(|r| r.queue_delay_s)
+            .collect();
+        let first_reasoning: Vec<f64> = successes
+            .iter()
+            .filter_map(|r| r.first_reasoning_s)
+            .collect();
+        let isl = token_samples(successes, |r| (r.prompt_tokens, r.tokenized_prompt_tokens));
+        let osl = token_samples(successes, |r| {
+            (r.completion_tokens, r.tokenized_completion_tokens)
+        });
+        Self {
+            first_byte_s: DistSummary::from_values(&first_byte),
+            queue_delay_s: DistSummary::from_values(&queue_delay),
+            first_reasoning_s: DistSummary::from_values(&first_reasoning),
+            isl_tokens: DistSummary::from_values(&isl.values),
+            isl_tokens_source: isl.source(),
+            osl_tokens: DistSummary::from_values(&osl.values),
+            osl_tokens_source: osl.source(),
+        }
+    }
+}
+
+struct TokenSamples {
+    values: Vec<f64>,
+    server: usize,
+    tokenizer: usize,
+}
+
+impl TokenSamples {
+    fn source(&self) -> Option<&'static str> {
+        match (self.server > 0, self.tokenizer > 0) {
+            (true, false) => Some("server_usage"),
+            (false, true) => Some("tokenizer_fallback"),
+            (true, true) => Some("mixed"),
+            (false, false) => None,
+        }
+    }
+}
+
+/// Per-request token counts. Server `usage` wins; the tokenizer fills only
+/// rows flagged `usage_missing`. A row that reports no usage and is not
+/// flagged (non-token modalities) is skipped rather than counted as zero.
+fn token_samples(
+    successes: &[&RequestRecord],
+    pick: impl Fn(&RequestRecord) -> (u64, Option<u64>),
+) -> TokenSamples {
+    let mut samples = TokenSamples {
+        values: Vec::new(),
+        server: 0,
+        tokenizer: 0,
+    };
+    for record in successes {
+        let (server, tokenized) = pick(record);
+        if record.usage_missing {
+            if let Some(tokens) = tokenized {
+                samples.values.push(tokens as f64);
+                samples.tokenizer += 1;
+            }
+        } else if record.prompt_tokens > 0
+            || record.completion_tokens > 0
+            || record.total_tokens > 0
+        {
+            samples.values.push(server as f64);
+            samples.server += 1;
+        }
+    }
+    samples
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -273,6 +388,7 @@ impl RunSummary {
             map
         };
         let per_endpoint = endpoint_summaries(&pool);
+        let recorded = RecordedFieldDists::from_successes(&successes);
         let bins = throughput_bins(&successes, window, bin_seconds);
         let completion_tokens_per_second = if ctps_valid {
             Some(completion_tokens as f64 / window)
@@ -308,6 +424,13 @@ impl RunSummary {
             prefill_s: DistSummary::from_values(&prefill),
             decode_s: DistSummary::from_values(&decode),
             decode_tok_s: DistSummary::from_values(&decode_tok),
+            first_byte_s: recorded.first_byte_s,
+            queue_delay_s: recorded.queue_delay_s,
+            first_reasoning_s: recorded.first_reasoning_s,
+            isl_tokens: recorded.isl_tokens,
+            isl_tokens_source: recorded.isl_tokens_source,
+            osl_tokens: recorded.osl_tokens,
+            osl_tokens_source: recorded.osl_tokens_source,
             throughput_bins_rps: DistSummary::from_values(&bins),
             goodput: GoodputSummary {
                 count: good.len(),
@@ -399,6 +522,10 @@ fn fmt_opt(value: Option<f64>, precision: usize) -> String {
 }
 
 fn print_dist(label: &str, dist: &DistSummary) {
+    print_dist_unit(label, dist, "s");
+}
+
+fn print_dist_unit(label: &str, dist: &DistSummary, unit: &str) {
     if dist.n == 0 {
         println!("  {label}: n=0");
         return;
@@ -419,7 +546,7 @@ fn print_dist(label: &str, dist: &DistSummary) {
         format!(" [{}]", flags.join(","))
     };
     println!(
-        "  {label}: n={} avg={}s p50={}s p90={}s p95={}s p99={}s{flag}",
+        "  {label}: n={} avg={}{unit} p50={}{unit} p90={}{unit} p95={}{unit} p99={}{unit}{flag}",
         dist.n,
         fmt_opt(dist.avg, 3),
         fmt_opt(dist.p50, 3),
@@ -497,6 +624,35 @@ pub fn print_run_summary(summary: &RunSummary) {
             summary.decode_tok_s.n,
             fmt_opt(summary.decode_tok_s.avg, 3),
             fmt_opt(summary.decode_tok_s.p50, 3),
+        );
+    }
+    if summary.first_byte_s.n > 0 {
+        print_dist("First byte", &summary.first_byte_s);
+    }
+    if summary.queue_delay_s.n > 0 {
+        print_dist("Queue delay", &summary.queue_delay_s);
+    }
+    if summary.first_reasoning_s.n > 0 {
+        print_dist("First reasoning", &summary.first_reasoning_s);
+    }
+    if summary.isl_tokens.n > 0 {
+        print_dist_unit(
+            &format!(
+                "ISL tokens ({})",
+                summary.isl_tokens_source.unwrap_or("unknown")
+            ),
+            &summary.isl_tokens,
+            "",
+        );
+    }
+    if summary.osl_tokens.n > 0 {
+        print_dist_unit(
+            &format!(
+                "OSL tokens ({})",
+                summary.osl_tokens_source.unwrap_or("unknown")
+            ),
+            &summary.osl_tokens,
+            "",
         );
     }
     if let Some(obs) = &summary.observed_concurrency {
@@ -636,6 +792,7 @@ fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSu
                 .iter()
                 .flat_map(|r| r.itl_s.iter().copied())
                 .collect();
+            let recorded = RecordedFieldDists::from_successes(&success);
             (
                 name,
                 EndpointSummary {
@@ -646,6 +803,13 @@ fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSu
                     ttft_s: DistSummary::from_values(&ttft),
                     tpot_s: DistSummary::from_values(&tpot),
                     itl_s: DistSummary::from_values(&itl),
+                    first_byte_s: recorded.first_byte_s,
+                    queue_delay_s: recorded.queue_delay_s,
+                    first_reasoning_s: recorded.first_reasoning_s,
+                    isl_tokens: recorded.isl_tokens,
+                    isl_tokens_source: recorded.isl_tokens_source,
+                    osl_tokens: recorded.osl_tokens,
+                    osl_tokens_source: recorded.osl_tokens_source,
                 },
             )
         })
@@ -998,5 +1162,88 @@ mod tests {
         .unwrap();
         assert_eq!(isl.osl_mismatch_count, 0);
         assert_eq!(isl.isl_mismatch_count, 0);
+    }
+    #[test]
+    fn recorded_fields_present_on_streaming_chat_records() {
+        let mut a = ok(0, 500, 120, 20, &[20; 19]).with_first_byte(Duration::from_millis(40));
+        a.first_reasoning_s = Some(0.05);
+        let mut b = ok(1, 600, 130, 30, &[20; 29]).with_first_byte(Duration::from_millis(50));
+        b.first_reasoning_s = Some(0.07);
+        b.endpoint = "other".into();
+        let summary = RunSummary::from_records(&[a, b], 1.0, false);
+        assert_eq!(summary.first_byte_s.n, 2);
+        assert_eq!(summary.first_reasoning_s.n, 2);
+        assert_eq!(summary.isl_tokens.n, 2);
+        assert_eq!(summary.isl_tokens.avg, Some(18.0));
+        assert_eq!(summary.osl_tokens.n, 2);
+        assert_eq!(summary.osl_tokens.avg, Some(25.0));
+        assert_eq!(summary.isl_tokens_source, Some("server_usage"));
+        assert_eq!(summary.osl_tokens_source, Some("server_usage"));
+        // Closed loop: no intended arrival, so queue delay is not applicable.
+        assert_eq!(summary.queue_delay_s.n, 0);
+        let ep = &summary.per_endpoint["other"];
+        assert_eq!(ep.first_byte_s.n, 1);
+        assert_eq!(ep.osl_tokens.avg, Some(30.0));
+        assert_eq!(ep.osl_tokens_source, Some("server_usage"));
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(value["first_byte_s"]["n"], 2);
+        assert_eq!(value["per_endpoint"]["ep"]["isl_tokens"]["n"], 1);
+    }
+
+    #[test]
+    fn queue_delay_only_from_scheduled_requests() {
+        let open = ok(0, 100, 20, 8, &[])
+            .with_schedule(Duration::from_millis(10), Duration::from_millis(3));
+        let closed = ok(1, 100, 20, 8, &[]);
+        let summary = RunSummary::from_records(&[open, closed], 1.0, false);
+        assert_eq!(summary.queue_delay_s.n, 1);
+        assert!((summary.queue_delay_s.avg.unwrap() - 0.003).abs() < 1e-12);
+    }
+
+    #[test]
+    fn recorded_fields_never_fabricated_for_non_token_rows() {
+        // ASR / imagegen shape: zero usage and no usage_missing flag.
+        let rec = ok(0, 100, 20, 0, &[]);
+        let mut rec = rec;
+        rec.prompt_tokens = 0;
+        rec.total_tokens = 0;
+        rec.ttft_s = None;
+        let summary = RunSummary::from_records(&[rec], 1.0, false);
+        for dist in [
+            &summary.first_byte_s,
+            &summary.queue_delay_s,
+            &summary.first_reasoning_s,
+            &summary.isl_tokens,
+            &summary.osl_tokens,
+        ] {
+            assert_eq!(dist.n, 0);
+            assert!(dist.avg.is_none());
+        }
+        assert!(summary.isl_tokens_source.is_none());
+        let value = serde_json::to_value(&summary).unwrap();
+        assert!(value.get("osl_tokens_source").is_none());
+    }
+
+    #[test]
+    fn token_dists_label_tokenizer_fallback_and_mixed() {
+        let server = ok(0, 100, 20, 8, &[]);
+        let mut gap = ok(1, 100, 20, 0, &[]);
+        gap.usage_missing = true;
+        gap.prompt_tokens = 0;
+        gap.total_tokens = 0;
+        gap.tokenized_prompt_tokens = Some(17);
+        gap.tokenized_completion_tokens = Some(12);
+        let mut unfilled = gap.clone();
+        unfilled.tokenized_prompt_tokens = None;
+        unfilled.tokenized_completion_tokens = None;
+        let only_gap = RunSummary::from_records(&[gap.clone(), unfilled.clone()], 1.0, false);
+        assert_eq!(only_gap.isl_tokens.n, 1);
+        assert_eq!(only_gap.isl_tokens.avg, Some(17.0));
+        assert_eq!(only_gap.osl_tokens_source, Some("tokenizer_fallback"));
+        let mixed = RunSummary::from_records(&[server, gap, unfilled], 1.0, false);
+        assert_eq!(mixed.osl_tokens.n, 2);
+        assert_eq!(mixed.osl_tokens.avg, Some(10.0));
+        assert_eq!(mixed.osl_tokens_source, Some("mixed"));
+        assert_eq!(mixed.isl_tokens_source, Some("mixed"));
     }
 }

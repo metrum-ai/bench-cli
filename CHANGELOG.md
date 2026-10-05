@@ -21,6 +21,16 @@
   `docs/TELEMETRY.md`, `docs/telemetry/exporters.md`,
   `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
   in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
+- Example telemetry YAML `include` defaults now cover more of the live
+  pages (#198). `docs/telemetry/examples/vllm.yaml` adds the TTFT, ITL, E2E,
+  queue, prefill, and decode histograms (`_bucket` / `_sum` / `_count`) and
+  the prefix-cache counters. `docs/telemetry/examples/all-smi.yaml` adds
+  chassis, energy, and NVLink topology series, drops per-core
+  `all_smi_cpu_core_utilization` through a CPU allowlist, and embeds the same
+  vLLM source as `vllm.yaml`. `all_smi_process_*` stays a commented-out
+  opt-in: those rows carry `user` and `command` labels and must not be used
+  in published runs. Matched series go from 82 to 66 on a recorded all-smi
+  metrum.4 page and from 6 to 154 on a synthetic vLLM v0.30.0 page.
 
 ### Added
 - `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs
@@ -37,6 +47,29 @@
   measured requests is above 0.9 (`--max-ttft-ratio`) and exits 3, because a
   single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
   TTFT into E2E and makes every streaming field meaningless.
+
+### Added
+- `summary.v3` (additive) summarizes per-request fields that were recorded
+  but not aggregated: `first_byte_s`, `queue_delay_s`, `first_reasoning_s`,
+  `isl_tokens`, and `osl_tokens` as type-7 `DistSummary` blocks, plus optional
+  `isl_tokens_source` / `osl_tokens_source` (`server_usage`,
+  `tokenizer_fallback`, or `mixed`; omitted when there are no samples). Each
+  `per_endpoint` entry carries the same seven fields. Only measured successes
+  count. `queue_delay_s` covers only open-loop (`--request-rate`) requests and
+  is `n=0` in closed loop. ISL/OSL prefer server usage, use tokenizer counts
+  only for `usage_missing` rows, and skip rows with no usage (ASR, imagegen)
+  rather than counting them as zero (#191).
+- Strategic sweep points JSON gains `first_byte_s`, `queue_delay_s`,
+  `first_reasoning_s`, `isl_tokens`, and `osl_tokens` distributions.
+  `queue_delay_s` is `n=0` for `--sweep-by concurrency` stages; ISL/OSL use
+  server usage only and skip rows with zero input and output tokens;
+  `osl_tokens` is `n=0` for embeddings and rerank stages, and rerank
+  `isl_tokens` is `usage.total_tokens` (all input). The
+  strategic request CSV gains a trailing optional `first_reasoning_s` column
+  (#191).
+- Console summary prints First byte, Queue delay, First reasoning, ISL tokens
+  (source), and OSL tokens (source) lines when the distribution has samples
+  (#191).
 
 ### Fixed
 - `observed_concurrency.in_flight_max` / `in_flight_mean` / `in_flight_p50`

@@ -115,6 +115,14 @@ The checked-in default is the Metrum fork of all-smi:
 - Install: https://github.com/chetan-metrum-ai/all-smi
 - Listen: `http://127.0.0.1:9090/metrics`. The same path as upstream lablup; `/metric` is not served. The API binds `0.0.0.0` with no bind flag, so firewall port 9090 on shared hosts.
 - Example YAML: [docs/telemetry/examples/all-smi.yaml](telemetry/examples/all-smi.yaml)
+  (GPU, host memory, aggregate CPU, chassis, energy, and NVLink series;
+  per-core CPU rows are left out).
+- Per-process rows (`all_smi_process_*`) are off by default. They need
+  `all-smi api --processes` plus the commented-out include line in the
+  example YAML. Every row carries `pid`, `name`, `user`, and `command` labels,
+  and command lines can hold secrets such as `--api-key`. `include` cannot
+  drop labels and the NDJSON stores them, so never enable process rows for a
+  published run.
 
 Bind exporters to `127.0.0.1` on the serving host when possible. Example YAMLs
 for DCGM, ROCm, engines, and BMC exporters live under
