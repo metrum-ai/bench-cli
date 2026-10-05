@@ -405,7 +405,9 @@ The strategic stdout `config` gains:
   otherwise.
 
 The telemetry NDJSON `run` row `config.kind` can be `vlm`, `asr`, or
-`imagegen`.
+`imagegen`. Its `config` also carries `modality` and `temperature` under the
+same rules as the stdout `config`, so NDJSON-only analysis sees the kind
+settings; chat, embeddings, and rerank `run` rows are unchanged.
 
 ### Strategic stdout `knee` and `knee_detection`
 

@@ -9,10 +9,8 @@
 //! Values are only recorded when measured: a request without a reference
 //! transcript has no `wer`, a sample without a duration has no
 //! `rtfx_client`, and the stage summary for that key is then `n = 0`.
-//!
-//! One deliberate difference from `metrum-ai-bench-cli-asr`: when the
-//! reference normalizes to empty and the transcript does not, WER/CER are
-//! undefined. The sweep records no value; the ASR binary records `1.0`.
+//! WER/CER use [`crate::asr::transcript_error_rates`], the scorer of
+//! `metrum-ai-bench-cli-asr`, so both record the same values.
 
 use crate::stats::DistSummary;
 use crate::strategic::BenchRecord;
@@ -45,7 +43,8 @@ impl ModalitySample {
     }
 
     /// ASR request. WER/CER only with a reference; `rtfx_client` (audio
-    /// seconds over client send-to-completion seconds) only with a duration.
+    /// seconds over client send-to-completion seconds) only with a positive
+    /// duration, the same rule as [`crate::asr::rtfx`].
     pub fn asr(
         transcript: &str,
         reference: Option<&str>,
@@ -55,12 +54,9 @@ impl ModalitySample {
     ) -> Self {
         let mut sample = Self::default();
         if let Some(reference) = reference {
-            if let Some(wer) = crate::asr::word_error_rate(reference, transcript, normalizer) {
-                sample.put("wer", wer);
-            }
-            if let Some(cer) = crate::asr::character_error_rate(reference, transcript, normalizer) {
-                sample.put("cer", cer);
-            }
+            let (wer, cer) = crate::asr::transcript_error_rates(reference, transcript, normalizer);
+            sample.put("wer", wer);
+            sample.put("cer", cer);
         }
         if let Some(seconds) = audio_seconds.filter(|s| s.is_finite() && *s > 0.0) {
             sample.put("audio_duration_s", seconds);
@@ -173,6 +169,18 @@ mod tests {
         assert_eq!(full.metrics["cer"], 0.0);
         assert_eq!(full.metrics["audio_duration_s"], 2.0);
         assert_eq!(full.metrics["rtfx_client"], 4.0);
+        // Empty normalized reference: the ASR binary's 1.0 rule, not omission.
+        let empty_ref = ModalitySample::asr(
+            "words",
+            Some("..."),
+            crate::asr::Normalizer::default(),
+            Some(0.0),
+            0.5,
+        );
+        assert_eq!(empty_ref.metrics["wer"], 1.0);
+        assert_eq!(empty_ref.metrics["cer"], 1.0);
+        assert!(!empty_ref.metrics.contains_key("rtfx_client"));
+        assert!(!empty_ref.metrics.contains_key("audio_duration_s"));
     }
 
     #[test]

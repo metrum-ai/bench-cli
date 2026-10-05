@@ -218,7 +218,12 @@ modality binaries use on `request.v3` records. VLM: `image_count`,
 metrics; ASR and imagegen are unary, so their `ttft_s` is `n = 0`.
 `config.modality` records the kind settings. For asr and imagegen, latency
 ends when the response body is read; parsing, WER/CER and image decoding run
-after it and never hold a concurrency slot. Telemetry (`--telemetry`,
+after it and never hold a concurrency slot. The ASR binary's latency also
+includes form building and parsing, so sweep ASR latency can read slightly
+lower (see `docs/METRICS.md`). WER/CER use the ASR binary's scorer, and
+`rtfx_client` needs a positive sample `duration` in both. For vlm,
+`--image` goes with `--prompt` (not `--prompts`) and `--shared-prefix` is
+rejected. Telemetry (`--telemetry`,
 `--ndjson`) works the same for every kind. Per-request modality values are
 not written to the CSV, which keeps its columns for every kind.
 

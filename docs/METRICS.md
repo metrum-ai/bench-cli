@@ -317,18 +317,24 @@ Workload section. This page focuses on measured fields.
   decoded `b64_json` images (`images`) and distinct SHA-256 digests
   (`distinct`) over measured successes; both are 0 for `url` responses.
   - Timing: ASR audio and VLM images are loaded before the first request, so
-    file I/O is not in latency. For asr and imagegen the clock stops when the
-    response body is fully read, as in their binaries; parsing, WER/CER and
-    image decode/hash run after it, after the concurrency slot is released
-    (decode on the blocking pool). An unparseable ASR body or an undecodable
-    `b64_json` image fails the request, as in the binaries. Chat, embeddings,
-    rerank and vlm keep parsing inside the window, unchanged.
+    file I/O is not in latency. For asr and imagegen the sweep clock runs
+    from send until the response body is fully read; parsing, WER/CER and
+    image decode/hash run after it, after the concurrency slot is released,
+    on the blocking pool. That matches the imagegen binary exactly. The ASR
+    binary's clock also covers building the multipart form and parsing the
+    response, so a sweep's ASR `service_latency_s` can read slightly lower
+    and its `rtfx_client` slightly higher than the binary's for the same
+    server. An unparseable ASR body or an undecodable `b64_json` image fails
+    the request, as in the binaries. Chat, embeddings, rerank and vlm keep
+    parsing inside the window, unchanged.
   - `images_requested` and the decode choice come from the body actually
     sent, so an `--extra-body-json` override of `n` or `response_format` is
     recorded as sent.
-  - WER/CER when the reference normalizes to empty and the transcript does
-    not: the sweep records no value (never a fabricated one); the ASR binary
-    records `1.0`.
+  - WER/CER use the ASR binary's scorer, so an empty normalized reference
+    scores `0.0` against an empty transcript and `1.0` otherwise in both.
+  - `rtfx_client` needs a positive `duration` in the sample row, in sweeps
+    and in the ASR binary: a sample with `duration` 0 records neither
+    `audio_duration_s` nor `rtfx_client`.
   - Tokens: vlm and asr stages report `osl_tokens` and
     `completion_tokens_total` from server usage (asr only when the server
     reports usage); imagegen generates no tokens, so `osl_tokens` is `n=0`

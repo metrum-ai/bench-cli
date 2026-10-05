@@ -119,6 +119,22 @@ pub fn character_error_rate(
     Some(edit_distance(&reference, &hypothesis) as f64 / reference.len() as f64)
 }
 
+/// WER and CER for one transcript, as every Metrum AI Bench ASR path records
+/// them (`metrum-ai-bench-cli-asr` and `--kind asr` sweeps). An empty
+/// normalized reference scores `0.0` against an empty transcript and `1.0`
+/// against any other, where [`word_error_rate`] and [`character_error_rate`]
+/// return `None`.
+pub fn transcript_error_rates(
+    reference: &str,
+    hypothesis: &str,
+    normalizer: Normalizer,
+) -> (f64, f64) {
+    (
+        word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0),
+        character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0),
+    )
+}
+
 fn edit_distance<T: Eq>(expected: &[T], actual: &[T]) -> usize {
     let mut previous: Vec<usize> = (0..=actual.len()).collect();
     for (i, expected_item) in expected.iter().enumerate() {
@@ -134,8 +150,13 @@ fn edit_distance<T: Eq>(expected: &[T], actual: &[T]) -> usize {
 }
 
 /// Real-time-factor multiplier (higher is better), using client wall duration.
+/// `None` unless both durations are finite and positive: a sample without a
+/// usable duration has no real-time factor (never a fabricated `0`).
 pub fn rtfx(audio_seconds: f64, client_seconds: f64) -> Option<f64> {
-    (audio_seconds.is_finite() && client_seconds.is_finite() && client_seconds > 0.0)
+    (audio_seconds.is_finite()
+        && audio_seconds > 0.0
+        && client_seconds.is_finite()
+        && client_seconds > 0.0)
         .then_some(audio_seconds / client_seconds)
 }
 
@@ -373,10 +394,11 @@ pub fn parse_transcription(
     match response_format {
         "verbose_json" | "json" => {
             let json_resp: Value = serde_json::from_str(body)?;
+            // A non-string `text` (for example `null`) falls back to `transcription`.
             let text = json_resp
                 .get("text")
-                .or_else(|| json_resp.get("transcription"))
                 .and_then(Value::as_str)
+                .or_else(|| json_resp.get("transcription").and_then(Value::as_str))
                 .ok_or("No transcription text in response")?
                 .to_string();
             let server_time = json_resp
@@ -419,6 +441,9 @@ mod tests {
             legacy.server_time, None,
             "negative time is not a server time"
         );
+        let null_text = parse_transcription("json", r#"{"text":null,"transcription":"x"}"#)
+            .expect("null text falls back to transcription");
+        assert_eq!(null_text.text, "x");
         let text = parse_transcription("text", "plain words").expect("text");
         assert_eq!(text.text, "plain words");
         assert!(text.server_time.is_none() && text.usage.is_none());
@@ -558,8 +583,20 @@ mod tests {
     }
 
     #[test]
+    fn transcript_error_rates_score_empty_reference_as_binary_does() {
+        let n = Normalizer::WhisperEnglish;
+        assert_eq!(transcript_error_rates("", "", n), (0.0, 0.0));
+        assert_eq!(transcript_error_rates("", "text", n), (1.0, 1.0));
+        let (wer, cer) = transcript_error_rates("the cat sat", "the cat sat", n);
+        assert_eq!((wer, cer), (0.0, 0.0));
+        let (wer, _) = transcript_error_rates("the cat sat", "the dog sat", n);
+        assert!((wer - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn rtfx_is_audio_over_client_time() {
         assert_eq!(rtfx(10.0, 2.0), Some(5.0));
         assert_eq!(rtfx(10.0, 0.0), None);
+        assert_eq!(rtfx(0.0, 2.0), None, "no duration, no real-time factor");
     }
 }

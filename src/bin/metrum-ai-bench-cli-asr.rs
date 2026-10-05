@@ -165,22 +165,6 @@ impl std::fmt::Display for MetrumAiBenchASRResponseFormat {
     }
 }
 
-fn word_error_rate(
-    reference: &str,
-    hypothesis: &str,
-    normalizer: metrum_ai_bench::asr::Normalizer,
-) -> f64 {
-    metrum_ai_bench::asr::word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
-}
-
-fn character_error_rate(
-    reference: &str,
-    hypothesis: &str,
-    normalizer: metrum_ai_bench::asr::Normalizer,
-) -> f64 {
-    metrum_ai_bench::asr::character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
-}
-
 async fn make_request(
     client: &Client,
     url: &str,
@@ -627,9 +611,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let (wer, cer) = ground_truth_sample
                         .as_ref()
                         .map(|gt| {
-                            (
-                                word_error_rate(gt, &transcription, normalizer),
-                                character_error_rate(gt, &transcription, normalizer),
+                            metrum_ai_bench::asr::transcript_error_rates(
+                                gt,
+                                &transcription,
+                                normalizer,
                             )
                         })
                         .unzip();

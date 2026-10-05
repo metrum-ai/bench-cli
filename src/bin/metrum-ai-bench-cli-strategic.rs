@@ -714,6 +714,15 @@ fn validate_kind_flags(args: &Args) -> Result<()> {
     if args.prompts.is_some() && kind == EndpointKind::Asr {
         bail!("--kind asr reads --audio-samples, not --prompts");
     }
+    if kind == EndpointKind::Vlm {
+        // VLM JSONL rows carry their own images, so --image would be ignored.
+        if args.prompts.is_some() && !args.images.is_empty() {
+            bail!("--kind vlm takes --image with --prompt, not with --prompts");
+        }
+        if args.shared_prefix.is_some() {
+            bail!("--shared-prefix is not valid for --kind vlm");
+        }
+    }
     if !kind.chat_like() {
         // Unary uploads and generations: these chat flags would do nothing.
         for (set, flag) in [
@@ -1008,12 +1017,13 @@ fn spawn_one_request(
             permit,
         ));
         let in_flight_at_send = request_slot.as_ref().map_or(0, |slot| slot.in_flight());
-        // JSON bodies serialize inside the send call, as before #197. An ASR
-        // form is assembled here, after the permit (only in-flight requests
-        // hold one) and before the send clock; the audio bytes are shared.
-        let request = client.post(&url).bearer_auth(api_key);
-        let request = match &input.upload {
-            Some(upload) => metrum_ai_bench::asr::transcription_form(
+        // An ASR form (and its request) is assembled here, after the permit
+        // (only in-flight requests hold one) and before the send clock; the
+        // audio bytes are shared. JSON requests are built after the clock
+        // starts and serialize inside the send call, as before #197, so
+        // chat, embeddings and rerank `service_latency_s` is unchanged.
+        let upload_request = input.upload.as_ref().map(|upload| {
+            metrum_ai_bench::asr::transcription_form(
                 &modality.model,
                 &modality.asr_response_format,
                 &modality.language,
@@ -1021,10 +1031,9 @@ fn spawn_one_request(
                 &upload.format,
                 upload.bytes.clone(),
             )
-            .map(|form| request.multipart(form))
-            .map_err(|err| anyhow::anyhow!("{err}")),
-            None => Ok(request),
-        };
+            .map(|form| client.post(&url).bearer_auth(&api_key).multipart(form))
+            .map_err(|err| anyhow::anyhow!("{err}"))
+        });
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -1042,14 +1051,12 @@ fn spawn_one_request(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(t_sent_ns);
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
+        let request = upload_request
+            .unwrap_or_else(|| Ok(client.post(&url).bearer_auth(&api_key).json(&*input.body)));
         let result = match request {
             Ok(request) => metrum_ai_bench::connect_timing::with_connect_slot(
                 Arc::clone(&connect_slot),
-                metrum_ai_bench::connect_timing::send(if input.upload.is_some() {
-                    request
-                } else {
-                    request.json(&*input.body)
-                }),
+                metrum_ai_bench::connect_timing::send(request),
             )
             .await
             .map_err(anyhow::Error::from),
@@ -1091,8 +1098,9 @@ fn spawn_one_request(
                 let body = metrum_ai_bench::connect_timing::read_body(response).await?;
                 Ok(Reply::Json(serde_json::from_slice::<Value>(&body)?))
             } else {
-                // ASR and imagegen: the clock stops once the body is read, as
-                // in their binaries; parsing happens after it.
+                // ASR and imagegen: the clock stops once the body is read and
+                // parsing happens after it (see docs/METRICS.md for how this
+                // differs from the ASR binary).
                 Ok(Reply::Raw(metrum_ai_bench::connect_timing::read_body(response).await?))
             }
         })
@@ -1264,8 +1272,8 @@ impl ModalityOptions {
 
     /// Parse a reply and derive its modality values. An unparseable ASR body
     /// or an undecodable imagegen image fails the request, as in their
-    /// binaries. Image decoding runs on the blocking pool so it never stalls
-    /// the runtime thread that polls other in-flight requests.
+    /// binaries. ASR scoring and image decoding run on the blocking pool so
+    /// they never stall the runtime thread that polls other in-flight requests.
     async fn finish(
         &self,
         kind: EndpointKind,
@@ -1282,24 +1290,34 @@ impl ModalityOptions {
                 Ok((value, sample))
             }
             (EndpointKind::Asr, Reply::Raw(body)) => {
-                let parsed = metrum_ai_bench::asr::parse_transcription(
-                    &self.asr_response_format,
-                    &String::from_utf8_lossy(&body),
-                )
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-                let upload = input.upload.as_deref();
-                let sample = ModalitySample::asr(
-                    &parsed.text,
-                    upload.and_then(|u| u.reference.as_deref()),
-                    self.normalizer,
-                    upload.and_then(|u| u.seconds),
-                    service_latency_s,
-                );
-                // Token usage only when the server reports it (json formats).
-                let value = parsed
-                    .usage
-                    .map_or(Value::Null, |usage| json!({ "usage": usage }));
-                Ok((value, sample))
+                // WER/CER edit distance is O(n * m) in transcript length, so
+                // parsing and scoring run on the blocking pool, like imagegen
+                // decoding, and never stall other in-flight requests.
+                let upload = input.upload.clone();
+                let response_format = self.asr_response_format.clone();
+                let normalizer = self.normalizer;
+                tokio::task::spawn_blocking(move || {
+                    let parsed = metrum_ai_bench::asr::parse_transcription(
+                        &response_format,
+                        &String::from_utf8_lossy(&body),
+                    )
+                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                    let upload = upload.as_deref();
+                    let sample = ModalitySample::asr(
+                        &parsed.text,
+                        upload.and_then(|u| u.reference.as_deref()),
+                        normalizer,
+                        upload.and_then(|u| u.seconds),
+                        service_latency_s,
+                    );
+                    // Token usage only when the server reports it (json formats).
+                    let value = parsed
+                        .usage
+                        .map_or(Value::Null, |usage| json!({ "usage": usage }));
+                    Ok((value, sample))
+                })
+                .await
+                .context("transcription scoring task failed")?
             }
             (EndpointKind::Imagegen, Reply::Raw(body)) => {
                 let request = input
@@ -1606,6 +1624,26 @@ async fn main() -> Result<()> {
     }
 
     if let Some(writer) = &ndjson_writer {
+        let mut run_config = json!({
+            "url": url,
+            "model": model,
+            "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
+            "sweep": args.sweep,
+            "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
+            "requests_per_stage": args.requests_per_stage,
+            "warmup_requests": args.warmup_requests,
+            "streaming": args.streaming,
+            "telemetry": args.telemetry,
+            "metrics_url": args.metrics_url,
+        });
+        // Same optional keys as the stdout config, so NDJSON-only analysis
+        // sees the kind settings; chat/embeddings/rerank rows are unchanged.
+        if let Some(temperature) = args.temperature {
+            run_config["temperature"] = json!(decimal_f32(temperature));
+        }
+        if let Some(modality) = modality_config(&args, &inputs) {
+            run_config["modality"] = modality;
+        }
         writer
             .send_priority(metrum_ai_bench::telemetry::Row::Run(
                 metrum_ai_bench::telemetry::RunRow {
@@ -1615,18 +1653,7 @@ async fn main() -> Result<()> {
                     schema_version: metrum_ai_bench::telemetry::TELEMETRY_SCHEMA_VERSION
                         .to_string(),
                     sut: sut_json.clone(),
-                    config: json!({
-                        "url": url,
-                        "model": model,
-                        "kind": format!("{:?}", args.kind).to_ascii_lowercase(),
-                        "sweep": args.sweep,
-                        "sweep_by": format!("{:?}", args.sweep_by).to_ascii_lowercase(),
-                        "requests_per_stage": args.requests_per_stage,
-                        "warmup_requests": args.warmup_requests,
-                        "streaming": args.streaming,
-                        "telemetry": args.telemetry,
-                        "metrics_url": args.metrics_url,
-                    }),
+                    config: run_config,
                     telemetry_sources: telemetry_source_stamps,
                 },
             ))

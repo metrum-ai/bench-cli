@@ -135,6 +135,12 @@ fn assert_sweep(sweep: &Sweep, summary: &Value, kind: &str, keys: &[&str]) {
     }
     assert_eq!(rows[0]["kind"], "run");
     assert_eq!(rows[0]["config"]["kind"], kind);
+    // NDJSON-only analysis sees the same kind settings as stdout.
+    assert_eq!(rows[0]["config"]["modality"], summary["config"]["modality"]);
+    assert_eq!(
+        rows[0]["config"]["temperature"],
+        summary["config"]["temperature"]
+    );
     let per_stage = REQUESTS + WARMUP;
     assert_eq!(
         kinds["request"],
@@ -421,6 +427,32 @@ fn modality_flags_rejected_for_other_kinds() {
         (
             &["--kind", "chat", "--max-image-dimension", "64"],
             "--max-image-dimension",
+        ),
+        (
+            &[
+                "--kind",
+                "vlm",
+                "--max-tokens",
+                "8",
+                "--prompts",
+                "p.jsonl",
+                "--image",
+                "x.png",
+            ],
+            "not with --prompts",
+        ),
+        (
+            &[
+                "--kind",
+                "vlm",
+                "--max-tokens",
+                "8",
+                "--image",
+                "x.png",
+                "--shared-prefix",
+                "ctx",
+            ],
+            "--shared-prefix",
         ),
     ];
     for (flags, needle) in cases {
