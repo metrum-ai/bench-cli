@@ -19,7 +19,7 @@ host. Paths are Prometheus text unless noted.
 ```bash
 # Prefer the published Linux binary (see GitHub Releases for other arches):
 curl -fsSL -o /tmp/all-smi.tgz \
-  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
 all-smi api --port 9090
 # scrape: http://127.0.0.1:9090/metrics

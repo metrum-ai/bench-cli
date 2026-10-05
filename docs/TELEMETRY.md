@@ -81,7 +81,7 @@ Example:
 # Default smoke: Metrum all-smi fork on loopback /metrics
 # Prefer a release binary (x86_64 example):
 curl -fsSL -o /tmp/all-smi.tgz \
-  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
 all-smi api --port 9090
 

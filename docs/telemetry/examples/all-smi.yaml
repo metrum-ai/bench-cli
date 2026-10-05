@@ -4,12 +4,18 @@
 # Default smoke/E2E telemetry: Metrum all-smi fork (/metrics) plus engine metrics.
 # Install: https://github.com/chetan-metrum-ai/all-smi/releases
 #   curl -fsSL -o /tmp/all-smi.tgz \
-#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 #   tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
-#   all-smi api --port 9090
-#   all-smi api --port 9090
+#   all-smi api --port 9090 --processes
 # The fork (v0.26.3-metrum.4) serves /metrics; /metric returns 404. It binds
 # 0.0.0.0 (no bind flag), so firewall port 9090 on shared hosts.
+# all_smi_process_* rows appear only with --processes (or ALL_SMI_API_PROCESSES).
+#
+# Starting point only: curl the live page and adjust include before a run.
+# Names below were checked against fork source at tag v0.26.3-metrum.4
+# (src/api/metrics/*.rs) and, where marked "page", a recorded metrum.4 page
+# from a 1x H100 PCIe host (2026-10-02). Series a host does not emit simply
+# match nothing.
 
 default_interval_ms: 1000
 timeout_ms: 800
@@ -18,9 +24,27 @@ sources:
     url: http://127.0.0.1:9090/metrics
     interval_ms: 500
     include:
-      - "^all_smi_(gpu|cpu|memory)_"
+      # GPU and host memory (page). Includes energy_hw_millijoules_total and
+      # nvlink_{tx,rx}_bytes_per_second.
+      - "^all_smi_gpu_"
+      - "^all_smi_memory_"
+      # Host CPU aggregates (page). all_smi_cpu_core_utilization is one row
+      # per core and is left out by default; add it back when needed.
+      - "^all_smi_cpu_(utilization|info|frequency_mhz|power_consumption_watts|temperature_celsius)$"
+      - "^all_smi_cpu_(socket|core|thread|gpu_core|p_core|e_core|s_core)_count$"
+      - "^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$"
+      - "^all_smi_cpu_([pes]_core_utilization|[pes]_cluster_frequency_mhz|ane_ops_per_second)$"
+      # Chassis power and info (page), whole-host and per-GPU energy (page).
+      - "^all_smi_chassis_"
+      - "^all_smi_energy_consumed_joules_total$"
+      # NVLink topology: one label-only row per active link (source; absent
+      # on PCIe-only hosts).
+      - "^all_smi_nvlink_remote_device_type$"
+      # Per-process GPU and CPU use (source; needs --processes).
+      - "^all_smi_process_"
     units:
-      # all-smi exports energy in millijoules; store joules (raw keeps mJ).
+      # all-smi exports GPU energy in millijoules; store joules (raw keeps mJ).
+      # all_smi_energy_consumed_joules_total is already in joules.
       all_smi_gpu_energy_hw_millijoules_total:
         scale: 0.001
         unit: J
@@ -28,4 +52,7 @@ sources:
     url: http://127.0.0.1:8000/metrics
     interval_ms: 1000
     include:
-      - "^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|generation_tokens_total)$"
+      # Same set as vllm.yaml.
+      - "^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$"
+      - "^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds|request_queue_time_seconds|request_prefill_time_seconds|request_decode_time_seconds)_(bucket|sum|count)$"
+      - "^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$"
