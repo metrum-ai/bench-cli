@@ -26,6 +26,7 @@ pub mod strategic;
 pub mod summary;
 pub mod sut;
 pub mod telemetry;
+pub mod time_weighted;
 pub mod tokenizer;
 pub mod usage;
 

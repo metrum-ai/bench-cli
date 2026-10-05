@@ -11,7 +11,6 @@
 //! view sampled at each send; these blocks weight every instant equally.
 
 use serde::Serialize;
-use std::cmp::Ordering;
 
 /// One measured success, in seconds relative to any shared epoch.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +34,7 @@ pub struct RequestSpan {
 /// when `n = 0` or the window is empty: not applicable, never zero.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct TimeWeightedStat {
+    /// Requests eligible for the block (before clipping to the window).
     pub n: usize,
     /// Integral over the window divided by `window_seconds`.
     pub avg: Option<f64>,
@@ -179,7 +179,7 @@ fn sweep(segments: &[Segment], n: usize, window_s: f64) -> TimeWeightedStat {
         events.push((start, 1, a, seg.slope));
         events.push((end, -1, -a, -seg.slope));
     }
-    events.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(Ordering::Equal));
+    events.sort_by(|x, y| x.0.total_cmp(&y.0));
     let (mut open, mut a, mut b) = (0i64, 0.0f64, 0.0f64);
     let mut max = 0.0f64;
     let mut active_s = 0.0;
@@ -229,7 +229,14 @@ mod tests {
         }
     }
 
-    fn assert_stat(stat: &TimeWeightedStat, n: usize, avg: f64, active: f64, max: f64, active_s: f64) {
+    fn assert_stat(
+        stat: &TimeWeightedStat,
+        n: usize,
+        avg: f64,
+        active: f64,
+        max: f64,
+        active_s: f64,
+    ) {
         assert_eq!(stat.n, n, "{stat:?}");
         let close = |got: Option<f64>, want: f64| {
             let got = got.unwrap_or_else(|| panic!("null in {stat:?}"));

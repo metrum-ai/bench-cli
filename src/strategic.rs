@@ -195,6 +195,9 @@ pub struct SweepPoint {
     /// Client-observed outstanding concurrency vs stage cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_concurrency: Option<crate::concurrency::ObservedConcurrency>,
+    /// Time-weighted blocks over stage successes (#195), same definitions as `summary.v3`.
+    #[serde(flatten)]
+    pub time_weighted: crate::time_weighted::TimeWeightedMetrics,
     pub connect_s: crate::stats::DistSummary,
     pub prefill_s: crate::stats::DistSummary,
     pub decode_s: crate::stats::DistSummary,
@@ -261,6 +264,44 @@ fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) 
         }
     }
     true
+}
+
+/// Time-weighted blocks for one stage. Times are nanoseconds from the first
+/// measured send, so `u128` epoch nanoseconds never lose precision in `f64`.
+/// The window runs from the first measured send (any outcome) to the latest
+/// successful completion, the same rule as `runner::window_seconds_from_records`,
+/// so no success is clipped. Token rules match the stage `isl_tokens` /
+/// `osl_tokens` (server `usage`, rows reporting none skipped).
+fn stage_time_weighted(
+    measured: &[&BenchRecord],
+    successes: &[&BenchRecord],
+    generates_output: bool,
+) -> crate::time_weighted::TimeWeightedMetrics {
+    let Some(first) = measured.iter().map(|r| r.sent_unix_ns).min() else {
+        return crate::time_weighted::TimeWeightedMetrics::default();
+    };
+    let spans: Vec<crate::time_weighted::RequestSpan> = successes
+        .iter()
+        .map(|r| {
+            let has_tokens = r.input_tokens > 0 || r.output_tokens > 0;
+            crate::time_weighted::RequestSpan {
+                start_s: r.sent_unix_ns.saturating_sub(first) as f64 / 1e9,
+                latency_s: r.service_latency_s,
+                prefill_end_s: crate::summary::phase_split_s(
+                    r.ttft_s,
+                    r.ttft_source,
+                    r.first_reasoning_s,
+                ),
+                input_tokens: has_tokens.then_some(r.input_tokens),
+                output_tokens: (has_tokens && generates_output).then_some(r.output_tokens),
+            }
+        })
+        .collect();
+    let window = spans
+        .iter()
+        .map(|span| span.start_s + span.latency_s)
+        .fold(0.0, f64::max);
+    crate::time_weighted::compute(&spans, 0.0, window)
 }
 
 pub fn summarize_stage(
@@ -484,6 +525,7 @@ pub fn summarize_stage_with_options(
         thresholds.insert("user_tps".to_string(), rate);
     }
     let no_slos = thresholds.is_empty();
+    let time_weighted = stage_time_weighted(&measured, &success_rows, generates_output);
     SweepPoint {
         load,
         n: measured.len(),
@@ -515,6 +557,7 @@ pub fn summarize_stage_with_options(
         time_to_second_token_s: crate::stats::DistSummary::from_values(&second_token),
         cost_per_million_output_tokens,
         observed_concurrency,
+        time_weighted,
         connect_s: crate::stats::DistSummary::from_values(&connect),
         prefill_s: crate::stats::DistSummary::from_values(&prefill),
         decode_s: crate::stats::DistSummary::from_values(&decode),
@@ -1305,6 +1348,7 @@ mod tests {
             time_to_second_token_s: crate::stats::DistSummary::from_values(&[]),
             cost_per_million_output_tokens: None,
             observed_concurrency: None,
+            time_weighted: Default::default(),
             connect_s: crate::stats::DistSummary::from_values(&[]),
             prefill_s: crate::stats::DistSummary::from_values(&[]),
             decode_s: crate::stats::DistSummary::from_values(&[]),
@@ -1487,6 +1531,7 @@ mod tests {
             time_to_second_token_s: crate::stats::DistSummary::from_values(&[]),
             cost_per_million_output_tokens: None,
             observed_concurrency: None,
+            time_weighted: Default::default(),
             connect_s: crate::stats::DistSummary::from_values(&[]),
             prefill_s: crate::stats::DistSummary::from_values(&[]),
             decode_s: crate::stats::DistSummary::from_values(&[]),
@@ -2228,5 +2273,67 @@ true,,64,16,,,,false\n";
                 .pointer("/resourceMetrics/0/scopeMetrics/0/metrics/0/name"),
             Some(&json!("benchmark.requests"))
         );
+    }
+
+    /// #195: sweep points carry the same time-weighted blocks as `summary.v3`
+    /// (synthetic intervals from `time_weighted::tests`, epoch nanoseconds).
+    #[test]
+    fn sweep_point_time_weighted_blocks_from_synthetic_intervals() {
+        let epoch: u128 = 1_790_000_000_000_000_000;
+        let row = |seq, send_s: f64, latency: f64, ttft: f64, input, output| BenchRecord {
+            seq,
+            stage: 2.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: epoch + (send_s * 1e9) as u128,
+            sent_unix_ns: epoch + (send_s * 1e9) as u128,
+            latency_s: latency,
+            queue_delay_s: 0.0,
+            service_latency_s: latency,
+            first_byte_s: None,
+            connect_s: None,
+            ttft_s: Some(ttft),
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: input,
+            output_tokens: output,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+            reasoning_tokens: None,
+        };
+        let mut warmup = row(9, 0.0, 3.0, 0.1, 999, 999);
+        warmup.warmup = true;
+        let rows = [
+            row(0, 0.0, 2.0, 0.5, 100, 30),
+            row(1, 1.0, 2.0, 1.5, 50, 10),
+            warmup,
+        ];
+        // The stage `seconds` (4.0) is not the time-weighted window: that runs
+        // from the first send to the latest completion, 3 s here.
+        let point = summarize_stage(2.0, &rows, 4.0, &crate::summary::SloConfig::default(), None);
+        let tw = &point.time_weighted;
+        let close = |got: Option<f64>, want: f64| {
+            let got = got.expect("value");
+            assert!((got - want).abs() < 1e-12, "{got} != {want}");
+        };
+        assert_eq!(tw.effective_concurrency.n, 2);
+        close(tw.effective_concurrency.avg, 4.0 / 3.0);
+        close(tw.effective_concurrency.max, 2.0);
+        close(tw.effective_prefill_concurrency.avg, 2.0 / 3.0);
+        close(tw.effective_decode_concurrency.active_avg, 1.0);
+        close(tw.tokens_in_flight.avg, 325.0 / 3.0);
+        close(tw.effective_prefill_throughput.avg, 50.0);
+        close(tw.effective_decode_throughput.avg, 40.0 / 3.0);
+        let json = serde_json::to_value(&point).expect("json");
+        assert_eq!(json["tokens_in_flight"]["n"], 2);
+        assert_eq!(json["effective_decode_throughput"]["max"], 20.0);
     }
 }

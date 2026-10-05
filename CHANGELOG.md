@@ -136,6 +136,23 @@
   only. A total is `null` when no success reported that field, and
   `completion_tokens_total` and `total_tokens_per_second` are `null` for
   embeddings and rerank stages (#193).
+- Time-weighted concurrency and throughput (#195, additive, no schema
+  version bump). `summary.v3` (top level, not `per_endpoint`) and every
+  strategic sweep point gain `effective_concurrency`,
+  `effective_prefill_concurrency`, `effective_decode_concurrency`,
+  `tokens_in_flight`, `effective_prefill_throughput`, and
+  `effective_decode_throughput`, each `{n, avg, active_avg, max, active_s}`
+  from a sweep line over measured-success intervals clipped to the window
+  (`avg` over `window_seconds`, `active_avg` over time with a request open;
+  `null` when `n=0`, never 0-filled). The phase split is the first generated
+  token, `min(first_reasoning_s, ttft_s)`; rows with first-byte approximated
+  or no TTFT count only in `effective_concurrency`. `effective_concurrency`
+  follows Little's law and is distinct from the unchanged
+  `observed_concurrency`; `tokens_in_flight` is a KV-cache occupancy proxy;
+  when every success streams with a positive decode time,
+  `effective_decode_throughput.avg` matches `completion_tokens_per_second`. Strategic uses `service_latency_s` (no
+  client queue delay) and server usage only. Matches AIPerf effective and
+  active metrics. The console prints one line per block with `n > 0`.
 - New launcher subcommand `sut` prints the SUT JSON to stdout without docker
   or a GPU. `HF_HUB_OFFLINE=1` skips the Hub revision lookup
   (`model.revision` is then null). The offline self-test

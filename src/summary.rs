@@ -7,6 +7,7 @@ use crate::isl_osl::IslOslValidation;
 use crate::record::{Phase, RequestRecord, SCHEMA_VERSION_SUMMARY};
 use crate::stats::{bootstrap_mean_ci, ConfidenceInterval, DistSummary};
 use crate::sut::Sut;
+use crate::time_weighted::{RequestSpan, TimeWeightedMetrics};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -111,6 +112,11 @@ pub struct RunSummary {
     /// Client-observed outstanding concurrency vs configured cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed_concurrency: Option<ObservedConcurrency>,
+    /// Time-weighted blocks over measured successes (#195): `effective_concurrency`,
+    /// `effective_prefill_concurrency`, `effective_decode_concurrency`,
+    /// `tokens_in_flight`, `effective_prefill_throughput`, `effective_decode_throughput`.
+    #[serde(flatten)]
+    pub time_weighted: TimeWeightedMetrics,
     /// Runtime ISL/OSL vs optional targets; omitted when no targets configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isl_osl: Option<IslOslValidation>,
@@ -372,13 +378,64 @@ pub(crate) fn first_generated_token_s(
 /// `usage` wins, the tokenizer fills `usage_missing` rows, and a row with no
 /// token accounting at all yields `None`.
 fn record_isl_tokens(record: &RequestRecord) -> Option<u64> {
+    record_tokens(record, record.prompt_tokens, record.tokenized_prompt_tokens)
+}
+
+/// Completion tokens for one row with the same rule as `osl_tokens`.
+fn record_osl_tokens(record: &RequestRecord) -> Option<u64> {
+    record_tokens(
+        record,
+        record.completion_tokens,
+        record.tokenized_completion_tokens,
+    )
+}
+
+fn record_tokens(record: &RequestRecord, server: u64, tokenized: Option<u64>) -> Option<u64> {
     if record.usage_missing {
-        record.tokenized_prompt_tokens
+        tokenized
     } else if record.prompt_tokens > 0 || record.completion_tokens > 0 || record.total_tokens > 0 {
-        Some(record.prompt_tokens)
+        Some(server)
     } else {
         None
     }
+}
+
+/// Prefill end for the time-weighted phase split: the first generated token
+/// (reasoning or visible), clamped by [`crate::time_weighted::compute`].
+/// First-byte TTFT is not a token and gives no split.
+pub(crate) fn phase_split_s(
+    ttft_s: Option<f64>,
+    ttft_source: Option<crate::measurement::TtftSource>,
+    first_reasoning_s: Option<f64>,
+) -> Option<f64> {
+    if ttft_is_first_byte_approx(ttft_source) {
+        return None;
+    }
+    first_generated_token_s(ttft_s, first_reasoning_s)
+}
+
+/// Time-weighted blocks over measured successes. The window starts at the
+/// first measured send (any outcome), as `runner::window_seconds_from_records`.
+fn time_weighted(
+    measured: &[&RequestRecord],
+    successes: &[&RequestRecord],
+    window_seconds: f64,
+) -> TimeWeightedMetrics {
+    let start = measured
+        .iter()
+        .map(|r| crate::runner::send_offset_seconds(r))
+        .fold(f64::INFINITY, f64::min);
+    let spans: Vec<RequestSpan> = successes
+        .iter()
+        .map(|r| RequestSpan {
+            start_s: crate::runner::send_offset_seconds(r),
+            latency_s: r.latency_s,
+            prefill_end_s: phase_split_s(r.ttft_s, r.ttft_source, r.first_reasoning_s),
+            input_tokens: record_isl_tokens(r),
+            output_tokens: record_osl_tokens(r),
+        })
+        .collect();
+    crate::time_weighted::compute(&spans, start, window_seconds)
 }
 
 /// Per-request token counts. Server `usage` wins; the tokenizer fills only
@@ -506,6 +563,7 @@ impl RunSummary {
         let per_endpoint = endpoint_summaries(&pool);
         let recorded = RecordedFieldDists::from_successes(&successes);
         let bins = throughput_bins(&successes, window, bin_seconds);
+        let time_weighted = time_weighted(&pool, &successes, window_seconds);
         let completion_tokens_per_second = completion_tokens_total.map(|t| t as f64 / window);
         let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / window);
         let total_tokens_per_second = match (prompt_tokens_total, completion_tokens_total) {
@@ -574,6 +632,7 @@ impl RunSummary {
             price_provenance: None,
             cost_per_million_output_tokens: None,
             observed_concurrency: None,
+            time_weighted,
             isl_osl: None,
             ttft_approx_count: 0,
             ttft_warning: None,
@@ -677,6 +736,20 @@ fn print_dist_unit(label: &str, dist: &DistSummary, unit: &str) {
         fmt_opt(dist.p90, 3),
         fmt_opt(dist.p95, 3),
         fmt_opt(dist.p99, 3),
+    );
+}
+
+fn print_time_weighted(label: &str, stat: &crate::time_weighted::TimeWeightedStat) {
+    if stat.n == 0 {
+        return;
+    }
+    println!(
+        "  {label}: n={} avg={} active_avg={} max={} active={}s",
+        stat.n,
+        fmt_opt(stat.avg, 3),
+        fmt_opt(stat.active_avg, 3),
+        fmt_opt(stat.max, 3),
+        fmt_opt(stat.active_s, 3),
     );
 }
 
@@ -822,6 +895,23 @@ pub fn print_run_summary(summary: &RunSummary) {
             obs.cap,
             fmt_opt(obs.cap_engagement_fraction, 3),
         );
+    }
+    let tw = &summary.time_weighted;
+    for (label, stat) in [
+        ("Effective concurrency", &tw.effective_concurrency),
+        (
+            "Effective prefill concurrency",
+            &tw.effective_prefill_concurrency,
+        ),
+        (
+            "Effective decode concurrency",
+            &tw.effective_decode_concurrency,
+        ),
+        ("Tokens in flight", &tw.tokens_in_flight),
+        ("Effective prefill tok/s", &tw.effective_prefill_throughput),
+        ("Effective decode tok/s", &tw.effective_decode_throughput),
+    ] {
+        print_time_weighted(label, stat);
     }
     if let Some(v) = &summary.isl_osl {
         println!(
@@ -1621,5 +1711,76 @@ mod tests {
         assert_eq!(first_generated_token_s(Some(0.1), Some(0.3)), Some(0.1));
         assert_eq!(first_generated_token_s(Some(0.1), None), Some(0.1));
         assert_eq!(first_generated_token_s(None, Some(0.05)), None);
+    }
+
+    /// #195: time-weighted blocks from synthetic intervals, end to end through
+    /// `RunSummary` (same intervals as `time_weighted::tests`).
+    #[test]
+    fn time_weighted_blocks_from_synthetic_intervals() {
+        let row = |seq, send: f64, lat_ms, ttft_ms, prompt: u64, completion: u64| {
+            let mut r = ok(seq, lat_ms, ttft_ms, completion, &[]);
+            r.send_offset_s = Some(send);
+            r.prompt_tokens = prompt;
+            r.total_tokens = prompt + completion;
+            r
+        };
+        let a = row(0, 10.0, 2000, 500, 100, 30);
+        let b = row(1, 11.0, 2000, 1500, 50, 10);
+        // First-byte TTFT: in flight, but no prefill/decode split.
+        let mut c = row(2, 13.0, 500, 100, 7, 7);
+        c.ttft_source = Some(crate::measurement::TtftSource::FirstByteApprox);
+        let failed = RequestRecord::failed(
+            3,
+            Phase::Measure,
+            "ep".into(),
+            Utc::now(),
+            Utc::now(),
+            Duration::from_secs(9),
+            RequestError::Timeout,
+        )
+        .with_send_offset(Duration::from_secs(10));
+        let mut warmup = row(4, 10.0, 4000, 100, 999, 999);
+        warmup.phase = Phase::Warmup;
+        let summary = RunSummary::from_records(&[a, b, c, failed, warmup], 4.0, false);
+        let tw = &summary.time_weighted;
+        let close = |got: Option<f64>, want: f64| {
+            let got = got.expect("value");
+            assert!((got - want).abs() < 1e-12, "{got} != {want}");
+        };
+        // Integral 4 + 0.5 over the 4 s window; failed and warmup rows excluded.
+        assert_eq!(tw.effective_concurrency.n, 3);
+        close(tw.effective_concurrency.avg, 4.5 / 4.0);
+        close(tw.effective_concurrency.active_avg, 4.5 / 3.5);
+        close(tw.effective_concurrency.max, 2.0);
+        assert_eq!(tw.effective_prefill_concurrency.n, 2);
+        close(tw.effective_prefill_concurrency.avg, 0.5);
+        close(tw.effective_decode_concurrency.avg, 0.5);
+        close(tw.tokens_in_flight.avg, 325.0 / 4.0);
+        close(tw.tokens_in_flight.max, 180.0);
+        close(tw.effective_prefill_throughput.avg, 37.5);
+        close(tw.effective_prefill_throughput.max, 200.0);
+        close(tw.effective_decode_throughput.avg, 10.0);
+        close(tw.effective_decode_throughput.active_avg, 20.0);
+
+        let json = serde_json::to_value(&summary).expect("json");
+        for key in [
+            "effective_concurrency",
+            "effective_prefill_concurrency",
+            "effective_decode_concurrency",
+            "tokens_in_flight",
+            "effective_prefill_throughput",
+            "effective_decode_throughput",
+        ] {
+            assert!(json[key]["n"].is_u64(), "{key}: {}", json[key]);
+        }
+    }
+
+    #[test]
+    fn time_weighted_blocks_null_without_successes() {
+        let summary = RunSummary::from_records(&[], 0.0, false);
+        let json = serde_json::to_value(&summary).expect("json");
+        assert_eq!(json["effective_concurrency"]["n"], 0);
+        assert!(json["effective_concurrency"]["avg"].is_null());
+        assert!(json["tokens_in_flight"]["max"].is_null());
     }
 }
