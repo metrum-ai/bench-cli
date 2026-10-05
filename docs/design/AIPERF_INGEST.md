@@ -151,7 +151,7 @@ One `request.v3` line per AIPerf record, sorted by `request_start_ns`. Status:
 | `run_id` | `benchmark_id` (aggregate JSON) | string as is; not a UUID | derived |
 | `seq` | record order | index after sorting by `request_start_ns` across phases | derived |
 | `phase` | `metadata.benchmark_phase` | `profiling` to `measure`, `warmup` to `warmup`; 0.11.0 has only `profiling` | exact |
-| `endpoint` | `input_config.endpoint.urls[0]` | host:port. AIPerf records do not say which URL served them, so a run with several URLs collapses to one endpoint (gap below). With `--redact-hostname` or `--require-sut`, replaced by `redacted` (see [Redaction](#redaction)) | derived |
+| `endpoint` | `input_config.endpoint.urls[0]` | host:port. AIPerf records do not say which URL served them, so a run with several URLs collapses to one endpoint (gap below). `--redact-hostname` / `--require-sut` behave exactly as in a native run (today they null `environment.hostname` and leave `endpoint` as is), with no extra rule | derived |
 | `started_at` / `completed_at` | `request_start_ns` / `request_end_ns` | epoch ns to ISO 8601 UTC | exact |
 | `send_offset_s` | `request_start_ns` | minus the first measured `request_start_ns`, in seconds. Wall clock, not monotonic | derived |
 | `latency_s` | `metrics.request_latency` | ms / 1000 | exact |
@@ -310,7 +310,6 @@ optional field to `request.v3`:
   "tool_version": "0.13.0",
   "export_schema_version": "1.4",
   "benchmark_id": "<from export>",
-  "cli_command": "<run_info.cli_command, redacted per the rules below>",
   "files": [{"path": "profile_export.jsonl", "sha256": "<hex>"}],
   "clock": "wall",
   "reclassified_no_output_token": 0,
@@ -326,42 +325,13 @@ Rules:
   (`declared`, or `mixed` from `sut init --probe`). It is still a declaration,
   now made after the run. `--require-sut` keeps its field checks and implies
   `--redact-hostname`.
-- Every string copied from the export follows [Redaction](#redaction).
+- The importer does not copy `run_info.cli_command`: it can hold URLs, paths,
+  and model names, and Bench does not need it.
 - [RESULTS_PUBLICATION_POLICY.md](../RESULTS_PUBLICATION_POLICY.md) should state that published numbers from an
   import carry "measured by AIPerf <version>, imported by Metrum AI Bench CLI"
   next to them. That policy change belongs to the implementation issue, not
   to this note.
 - The importer never edits or rewrites the AIPerf files. It reads them only.
-
-### Redaction
-
-AIPerf does not redact `run_info.cli_command` beyond API keys. Both real
-exports carry it in clear: the 0.11.0 file has `--url
-'http://127.0.0.1:8000'`, `--tokenizer` with the served model's repository
-name, and `/tmp/...` paths for `--input-file` and `--artifact-dir`. The
-0.13.0 harness files have the same flags. So the importer must not copy
-`cli_command` as is.
-
-- Without `--redact-hostname` or `--require-sut`: copy `cli_command`, minus
-  any `--api-key` or `Authorization` value. The operator ran the command and
-  is publishing nothing yet.
-- With `--redact-hostname` or `--require-sut` (which implies it): omit
-  `cli_command` and keep only the flag names in `import.cli_flags`, for
-  example `["--model", "--url", "--streaming", "--concurrency"]`. Omitting the
-  command is simpler and safer than rewriting it, because a value can show
-  up in forms that a parser would miss.
-- Under the same flags, apply one rule to every other string from the
-  export. `endpoint` and `per_endpoint` keys from
-  `input_config.endpoint.urls` become `redacted`. Absolute paths
-  (`input_config.datasets[].path`, `artifacts.dir`) are dropped.
-  `input_config.tokenizer.name` and `models.items[].name` become `redacted`
-  unless the `--sut` file declares the same model, in which case the SUT
-  block is the one place the model name appears.
-- `import.files[].path` is always the bare file name, never the source
-  directory.
-- Phase 1 tests run the 0.11.0 shape through `--require-sut` and assert that
-  no host, port, absolute path, or model or tokenizer name is left in the
-  output.
 
 ## Cost
 
@@ -462,7 +432,7 @@ Phase 1 tests confirm the exact count.
 |------|------|
 | Phase 1: serde model for the `profile_export.jsonl` record, unit-aware value reader, version gate on observed (`aiperf_version`, `schema_version`) pairs | 1 |
 | Phase 1: mapping to `RequestRecord` (TTFO, ITL rebuild, error and `no_output_token` rules, `in_flight_at_send`, `inputs.json` join) | 1 |
-| Phase 1: `import aiperf` clap subcommand, `--sut` / `--require-sut` / `--price-per-hour` / `--slo`, the `import` block and `source` field, redaction rules, plus `docs/OUTPUT_SCHEMA.md`, `docs/METRICS.md`, `CHANGELOG.md`, and `scripts/render_cli_help.sh` | 1 |
+| Phase 1: `import aiperf` clap subcommand, `--sut` / `--require-sut` / `--price-per-hour` / `--slo`, the `import` block and `source` field, plus `docs/OUTPUT_SCHEMA.md`, `docs/METRICS.md`, `CHANGELOG.md`, and `scripts/render_cli_help.sh` | 1 |
 | Phase 1: fixtures and tests. Generate fresh exports with `scripts/parity/run_pair.sh` (`TOOLS=aiperf`), trim them into `tests/fixtures/`, and assert the evidence table above to 1e-9 s. Add an `import` row to `count_points.py`. | 1 |
 | **Phase 1 total** | **about 4** |
 | Phase 2: `.jsonl` scrape reader, `telemetry.v1` writer reuse, `_total` normalization, a GPU telemetry `.jsonl` reader, capture fixture, tests | 2 to 3 |
