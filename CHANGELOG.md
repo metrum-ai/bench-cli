@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Documentation
+- Telemetry docs state that Prometheus series are selected at runtime from
+  `--telemetry` YAML. The binary does not embed a metric catalog. Agents curl
+  the live `/metrics` page (all-smi, the serving engine, and any other
+  exporter) and set `include` from that response.
+- `docs/TELEMETRY.md` compares that open scrape with AIPerf. AIPerf's metrics
+  reference is a named client catalog plus inference `/metrics` and
+  DCGM/pynvml/amdsmi GPU telemetry. Bench CLI stores client JSONL plus whatever
+  live Prometheus pages the YAML selects. The publish-20261002 campaign is the
+  example (all-smi and the serving engine in one NDJSON per cell).
+
 ## 1.5.3 (2026-10-02)
 
 ### Documentation

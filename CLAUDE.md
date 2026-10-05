@@ -37,7 +37,7 @@
 - Results go to `--data-log`; one JSONL record per request, final line is the run summary. Schema: `docs/OUTPUT_SCHEMA.md`.
 - Thinking models: read `docs/REASONING_MODELS.md` before choosing `--max-tokens`. `no_output_token` in the summary means the cap was too low.
 - Prompt files are JSONL only. Strategic sweeps: prefer `--prompts` + `--max-tokens` + `--warmup-requests` on GPU.
-- Strategic telemetry: `--ndjson` + `--telemetry` YAML (Prometheus GET only). Default smoke scrapes the Metrum all-smi fork at `http://127.0.0.1:9090/metrics` (`/metric` returns 404 on v0.26.3-metrum.4); confirm with curl before a run. Offline analysis: `docs/TELEMETRY.md`, `docs/queries/analyze.py`. No in-binary SQL/`correlate`.
+- Strategic telemetry: `--ndjson` + `--telemetry` YAML (Prometheus GET only). The series list is not compiled into the binary. Curl the live pages (Metrum all-smi fork at `http://127.0.0.1:9090/metrics`, the serving engine `/metrics`, and any other exporter) and set YAML `include` from that response. `/metric` returns 404 on all-smi v0.26.3-metrum.4. Example YAMLs are starting points. Offline analysis: `docs/TELEMETRY.md`, `docs/queries/analyze.py`. No in-binary SQL/`correlate`.
 - Charts are not a CLI responsibility; analyze CSV/JSON/NDJSON with a separate prompt or script.
 - `docs/CLI.md` is generated; run `scripts/render_cli_help.sh` after any clap change.
 - Header check: `scripts/check_headers.sh`. Every file keeps the Metrum AI copyright and SPDX lines.

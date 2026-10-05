@@ -87,9 +87,12 @@ axes, ticks, and a grid**, and marks the unit-normalized Kneedle result. Use
 `metrum-ai-bench-cli compare` on two of our own stdout JSON summaries (or
 request CSVs). Legacy `--metrics-url` still aggregates engine KV/queue gauges
 into stdout. For durable GPU/host timeseries, pass `--ndjson` with
-`--telemetry` (Prometheus text). Default smoke uses the Metrum
+`--telemetry` (Prometheus text). The binary loads that YAML at startup and
+keeps series whose names match `include`. Default smoke uses the Metrum
 [all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on
-`http://127.0.0.1:9090/metrics`. See repository `docs/TELEMETRY.md`.
+`http://127.0.0.1:9090/metrics` plus the serving engine's `/metrics`. Curl
+those pages before a run; example files are starting points. See repository
+`docs/TELEMETRY.md`.
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages. Rate
 requests retain their intended schedule while waiting for an in-flight slot.

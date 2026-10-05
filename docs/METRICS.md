@@ -119,7 +119,9 @@ inside modality `--data-log` request rows.
   weighted math must join long-format `telemetry` rows to `stage` windows.
 
 Default smoke exporter: Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
-fork on `http://127.0.0.1:9090/metrics`. Full join rules and recipes:
+fork on `http://127.0.0.1:9090/metrics`, scraped beside the serving engine's
+`/metrics`. Which series land in the NDJSON is the runtime `--telemetry`
+YAML, not a list compiled into the binary. Full join rules and recipes:
 [TELEMETRY.md](TELEMETRY.md), [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
 
 Distributions report `n`, min, max, arithmetic mean, sample standard

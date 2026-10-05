@@ -112,6 +112,9 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 - Scaffold SUT with `metrum-ai-bench-cli sut init --probe` on the measurement
   host, then fill runtime/model/vendor. Observed fields are local only.
 - For any number you might publish: `--sut <file> --require-sut`.
+- Telemetry series are not a catalog in the binary. Curl the live `/metrics`
+  pages (all-smi, the serving engine, and any other exporter) and set
+  `--telemetry` YAML `include` from that response. Example YAMLs go stale.
 - Write `--data-log` under `./bench-out/`. Summarize with jq only; never invent
   metrics. For multi-run deltas use `metrum-ai-bench-cli compare`; for charts
   beyond strategic `--html`, use an analysis prompt on CSV/JSON/NDJSON exports

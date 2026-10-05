@@ -4,8 +4,9 @@
 # Telemetry exporters
 
 Install one-liners and default scrape targets for YAML under
-[examples/](examples/). Verify ports and metric names against the project
-README before a publishable run; vendors change tags.
+[examples/](examples/). These pages are install hints. The binary does not
+freeze their metric names: curl the live endpoint and set `include` from that
+response. Vendors change tags and series between releases.
 
 Bind listeners to `127.0.0.1` when the exporter and the bench client share a
 host. Paths are Prometheus text unless noted.
