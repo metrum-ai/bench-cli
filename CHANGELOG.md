@@ -7,11 +7,19 @@
   `--telemetry` YAML. The binary does not embed a metric catalog. Agents curl
   the live `/metrics` page (all-smi, the serving engine, and any other
   exporter) and set `include` from that response.
-- `docs/TELEMETRY.md` compares that open scrape with AIPerf. AIPerf's metrics
-  reference is a named client catalog plus inference `/metrics` and
-  DCGM/pynvml/amdsmi GPU telemetry. Bench CLI stores client JSONL plus whatever
-  live Prometheus pages the YAML selects. The publish-20261002 campaign is the
-  example (all-smi and the serving engine in one NDJSON per cell).
+- `docs/TELEMETRY.md` compares that open scrape with AIPerf (corrected in
+  #200). AIPerf's metrics reference is a named client catalog. Its
+  `--server-metrics` (on by default) ingests any Prometheus page, including
+  all 69 Metrum all-smi fork GPU series names. Its power-efficiency family
+  comes only from `--gpu-telemetry` (DCGM, pynvml, amdsmi) as aggregated
+  values. Bench CLI stores client JSONL plus every matched raw series from
+  the live Prometheus pages the YAML selects, on the request clock. The
+  publish-20261002 campaign is the example (all-smi and the serving engine
+  in one NDJSON per cell).
+- Remaining all-smi `v0.26.3-metrum.3` references in
+  `docs/TELEMETRY.md`, `docs/telemetry/exporters.md`,
+  `docs/telemetry/examples/all-smi.yaml`, and the `ALL_SMI_RELEASE` default
+  in `scripts/e2e/sut-setup.sh` now point to `v0.26.3-metrum.4`.
 
 ## 1.5.3 (2026-10-02)
 

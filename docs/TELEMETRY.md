@@ -37,10 +37,14 @@ allowlist (`engine_include_patterns` in `src/telemetry/parser.rs`). Use
 ## Compared with AIPerf
 
 [AIPerf](https://github.com/ai-dynamo/aiperf) is NVIDIA's replacement for
-GenAI-Perf. Its metrics reference is a named client catalog. It also scrapes
-the inference server's `/metrics` (`--server-metrics`, on by default) and
-collects GPU telemetry from DCGM, pynvml, and amdsmi (`--gpu-telemetry`), then
-derives a power-efficiency family for NVIDIA and AMD.
+GenAI-Perf. Its metrics reference is a named client catalog. `--server-metrics`
+(on by default) ingests any Prometheus page, not only the inference server's
+`/metrics`. On 2026-10-05 it ingested all 69 Metrum all-smi fork GPU series
+names. Its power-efficiency family comes only from `--gpu-telemetry` (DCGM,
+pynvml, and amdsmi), and it reports aggregated values rather than raw samples.
+The real difference is that Bench CLI keeps every matched raw series on the
+request clock, so GPU signals from any exporter line up with individual
+requests.
 
 Bench CLI splits the same job differently. `request.v3` and `summary.v3` are
 the fixed client schema. Telemetry is not a second catalog in the binary:
@@ -81,7 +85,7 @@ Example:
 # Default smoke: Metrum all-smi fork on loopback /metrics
 # Prefer a release binary (x86_64 example):
 curl -fsSL -o /tmp/all-smi.tgz \
-  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
 all-smi api --port 9090
 
