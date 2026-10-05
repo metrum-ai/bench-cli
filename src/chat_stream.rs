@@ -19,6 +19,8 @@ pub struct ChatStreamResult {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    /// Server-reported reasoning tokens from the usage chunk; `None` when absent.
+    pub reasoning_tokens: Option<u64>,
     pub completion_text: String,
 }
 
@@ -32,6 +34,7 @@ struct Consumer {
     prompt_tokens: u64,
     completion_tokens: u64,
     total_tokens: u64,
+    reasoning_tokens: Option<u64>,
     done: bool,
     saw_finish: bool,
     completion_text: String,
@@ -63,6 +66,8 @@ impl Consumer {
                             .get("total_tokens")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(self.total_tokens);
+                        self.reasoning_tokens =
+                            crate::usage::reasoning_tokens(usage).or(self.reasoning_tokens);
                     }
                     if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
                         for choice in choices {
@@ -114,6 +119,7 @@ impl Consumer {
             prompt_tokens: self.prompt_tokens,
             completion_tokens: self.completion_tokens,
             total_tokens: self.total_tokens,
+            reasoning_tokens: self.reasoning_tokens,
             completion_text: self.completion_text,
         })
     }
@@ -268,6 +274,36 @@ mod tests {
             ),
             (2, 3, 5)
         );
+        assert_eq!(result.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn usage_chunk_reasoning_tokens_are_captured() {
+        let mut consumer = Consumer::default();
+        event(
+            &mut consumer,
+            json!({"choices":[{"delta":{"content":"hi"}}]}),
+            10,
+        )
+        .expect("content");
+        event(
+            &mut consumer,
+            json!({"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":9,"total_tokens":11,"completion_tokens_details":{"reasoning_tokens":6}}}),
+            20,
+        )
+        .expect("finish");
+        // A later usage-only chunk without details keeps the reported value.
+        event(
+            &mut consumer,
+            json!({"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":9,"total_tokens":11}}),
+            25,
+        )
+        .expect("usage");
+        let result = consumer
+            .finish(Duration::from_millis(30), false)
+            .expect("complete");
+        assert_eq!(result.reasoning_tokens, Some(6));
+        assert_eq!(result.completion_tokens, 9);
     }
 
     #[tokio::test]

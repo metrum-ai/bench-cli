@@ -71,6 +71,14 @@ pub struct RunSummary {
     /// Provenance of `osl_tokens`: `server_usage`, `tokenizer_fallback`, or `mixed`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub osl_tokens_source: Option<&'static str>,
+    /// Per-request server-reported reasoning tokens (rows that reported none are skipped).
+    pub reasoning_tokens: DistSummary,
+    /// Sum of `reasoning_tokens` over measured successes that reported it; null when `n = 0`.
+    pub reasoning_tokens_total: Option<u64>,
+    /// Per-request `completion_tokens - reasoning_tokens` (reasoning-reporting rows only).
+    pub visible_completion_tokens: DistSummary,
+    /// Sum of `visible_completion_tokens`; null when `n = 0`.
+    pub visible_completion_tokens_total: Option<u64>,
     pub throughput_bins_rps: DistSummary,
     pub goodput: GoodputSummary,
     pub pooled_mixture: bool,
@@ -209,6 +217,8 @@ pub struct EndpointSummary {
     pub osl_tokens: DistSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub osl_tokens_source: Option<&'static str>,
+    pub reasoning_tokens: DistSummary,
+    pub visible_completion_tokens: DistSummary,
 }
 
 /// Distributions over fields already recorded per request (#191).
@@ -220,6 +230,10 @@ struct RecordedFieldDists {
     isl_tokens_source: Option<&'static str>,
     osl_tokens: DistSummary,
     osl_tokens_source: Option<&'static str>,
+    reasoning_tokens: DistSummary,
+    reasoning_tokens_total: Option<u64>,
+    visible_completion_tokens: DistSummary,
+    visible_completion_tokens_total: Option<u64>,
 }
 
 impl RecordedFieldDists {
@@ -242,6 +256,15 @@ impl RecordedFieldDists {
         let osl = token_samples(successes, |r| {
             (r.completion_tokens, r.tokenized_completion_tokens)
         });
+        // Reasoning counts come only from server usage; no tokenizer fallback.
+        let reasoning: Vec<u64> = successes
+            .iter()
+            .filter_map(|r| r.reasoning_tokens)
+            .collect();
+        let visible: Vec<u64> = successes
+            .iter()
+            .filter_map(|r| r.visible_completion_tokens)
+            .collect();
         Self {
             first_byte_s: DistSummary::from_values(&first_byte),
             queue_delay_s: DistSummary::from_values(&queue_delay),
@@ -250,8 +273,22 @@ impl RecordedFieldDists {
             isl_tokens_source: isl.source(),
             osl_tokens: DistSummary::from_values(&osl.values),
             osl_tokens_source: osl.source(),
+            reasoning_tokens: DistSummary::from_values(&as_f64(&reasoning)),
+            reasoning_tokens_total: total(&reasoning),
+            visible_completion_tokens: DistSummary::from_values(&as_f64(&visible)),
+            visible_completion_tokens_total: total(&visible),
         }
     }
+}
+
+fn as_f64(values: &[u64]) -> Vec<f64> {
+    values.iter().map(|&v| v as f64).collect()
+}
+
+/// Sum of reported counts; `None` (not `0`) when nothing was reported.
+/// Saturates so a bogus server count cannot overflow the total.
+pub(crate) fn total(values: &[u64]) -> Option<u64> {
+    (!values.is_empty()).then(|| values.iter().fold(0u64, |acc, &v| acc.saturating_add(v)))
 }
 
 struct TokenSamples {
@@ -431,6 +468,10 @@ impl RunSummary {
             isl_tokens_source: recorded.isl_tokens_source,
             osl_tokens: recorded.osl_tokens,
             osl_tokens_source: recorded.osl_tokens_source,
+            reasoning_tokens: recorded.reasoning_tokens,
+            reasoning_tokens_total: recorded.reasoning_tokens_total,
+            visible_completion_tokens: recorded.visible_completion_tokens,
+            visible_completion_tokens_total: recorded.visible_completion_tokens_total,
             throughput_bins_rps: DistSummary::from_values(&bins),
             goodput: GoodputSummary {
                 count: good.len(),
@@ -655,6 +696,20 @@ pub fn print_run_summary(summary: &RunSummary) {
             "",
         );
     }
+    if summary.reasoning_tokens.n > 0 {
+        print_dist_unit("Reasoning tokens", &summary.reasoning_tokens, "");
+        println!(
+            "  Reasoning tokens total: {}",
+            summary.reasoning_tokens_total.unwrap_or(0)
+        );
+    }
+    if summary.visible_completion_tokens.n > 0 {
+        print_dist_unit(
+            "Visible completion tokens",
+            &summary.visible_completion_tokens,
+            "",
+        );
+    }
     if let Some(obs) = &summary.observed_concurrency {
         println!(
             "  Observed concurrency: mean={} p50={} max={} cap={} engagement={}",
@@ -810,6 +865,8 @@ fn endpoint_summaries(records: &[&RequestRecord]) -> BTreeMap<String, EndpointSu
                     isl_tokens_source: recorded.isl_tokens_source,
                     osl_tokens: recorded.osl_tokens,
                     osl_tokens_source: recorded.osl_tokens_source,
+                    reasoning_tokens: recorded.reasoning_tokens,
+                    visible_completion_tokens: recorded.visible_completion_tokens,
                 },
             )
         })
@@ -1222,6 +1279,51 @@ mod tests {
         assert!(summary.isl_tokens_source.is_none());
         let value = serde_json::to_value(&summary).unwrap();
         assert!(value.get("osl_tokens_source").is_none());
+    }
+
+    #[test]
+    fn reasoning_tokens_summarized_only_from_reporting_rows() {
+        let a = ok(0, 500, 120, 20, &[20; 19]).with_reasoning_tokens(Some(6));
+        let mut b = ok(1, 600, 130, 30, &[20; 29]).with_reasoning_tokens(Some(10));
+        b.endpoint = "other".into();
+        // Server reported no reasoning count: excluded, not counted as zero.
+        let c = ok(2, 500, 120, 20, &[20; 19]);
+        let summary = RunSummary::from_records(&[a, b, c], 1.0, false);
+        assert_eq!(summary.reasoning_tokens.n, 2);
+        assert_eq!(summary.reasoning_tokens.avg, Some(8.0));
+        assert_eq!(summary.reasoning_tokens_total, Some(16));
+        assert_eq!(summary.visible_completion_tokens.n, 2);
+        assert_eq!(summary.visible_completion_tokens.avg, Some(17.0));
+        assert_eq!(summary.visible_completion_tokens_total, Some(34));
+        assert_eq!(summary.per_endpoint["other"].reasoning_tokens.n, 1);
+        assert_eq!(
+            summary.per_endpoint["other"].visible_completion_tokens.avg,
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn reasoning_total_saturates_instead_of_overflowing() {
+        assert_eq!(total(&[u64::MAX, 5]), Some(u64::MAX));
+        assert_eq!(total(&[]), None);
+    }
+
+    #[test]
+    fn reasoning_tokens_absent_serialize_as_null() {
+        let rec = ok(0, 500, 120, 20, &[20; 19]);
+        let record_value = serde_json::to_value(&rec).unwrap();
+        assert!(record_value["reasoning_tokens"].is_null());
+        assert!(record_value["visible_completion_tokens"].is_null());
+        assert!(record_value
+            .as_object()
+            .unwrap()
+            .contains_key("reasoning_tokens"));
+        let summary = RunSummary::from_records(&[rec], 1.0, false);
+        assert_eq!(summary.reasoning_tokens.n, 0);
+        let value = serde_json::to_value(&summary).unwrap();
+        assert!(value["reasoning_tokens_total"].is_null());
+        assert!(value["visible_completion_tokens_total"].is_null());
+        assert_eq!(value["reasoning_tokens"]["n"], 0);
     }
 
     #[test]

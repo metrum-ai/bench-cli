@@ -174,6 +174,7 @@ struct StreamMetrics {
     prompt_tokens: u64,
     completion_tokens: u64,
     total_tokens: u64,
+    reasoning_tokens: Option<u64>,
     prompt_words: usize,
     completion_words: usize,
     prompt_text: String,
@@ -283,6 +284,7 @@ async fn make_request(
             prompt_tokens: stream.prompt_tokens,
             completion_tokens: stream.completion_tokens,
             total_tokens: stream.total_tokens,
+            reasoning_tokens: stream.reasoning_tokens,
             prompt_words: prompt_word_count,
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
@@ -359,6 +361,9 @@ async fn make_request(
             .and_then(|usage| usage.get("total_tokens"))
             .map(parse_token_count)
             .unwrap_or(0);
+        let reasoning_tokens = json_resp
+            .get("usage")
+            .and_then(metrum_ai_bench::usage::reasoning_tokens);
 
         // Non-streaming: TTFT is not measured (do not fabricate latency as TTFT).
         Ok(StreamMetrics {
@@ -370,6 +375,7 @@ async fn make_request(
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            reasoning_tokens,
             prompt_words: prompt_word_count,
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
@@ -762,6 +768,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         sm.completion_tokens,
                         sm.total_tokens,
                     )
+                    .with_reasoning_tokens(sm.reasoning_tokens)
                     .with_first_byte(sm.first_byte)
                     .with_resolved_ttft(resolved)
                     .with_connect(connect_s)

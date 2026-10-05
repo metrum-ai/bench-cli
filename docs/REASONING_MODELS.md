@@ -29,11 +29,45 @@ Definitions (from [METRICS.md](METRICS.md)):
   and appears in summary `errors_by_type.no_output_token`.
 - **First reasoning** (`first_reasoning_s` on each request): first non-empty
   `reasoning_content` / `reasoning` delta minus send, reported separately from
-  TTFT.
+  TTFT. The summary carries a `first_reasoning_s` distribution over measured
+  successes that streamed a reasoning delta.
+- **Reasoning tokens** (`reasoning_tokens` and `visible_completion_tokens` on
+  each request; summary distributions plus `reasoning_tokens_total` and
+  `visible_completion_tokens_total`): the server-reported reasoning count
+  from `usage`, and `completion_tokens` minus that count. `null` (never `0`)
+  when the server does not report it; Bench does not estimate it with a
+  tokenizer. vLLM (the default engine, [SERVING.md](SERVING.md)) reports
+  `usage.completion_tokens_details.reasoning_tokens` from v0.28.0
+  ([vllm#45802](https://github.com/vllm-project/vllm/pull/45802)), and only
+  when started with `--reasoning-parser`
+  ([vLLM reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/)).
+  Without the parser, or on older vLLM, the field is `null`, so you will see
+  `reasoning_tokens.n=0` even though the model reasons. Add the model's
+  reasoning parser to the launch flags if you need the count. Other engines:
+  check their docs for `completion_tokens_details`. See
+  [METRICS.md](METRICS.md) for the accepted locations.
 
-There is **no** summary-level distribution for `first_reasoning_s` today.
-Compare per-request values in the JSONL when you need that latency. See
-[OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
+See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
+
+### Reading `reasoning_tokens` vs `no_output_token`
+
+The two answer different questions:
+
+- `no_output_token` is a request failure: the stream ended with no visible
+  answer delta, usually because `--max-tokens` ran out during reasoning.
+  These rows are excluded from summary distributions and their
+  `reasoning_tokens` is `null` (the request errored), so they never show up
+  in the reasoning token summary.
+- `reasoning_tokens` describes successful requests: how much of each
+  answer's `completion_tokens` went to thinking.
+
+So a run with many `no_output_token` errors and a modest
+`reasoning_tokens` p50 means the cap cut off the long tail, and the
+distribution is biased low. Fix the cap first (see below). Once
+`no_output_token` is zero, compare `reasoning_tokens` p99 with
+`--max-tokens` to see the remaining headroom. `completion_tokens`,
+`completion_tokens_per_second`, and cost per million output tokens include
+reasoning tokens; use `visible_completion_tokens` for answer-only counts.
 
 ## Passing `reasoning_effort` and related parameters
 
@@ -101,9 +135,9 @@ done
 
 Fields to compare across the three summaries: time-to-first-answer
 (`ttft_s`), output tokens per second (`completion_tokens_per_second`), and
-`errors_by_type.no_output_token`. First-reasoning latency is per-request
-(`first_reasoning_s`) only; the summary has no first-reasoning distribution.
-There is no reasoning-tokens-per-request field in the schema today.
+`errors_by_type.no_output_token`, plus first-reasoning latency
+(`first_reasoning_s`), `reasoning_tokens` / `reasoning_tokens_total`, and
+`visible_completion_tokens` when the server reports reasoning usage.
 
 ## What Bench does not measure
 

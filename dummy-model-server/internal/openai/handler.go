@@ -93,7 +93,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		h.serveChatStream(w, model, maxTokens, promptTokens, includeUsage)
 		return
 	}
-	serveChatNonStream(w, model, promptTokens, maxTokens)
+	serveChatNonStream(w, model, promptTokens, maxTokens, h.Cfg.ReasoningTokens)
 }
 
 // Completions handles POST /v1/completions (legacy text completions).
@@ -188,8 +188,20 @@ func (h *Handler) serveChatStream(w http.ResponseWriter, model string, maxTokens
 		return
 	}
 
-	// Optional reasoning deltas (vLLM-style) before visible content.
-	if h.Cfg.Reasoning {
+	// Counted reasoning deltas before visible content (-reasoning-tokens).
+	reasoningTokens := h.Cfg.ReasoningTokens
+	for i := 0; i < reasoningTokens; i++ {
+		if h.Cfg.ChunkInterval > 0 {
+			time.Sleep(h.Cfg.ChunkInterval)
+		}
+		_ = sw.Data(streamChunk{
+			ID: id, Object: "chat.completion.chunk", Created: created, Model: model,
+			Choices: []streamChoice{{Index: 0, Delta: streamDelta{ReasoningContent: "think"}}},
+		})
+	}
+
+	// Optional uncounted reasoning delta (vLLM-style) before visible content.
+	if h.Cfg.Reasoning && reasoningTokens == 0 {
 		if h.Cfg.ChunkInterval > 0 {
 			time.Sleep(h.Cfg.ChunkInterval)
 		}
@@ -221,11 +233,11 @@ func (h *Handler) serveChatStream(w http.ResponseWriter, model string, maxTokens
 		Choices: []streamChoice{{Index: 0, Delta: streamDelta{}, FinishReason: &stop}},
 	}
 	if includeUsage {
-		final.Usage = &usage{
+		final.Usage = withReasoning(&usage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,
 			TotalTokens:      promptTokens + completionTokens,
-		}
+		}, reasoningTokens)
 	}
 	_ = sw.Data(final)
 	_ = sw.Done()
@@ -256,20 +268,37 @@ func (h *Handler) serveCompletionStream(w http.ResponseWriter, model string, max
 	_ = sw.Done()
 }
 
-func serveChatNonStream(w http.ResponseWriter, model string, promptTokens, completionTokens int) {
+func serveChatNonStream(w http.ResponseWriter, model string, promptTokens, completionTokens, reasoningTokens int) {
 	if promptTokens == 0 {
 		promptTokens = 1
+	}
+	msg := message{Role: "assistant", Content: "Hello."}
+	if reasoningTokens > 0 {
+		msg.ReasoningContent = "think"
 	}
 	writeJSON(w, http.StatusOK, chatCompletionResponse{
 		ID: "chatcmpl-dummy", Object: "chat.completion", Created: time.Now().Unix(), Model: model,
 		Choices: []choice{{
-			Index: 0, Message: message{Role: "assistant", Content: "Hello."}, FinishReason: "stop",
+			Index: 0, Message: msg, FinishReason: "stop",
 		}},
-		Usage: usage{
+		Usage: *withReasoning(&usage{
 			PromptTokens: promptTokens, CompletionTokens: completionTokens,
 			TotalTokens: promptTokens + completionTokens,
-		},
+		}, reasoningTokens),
 	})
+}
+
+// withReasoning adds reasoning tokens to completion_tokens (OpenAI counts
+// them as output) and reports them in completion_tokens_details. With 0 the
+// usage is returned unchanged, so the details object stays absent.
+func withReasoning(u *usage, reasoningTokens int) *usage {
+	if reasoningTokens <= 0 {
+		return u
+	}
+	u.CompletionTokens += reasoningTokens
+	u.TotalTokens += reasoningTokens
+	u.CompletionTokensDetails = &completionTokensDetails{ReasoningTokens: reasoningTokens}
+	return u
 }
 
 func promptTokensChat(messages []chatMessage) int {

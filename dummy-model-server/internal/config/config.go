@@ -34,13 +34,16 @@ type Config struct {
 	OmitDone       bool
 	RoleOnly       bool
 	Reasoning      bool
-	IncludeUsage   bool
-	Seed           int64
-	Compat         Compat
-	LogRequests    bool
-	ImageSize      string
-	MaxImages      int
-	AllowAnyModel  bool
+	// ReasoningTokens > 0 streams that many reasoning_content chunks (one
+	// token each) and reports them in usage.completion_tokens_details.
+	ReasoningTokens int
+	IncludeUsage    bool
+	Seed            int64
+	Compat          Compat
+	LogRequests     bool
+	ImageSize       string
+	MaxImages       int
+	AllowAnyModel   bool
 	// StrictMedia rejects media payloads real servers reject (see internal/media).
 	StrictMedia bool
 }
@@ -62,6 +65,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.OmitDone, "omit-done", false, "Adversarial: omit trailing data: [DONE]")
 	fs.BoolVar(&cfg.RoleOnly, "role-only", false, "Adversarial: stream role delta only (no content)")
 	fs.BoolVar(&cfg.Reasoning, "reasoning", false, "Emit delta.reasoning_content before content (vLLM-style)")
+	fs.IntVar(&cfg.ReasoningTokens, "reasoning-tokens", 0, "Emit N reasoning tokens and report usage.completion_tokens_details.reasoning_tokens; 0 = off")
 	fs.BoolVar(&cfg.IncludeUsage, "include-usage", true, "Include usage on final stream chunk by default")
 	fs.Int64Var(&cfg.Seed, "seed", 0, "RNG seed for error injection and deterministic text; 0 = time-based")
 	compat := fs.String("compat", "openai", "Vendor profile: openai|vllm|sglang")
@@ -73,6 +77,10 @@ func ParseFlags(args []string) (*Config, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+
+	if cfg.ReasoningTokens < 0 {
+		return nil, fmt.Errorf("invalid -reasoning-tokens %d: must be >= 0", cfg.ReasoningTokens)
 	}
 
 	if d, err := time.ParseDuration(*latency); err == nil {

@@ -114,6 +114,14 @@ pub struct RequestRecord {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    /// Server-reported reasoning tokens (`usage.completion_tokens_details.reasoning_tokens`
+    /// or an accepted variant, see `crate::usage`). `null` when the server did not report it.
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
+    /// `completion_tokens - reasoning_tokens`; `null` when reasoning is unreported
+    /// or exceeds `completion_tokens`.
+    #[serde(default)]
+    pub visible_completion_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokenized_prompt_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -171,6 +179,8 @@ impl RequestRecord {
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            reasoning_tokens: None,
+            visible_completion_tokens: None,
             tokenized_prompt_tokens: None,
             tokenized_completion_tokens: None,
             usage_missing: false,
@@ -216,6 +226,8 @@ impl RequestRecord {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
+            reasoning_tokens: None,
+            visible_completion_tokens: None,
             tokenized_prompt_tokens: None,
             tokenized_completion_tokens: None,
             usage_missing: false,
@@ -251,6 +263,14 @@ impl RequestRecord {
     pub fn with_connect(mut self, connect_s: f64) -> Self {
         self.connect_s = Some(connect_s);
         self.with_phase_metrics()
+    }
+
+    /// Record server-reported reasoning tokens and derive visible completion tokens.
+    pub fn with_reasoning_tokens(mut self, reasoning_tokens: Option<u64>) -> Self {
+        self.reasoning_tokens = reasoning_tokens;
+        self.visible_completion_tokens =
+            crate::usage::visible_completion_tokens(self.completion_tokens, reasoning_tokens);
+        self
     }
 
     pub fn with_in_flight(mut self, in_flight: u64) -> Self {

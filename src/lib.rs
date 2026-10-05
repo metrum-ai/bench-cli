@@ -27,6 +27,7 @@ pub mod summary;
 pub mod sut;
 pub mod telemetry;
 pub mod tokenizer;
+pub mod usage;
 
 pub mod banner {
     use std::io::IsTerminal;
