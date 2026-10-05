@@ -14,13 +14,14 @@ For agent-bench, start from the streaming LLM/chat path so TTFT measures visible
 output as it arrives. The unary strategic path cannot measure TTFT. Strategic
 chat turns opt in with `--streaming`, including `--sessions`; their per-turn CSV
 records include `first_byte_s` and `ttft_s`, and measured TTFT enforces `--slo ttft=`.
-Streaming is off by default. Embeddings and rerank remain JSON, and `--tools`
-cannot be combined with `--streaming`.
+Streaming is off by default and applies to chat and vlm. Embeddings, rerank,
+asr and imagegen remain unary, and `--tools` cannot be combined with
+`--streaming`.
 
 
 `metrum-ai-bench-cli-strategic` is the runner for concurrency/rate sweeps, chat
-sessions, structured output, embeddings, reranking, server correlation and
-portable exports. Existing modality-specific binaries remain supported.
+sessions, structured output, embeddings, reranking, VLM, ASR and image
+generation sweeps, server correlation and portable exports. Existing modality-specific binaries remain supported.
 
 ## Sweep and server correlation
 
@@ -171,6 +172,60 @@ and JSON arguments. Valid responses determine `validity_rate` and feed goodput
 Use `--kind embeddings` with `--prompt TEXT` against `/v1/embeddings`.
 Use `--kind rerank` with `--prompt 'query|document one|document two'` against
 Jina/Cohere-style `/v1/rerank` endpoints.
+
+## VLM, ASR and image generation sweeps
+
+`--kind vlm`, `--kind asr` and `--kind imagegen` sweep the same endpoints as
+the modality binaries and build requests with their shared request builders
+(`src/vlm.rs`, `src/asr.rs`, `src/imagegen.rs`), so a sweep point and a
+single modality run send the same bodies. `--url` is the full endpoint URL.
+Inputs load once before the first request: images are read and base64
+encoded, and audio is read (or downloaded once) into memory, so file I/O never
+enters a measured latency.
+
+```bash
+# VLM: chat completions with image_url parts; --max-tokens is required.
+metrum-ai-bench-cli-strategic --kind vlm \
+  --url http://127.0.0.1:8000/v1/chat/completions --model MODEL --api-key dummy \
+  --prompts vlm.jsonl --max-tokens 128 --streaming --sweep 1,2,4,8,16
+
+# ASR: multipart uploads; --ground-truth adds stage WER/CER.
+metrum-ai-bench-cli-strategic --kind asr \
+  --url http://127.0.0.1:8000/v1/audio/transcriptions --model MODEL --api-key dummy \
+  --audio-samples audio.jsonl --ground-truth refs.jsonl --sweep 1,2,4,8,16
+
+# Image generation: b64_json images are decoded and digested.
+metrum-ai-bench-cli-strategic --kind imagegen \
+  --url http://127.0.0.1:8000/v1/images/generations --model MODEL --api-key dummy \
+  --prompts prompts.jsonl --image-size 1024x1024 --sweep 1,2,4
+```
+
+| Kind | Inputs | Kind flags |
+|------|--------|------------|
+| `vlm` | `--prompts` VLM JSONL (as `metrum-ai-bench-cli-vlm --prompts`), or `--prompt` plus repeatable `--image` | `--max-tokens` (required), `--image-detail`, `--max-image-dimension`, `--temperature` (default 0.1), `--ignore-eos`, `--min-tokens`, `--extra-body-json`, `--streaming` |
+| `asr` | `--audio-samples` JSONL (as `metrum-ai-bench-cli-asr --input`), optional `--ground-truth` | `--asr-response-format`, `--language`, `--normalizer` |
+| `imagegen` | `--prompts` JSONL with `prompt`, or `--prompt` | `--image-size`, `--images-per-request`, `--image-response-format`, `--extra-body-json` |
+
+Every sweep point keeps the usual stage summary (throughput, latency, HTTP
+phases, time-weighted blocks, `knee_detection`) and adds `modality_metrics`:
+one distribution per key over measured successes, with the key names the
+modality binaries use on `request.v3` records. VLM: `image_count`,
+`image_bytes`. ASR: `wer`, `cer` (with references), `rtfx_client` and
+`audio_duration_s` (when the sample row has `duration`). Imagegen:
+`images_requested`, `images_returned`, plus `image_digests` (`images`,
+`distinct`) for decoded `b64_json` images. A key with no measured value is
+`n = 0`, never a fabricated number. VLM also reports the chat TTFT and token
+metrics; ASR and imagegen are unary, so their `ttft_s` is `n = 0`.
+`config.modality` records the kind settings. For asr and imagegen, latency
+ends when the response body is read; parsing, WER/CER and image decoding run
+after it and never hold a concurrency slot. The ASR binary's latency also
+includes form building and parsing, so sweep ASR latency can read slightly
+lower (see `docs/METRICS.md`). WER/CER use the ASR binary's scorer, and
+`rtfx_client` needs a positive sample `duration` in both. For vlm,
+`--image` goes with `--prompt` (not `--prompts`) and `--shared-prefix` is
+rejected. Telemetry (`--telemetry`,
+`--ndjson`) works the same for every kind. Per-request modality values are
+not written to the CSV, which keeps its columns for every kind.
 
 ## Prometheus telemetry NDJSON
 

@@ -294,8 +294,8 @@ gains these type-7 `DistSummary` fields over measured successes in the stage
 - `first_reasoning_s` (seconds) - requests that streamed a reasoning delta.
 - `isl_tokens` / `osl_tokens` (tokens) - per-request input/output tokens from
   server `usage` only (no tokenizer fallback). Rows with zero input and zero
-  output tokens are skipped. `osl_tokens` is `n=0` for `--kind embeddings` and
-  `--kind rerank` stages, which generate no output. Rerank `isl_tokens` is the
+  output tokens are skipped. `osl_tokens` is `n=0` for `--kind embeddings`,
+  `--kind rerank`, and `--kind imagegen` stages, which generate no output. Rerank `isl_tokens` is the
   server's `usage.total_tokens` (query plus documents, all input).
 
 Each is always present; `n=0` with null stats when no request qualifies.
@@ -329,7 +329,8 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   sums `usage.total_tokens` (all input).
 - `completion_tokens_total` (integer tokens) - sum of `output_tokens` over the
   same rows. `null` when no success reports output tokens, and always `null`
-  for `--kind embeddings` and `--kind rerank` stages (no generated output).
+  for `--kind embeddings`, `--kind rerank`, and `--kind imagegen` stages (no
+  generated output).
   The pre-existing `completion_tokens_per_second` is unchanged and reads
   `0.0` (not `null`) for those stages, so it can be `0.0` while this total is
   `null`.
@@ -358,8 +359,8 @@ present, with the same `null` rules. Differences from the summary:
   send of the stage to the latest successful `sent + service_latency_s`, so
   it can differ slightly from the stage window behind `throughput`.
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
-  reporting neither are skipped. `--kind embeddings` and `--kind rerank`
-  stages have no output, so `tokens_in_flight` and
+  reporting neither are skipped. `--kind embeddings`, `--kind rerank`, and
+  `--kind imagegen` stages have no output, so `tokens_in_flight` and
   `effective_decode_throughput` are `n=0`.
 
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
@@ -374,6 +375,58 @@ report reasoning. A trace cell is empty when the value is absent;
 requests.
 Existing columns keep their order, and CSVs written before these columns
 existed still load (missing cells read as empty).
+
+### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
+
+Strategic `--kind vlm`, `--kind asr`, and `--kind imagegen` (additive, #197)
+add these fields. The schema stays `metrum-ai-bench-cli.strategic.v1`, the
+request CSV columns are unchanged for every kind (per-request modality values
+are not in the CSV), and chat, embeddings, and rerank output is unchanged.
+Modality binary output (`summary.v3`, `request.v3`) is unchanged.
+
+`SweepPoint` gains:
+
+- `modality_metrics` (object, key to `DistSummary`) - one type-7
+  distribution per key over measured successes. Keys and definitions match
+  the modality `request.v3` `modality_metrics`: VLM `image_count` (count),
+  `image_bytes` (bytes); ASR `wer`, `cer` (ratio), `rtfx_client` (ratio),
+  `audio_duration_s` (seconds); imagegen `images_requested`,
+  `images_returned` (count). A key is `n=0` when no measured success has a
+  value (for example `wer` / `cer` without `--ground-truth`, or
+  `audio_duration_s` / `rtfx_client` when the sample row has no duration).
+  Omitted when empty, that is for chat, embeddings, and rerank.
+- `image_digests` (object) - `--kind imagegen` only, omitted otherwise.
+  `images` (integer) is the number of decoded `b64_json` images over measured
+  successes; `distinct` (integer) is the number of distinct SHA-256 digests
+  among them. Both are `0` for `url` responses.
+
+Existing fields for modality kinds: `osl_tokens` and
+`completion_tokens_total` come from server usage for vlm and asr (asr only
+when the server reports usage) and are `n=0` / `null` for imagegen, which
+generates no tokens. `ttft_s` has samples only for streaming chat and vlm;
+asr and imagegen stages report `ttft_s` with `n=0`.
+
+The strategic stdout `config` gains:
+
+- `modality` (object) - only for modality kinds, omitted otherwise.
+  - vlm: `pool_images` (integer, images loaded across the request pool),
+    `image_detail` (string, default `low`), `max_image_dimension` (integer
+    pixels, `null` when unset), `temperature` (number, default 0.1).
+  - asr: `audio_samples` (string path, `null` when unset), `ground_truth`
+    (string path, `null` when unset), `references_matched` (integer, samples
+    with a reference transcript), `response_format` (string, default
+    `verbose_json`), `language` (string, default `en`, empty when omitted from
+    the form), `normalizer` (string).
+  - imagegen: `image_size` (string, default `1024x1024`),
+    `images_per_request` (integer, default 1), `image_response_format`
+    (string).
+- `temperature` (number) - only when `--temperature` is set; omitted
+  otherwise.
+
+The telemetry NDJSON `run` row `config.kind` can be `vlm`, `asr`, or
+`imagegen`. Its `config` also carries `modality` and `temperature` under the
+same rules as the stdout `config`, so NDJSON-only analysis sees the kind
+settings; chat, embeddings, and rerank `run` rows are unchanged.
 
 ### Strategic stdout `knee` and `knee_detection`
 

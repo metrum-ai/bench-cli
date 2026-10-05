@@ -5,18 +5,19 @@
 use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, warn};
+use metrum_ai_bench::asr::{
+    download_audio_file, load_audio_samples, load_ground_truth, AudioSample,
+};
 use metrum_ai_bench::endpoints::resolve_endpoints;
-use metrum_ai_bench::prompt_inputs::read_utf8_from_path_or_url;
 use metrum_ai_bench::unique_id;
 use rand::SeedableRng;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::json;
 use simplelog::*;
-use std::collections::HashMap;
 use std::{
     error::Error,
-    fs::{self, File},
-    path::{Path, PathBuf},
+    fs::File,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -167,33 +168,6 @@ impl std::fmt::Display for MetrumAiBenchASRResponseFormat {
     }
 }
 
-fn word_error_rate(
-    reference: &str,
-    hypothesis: &str,
-    normalizer: metrum_ai_bench::asr::Normalizer,
-) -> f64 {
-    metrum_ai_bench::asr::word_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
-}
-
-fn character_error_rate(
-    reference: &str,
-    hypothesis: &str,
-    normalizer: metrum_ai_bench::asr::Normalizer,
-) -> f64 {
-    metrum_ai_bench::asr::character_error_rate(reference, hypothesis, normalizer).unwrap_or(1.0)
-}
-
-#[derive(Clone)]
-struct AudioSample {
-    id: String,
-    url: Option<String>, // URL is now optional if we have a direct path
-    format: String,
-    duration: Option<f64>,
-    ground_truth: Option<String>,
-    // Stores the local file path (either from direct path or after download)
-    local_file_path: Option<String>,
-}
-
 async fn make_request(
     client: &Client,
     url: &str,
@@ -228,25 +202,14 @@ async fn make_request(
         .file_name()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| format!("audio.{}", audio_sample.format));
-    let mime = mime_for_format(&audio_sample.format);
-    let file_part = reqwest::multipart::Part::bytes(file_content)
-        .file_name(basename)
-        .mime_str(mime)?;
-
-    // Start building the form
-    let mut form = reqwest::multipart::Form::new()
-        .part("file", file_part)
-        .text("model", model.to_string())
-        .text("response_format", response_format.to_string());
-
-    if !language.is_empty() {
-        form = form.text("language", language.to_string());
-    }
-
-    // Only add timestamp_granularities for json/verbose_json formats
-    if response_format == "json" || response_format == "verbose_json" {
-        form = form.text("timestamp_granularities[]", "word");
-    }
+    let form = metrum_ai_bench::asr::transcription_form(
+        model,
+        response_format,
+        language,
+        basename,
+        &audio_sample.format,
+        bytes::Bytes::from(file_content),
+    )?;
 
     let response = match metrum_ai_bench::connect_timing::send(
         client
@@ -281,27 +244,13 @@ async fn make_request(
     let response_size = response_text.len();
     debug!("Response body size: {} bytes", response_size);
 
-    // Parse response based on format
-    let (transcription, inference_time, inference_time_source) = match response_format {
-        "verbose_json" | "json" => {
-            let json_resp: Value = serde_json::from_str(&response_text)?;
-            let text = if let Some(text) = json_resp.get("text").and_then(|v| v.as_str()) {
-                text.to_string()
-            } else if let Some(text) = json_resp.get("transcription").and_then(|v| v.as_str()) {
-                text.to_string()
-            } else {
-                return Err("No transcription text in response".into());
-            };
-
-            let raw = json_resp.get("inference_time").and_then(|v| v.as_f64());
-            let (inference_time, source) = match raw {
-                Some(t) if t.is_finite() && t >= 0.0 => (t, "server"),
-                _ => (start_time.elapsed().as_secs_f64(), "client"),
-            };
-            (text, inference_time, source)
-        }
-        "text" | "srt" | "vtt" => (response_text, start_time.elapsed().as_secs_f64(), "client"),
-        _ => return Err(format!("Unsupported response format: {}", response_format).into()),
+    // Parse response based on format; a missing or invalid server
+    // inference_time falls back to the client clock.
+    let parsed = metrum_ai_bench::asr::parse_transcription(response_format, &response_text)?;
+    let transcription = parsed.text;
+    let (inference_time, inference_time_source) = match parsed.server_time {
+        Some(t) => (t, "server"),
+        None => (start_time.elapsed().as_secs_f64(), "client"),
     };
 
     let total_time = start_time.elapsed();
@@ -315,167 +264,6 @@ async fn make_request(
         content_size,
         response_size,
     ))
-}
-
-fn mime_for_format(format: &str) -> &'static str {
-    match format.to_lowercase().as_str() {
-        "mp3" | "mpeg" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "webm" => "audio/webm",
-        "ogg" | "oga" => "audio/ogg",
-        "m4a" | "mp4" => "audio/mp4",
-        "flac" => "audio/flac",
-        _ => "audio/mpeg",
-    }
-}
-
-/// Collision-safe cache key from URL so different URLs never share the same file.
-fn url_cache_key(url: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    url.hash(&mut h);
-    h.finish()
-}
-
-// Function to download an audio file from a URL
-async fn download_audio_file(
-    client: &Client,
-    url: &str,
-    format: &str,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let temp_dir = PathBuf::from("audio");
-    if !temp_dir.exists() {
-        fs::create_dir_all(&temp_dir)?;
-    }
-    // Use URL-based cache key to avoid collisions when different URLs have the same basename
-    let file_name = format!("{:016x}.{}", url_cache_key(url), format);
-    let file_path = temp_dir.join(&file_name);
-    let file_path_str = file_path.to_string_lossy().into_owned();
-
-    // Check if file already exists
-    if file_path.exists() {
-        let metadata = fs::metadata(&file_path)?;
-        info!(
-            "Using existing audio file at {} (size: {} bytes)",
-            file_path.display(),
-            metadata.len()
-        );
-        return Ok(file_path_str);
-    }
-
-    info!(
-        "Downloading audio file from {} to {}",
-        url,
-        file_path.display()
-    );
-
-    // Download the file
-    let response = client.get(url).send().await?;
-
-    if !response.status().is_success() {
-        return Err(format!("Failed to download file: HTTP status {}", response.status()).into());
-    }
-
-    // Save the file
-    let content = response.bytes().await?;
-    fs::write(&file_path, content)?;
-
-    // Verify file was written successfully
-    let metadata = fs::metadata(&file_path)?;
-    info!(
-        "Successfully downloaded audio file to {} (size: {} bytes)",
-        file_path.display(),
-        metadata.len()
-    );
-
-    Ok(file_path_str)
-}
-
-fn load_audio_samples(input_path: &str) -> Result<Vec<AudioSample>, Box<dyn Error + Send + Sync>> {
-    let content = read_utf8_from_path_or_url(input_path)?;
-    let mut samples = Vec::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let sample: Value = serde_json::from_str(line)?;
-
-        let id = sample
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing id field in audio sample")?
-            .to_string();
-
-        // Check if we have a direct path first, then fall back to URL
-        let path = sample
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let url = sample
-            .get("url")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        // Ensure we have either a path or URL
-        if path.is_none() && url.is_none() {
-            return Err("Audio sample must have either 'path' or 'url' field".into());
-        }
-
-        let format = sample
-            .get("format")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        let duration = sample.get("duration").and_then(|v| v.as_f64());
-
-        // If we have a direct path, use it as the local_file_path
-        let local_file_path = path;
-
-        samples.push(AudioSample {
-            id,
-            url,
-            format,
-            duration,
-            ground_truth: None,
-            local_file_path,
-        });
-    }
-
-    Ok(samples)
-}
-
-fn load_ground_truth(path: &str) -> Result<HashMap<String, String>, Box<dyn Error + Send + Sync>> {
-    let content = read_utf8_from_path_or_url(path)?;
-    let mut ground_truth = HashMap::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let record: Value = serde_json::from_str(line)?;
-
-        let id = record
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing id field in ground truth")?
-            .to_string();
-
-        let transcript = record
-            .get("transcript")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing transcript field in ground truth")?
-            .to_string();
-
-        ground_truth.insert(id, transcript);
-    }
-
-    Ok(ground_truth)
 }
 
 #[tokio::main]
@@ -863,9 +651,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let (wer, cer) = ground_truth_sample
                         .as_ref()
                         .map(|gt| {
-                            (
-                                word_error_rate(gt, &transcription, normalizer),
-                                character_error_rate(gt, &transcription, normalizer),
+                            metrum_ai_bench::asr::transcript_error_rates(
+                                gt,
+                                &transcription,
+                                normalizer,
                             )
                         })
                         .unzip();

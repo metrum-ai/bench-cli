@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BenchRecord {
     pub seq: u64,
     pub stage: f64,
@@ -272,6 +272,16 @@ pub struct SweepPoint {
     /// Runtime ISL/OSL vs optional targets for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isl_osl: Option<crate::isl_osl::IslOslValidation>,
+    /// Modality sweeps only (#197): one distribution per `modality_metrics`
+    /// key over measured successes, with the modality binaries' key names
+    /// (VLM `image_count`/`image_bytes`; ASR `wer`/`cer`/`rtfx_client`/
+    /// `audio_duration_s`; imagegen `images_requested`/`images_returned`).
+    /// Omitted for chat, embeddings and rerank.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub modality_metrics: std::collections::BTreeMap<String, crate::stats::DistSummary>,
+    /// `--kind imagegen` only (#197): decoded images and distinct digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_digests: Option<crate::sweep_modality::ImageDigests>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
 }
@@ -641,6 +651,8 @@ pub fn summarize_stage_with_options(
         ttft_approx_count,
         ttft_warning: None,
         isl_osl,
+        modality_metrics: std::collections::BTreeMap::new(),
+        image_digests: None,
         config,
     }
 }
@@ -1435,6 +1447,8 @@ mod tests {
             ttft_approx_count: 0,
             ttft_warning: None,
             isl_osl: None,
+            modality_metrics: std::collections::BTreeMap::new(),
+            image_digests: None,
             config: None,
         }
     }
@@ -1625,6 +1639,8 @@ mod tests {
             ttft_approx_count: 0,
             ttft_warning: None,
             isl_osl: None,
+            modality_metrics: std::collections::BTreeMap::new(),
+            image_digests: None,
             config: None,
         }];
         let dir = tempfile::tempdir().unwrap();
