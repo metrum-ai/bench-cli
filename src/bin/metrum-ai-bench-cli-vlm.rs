@@ -568,7 +568,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.common.request_rate.unwrap_or(0.0),
         &mut arrival_rng,
     );
+    let mut warmup_barrier =
+        metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
+            .with_tracker(Arc::clone(&inflight_tracker));
     'request_loop: for slot in slots {
+        // Measured requests wait for every warmup request (#226).
+        let slot = warmup_barrier
+            .before_slot(slot, &mut handles, start_time)
+            .await;
         if stop.is_stopped() {
             info!("Stop flag set; not issuing further requests");
             break 'request_loop;
@@ -1184,6 +1191,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
+    errors += warmup_barrier.join_errors();
     for handle in handles {
         if let Err(e) = handle.await {
             error!("Task join error: {e}");
