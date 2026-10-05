@@ -15,7 +15,8 @@ asks for power, energy, J/token, GPU util, KV cache, or preemption trends.
 2. Confirm `kind: run` `schema_version` is `metrum-ai-bench-cli.telemetry.v1`.
 3. Decompress if needed (`zstd -d` / `gunzip`).
 4. Run or emit recipes from [../queries/](../queries/):
-   - `python3 docs/queries/analyze.py /path/to/run.ndjson`
+   - `python3 docs/queries/analyze.py /path/to/run.ndjson [stdout.json] [--json]`
+     (pass the strategic stdout JSON for `kv_cache_util_at_knee`)
    - or DuckDB CLI with the `.sql` files (`read_ndjson_auto`)
 5. Join telemetry to `phase = measure` stages via `t_ns` in
    `[t_start_ns, t_end_ns)`. Counters: always Δ in the window. Gauges:
