@@ -89,6 +89,29 @@ and token throughput is not comparable across configs. Stage `config` stamps
 
 The report plots achieved
 throughput against p95 latency and marks the unit-normalized Kneedle result.
+
+Knee detection needs at least 5 measured stages (stages with a p95): both
+endpoints plus 3 interior candidates. Stages with no successes have no p95
+and do not count. With 3 stages Kneedle has a
+single interior candidate and always returns the middle stage, so shorter
+sweeps report no knee instead of a misleading one. Plan sweeps with 5 or more
+loads (for example `--sweep 1,2,4,8,16,32`) when the knee matters. When there
+is no knee, stdout JSON has `"knee": null` and `knee_detection.reason` says
+why:
+
+- `insufficient_points`: fewer than `knee_detection.min_points` (5) measured
+  stages (stages with a p95).
+- `missing_latency`: the first or last stage has no p95 (no successes).
+- `flat_curve`: throughput or p95 does not change from the first to the last
+  stage.
+
+`knee_detection` is always present:
+`{"index": <stage index or null>, "reason": <string or null>, "points": <measured stages>, "min_points": 5}`.
+`reason` is null exactly when `index` is set. The CLI also prints
+`note: no knee: ...` on stderr (only for runs with 2 or more stages, so
+single-stage and sessions runs stay quiet) and the HTML report shows the same sentence.
+Analysis that keys on the knee (for example `kv_cache_util_at_knee`) should
+report null, not 0, when `knee` is null.
 The metrics scraper recognizes vLLM, SGLang and TensorRT-LLM names for
 KV-cache utilization, preemptions, and running/waiting queues.
 

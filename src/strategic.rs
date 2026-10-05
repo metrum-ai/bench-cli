@@ -486,25 +486,103 @@ pub fn summarize_stage_with_options(
     }
 }
 
+/// Minimum number of measured sweep stages (stages with a p95) before a knee
+/// is reported: both endpoints plus at least 3 interior candidates. With
+/// fewer, Kneedle has at most two interior candidates, so a 3-stage sweep
+/// would always return its middle stage.
+pub const KNEE_MIN_POINTS: usize = 5;
+
+/// Why [`detect_knee_with_reason`] reported no knee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KneeReason {
+    /// Fewer than [`KNEE_MIN_POINTS`] measured stages (stages with a p95).
+    InsufficientPoints,
+    /// The first or last stage has no p95 latency (for example, no
+    /// successes), so the curve has no endpoints.
+    MissingLatency,
+    /// Throughput or p95 latency does not change between the first and last
+    /// stage, so the curve cannot be normalized.
+    FlatCurve,
+}
+
+/// Knee detection outcome, serialized into the strategic summary as
+/// `knee_detection`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KneeDetection {
+    /// Index into the sweep points, or `None` when there is no knee.
+    pub index: Option<usize>,
+    /// Set exactly when `index` is `None`.
+    pub reason: Option<KneeReason>,
+    /// Number of measured sweep stages (stages with a p95).
+    pub points: usize,
+    /// Always [`KNEE_MIN_POINTS`].
+    pub min_points: usize,
+}
+
+impl KneeDetection {
+    fn none(reason: KneeReason, points: usize) -> Self {
+        Self {
+            index: None,
+            reason: Some(reason),
+            points,
+            min_points: KNEE_MIN_POINTS,
+        }
+    }
+
+    /// Human-readable reason for a missing knee; `None` when a knee exists.
+    pub fn note(&self) -> Option<String> {
+        let reason = self.reason?;
+        Some(match reason {
+            KneeReason::InsufficientPoints => format!(
+                "no knee: {} measured sweep stage(s) (stages with a p95), knee detection needs at least {}",
+                self.points, self.min_points
+            ),
+            KneeReason::MissingLatency => {
+                "no knee: the first or last sweep stage has no p95 latency".to_string()
+            }
+            KneeReason::FlatCurve => {
+                "no knee: throughput or p95 latency is flat across the sweep".to_string()
+            }
+        })
+    }
+}
+
 /// Finds the maximum distance from the endpoint chord after normalizing the
 /// throughput/latency curve. This is the standard deterministic Kneedle
-/// construction and is robust to units and uneven sweep spacing.
+/// construction and is robust to units and uneven sweep spacing. Returns no
+/// knee below [`KNEE_MIN_POINTS`] measured stages (stages with a p95); see
+/// [`detect_knee_with_reason`].
 pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
-    if points.len() < 3 {
-        return None;
+    detect_knee_with_reason(points).index
+}
+
+/// [`detect_knee`] plus the machine-readable reason when there is no knee.
+pub fn detect_knee_with_reason(points: &[SweepPoint]) -> KneeDetection {
+    let count = points.len();
+    // Interior stages without a p95 are skipped below, so the minimum counts
+    // measured stages only: otherwise gaps could leave one candidate, which
+    // would always be returned.
+    let measured = points.iter().filter(|point| point.p95_s.is_some()).count();
+    if measured < KNEE_MIN_POINTS {
+        return KneeDetection::none(KneeReason::InsufficientPoints, measured);
     }
-    let x_min = points.first()?.throughput;
-    let x_max = points.last()?.throughput;
-    let y_min = points.first()?.p95_s?;
-    let y_max = points.last()?.p95_s?;
+    let (Some(first), Some(last)) = (points.first(), points.last()) else {
+        return KneeDetection::none(KneeReason::InsufficientPoints, measured);
+    };
+    let (Some(y_min), Some(y_max)) = (first.p95_s, last.p95_s) else {
+        return KneeDetection::none(KneeReason::MissingLatency, measured);
+    };
+    let x_min = first.throughput;
+    let x_max = last.throughput;
     if (x_max - x_min).abs() <= f64::EPSILON || (y_max - y_min).abs() <= f64::EPSILON {
-        return None;
+        return KneeDetection::none(KneeReason::FlatCurve, measured);
     }
-    points
+    let index = points
         .iter()
         .enumerate()
         .skip(1)
-        .take(points.len() - 2)
+        .take(count - 2)
         .filter_map(|(index, point)| {
             let x = (point.throughput - x_min) / (x_max - x_min);
             point
@@ -512,7 +590,16 @@ pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
                 .map(|latency| (index, ((latency - y_min) / (y_max - y_min) - x).abs()))
         })
         .max_by(|left, right| left.1.total_cmp(&right.1))
-        .map(|pair| pair.0)
+        .map(|pair| pair.0);
+    match index {
+        Some(_) => KneeDetection {
+            index,
+            reason: None,
+            points: measured,
+            min_points: KNEE_MIN_POINTS,
+        },
+        None => KneeDetection::none(KneeReason::MissingLatency, measured),
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -778,7 +865,7 @@ pub fn export_html(
     path: &Path,
     title: &str,
     points: &[SweepPoint],
-    knee: Option<usize>,
+    knee: &KneeDetection,
     server: &ServerMetrics,
     sut: Option<&Value>,
 ) -> Result<()> {
@@ -898,7 +985,7 @@ pub fn export_html(
         .map(|(index, point)| {
             format!(
                 "<tr{}><td>{:.2}</td><td>{}</td><td>{:.2}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>",
-                if knee == Some(index) {
+                if knee.index == Some(index) {
                     " class=knee"
                 } else {
                     ""
@@ -923,6 +1010,7 @@ pub fn export_html(
         })
         .collect::<String>();
     let knee_circle = knee
+        .index
         .and_then(|index| coordinates.get(index))
         .map(|(x, y)| {
             format!(
@@ -937,6 +1025,10 @@ pub fn export_html(
         ),
         None => String::new(),
     };
+    let knee_note = knee
+        .note()
+        .map(|note| format!("<p>{}.</p>", escape_html(&note)))
+        .unwrap_or_default();
     let html = format!(
         r##"<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
 <style>body{{font:14px system-ui,sans-serif;margin:2rem;max-width:960px;color:#111827}}table{{border-collapse:collapse;width:100%}}th,td{{padding:.45rem;border-bottom:1px solid #ddd;text-align:right}}th:first-child,td:first-child{{text-align:left}}.knee{{background:#fee2e2}}svg{{border:1px solid #d1d5db;background:#fafafa;max-width:100%}}caption{{text-align:left;font-weight:600;margin:.5rem 0}}</style></head>
@@ -947,6 +1039,7 @@ pub fn export_html(
 <polyline points="{polyline}" fill="none" stroke="#2563eb" stroke-width="3"/>
 {dots}{knee_circle}
 </svg>
+{knee_note}
 <h2>Sweep</h2>
 <table><caption>Per-stage load, throughput, latency, and goodput</caption><thead><tr><th>Load</th><th>n</th><th>Throughput (req/s)</th><th>p95 seconds</th><th>p99 seconds</th><th>Error</th><th>Goodput</th></tr></thead><tbody>{rows}</tbody></table>
 {sut_block}
@@ -1129,55 +1222,179 @@ pub fn now_unix_ns() -> u128 {
 mod tests {
     use super::*;
 
+    fn knee_point(throughput: f64, latency: f64) -> SweepPoint {
+        let latency_s = crate::stats::DistSummary::from_values(&[latency]);
+        SweepPoint {
+            load: throughput,
+            n: 1,
+            errors: 0,
+            throughput,
+            latency_s: latency_s.clone(),
+            p50_s: Some(latency),
+            p95_s: Some(latency),
+            p99_s: Some(latency),
+            p99_unreliable: latency_s.p99_unreliable,
+            error_rate: Some(0.0),
+            validity_rate: None,
+            goodput: throughput,
+            goodput_equals_throughput: true,
+            slo_thresholds_s: None,
+            user_tps: crate::stats::DistSummary::from_values(&[]),
+            users_at_slo: None,
+            users_meeting_user_tps: None,
+            completion_tokens_per_second: None,
+            cost_per_million_output_tokens: None,
+            observed_concurrency: None,
+            connect_s: crate::stats::DistSummary::from_values(&[]),
+            prefill_s: crate::stats::DistSummary::from_values(&[]),
+            decode_s: crate::stats::DistSummary::from_values(&[]),
+            decode_tok_s: crate::stats::DistSummary::from_values(&[]),
+            ttft_s: crate::stats::DistSummary::from_values(&[]),
+            first_byte_s: crate::stats::DistSummary::from_values(&[]),
+            queue_delay_s: crate::stats::DistSummary::from_values(&[]),
+            first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
+            isl_tokens: crate::stats::DistSummary::from_values(&[]),
+            osl_tokens: crate::stats::DistSummary::from_values(&[]),
+            reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
+            reasoning_tokens_total: None,
+            visible_completion_tokens_total: None,
+            visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
+            ttft_approx_count: 0,
+            ttft_warning: None,
+            isl_osl: None,
+            config: None,
+        }
+    }
+
+    fn knee_points(pairs: &[(f64, f64)]) -> Vec<SweepPoint> {
+        pairs
+            .iter()
+            .map(|&(throughput, latency)| knee_point(throughput, latency))
+            .collect()
+    }
+
     #[test]
     fn knee_finds_curve_bend() {
-        let points: Vec<_> = [(1.0, 1.0), (2.0, 1.1), (3.0, 1.3), (3.2, 4.0)]
-            .into_iter()
-            .map(|(throughput, latency)| {
-                let latency_s = crate::stats::DistSummary::from_values(&[latency]);
-                SweepPoint {
-                    load: throughput,
-                    n: 1,
-                    errors: 0,
-                    throughput,
-                    latency_s: latency_s.clone(),
-                    p50_s: Some(latency),
-                    p95_s: Some(latency),
-                    p99_s: Some(latency),
-                    p99_unreliable: latency_s.p99_unreliable,
-                    error_rate: Some(0.0),
-                    validity_rate: None,
-                    goodput: throughput,
-                    goodput_equals_throughput: true,
-                    slo_thresholds_s: None,
-                    user_tps: crate::stats::DistSummary::from_values(&[]),
-                    users_at_slo: None,
-                    users_meeting_user_tps: None,
-                    completion_tokens_per_second: None,
-                    cost_per_million_output_tokens: None,
-                    observed_concurrency: None,
-                    connect_s: crate::stats::DistSummary::from_values(&[]),
-                    prefill_s: crate::stats::DistSummary::from_values(&[]),
-                    decode_s: crate::stats::DistSummary::from_values(&[]),
-                    decode_tok_s: crate::stats::DistSummary::from_values(&[]),
-                    ttft_s: crate::stats::DistSummary::from_values(&[]),
-                    first_byte_s: crate::stats::DistSummary::from_values(&[]),
-                    queue_delay_s: crate::stats::DistSummary::from_values(&[]),
-                    first_reasoning_s: crate::stats::DistSummary::from_values(&[]),
-                    isl_tokens: crate::stats::DistSummary::from_values(&[]),
-                    osl_tokens: crate::stats::DistSummary::from_values(&[]),
-                    reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
-                    reasoning_tokens_total: None,
-                    visible_completion_tokens_total: None,
-                    visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
-                    ttft_approx_count: 0,
-                    ttft_warning: None,
-                    isl_osl: None,
-                    config: None,
-                }
-            })
-            .collect();
+        // Flat latency, then a sharp bend after stage 3 (stage 4 is saturated).
+        let points = knee_points(&[
+            (1.0, 1.0),
+            (2.0, 1.02),
+            (3.0, 1.04),
+            (4.0, 1.06),
+            (4.2, 4.0),
+        ]);
+        assert_eq!(detect_knee(&points), Some(3));
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.index, Some(3));
+        assert_eq!(detection.reason, None);
+        assert_eq!(detection.points, 5);
+        assert_eq!(detection.min_points, KNEE_MIN_POINTS);
+    }
+
+    #[test]
+    fn knee_five_points_picks_correct_stage() {
+        // Latency bends at stage 2; stages 3 and 4 are past saturation.
+        let points = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (3.1, 3.0), (3.15, 5.0)]);
         assert_eq!(detect_knee(&points), Some(2));
+    }
+
+    #[test]
+    fn knee_three_points_reports_insufficient_points() {
+        let points = knee_points(&[(1.0, 1.0), (2.0, 1.1), (2.1, 4.0)]);
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.index, None);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 3);
+        assert_eq!(detection.min_points, 5);
+        assert_eq!(detect_knee(&points), None);
+    }
+
+    #[test]
+    fn knee_four_points_reports_insufficient_points() {
+        // The pre-#190 fixture: used to return Some(2).
+        let points = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.3), (3.2, 4.0)]);
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.index, None);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 4);
+        assert_eq!(detect_knee(&points), None);
+    }
+
+    #[test]
+    fn knee_reasons_for_flat_and_missing_latency() {
+        let flat = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (5.0, 1.0)]);
+        assert_eq!(
+            detect_knee_with_reason(&flat).reason,
+            Some(KneeReason::FlatCurve)
+        );
+        // Five measured stages but no last-stage p95: no curve endpoint.
+        let mut missing = knee_points(&[
+            (1.0, 1.0),
+            (2.0, 1.1),
+            (3.0, 1.2),
+            (4.0, 2.0),
+            (5.0, 4.0),
+            (6.0, 6.0),
+        ]);
+        missing[5].p95_s = None;
+        let detection = detect_knee_with_reason(&missing);
+        assert_eq!(detection.reason, Some(KneeReason::MissingLatency));
+        assert_eq!(detection.points, 5);
+        // Only 4 measured stages: too few, whichever stage lost its p95.
+        let mut short = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        short[4].p95_s = None;
+        let detection = detect_knee_with_reason(&short);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 4);
+        let mut interior =
+            knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        for point in &mut interior[1..4] {
+            point.p95_s = None;
+        }
+        let detection = detect_knee_with_reason(&interior);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 2);
+        // A single interior gap is skipped when 5 measured stages remain.
+        let mut gap = knee_points(&[
+            (1.0, 1.0),
+            (2.0, 1.02),
+            (3.0, 1.04),
+            (3.5, 1.05),
+            (4.0, 1.06),
+            (4.2, 4.0),
+        ]);
+        gap[1].p95_s = None;
+        let detection = detect_knee_with_reason(&gap);
+        assert_eq!(detection.index, Some(4));
+        assert_eq!(detection.reason, None);
+        assert_eq!(detection.points, 5);
+    }
+
+    #[test]
+    fn knee_five_stages_with_two_interior_gaps_reports_insufficient_points() {
+        // Pre-fix: one interior candidate left, always returned as the knee.
+        let mut points = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        points[1].p95_s = None;
+        points[3].p95_s = None;
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.index, None);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 3);
+        assert_eq!(detection.min_points, KNEE_MIN_POINTS);
+    }
+
+    #[test]
+    fn knee_detection_serializes_snake_case_reason() {
+        let detection = detect_knee_with_reason(&knee_points(&[(1.0, 1.0)]));
+        assert_eq!(
+            serde_json::to_value(detection).expect("serialize"),
+            serde_json::json!({
+                "index": null,
+                "reason": "insufficient_points",
+                "points": 1,
+                "min_points": 5
+            })
+        );
     }
 
     #[test]
@@ -1229,7 +1446,7 @@ mod tests {
             &path,
             "unit test",
             &points,
-            None,
+            &detect_knee_with_reason(&points),
             &ServerMetrics::default(),
             None,
         )
@@ -1239,6 +1456,7 @@ mod tests {
         assert!(html.contains("p95 latency (s)"));
         assert!(html.contains("text-anchor"));
         assert!(html.contains("<polyline"));
+        assert!(html.contains("no knee: 1 measured sweep stage(s) (stages with a p95), knee detection needs at least 5."));
     }
 
     #[test]

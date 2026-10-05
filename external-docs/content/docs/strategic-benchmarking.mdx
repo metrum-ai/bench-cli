@@ -94,6 +94,17 @@ keeps series whose names match `include`. Default smoke uses the Metrum
 those pages before a run; example files are starting points. See repository
 `docs/TELEMETRY.md`.
 
+A knee needs at least 5 measured stages (stages with a p95): both endpoints
+plus 3 interior candidates. Shorter sweeps, or sweeps whose failed stages leave
+fewer than 5 measured stages, report `"knee": null` instead of a misleading
+middle stage. The always-present `knee_detection` object gives the reason
+(`insufficient_points`, `missing_latency`, or `flat_curve`) and the measured
+`points` count. Plan sweeps with 5 or more loads (for example
+`--sweep 1,2,4,8,16,32`) when the knee matters. See
+[docs/STRATEGIC_BENCHMARKING.md](https://github.com/metrum-ai/bench-cli/blob/main/docs/STRATEGIC_BENCHMARKING.md)
+and
+[docs/OUTPUT_SCHEMA.md](https://github.com/metrum-ai/bench-cli/blob/main/docs/OUTPUT_SCHEMA.md).
+
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages. Rate
 requests retain their intended schedule while waiting for an in-flight slot.
 
