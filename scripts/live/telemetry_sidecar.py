@@ -3,8 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Metrum AI Bench CLI telemetry sidecar for modality cells.
 
-metrum-ai-bench-cli-{llm,vlm,asr} have no --telemetry flag (only the
-strategic binary scrapes). This sidecar polls a Prometheus text endpoint, by
+DEPRECATED (#196): metrum-ai-bench-cli-{llm,vlm,asr,imagegen} now take
+--ndjson PATH --telemetry YAML [--require-telemetry], like the strategic
+binary. They write telemetry.v1 rows with units and stage windows on the
+same monotonic clock as their request rows. See docs/TELEMETRY.md. This
+script stays only for binaries older than that change; it will be removed
+once live scripts stop calling it.
+
+Older metrum-ai-bench-cli-{llm,vlm,asr,imagegen} have no --telemetry flag
+(only the strategic binary scrapes). This sidecar polls a Prometheus text endpoint, by
 default the Metrum all-smi fork at http://127.0.0.1:9090/metrics, and writes
 one NDJSON row per sample with a wall-clock timestamp, so a cell's data log
 can be joined to telemetry by time:
@@ -56,6 +63,7 @@ def main():
     ap.add_argument("--interval-ms", type=int, default=500)
     ap.add_argument("--include", action="append", default=[])
     a = ap.parse_args()
+    print("telemetry_sidecar.py is deprecated (#196): pass --ndjson and --telemetry to the bench binary; see docs/TELEMETRY.md", file=sys.stderr)
     include = [re.compile(p) for p in a.include]
     stop = []
     signal.signal(signal.SIGTERM, lambda *_: stop.append(1))

@@ -247,6 +247,22 @@ Additional v3 fields:
   `--osl-target` or `--prompt-mix-report`: targets, tolerances, measured
   mean/p50, mismatch counts, and `length_basis` (`server_usage` or
   `tokenizer`)
+- `telemetry` (object, additive, #196) - NDJSON stamp written by the
+  modality binaries (LLM, VLM, ASR, imagegen) when `--ndjson` is set.
+  Omitted from JSON otherwise (not `null`). Readers must treat it as
+  optional. Fields:
+  - `schema_version` (string) - `"metrum-ai-bench-cli.telemetry.v1"`.
+  - `ndjson` (string) - file name of the `--ndjson` output (no directories, so
+    the publishable summary carries no local paths).
+  - `sources` (integer) - configured scrape sources; `0` without
+    `--telemetry`.
+  - `request_rows`, `stage_rows`, `telemetry_rows`, `scrape_error_rows`
+    (integer rows) - rows of each kind written to the NDJSON.
+  - `dropped_telemetry_rows` (integer rows) - `telemetry` samples dropped
+    under writer backpressure (same count as the NDJSON `summary` row).
+  Top level only; `per_endpoint` entries do not carry it. Strategic sweep
+  points do not carry it either; strategic stdout already reports `ndjson`
+  and `dropped_telemetry_rows` once per run.
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 `p99_unreliable` using `percentile_unreliable(n, p)` (unreliable when
@@ -390,12 +406,17 @@ treat those knees as unreliable. See
 publication runs use `--sut <file> --require-sut` (implies `--redact-hostname`).
 See [Publishing a result](../README.md#publishing-a-result).
 
-## Strategic telemetry NDJSON (`metrum-ai-bench-cli.telemetry.v1`)
+## Telemetry NDJSON (`metrum-ai-bench-cli.telemetry.v1`)
 
-`metrum-ai-bench-cli-strategic --ndjson PATH` writes one tagged JSON object per
-line. Rows are discriminated by `kind`. All `*_ns` fields are nanoseconds from
-a single run-wide monotonic epoch; `run.t0_wall` is the ISO 8601 UTC wall
-anchor for that Instant. See [TELEMETRY.md](TELEMETRY.md) and
+`--ndjson PATH` on `metrum-ai-bench-cli-strategic` and, since #196, on every
+modality binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`)
+writes one tagged JSON object per line. All binaries share one writer, the
+same row kinds, and the same schema version. Rows are discriminated by
+`kind`. All `*_ns` fields are nanoseconds from a single run-wide monotonic
+epoch, shared by request and telemetry rows; `run.t0_wall` is the ISO 8601
+UTC wall anchor for that Instant. The `run` row is always the first line,
+before any telemetry sample, and the `summary` row is the last. See
+[TELEMETRY.md](TELEMETRY.md) and
 [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md).
 
 | `kind` | Required fields | Optional |
@@ -410,5 +431,31 @@ anchor for that Instant. See [TELEMETRY.md](TELEMETRY.md) and
 `mtype` is `counter`, `gauge`, `histogram_bucket`, `summary`, or `unknown`.
 Telemetry rows may be dropped under writer backpressure; `summary.dropped_telemetry_rows`
 counts those drops. Request, stage, run, scrape_error, and summary rows are
-awaited and are not dropped. This file is separate from modality `--data-log`
-JSONL.
+awaited and are not dropped. The `summary` row is written after queued rows
+drain (bounded wait), so its row counts match the file. This file is
+separate from modality `--data-log` JSONL.
+
+### Modality binaries
+
+A modality run is one stage. Each `request.v3` record also becomes one
+`request` row, joined on `run_id` and `seq`, mapped as follows (full rules
+in [TELEMETRY.md](TELEMETRY.md#modality-binaries-llm-vlm-asr-imagegen)):
+
+- `t_sent_ns` - `send_offset_s` in nanoseconds. With `--ndjson` the run clock
+  starts at the NDJSON epoch (after the telemetry probes), so the two share
+  one origin and join exactly; `run.t0_wall + t_sent_ns` is the send wall time.
+- `t_done_ns` - `t_sent_ns + latency_s` (the record's `latency_s`).
+- `t_first_ns` - `t_sent_ns + first_byte_s`; omitted when the record has no
+  `first_byte_s`.
+- `t_sched_ns` - `scheduled_offset_s` in nanoseconds when the record has it
+  (open loop, `--request-rate`); equal to `t_sent_ns` otherwise.
+- `service_latency_s` - the record's `latency_s`; `latency_s` -
+  `queue_delay_s + latency_s` (as on strategic rows).
+- `stage` and `load` - the offered load: `--request-rate` in open loop, the
+  effective concurrency cap otherwise.
+- `warmup` - `true` when the record's `phase` is `warmup`.
+
+Up to two `stage` rows (`warmup`, `measure`) are written at the end of the
+run. Each window runs from the phase's first send to its last completion;
+at concurrency above 1 the two windows can overlap. The run also stamps the
+additive `summary.v3.telemetry` block described above.

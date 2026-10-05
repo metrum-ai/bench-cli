@@ -140,6 +140,10 @@ pub struct RunSummary {
     /// Human-readable note when TTFT was approximated or left unmeasured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_warning: Option<String>,
+    /// NDJSON telemetry stamp (`--ndjson`): file path and row counts per
+    /// kind. Omitted when the run wrote no NDJSON (#196).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<crate::telemetry::TelemetryRunInfo>,
     pub partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<EffectiveRunConfig>,
@@ -692,6 +696,7 @@ impl RunSummary {
             isl_osl: None,
             ttft_approx_count: 0,
             ttft_warning: None,
+            telemetry: None,
             partial,
             config: None,
         }
@@ -706,6 +711,12 @@ impl RunSummary {
     /// Embed an operator-declared SUT block (`None` serializes as JSON `null`).
     pub fn with_sut(mut self, sut: Option<Sut>) -> Self {
         self.sut = sut;
+        self
+    }
+
+    /// Attach the NDJSON telemetry stamp written by `--ndjson`.
+    pub fn with_telemetry(mut self, telemetry: Option<crate::telemetry::TelemetryRunInfo>) -> Self {
+        self.telemetry = telemetry;
         self
     }
 

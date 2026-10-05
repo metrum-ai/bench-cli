@@ -206,6 +206,30 @@
   advances by a fixed step per scrape, so J/token from these fixtures is not
   meaningful (see `docs/telemetry/ANALYSIS.md`). No Rust or schema change
   (#199).
+- Run telemetry for every binary (#196, additive, no schema version bump).
+  `metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, and `-imagegen` gain the
+  strategic telemetry flags `--ndjson PATH`, `--telemetry YAML`,
+  `--require-telemetry`, and `--require-telemetry-failures N` (default 3),
+  backed by one shared `TelemetrySession` that strategic now uses too. Same
+  YAML schema, same NDJSON row kinds (`run`, `stage`, `request`,
+  `telemetry`, `scrape_error`, `summary`), same
+  `metrum-ai-bench-cli.telemetry.v1`, and one monotonic epoch shared by
+  request and telemetry rows. Each `request.v3` record becomes a `request`
+  row (`t_sent_ns` equals `send_offset_s` in nanoseconds: with `--ndjson`
+  the run clock starts at the NDJSON epoch, after the telemetry probes, so
+  data-log offsets and `*_ns` fields share one origin; `t_done_ns = t_sent_ns +
+  latency_s`, `service_latency_s` is the record's `latency_s`, row
+  `latency_s` adds `queue_delay_s`); `warmup` and `measure` `stage` rows
+  span the phase's first send to last completion and can overlap at
+  concurrency above 1. See `docs/TELEMETRY.md` "Modality binaries" and
+  `docs/OUTPUT_SCHEMA.md`.
+- `summary.v3` gains an optional top-level `telemetry` object, present only
+  with `--ndjson`: `schema_version`, `ndjson` (file name only), `sources` (configured
+  source count, `0` without `--telemetry`), and integer `request_rows`,
+  `stage_rows`, `telemetry_rows`, `scrape_error_rows`, and
+  `dropped_telemetry_rows`. Omitted otherwise. Strategic sweep points do not
+  gain it; strategic stdout already reports `ndjson` and
+  `dropped_telemetry_rows` per run (#196).
 
 ### Changed
 - VLM, ASR, and imagegen now record `connect_s` and the HTTP phase trace
@@ -231,8 +255,24 @@
   `scripts/e2e/write_aiperf_comparison.py` prints the reason next to a
   missing knee. See `docs/OUTPUT_SCHEMA.md` and
   `docs/STRATEGIC_BENCHMARKING.md` (#190).
+- With `--require-telemetry`, a source that fails N consecutive scrapes
+  (`--require-telemetry-failures`, default 3) now also trips the run stop
+  flag, so no new requests or stages are issued; in-flight requests finish
+  and the binary exits non-zero after writing `summary.v3` and closing the
+  NDJSON with `partial: true` (strategic now closes it too). Without the flag
+  a scraper exit stays a warning. An NDJSON write failure no longer costs a
+  modality run its `summary.v3`. Before, the run kept issuing load and only
+  failed at the end. Strategic CLI flags and stdout are otherwise unchanged
+  (#196).
+- `scripts/live/telemetry_sidecar.py` is deprecated (docstring and a stderr
+  notice) but not removed. Pass `--ndjson` and `--telemetry` to the bench
+  binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- The telemetry NDJSON `run` row is now always written before any
+  `telemetry` sample; scrapers could previously emit samples ahead of it.
+  The NDJSON `summary` row now waits (up to 2 s) for queued rows to drain
+  instead of a fixed 50 ms sleep, so its row counts are exact (#196).
 - Streaming clients (LLM, VLM, strategic chat, preflight) now read the body
   to its end after `data: [DONE]`. They used to stop at `[DONE]` and drop the
   body before the terminating HTTP chunk arrived, so hyper discarded the

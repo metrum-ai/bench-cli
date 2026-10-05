@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Strategic telemetry (Prometheus scrape)
+# Run telemetry (Prometheus scrape)
 
 **Search first, then check the path.** Before a run, confirm the exporter's
 current release, its listen port, and the path your installed binary serves
@@ -9,9 +9,12 @@ current release, its listen port, and the path your installed binary serves
 Metrum all-smi fork v0.26.3-metrum.4 serves **`/metrics`**. Its `/metric`
 returned HTTP 404 on 2026-10-02, although earlier repo docs gave `/metric`.
 
-`metrum-ai-bench-cli-strategic` optionally scrapes Prometheus text or
-OpenMetrics exposition during a sweep and writes tagged NDJSON rows beside
-request and stage rows. Hardware and engine signals reach the client only
+Every benchmark binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`,
+`-imagegen` and `-strategic`) optionally scrapes Prometheus text or
+OpenMetrics exposition during a run and writes tagged NDJSON rows beside
+request and stage rows. All five share one writer and one lifecycle
+(`TelemetrySession` in `src/telemetry/session.rs`), so the YAML schema, the
+row kinds and `telemetry.v1` are the same everywhere. Hardware and engine signals reach the client only
 through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
 source, not a crate dependency.
@@ -78,13 +81,35 @@ series between releases.
 
 ## Flags
 
-| Flag | Role |
-|------|------|
-| `--ndjson PATH` | Tagged NDJSON run log (`run` / `stage` / `request` / `telemetry` / `scrape_error` / `summary`) |
-| `--telemetry PATH` | YAML listing Prometheus sources (URL, interval, `include` regexes, optional `units`) |
-| `--require-telemetry` | Abort after consecutive scrape failures (default 3; override with `--require-telemetry-failures`) |
-| `--metrics-url URL` | Legacy single engine source; desugars to a YAML-equivalent when `--ndjson` or `--require-telemetry` is set |
+| Flag | Binaries | Role |
+|------|----------|------|
+| `--ndjson PATH` | all | Tagged NDJSON run log (`run` / `stage` / `request` / `telemetry` / `scrape_error` / `summary`) |
+| `--telemetry PATH` | all | YAML listing Prometheus sources (URL, interval, `include` regexes, optional `units`) |
+| `--require-telemetry` | all | Abort after consecutive scrape failures (default 3; override with `--require-telemetry-failures`) |
+| `--require-telemetry-failures N` | all | Consecutive failures per source before `--require-telemetry` aborts |
+| `--metrics-url URL` | strategic | Legacy single engine source; desugars to a YAML-equivalent when `--ndjson` or `--require-telemetry` is set |
 
+Failure policy, the same for every binary:
+
+- **Startup probe.** Before the first request, each source is fetched once.
+  A source that refuses the connection, returns 4xx/5xx, or matches zero
+  series (without `allow_empty: true`) fails the run with
+  `telemetry: a configured source could not be scraped at startup; no
+  requests were sent`. This holds with or without `--require-telemetry`.
+- **Mid-run.** Without `--require-telemetry`, a failing scrape writes a
+  `scrape_error` row and the run continues. With it, N consecutive failures
+  on one source stop the run from issuing new requests (or stages), the
+  in-flight requests finish, and the binary exits non-zero. Modality
+  binaries still write `summary.v3` (with `partial: true`) and close the
+  NDJSON with `partial: true` before exiting. Strategic also closes its
+  NDJSON with `partial: true` before exiting non-zero.
+- A scraper that exits without `--require-telemetry` (for example a panic)
+  is a warning and never stops the run.
+- If the NDJSON itself cannot be written (for example a full disk), the
+  modality binary stops writing rows, still writes `summary.v3`, and then
+  exits non-zero.
+- `--require-telemetry` without `--telemetry` (or `--metrics-url` on
+  strategic) is rejected at startup.
 `--telemetry` and telemetry via `--metrics-url` require `--ndjson`. Without
 `--ndjson`, scrapes are not persisted. Legacy `--metrics-url` without NDJSON
 still feeds the existing strategic correlation path only.
@@ -107,6 +132,56 @@ metrum-ai-bench-cli-strategic \
   --telemetry docs/telemetry/examples/all-smi.yaml \
   --require-telemetry
 ```
+
+Modality example (any of llm, vlm, asr, imagegen):
+
+```bash
+metrum-ai-bench-cli-llm \
+  --url http://127.0.0.1:8000/v1/chat/completions --api-key dummy \
+  --model demo --scenario smoke --mode chat --streaming \
+  --prompts prompts.jsonl --max-tokens 256 \
+  --num-requests 68 --warmup-requests 4 --concurrency 4 \
+  --data-log results.jsonl \
+  --ndjson run.ndjson \
+  --telemetry docs/telemetry/examples/all-smi.yaml \
+  --require-telemetry
+```
+
+## Modality binaries (llm, vlm, asr, imagegen)
+
+A modality run is one stage. Its NDJSON holds:
+
+- One `run` row first. `config.binary` names the binary; `config` never holds
+  API keys.
+- One `request` row per `request.v3` record, written as each request
+  completes, joined on `seq` and `run_id`. `t_sent_ns` is the record's
+  `send_offset_s` in nanoseconds (the run clock starts at the NDJSON epoch,
+  after the telemetry probes, so both share one origin), `t_done_ns = t_sent_ns + latency_s`,
+  `t_first_ns` is response headers (`first_byte_s`) as on strategic rows,
+  and `t_sched_ns` comes from `scheduled_offset_s` in open-loop runs.
+  `service_latency_s` is the record's `latency_s`; `latency_s` adds
+  `queue_delay_s`, as on strategic rows.
+- Up to two `stage` rows, `warmup` and `measure`, written at the end. Each
+  window runs from the phase's first send to its last completion. `stage`
+  and `load` are the offered load: `--request-rate` in open-loop runs, the
+  effective concurrency cap otherwise. Modality binaries do not drain
+  warmup before measuring, so at concurrency above 1 the two windows can
+  overlap; filter on `phase = 'measure'` as usual.
+- `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
+  row last.
+
+`summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
+`sources`, row counts per kind, and `dropped_telemetry_rows`. See
+[OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
+
+### Replacing `scripts/live/telemetry_sidecar.py`
+
+The sidecar is deprecated. It stamped wall-clock time, applied no units and
+wrote no stage windows. Live cells should pass `--ndjson` and `--telemetry`
+to the bench binary instead, with one YAML listing both the all-smi fork
+(500 ms) and the engine `/metrics` (1 s) sources that
+`scripts/live/widen_cell.sh` starts sidecars for today. The sidecar stays
+for binaries built before this change.
 
 ## Default source
 
