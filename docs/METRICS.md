@@ -30,7 +30,8 @@ Workload section. This page focuses on measured fields.
 - **Observed concurrency**: client outstanding requests while the semaphore
   is held. Summary fields `observed_concurrency.in_flight_{mean,p50,max}` and
   `cap_engagement_fraction` (fraction of acquires that blocked on the cap).
-  Optional per-request `in_flight_at_send`.
+  Optional per-request `in_flight_at_send`. In-flight values never exceed
+  `cap`: a request leaves the gauge before its permit is released.
 - **ISL/OSL validation**: optional `--isl-target` / `--osl-target` (or
   `--prompt-mix-report` metadata) compared to measured prompt/completion
   tokens. Summary `isl_osl` carries means, p50, and mismatch counts.
