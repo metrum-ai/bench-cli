@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Telemetry config used to record the analyze.py fixtures in this directory
+# against metrum-ai-bench-cli-mock-server --telemetry-fixture. Not for real runs:
+# start from docs/telemetry/examples/ and curl the live page instead.
+# MOCK_URL is substituted by record.sh.
+
+default_interval_ms: 250
+timeout_ms: 200
+sources:
+  - name: mock
+    url: MOCK_URL/metrics
+    interval_ms: 250
+    include:
+      - "^DCGM_FI_DEV_(POWER_USAGE|TOTAL_ENERGY_CONSUMPTION|GPU_UTIL)$"
+      - "^DCGM_FI_PROF_SM_ACTIVE$"
+      - "^all_smi_gpu_(power_consumption_watts|utilization)$"
+      - "^vllm:(gpu_cache_usage_perc|num_preemptions_total|num_requests_running)$"
+    units:
+      DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION:
+        scale: 0.001
+        unit: J
