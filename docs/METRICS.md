@@ -15,7 +15,14 @@ Workload section. This page focuses on measured fields.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
 - **First byte**: response headers received minus send (`first_byte_s`).
-  Separates gateway/header delay from later body progress.
+  Separates gateway/header delay from later body progress. Summary
+  `first_byte_s` (seconds) is the type-7 distribution over measured successes
+  that recorded it.
+- **Queue delay**: actual send minus scheduled (intended) arrival
+  (`queue_delay_s`, seconds): `max(0, send - scheduled_offset_s)`, both
+  measured from the run-epoch `Instant`. Defined only for requests with an intended arrival
+  (open loop, `--request-rate`). Closed-loop runs and strategic
+  `--sweep-by concurrency` stages report `n=0`, not zero delay.
 - **Connect**: HTTP connector duration for a new TCP/TLS session (`connect_s`).
   A value of `0` means the client reused a pooled connection (pool hit).
   Fresh connects include DNS plus TCP and, for HTTPS, TLS. TTFT still includes
@@ -38,6 +45,15 @@ Workload section. This page focuses on measured fields.
   `--fail-on-osl-mismatch` exits non-zero for publishable gates. Interact with
   `--max-tokens` / `ignore_eos`: unbounded OSL without a token cap will
   mismatch a tight target.
+- **ISL/OSL tokens**: summary `isl_tokens` / `osl_tokens` are type-7
+  distributions (unit: tokens) of per-request prompt and completion token
+  counts over measured successes. Server `usage` wins; local tokenizer counts
+  fill only rows flagged `usage_missing`. Rows with no usage and no
+  `usage_missing` flag (ASR, imagegen) are skipped, never counted as zero.
+  `isl_tokens_source` / `osl_tokens_source` record `server_usage`,
+  `tokenizer_fallback`, or `mixed`, and are omitted when `n=0`. Strategic
+  sweep points use server usage only (no tokenizer fallback) and skip rows
+  whose input and output tokens are both zero.
 - **ITL**: every successive visible-output chunk timestamp delta, pooled
   across measured successes.
 - **TPOT**: `(e2e - ttft) / (completion_tokens - 1)`, defined only for at
@@ -97,7 +113,10 @@ Workload section. This page focuses on measured fields.
   includes connection setup, TLS, and queueing by design. Non-streaming
   responses report `ttft_s: null` (undefined; never fabricated from E2E).
 - **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
-  minus send, reported separately from TTFT.
+  minus send, reported separately from TTFT. Summary and strategic sweep
+  point `first_reasoning_s` (seconds) is the type-7 distribution over
+  measured successes that recorded it; `n=0` for non-thinking models. The
+  strategic request CSV carries it per request as the last column.
 
 Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 [REASONING_MODELS.md](REASONING_MODELS.md).
@@ -141,4 +160,6 @@ full distributions are emitted independently per endpoint.
 
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
 values written as `summary.v3`. There is no separate nearest-rank console
-estimator.
+estimator. The console prints First byte, Queue delay, First reasoning,
+ISL tokens (source), and OSL tokens (source) lines only when that
+distribution has `n > 0`.

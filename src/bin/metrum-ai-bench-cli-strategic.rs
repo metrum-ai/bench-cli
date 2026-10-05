@@ -609,6 +609,7 @@ fn spawn_one_request(
         let mut first_byte_s = None;
         let mut t_first_ns = None;
         let mut stream_ttft_s = None;
+        let mut first_reasoning_s = None;
         let mut itl_s = Vec::new();
         let result: Result<Value> = async {
             let response = result?;
@@ -623,6 +624,7 @@ fn spawn_one_request(
                 )
                 .await?;
                 stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());
+                first_reasoning_s = stream.first_reasoning.map(|d| d.as_secs_f64());
                 itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
                 Ok(json!({
                     "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
@@ -682,6 +684,7 @@ fn spawn_one_request(
             turn: input.turn,
             error: error.clone(),
             warmup,
+            first_reasoning_s,
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {

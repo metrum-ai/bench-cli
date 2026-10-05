@@ -369,3 +369,64 @@ fn strategic_streaming_rejects_tools_clearly() {
         "{error}"
     );
 }
+
+/// #191: sweep points carry first byte, first reasoning, ISL/OSL, and queue
+/// delay distributions; queue delay is empty for closed-loop stages.
+#[test]
+fn strategic_points_summarize_recorded_fields() {
+    let Some(dummy) =
+        common::spawn_dummy(&["-reasoning", "-latency", "20ms", "-chunk-interval", "2ms"])
+    else {
+        common::skip("go dummy-model-server not available");
+        return;
+    };
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let prompts = directory.path().join("prompts.jsonl");
+    fs::write(&prompts, "{\"prompt\":\"alpha\"}\n").expect("prompts");
+    for sweep_by in ["concurrency", "rate"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+            .args([
+                "--url",
+                &dummy.url("/v1/chat/completions"),
+                "--model",
+                "dummy",
+                "--streaming",
+                "--prompts",
+                prompts.to_str().expect("utf8"),
+                "--max-tokens",
+                "8",
+                "--sweep",
+                "20",
+                "--sweep-by",
+                sweep_by,
+                "--requests-per-stage",
+                "3",
+            ])
+            .arg("--csv")
+            .arg(directory.path().join("records.csv"))
+            .arg("--html")
+            .arg(directory.path().join("report.html"))
+            .output()
+            .expect("run strategic");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let summary: Value = serde_json::from_slice(&output.stdout).expect("summary");
+        let point = &summary["points"][0];
+        for key in [
+            "first_byte_s",
+            "first_reasoning_s",
+            "isl_tokens",
+            "osl_tokens",
+        ] {
+            assert_eq!(point[key]["n"], 3, "{sweep_by} {key}");
+        }
+        let queue_n = if sweep_by == "rate" { 3 } else { 0 };
+        assert_eq!(
+            point["queue_delay_s"]["n"], queue_n,
+            "{sweep_by} queue delay"
+        );
+    }
+}
