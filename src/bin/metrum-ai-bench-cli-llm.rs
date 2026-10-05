@@ -217,14 +217,15 @@ async fn make_request(
 
     if streaming {
         // Handle streaming response
-        let response = match client
-            .post(url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-            .timeout(Duration::from_secs(request_timeout))
-            .send()
-            .await
+        let response = match metrum_ai_bench::connect_timing::send(
+            client
+                .post(url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&payload)
+                .timeout(Duration::from_secs(request_timeout)),
+        )
+        .await
         {
             Ok(resp) => resp,
             Err(e) => {
@@ -267,7 +268,7 @@ async fn make_request(
         }
 
         let stream = metrum_ai_bench::chat_stream::consume_with_options(
-            response.bytes_stream(),
+            metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
             allow_missing_ttft,
         )
@@ -292,14 +293,15 @@ async fn make_request(
         })
     } else {
         // Handle non-streaming response
-        let response: Response = match client
-            .post(url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-            .timeout(Duration::from_secs(request_timeout))
-            .send()
-            .await
+        let response: Response = match metrum_ai_bench::connect_timing::send(
+            client
+                .post(url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&payload)
+                .timeout(Duration::from_secs(request_timeout)),
+        )
+        .await
         {
             Ok(resp) => resp,
             Err(e) => return Err(metrum_ai_bench::error::RequestError::from_reqwest(&e).into()),
@@ -313,7 +315,8 @@ async fn make_request(
             return Err(metrum_ai_bench::error::RequestError::from_status(status.as_u16()).into());
         }
         // Clock stops after the full body is consumed (not at headers).
-        let json_resp: Value = response.json().await?;
+        let body = metrum_ai_bench::connect_timing::read_body(response).await?;
+        let json_resp: Value = serde_json::from_slice(&body)?;
         let total_time = start_time.elapsed();
 
         // Check for multiple choices in non-streaming response
@@ -727,7 +730,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 ),
             )
             .await;
-            let connect_s = connect_slot.take();
+            let http_trace = connect_slot.trace();
             // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
             drop(request_slot);
@@ -771,7 +774,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_reasoning_tokens(sm.reasoning_tokens)
                     .with_first_byte(sm.first_byte)
                     .with_resolved_ttft(resolved)
-                    .with_connect(connect_s)
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
@@ -805,7 +808,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         latency,
                         request_error,
                     )
-                    .with_connect(connect_s)
+                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {

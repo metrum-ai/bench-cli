@@ -112,6 +112,7 @@ fn vlm_streaming_measures_real_ttft_and_itl() {
     let records = request_records(&fixture.data_log);
     assert_eq!(records.len(), 2, "expected one record per request");
     for record in &records {
+        common::assert_http_trace(record);
         let ttft = record["ttft_s"].as_f64().expect("ttft_s");
         let latency = record["latency_s"].as_f64().expect("latency_s");
         // Server holds 120ms, then streams a chunk every 20ms.

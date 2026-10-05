@@ -185,12 +185,18 @@ fn strategic_points_report_reasoning_tokens() {
         assert_eq!(point["reasoning_tokens_total"], 3 * REASONING);
         assert_eq!(point["visible_completion_tokens"]["avg"], MAX_TOKENS as f64);
         let rows = std::fs::read_to_string(&csv).expect("csv");
-        let header = rows.lines().next().expect("header");
-        assert!(header.ends_with(",reasoning_tokens"), "{header}");
+        let header: Vec<&str> = rows.lines().next().expect("header").split(',').collect();
+        // reasoning_tokens follows first_reasoning_s; later trailing columns
+        // (#194 HTTP trace) are appended after it.
+        let column = header
+            .iter()
+            .position(|name| *name == "reasoning_tokens")
+            .expect("reasoning_tokens column");
+        assert_eq!(header[column - 1], "first_reasoning_s", "{header:?}");
         assert!(rows
             .lines()
             .skip(1)
-            .all(|line| line.ends_with(&format!(",{REASONING}"))));
+            .all(|line| { line.split(',').nth(column) == Some(REASONING.to_string().as_str()) }));
     }
 }
 

@@ -6,6 +6,7 @@ package sse
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // Writer emits OpenAI-style SSE data lines with optional adversarial framing.
@@ -14,6 +15,9 @@ type Writer struct {
 	Flusher  http.Flusher
 	SplitSSE bool
 	OmitDone bool
+	// DoneTail sleeps after flushing data: [DONE], so the terminating
+	// chunk reaches the client in a later read.
+	DoneTail time.Duration
 }
 
 // New prepares headers and returns a Writer. Caller must have set status 200.
@@ -78,6 +82,9 @@ func (s *Writer) Done() error {
 	}
 	_, err := s.W.Write([]byte("data: [DONE]\n\n"))
 	s.Flusher.Flush()
+	if s.DoneTail > 0 {
+		time.Sleep(s.DoneTail)
+	}
 	return err
 }
 

@@ -611,27 +611,25 @@ fn spawn_one_request(
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
         let result = metrum_ai_bench::connect_timing::with_connect_slot(
             Arc::clone(&connect_slot),
-            client
-                .post(&url)
-                .bearer_auth(api_key)
-                .json(&input.body)
-                .send(),
+            metrum_ai_bench::connect_timing::send(
+                client.post(&url).bearer_auth(api_key).json(&input.body),
+            ),
         )
         .await;
-        let connect_s = connect_slot.take();
         let mut first_byte_s = None;
         let mut t_first_ns = None;
         let mut stream_ttft_s = None;
         let mut first_reasoning_s = None;
         let mut itl_s = Vec::new();
-        let result: Result<Value> = async {
+        let body_slot = Arc::clone(&connect_slot);
+        let result: Result<Value> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
             let response = result?;
             first_byte_s.replace(sent.elapsed().as_secs_f64());
             t_first_ns.replace(run_epoch.elapsed_ns());
             let response = response.error_for_status()?;
             if streaming {
                 let stream = metrum_ai_bench::chat_stream::consume_with_options(
-                    response.bytes_stream(),
+                    metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
                     sent,
                     infer_ttft,
                 )
@@ -651,10 +649,12 @@ fn spawn_one_request(
                     "usage": usage
                 }))
             } else {
-                Ok(response.json::<Value>().await?)
+                let body = metrum_ai_bench::connect_timing::read_body(response).await?;
+                Ok(serde_json::from_slice::<Value>(&body)?)
             }
-        }
+        })
         .await;
+        let http_trace = connect_slot.trace();
         let completed = Instant::now();
         let t_done_ns = run_epoch.elapsed_ns();
         let (success, valid, input_tokens, output_tokens, reasoning_tokens, error) = match result {
@@ -689,7 +689,7 @@ fn spawn_one_request(
             queue_delay_s: sent.saturating_duration_since(scheduled).as_secs_f64(),
             service_latency_s: completed.saturating_duration_since(sent).as_secs_f64(),
             first_byte_s,
-            connect_s: Some(connect_s),
+            connect_s: Some(http_trace.connect_s),
             ttft_s: resolved.ttft_s,
             ttft_source: resolved.source,
             prefill_s: None,
@@ -707,6 +707,13 @@ fn spawn_one_request(
             warmup,
             first_reasoning_s,
             reasoning_tokens,
+            connection_reused: Some(http_trace.connection_reused),
+            dns_s: Some(http_trace.dns_s),
+            bytes_sent: http_trace.bytes_sent,
+            // Body fields only for successes, as on modality request records.
+            receive_s: http_trace.receive_s.filter(|_| success),
+            bytes_received: http_trace.bytes_received.filter(|_| success),
+            chunks_received: http_trace.chunks_received.filter(|_| success),
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {

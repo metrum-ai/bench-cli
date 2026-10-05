@@ -32,8 +32,11 @@ type Config struct {
 	ErrorRate      float64
 	SplitSSE       bool
 	OmitDone       bool
-	RoleOnly       bool
-	Reasoning      bool
+	// DoneTail delays the end of a stream after data: [DONE] (the
+	// terminating HTTP chunk), as servers that flush [DONE] separately do.
+	DoneTail  time.Duration
+	RoleOnly  bool
+	Reasoning bool
 	// ReasoningTokens > 0 streams that many reasoning_content chunks (one
 	// token each) and reports them in usage.completion_tokens_details.
 	ReasoningTokens int
@@ -63,6 +66,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.Float64Var(&cfg.ErrorRate, "error-rate", 0, "Probability 0-1 of error (503 or mid-stream); 0 = off")
 	fs.BoolVar(&cfg.SplitSSE, "split-sse", false, "Adversarial: flush mid-event SSE frames")
 	fs.BoolVar(&cfg.OmitDone, "omit-done", false, "Adversarial: omit trailing data: [DONE]")
+	doneTail := fs.String("done-tail", "0", "Delay between data: [DONE] and the end of the stream body (e.g. 20ms)")
 	fs.BoolVar(&cfg.RoleOnly, "role-only", false, "Adversarial: stream role delta only (no content)")
 	fs.BoolVar(&cfg.Reasoning, "reasoning", false, "Emit delta.reasoning_content before content (vLLM-style)")
 	fs.IntVar(&cfg.ReasoningTokens, "reasoning-tokens", 0, "Emit N reasoning tokens and report usage.completion_tokens_details.reasoning_tokens; 0 = off")
@@ -92,6 +96,12 @@ func ParseFlags(args []string) (*Config, error) {
 		cfg.ChunkInterval = d
 	} else if *chunk != "0" && *chunk != "" {
 		return nil, fmt.Errorf("invalid -chunk-interval %q: %w", *chunk, err)
+	}
+
+	if d, err := time.ParseDuration(*doneTail); err == nil && d >= 0 {
+		cfg.DoneTail = d
+	} else if *doneTail != "0" && *doneTail != "" {
+		return nil, fmt.Errorf("invalid -done-tail %q", *doneTail)
 	}
 
 	c := Compat(strings.ToLower(strings.TrimSpace(*compat)))

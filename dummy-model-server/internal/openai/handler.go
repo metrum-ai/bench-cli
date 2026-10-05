@@ -167,6 +167,7 @@ func (h *Handler) serveChatStream(w http.ResponseWriter, model string, maxTokens
 	if !ok {
 		return
 	}
+	sw.DoneTail = h.Cfg.DoneTail
 	id := "chatcmpl-dummy"
 	created := time.Now().Unix()
 
@@ -248,6 +249,7 @@ func (h *Handler) serveCompletionStream(w http.ResponseWriter, model string, max
 	if !ok {
 		return
 	}
+	sw.DoneTail = h.Cfg.DoneTail
 	id := "cmpl-dummy"
 	for i := 0; i < maxTokens; i++ {
 		if h.Cfg.ChunkInterval > 0 {
