@@ -497,7 +497,8 @@ pub const KNEE_MIN_POINTS: usize = 5;
 pub enum KneeReason {
     /// Fewer than [`KNEE_MIN_POINTS`] stages.
     InsufficientPoints,
-    /// An endpoint stage has no p95 latency (for example, no successes).
+    /// A stage needed for the curve (an endpoint, or every interior stage)
+    /// has no p95 latency (for example, no successes).
     MissingLatency,
     /// Throughput or p95 latency does not change between the first and last
     /// stage, so the curve cannot be normalized.
@@ -1325,6 +1326,27 @@ mod tests {
             detect_knee_with_reason(&missing).reason,
             Some(KneeReason::MissingLatency)
         );
+        let mut interior =
+            knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        for point in &mut interior[1..4] {
+            point.p95_s = None;
+        }
+        assert_eq!(
+            detect_knee_with_reason(&interior).reason,
+            Some(KneeReason::MissingLatency)
+        );
+        // A single interior gap is skipped; the remaining stages still decide.
+        let mut gap = knee_points(&[
+            (1.0, 1.0),
+            (2.0, 1.02),
+            (3.0, 1.04),
+            (4.0, 1.06),
+            (4.2, 4.0),
+        ]);
+        gap[1].p95_s = None;
+        let detection = detect_knee_with_reason(&gap);
+        assert_eq!(detection.index, Some(3));
+        assert_eq!(detection.reason, None);
     }
 
     #[test]
