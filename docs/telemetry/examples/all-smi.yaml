@@ -4,9 +4,8 @@
 # Default smoke/E2E telemetry: Metrum all-smi fork (/metrics) plus engine metrics.
 # Install: https://github.com/chetan-metrum-ai/all-smi/releases
 #   curl -fsSL -o /tmp/all-smi.tgz \
-#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.3/all-smi-linux-x86_64.tar.gz
+#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
 #   tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
-#   all-smi api --port 9090
 #   all-smi api --port 9090
 # The fork (v0.26.3-metrum.4) serves /metrics; /metric returns 404. It binds
 # 0.0.0.0 (no bind flag), so firewall port 9090 on shared hosts.
