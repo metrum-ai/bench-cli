@@ -10,6 +10,9 @@
 //!   connector call. When the pool supplies a live connection the connector
 //!   is never invoked, so `connect_s` is `0.0` and `connection_reused` is true.
 //!   DNS and, for HTTPS, the TLS handshake run inside this one connector call.
+//!   Connector or resolver work that finishes after the response headers (a
+//!   background connect that lost the race to a pooled connection) is not
+//!   booked to the request.
 //! - [`TimedResolver`] (reqwest `dns_resolver`) times name resolution inside
 //!   the connector. It resolves with `getaddrinfo` on a blocking thread, the
 //!   same path as reqwest's default resolver. IP-literal hosts skip it.
@@ -39,6 +42,8 @@ tokio::task_local! {
 #[derive(Debug, Default)]
 struct TraceState {
     connect_attempted: bool,
+    /// A connector call finished before the response headers arrived.
+    connect_completed: bool,
     connect: Option<Duration>,
     dns: Option<Duration>,
     bytes_sent: Option<u64>,
@@ -61,7 +66,8 @@ pub struct ConnectSlot {
 pub struct HttpTrace {
     /// Connector seconds; `0.0` when no new connection completed.
     pub connect_s: f64,
-    /// True when the connector was not invoked (pooled connection).
+    /// True when no connector call finished before the response headers
+    /// (pooled connection). Without headers, true only if none was attempted.
     pub connection_reused: bool,
     /// Resolver seconds; `0.0` when no lookup ran (pool hit or IP literal).
     pub dns_s: f64,
@@ -89,8 +95,25 @@ impl ConnectSlot {
         f(&mut guard)
     }
 
+    /// Add connector time. Work that finishes after the response headers did
+    /// not carry this request (a connect that lost the race to a pooled
+    /// connection), so it is not booked here.
     fn record(&self, elapsed: Duration) {
-        self.with_state(|s| s.connect = Some(elapsed));
+        self.with_state(|s| {
+            if s.headers_at.is_none() {
+                s.connect_completed = true;
+                s.connect = Some(s.connect.unwrap_or_default() + elapsed);
+            }
+        });
+    }
+
+    /// Add resolver time, with the same late-work rule as [`Self::record`].
+    fn record_dns(&self, elapsed: Duration) {
+        self.with_state(|s| {
+            if s.headers_at.is_none() {
+                s.dns = Some(s.dns.unwrap_or_default() + elapsed);
+            }
+        });
     }
 
     /// Seconds of connector work, or `0.0` when the pool supplied a live connection.
@@ -110,7 +133,13 @@ impl ConnectSlot {
             let body_read = s.body_end_at.is_some();
             HttpTrace {
                 connect_s: s.connect.map_or(0.0, |d| d.as_secs_f64()),
-                connection_reused: !s.connect_attempted,
+                // With headers, only a connect that finished first can have
+                // carried the request; without them, any attempt counts.
+                connection_reused: if s.headers_at.is_some() {
+                    !s.connect_completed
+                } else {
+                    !s.connect_attempted
+                },
                 dns_s: s.dns.map_or(0.0, |d| d.as_secs_f64()),
                 bytes_sent: s.bytes_sent,
                 receive_s,
@@ -206,9 +235,14 @@ pub fn counted<S>(stream: S) -> Counted<S> {
 
 /// Read a whole response body through [`counted`].
 pub async fn read_body(response: reqwest::Response) -> reqwest::Result<Bytes> {
+    // Preallocate from Content-Length (capped) so large bodies are not
+    // regrown inside the timed window.
+    let capacity = response
+        .content_length()
+        .map_or(0, |len| len.min(64 << 20) as usize);
     let stream = counted(response.bytes_stream());
     futures_util::pin_mut!(stream);
-    let mut body = Vec::new();
+    let mut body = Vec::with_capacity(capacity);
     while let Some(chunk) = stream.next().await {
         body.extend_from_slice(&chunk?);
     }
@@ -226,12 +260,12 @@ impl reqwest::dns::Resolve for TimedResolver {
         let host = name.as_str().to_owned();
         Box::pin(async move {
             let start = Instant::now();
-            let addrs: Vec<SocketAddr> =
-                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            let resolved = tokio::net::lookup_host((host.as_str(), 0)).await;
+            // Record before error handling so failed lookups keep their time.
             if let Some(slot) = slot {
-                let elapsed = start.elapsed();
-                slot.with_state(|s| s.dns = Some(s.dns.unwrap_or_default() + elapsed));
+                slot.record_dns(start.elapsed());
             }
+            let addrs: Vec<SocketAddr> = resolved?.collect();
             let addrs: reqwest::dns::Addrs = Box::new(addrs.into_iter());
             Ok(addrs)
         })
@@ -354,6 +388,53 @@ mod tests {
         })
         .await;
         assert!(!slot.trace().connection_reused);
+    }
+
+    #[tokio::test]
+    async fn late_connect_after_headers_is_not_booked() {
+        let slot = ConnectSlot::new();
+        slot.record_dns(Duration::from_millis(2));
+        slot.record(Duration::from_millis(5));
+        slot.record(Duration::from_millis(7));
+        slot.with_state(|s| {
+            s.connect_attempted = true;
+            s.headers_at = Some(Instant::now());
+        });
+        // A losing background connect finishing after the headers.
+        slot.record_dns(Duration::from_millis(40));
+        slot.record(Duration::from_millis(50));
+        let trace = slot.trace();
+        assert!(
+            (trace.connect_s - 0.012).abs() < 1e-9,
+            "{}",
+            trace.connect_s
+        );
+        assert!((trace.dns_s - 0.002).abs() < 1e-9, "{}", trace.dns_s);
+        assert!(trace.dns_s <= trace.connect_s);
+        assert!(!trace.connection_reused);
+
+        // Only late work: the request rode a pooled connection.
+        let pooled = ConnectSlot::new();
+        pooled.with_state(|s| {
+            s.connect_attempted = true;
+            s.headers_at = Some(Instant::now());
+        });
+        pooled.record(Duration::from_millis(50));
+        let trace = pooled.trace();
+        assert!(trace.connection_reused);
+        assert_eq!(trace.connect_s, 0.0);
+    }
+
+    #[tokio::test]
+    async fn failed_lookup_keeps_dns_time() {
+        let slot = ConnectSlot::new();
+        let result = with_connect_slot(Arc::clone(&slot), async {
+            let name: reqwest::dns::Name = "no-such-host.invalid".parse().expect("name");
+            reqwest::dns::Resolve::resolve(&TimedResolver, name).await
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(slot.trace().dns_s > 0.0);
     }
 
     #[tokio::test]

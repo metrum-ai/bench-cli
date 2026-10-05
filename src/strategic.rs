@@ -2004,6 +2004,80 @@ mod tests {
     }
 
     #[test]
+    fn http_trace_columns_round_trip_through_csv() {
+        let row = BenchRecord {
+            seq: 0,
+            stage: 1.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.5,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.5,
+            first_byte_s: Some(0.04),
+            connect_s: Some(0.003),
+            ttft_s: None,
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 8,
+            output_tokens: 20,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+            reasoning_tokens: None,
+            connection_reused: Some(false),
+            dns_s: Some(0.001),
+            bytes_sent: Some(120),
+            receive_s: Some(0.25),
+            bytes_received: Some(900),
+            chunks_received: Some(9),
+        };
+        let mut untraced = row.clone();
+        untraced.connection_reused = None;
+        untraced.dns_s = None;
+        untraced.bytes_sent = None;
+        untraced.receive_s = None;
+        untraced.bytes_received = None;
+        untraced.chunks_received = None;
+        let mut writer = csv::Writer::from_writer(Vec::new());
+        for written in [&row, &untraced] {
+            writer.serialize(written).unwrap();
+        }
+        let bytes = writer.into_inner().unwrap();
+        let text = String::from_utf8(bytes.clone()).expect("utf8");
+        assert!(text
+            .lines()
+            .next()
+            .expect("header")
+            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received"));
+        let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .expect("csv round trip");
+        assert_eq!(back[0].connection_reused, Some(false));
+        assert_eq!(back[0].dns_s, Some(0.001));
+        assert_eq!(back[0].bytes_sent, Some(120));
+        assert_eq!(back[0].receive_s, Some(0.25));
+        assert_eq!(back[0].bytes_received, Some(900));
+        assert_eq!(back[0].chunks_received, Some(9));
+        // Empty cells read back as absent, not 0 or false.
+        assert_eq!(back[1].connection_reused, None);
+        assert_eq!(back[1].dns_s, None);
+        assert_eq!(back[1].bytes_sent, None);
+        assert_eq!(back[1].receive_s, None);
+        assert_eq!(back[1].bytes_received, None);
+        assert_eq!(back[1].chunks_received, None);
+    }
+
+    #[test]
     fn pre_191_csv_without_first_reasoning_column_still_loads() {
         // Header and row as written before #191 (no trailing first_reasoning_s).
         let old = "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,\

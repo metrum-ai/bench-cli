@@ -31,11 +31,16 @@ Workload section. This page focuses on measured fields.
   ASR, imagegen, and strategic all record it (#194; before, only LLM and
   strategic did). For imagegen with retries, the HTTP phase fields describe
   the last attempt (the successful one on success).
-- **Connection reused** (`connection_reused`, bool): true when the HTTP
-  connector was not invoked for this request, that is the pool supplied a
-  live connection. If a connect started and a pooled connection freed up
-  first, the row reads `false` even though a pooled connection carried the
-  request. Summary `connections_reused` (integer) counts measured successes
+- **Connection reused** (`connection_reused`, bool): true when no connector
+  call for this request finished before its response headers, that is the
+  pool supplied a live connection. When the client starts a connect and a
+  pooled connection frees up first, the losing connect keeps running in the
+  background: work it finishes after the headers is not booked to the row
+  (`connection_reused = true`, and it adds nothing to `connect_s` or
+  `dns_s`). If it finishes before the headers, the row still reads `false`
+  and carries that connect and DNS time, which also lowers `prefill_s`. This
+  mostly affects ramp-up and open-loop stages. Requests with no response
+  headers (failures) read `false` whenever a connect was attempted. Summary `connections_reused` (integer) counts measured successes
   with `connection_reused = true`; `connection_reuse_rate` is
   `connections_reused / successes carrying the flag`. Both are `null` when no
   measured success carries the flag (#194).
@@ -44,6 +49,11 @@ Workload section. This page focuses on measured fields.
   `getaddrinfo` on a blocking thread (tokio `lookup_host`), the same path as
   reqwest's default resolver. `0.0` when no lookup ran (pool hit or
   IP-literal host). `dns_s` is part of `connect_s`, not added to it (#194).
+  When one request triggers more than one connector call (for example a
+  reconnect after a stale pooled connection), both `connect_s` and `dns_s`
+  sum those calls, so `dns_s <= connect_s` holds on successes. A failed
+  lookup still records its time, so a DNS-failure row can show `dns_s > 0`
+  with `connect_s = 0.0` (the connector never completed).
 - **TCP and TLS are not split.** reqwest runs TCP connect and the TLS
   handshake inside one opaque connector future, and Bench times that future
   as a whole (`connector_layer`). Only their sum is observable:

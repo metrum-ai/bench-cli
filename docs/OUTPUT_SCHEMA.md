@@ -32,8 +32,9 @@ Each line is a complete JSON object and carries `schema_version`.
   requests whose stream ended in an error (including `no_output_token`).
   `completion_tokens` is unchanged and still includes reasoning tokens.
 - HTTP phase trace (additive, #194), each omitted from JSON when absent:
-  - `connection_reused` (bool) - true when the HTTP connector was not invoked
-    (pooled connection).
+  - `connection_reused` (bool) - true when no connector call for this request
+    finished before its response headers (pooled connection); connect work
+    finishing after the headers is not booked to the row.
   - `dns_s` (seconds) - DNS time inside the connector, included in
     `connect_s`; `0.0` when no lookup ran (pool hit or IP-literal host).
   - `bytes_sent` (bytes) - request body bytes, headers excluded; absent when

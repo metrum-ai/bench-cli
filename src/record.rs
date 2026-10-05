@@ -88,8 +88,9 @@ pub struct RequestRecord {
     /// request path did not install connect timing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connect_s: Option<f64>,
-    /// True when the request rode a pooled connection (the connector was not
-    /// invoked). Absent when the request path did not install the HTTP trace.
+    /// True when the request rode a pooled connection (no connector call
+    /// finished before its response headers). Absent when the request path
+    /// did not install the HTTP trace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_reused: Option<bool>,
     /// Seconds in DNS resolution inside the connector; `0.0` when no lookup
