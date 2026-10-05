@@ -95,6 +95,38 @@ Additional v3 fields:
   `usage_missing` without a tokenizer count to fill the gap; otherwise a rate
 - `completion_tokens_source` - `"server_usage"` or `"tokenizer_fallback"` when
   the rate is present
+- `prompt_tokens_total` (integer tokens, #193) - sum of prompt tokens over
+  measured successes. Server `usage` wins; `tokenized_prompt_tokens` fills
+  only `usage_missing` rows (same accounting as
+  `completion_tokens_per_second`). Always present; `null` when no measured
+  success reports tokens (ASR, imagegen) or any `usage_missing` row lacks a
+  tokenizer count.
+- `completion_tokens_total` (integer tokens, #193) - the completion token sum
+  behind `completion_tokens_per_second`. Always present; `null` exactly when
+  `completion_tokens_per_second` is `null`.
+- `input_tokens_per_second` (tokens/second, #193) -
+  `prompt_tokens_total / window_seconds`. Always present; `null` when
+  `prompt_tokens_total` is `null`.
+- `total_tokens_per_second` (tokens/second, #193) -
+  `(prompt_tokens_total + completion_tokens_total) / window_seconds`. Always
+  present; `null` unless both totals are non-null.
+- `prefill_tps_per_user` (tokens/second, #193) - type-7 distribution of
+  per-request `isl_tokens / ttft_s` over measured successes with ISL > 0 and
+  TTFT > 0 (ISL per the `isl_tokens` rule below). Always present; `n=0`
+  without streaming TTFT. TTFT includes connect time and server queueing;
+  first-byte approximated TTFT (`--infer-ttft-from-first-byte`) also feeds it.
+- `time_to_second_token_s` (seconds, #193) - type-7 distribution of
+  per-request `ttft_s + itl_s[0]` over measured successes with a TTFT and at
+  least one ITL sample (two content chunks). ITL is measured between SSE
+  content chunks, so with multi-token chunks this is time to second chunk.
+  Always present; `n=0` when no request qualifies.
+- `user_tps` (tokens/second, #193) - type-7 distribution of per-request
+  `completion_tokens / latency_s` over measured successes with server usage
+  `completion_tokens > 0` (no tokenizer fallback). Same definition as the
+  `user_tps=` SLO and strategic `SweepPoint.user_tps`. Always present; `n=0`
+  when no request qualifies.
+- These seven fields are top level only; `per_endpoint` entries do not carry
+  them.
 - `ttft_approx_count` - measured successes whose TTFT came from HTTP
   time-to-first-byte via `--infer-ttft-from-first-byte` (omitted when zero)
 - `ttft_warning` - optional human-readable note when TTFT was approximated or
@@ -198,6 +230,28 @@ embeddings` and `--kind rerank` never report reasoning):
   reasoning exceeds `output_tokens`.
 - `visible_completion_tokens_total` (integer tokens) - sum of those samples;
   `null` when `visible_completion_tokens` has `n=0`.
+
+Token totals, rates, and per-user latency fields (additive, #193). Server
+`usage` only (no tokenizer fallback); formulas in [METRICS.md](METRICS.md).
+`user_tps` already existed and is unchanged.
+
+- `prompt_tokens_total` (integer tokens) - sum of `input_tokens` over
+  measured successes that report usage (`input_tokens > 0` or
+  `output_tokens > 0`). `null` when no success reports usage. Rerank sums
+  `usage.total_tokens` (all input).
+- `completion_tokens_total` (integer tokens) - sum of `output_tokens` over the
+  same rows. `null` when no success reports usage, and always `null` for
+  `--kind embeddings` and `--kind rerank` stages (no generated output).
+- `input_tokens_per_second` (tokens/second) - `prompt_tokens_total` divided by
+  the stage window; `null` when that total is `null`.
+- `total_tokens_per_second` (tokens/second) -
+  `(prompt_tokens_total + completion_tokens_total)` divided by the stage
+  window; `null` unless both totals are non-null.
+- `prefill_tps_per_user` (tokens/second) - `DistSummary` of per-request
+  `input_tokens / ttft_s` over successes with `input_tokens > 0` and
+  `ttft_s > 0`; `n=0` without streaming TTFT.
+- `time_to_second_token_s` (seconds) - `DistSummary` of per-request
+  `ttft_s + itl_s[0]` over successes with a TTFT and at least one ITL sample.
 
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
 trailing optional columns, in this order: `first_reasoning_s` (seconds), then

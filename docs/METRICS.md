@@ -69,6 +69,30 @@ Workload section. This page focuses on measured fields.
   `output_tokens / service_latency_s` on strategic). The `user_tps=` SLO is a
   **minimum** rate (higher is better). Strategic stages also emit
   `users_at_slo = load * (meeting / successes)` when that SLO is set.
+  Summary `user_tps` (tokens/second, #193) is the type-7 distribution of
+  `completion_tokens / latency_s` over measured successes with
+  `completion_tokens > 0` and `latency_s > 0`. It uses server usage
+  `completion_tokens` only (no tokenizer fallback), so `usage_missing` rows
+  contribute no sample. This is the same per-request value the `user_tps=` SLO
+  tests, and the modality counterpart of strategic `SweepPoint.user_tps`.
+- **Prefill tok/s per user (`prefill_tps_per_user`)**: per-request
+  client-observed prefill rate, tokens/second (#193):
+  `prefill_tps_per_user = isl_tokens / ttft_s`. On modality summaries the ISL
+  follows the `isl_tokens` rule (server usage `prompt_tokens` wins, tokenizer
+  count fills `usage_missing` rows, rows with no token accounting are
+  skipped); strategic uses `input_tokens / ttft_s` from server usage only.
+  Only rows with ISL > 0 and TTFT > 0 contribute, so the distribution is
+  `n=0` without streaming TTFT. TTFT includes connect time, TLS, and queueing
+  on the server, so this is a lower bound on engine prefill speed, not a
+  server prefill trace. TTFT approximated from first byte
+  (`--infer-ttft-from-first-byte`) also feeds it.
+- **Time to second token (`time_to_second_token_s`)**: per-request
+  `time_to_second_token_s = ttft_s + itl_s[0]`, seconds (#193). Only rows with
+  a TTFT and at least one ITL sample (two visible content chunks) contribute.
+  ITL is measured between SSE content chunks, so when a server packs several
+  tokens into one chunk this is the time to the second chunk, not strictly
+  the second token. Same definition on modality summaries and strategic sweep
+  points.
 - **Request throughput**: measured successes divided by the explicit window.
   The window is first measured send → last measured successful completion,
   derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
@@ -84,6 +108,26 @@ Workload section. This page focuses on measured fields.
   closed-loop `--concurrency` value that caps outstanding work.
 - **Token throughput**: successful server-usage tokens divided by that same
   window. Optional local tokenizer counts are separate fields.
+- **Token totals and rates** (#193): summary `prompt_tokens_total` and
+  `completion_tokens_total` (integer tokens) sum per-request prompt and
+  completion tokens over measured successes. Server `usage` wins; tokenizer
+  counts fill only `usage_missing` rows. This is the accounting behind
+  `completion_tokens_per_second`:
+  - `completion_tokens_per_second = completion_tokens_total / window_seconds`
+  - `input_tokens_per_second = prompt_tokens_total / window_seconds`
+  - `total_tokens_per_second = (prompt_tokens_total + completion_tokens_total) / window_seconds`
+
+  A total is `null` when no measured success reports tokens (ASR, imagegen)
+  or when any `usage_missing` row lacks a tokenizer count; its rate is then
+  `null` too. `completion_tokens_total` is `null` exactly when
+  `completion_tokens_per_second` is `null`. `total_tokens_per_second` is
+  `null` unless both totals exist. Strategic sweep points carry the same four
+  fields per stage from server usage only (no tokenizer fallback), summed over
+  successes that report usage (`input_tokens > 0` or `output_tokens > 0`) and
+  divided by the stage window. Strategic `completion_tokens_total` (and so
+  `total_tokens_per_second`) is `null` for stages that generate no output
+  (`--kind embeddings`, `--kind rerank`); rerank `prompt_tokens_total` sums
+  `usage.total_tokens` (all input).
 - **Error rate**: measured failures divided by measured attempts.
 - **Goodput**: measured successes satisfying every configured TTFT, TPOT,
   E2E, and `user_tps` SLO divided by the window.
@@ -211,3 +255,7 @@ values written as `summary.v3`. There is no separate nearest-rank console
 estimator. The console prints First byte, Queue delay, First reasoning,
 ISL tokens (source), OSL tokens (source), Reasoning tokens (with the total),
 and Visible completion tokens lines only when that distribution has `n > 0`.
+It also prints Time to second token, Prefill tok/s per user, and User tok/s
+lines when that distribution has `n > 0`, and Prompt tokens with Input
+tokens/sec, Completion tokens, and Total tokens/sec lines when the value is
+not `null` (#193).

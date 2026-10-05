@@ -175,6 +175,20 @@ pub struct SweepPoint {
     pub users_meeting_user_tps: Option<usize>,
     /// Stage output-token throughput (success tokens / window).
     pub completion_tokens_per_second: Option<f64>,
+    /// Sum of server `usage` input tokens over stage successes that report
+    /// usage; null when no success reports usage.
+    pub prompt_tokens_total: Option<u64>,
+    /// Sum of server `usage` output tokens over the same rows; null when no
+    /// success reports usage or the stage generates no output (embeddings, rerank).
+    pub completion_tokens_total: Option<u64>,
+    /// `prompt_tokens_total / window`; null when the total is null.
+    pub input_tokens_per_second: Option<f64>,
+    /// `(prompt_tokens_total + completion_tokens_total) / window`; null unless both totals exist.
+    pub total_tokens_per_second: Option<f64>,
+    /// Per-request prefill rate `input_tokens / ttft_s` over successes with both.
+    pub prefill_tps_per_user: crate::stats::DistSummary,
+    /// Per-request `ttft_s + itl_s[0]`; streaming successes with two or more content chunks.
+    pub time_to_second_token_s: crate::stats::DistSummary,
     /// `$ / 1M output tokens` from declared price and stage token rate; null when absent.
     pub cost_per_million_output_tokens: Option<f64>,
     /// Client-observed outstanding concurrency vs stage cap.
@@ -405,6 +419,40 @@ pub fn summarize_stage_with_options(
     } else {
         Vec::new()
     };
+    let prompt_tokens_total = crate::summary::total(
+        &token_rows
+            .iter()
+            .map(|r| r.input_tokens)
+            .collect::<Vec<_>>(),
+    );
+    let completion_tokens_total = if generates_output {
+        crate::summary::total(
+            &token_rows
+                .iter()
+                .map(|r| r.output_tokens)
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+    let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / elapsed);
+    let total_tokens_per_second = match (prompt_tokens_total, completion_tokens_total) {
+        (Some(p), Some(c)) => Some(p.saturating_add(c) as f64 / elapsed),
+        _ => None,
+    };
+    let prefill_rates: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| match record.ttft_s {
+            Some(ttft) if record.input_tokens > 0 && ttft > 0.0 => {
+                Some(record.input_tokens as f64 / ttft)
+            }
+            _ => None,
+        })
+        .collect();
+    let second_token: Vec<f64> = success_rows
+        .iter()
+        .filter_map(|record| Some(record.ttft_s? + record.itl_s.first()?))
+        .collect();
     let reasoning: Vec<u64> = success_rows
         .iter()
         .filter_map(|record| record.reasoning_tokens)
@@ -459,6 +507,12 @@ pub fn summarize_stage_with_options(
         users_at_slo,
         users_meeting_user_tps: meeting_user_tps,
         completion_tokens_per_second,
+        prompt_tokens_total,
+        completion_tokens_total,
+        input_tokens_per_second,
+        total_tokens_per_second,
+        prefill_tps_per_user: crate::stats::DistSummary::from_values(&prefill_rates),
+        time_to_second_token_s: crate::stats::DistSummary::from_values(&second_token),
         cost_per_million_output_tokens,
         observed_concurrency,
         connect_s: crate::stats::DistSummary::from_values(&connect),
@@ -1154,6 +1208,12 @@ mod tests {
                     users_at_slo: None,
                     users_meeting_user_tps: None,
                     completion_tokens_per_second: None,
+                    prompt_tokens_total: None,
+                    completion_tokens_total: None,
+                    input_tokens_per_second: None,
+                    total_tokens_per_second: None,
+                    prefill_tps_per_user: crate::stats::DistSummary::from_values(&[]),
+                    time_to_second_token_s: crate::stats::DistSummary::from_values(&[]),
                     cost_per_million_output_tokens: None,
                     observed_concurrency: None,
                     connect_s: crate::stats::DistSummary::from_values(&[]),
@@ -1202,6 +1262,12 @@ mod tests {
             users_at_slo: None,
             users_meeting_user_tps: None,
             completion_tokens_per_second: None,
+            prompt_tokens_total: None,
+            completion_tokens_total: None,
+            input_tokens_per_second: None,
+            total_tokens_per_second: None,
+            prefill_tps_per_user: crate::stats::DistSummary::from_values(&[]),
+            time_to_second_token_s: crate::stats::DistSummary::from_values(&[]),
             cost_per_million_output_tokens: None,
             observed_concurrency: None,
             connect_s: crate::stats::DistSummary::from_values(&[]),
@@ -1404,6 +1470,108 @@ mod tests {
         assert!(point.osl_tokens.avg.is_none());
         assert_eq!(point.isl_tokens.n, 2);
         assert_eq!(point.isl_tokens.avg, Some(12.0));
+        // No output tokens: input totals still report, total rate does not.
+        assert_eq!(point.prompt_tokens_total, Some(24));
+        assert!(point.input_tokens_per_second.is_some());
+        assert!(point.completion_tokens_total.is_none());
+        assert!(point.total_tokens_per_second.is_none());
+    }
+
+    #[test]
+    fn summarize_stage_token_totals_and_rates_match_rows() {
+        let base = BenchRecord {
+            seq: 0,
+            stage: 2.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: 5,
+            sent_unix_ns: 5,
+            latency_s: 0.5,
+            queue_delay_s: 0.0,
+            service_latency_s: 0.5,
+            first_byte_s: None,
+            connect_s: None,
+            ttft_s: Some(0.1),
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: vec![0.02, 0.03],
+            in_flight_at_send: None,
+            success: true,
+            valid: None,
+            input_tokens: 40,
+            output_tokens: 20,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup: false,
+            first_reasoning_s: None,
+            reasoning_tokens: None,
+        };
+        let mut second = base.clone();
+        second.seq = 1;
+        second.ttft_s = Some(0.2);
+        second.itl_s = vec![0.05];
+        second.input_tokens = 100;
+        second.output_tokens = 30;
+        second.service_latency_s = 1.0;
+        // Unary row: no TTFT or ITL, so no prefill rate or second token.
+        let mut unary = base.clone();
+        unary.seq = 2;
+        unary.ttft_s = None;
+        unary.itl_s = Vec::new();
+        // Failed rows never count.
+        let mut failed = base.clone();
+        failed.seq = 3;
+        failed.success = false;
+        let rows = [base.clone(), second.clone(), unary.clone(), failed];
+        let window = 2.0;
+        let point = summarize_stage(
+            2.0,
+            &rows,
+            window,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        let ok = [&base, &second, &unary];
+        let prompt: u64 = ok.iter().map(|r| r.input_tokens).sum();
+        let completion: u64 = ok.iter().map(|r| r.output_tokens).sum();
+        assert_eq!(point.prompt_tokens_total, Some(prompt));
+        assert_eq!(point.completion_tokens_total, Some(completion));
+        assert_eq!(point.input_tokens_per_second, Some(prompt as f64 / window));
+        assert_eq!(
+            point.total_tokens_per_second,
+            Some((prompt + completion) as f64 / window)
+        );
+        assert_eq!(
+            point.completion_tokens_per_second,
+            Some(completion as f64 / window)
+        );
+        assert_eq!(point.prefill_tps_per_user.n, 2);
+        let prefill_mean = (40.0 / 0.1 + 100.0 / 0.2) / 2.0;
+        assert!((point.prefill_tps_per_user.avg.unwrap() - prefill_mean).abs() < 1e-9);
+        assert_eq!(point.time_to_second_token_s.n, 2);
+        let ttst_mean = ((0.1 + 0.02) + (0.2 + 0.05)) / 2.0;
+        assert!((point.time_to_second_token_s.avg.unwrap() - ttst_mean).abs() < 1e-9);
+        assert_eq!(point.user_tps.n, 3);
+        let user_mean = (20.0 / 0.5 + 30.0 / 1.0 + 20.0 / 0.5) / 3.0;
+        assert!((point.user_tps.avg.unwrap() - user_mean).abs() < 1e-9);
+        // No usage on any success: totals and rates are null, not 0.
+        let mut bare = base.clone();
+        bare.input_tokens = 0;
+        bare.output_tokens = 0;
+        let empty = summarize_stage(
+            1.0,
+            &[bare],
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert!(empty.prompt_tokens_total.is_none());
+        assert!(empty.completion_tokens_total.is_none());
+        assert!(empty.input_tokens_per_second.is_none());
+        assert!(empty.total_tokens_per_second.is_none());
+        assert_eq!(empty.prefill_tps_per_user.n, 0);
     }
 
     #[test]
