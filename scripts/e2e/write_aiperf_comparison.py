@@ -42,6 +42,19 @@ def _num(d: dict[str, Any], *keys: str) -> float | None:
         return None
 
 
+def _no_knee_reason(stdout: Any) -> str:
+    """Suffix explaining a null knee from `knee_detection` (#190), or ''."""
+    det = stdout.get("knee_detection") if isinstance(stdout, dict) else None
+    if not isinstance(det, dict) or not det.get("reason"):
+        return ""
+    if det["reason"] != "insufficient_points":
+        return f" (`{det['reason']}`)"
+    return (
+        f" (`{det['reason']}`: {det.get('points')} stages, "
+        f"knee needs at least {det.get('min_points')})"
+    )
+
+
 def _fmt(v: float | None, digits: int = 3) -> str:
     if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
         return "n/a"
@@ -339,7 +352,7 @@ Fairness notes:
             "",
         ]
     else:
-        knee_lines += ["_No knee object in `stdout-closed.json`._", ""]
+        knee_lines += [f"_No knee object in `stdout-closed.json`{_no_knee_reason(stdout_closed)}._", ""]
 
     # Open-loop rate sweep (metrum only)
     open_lines = [
@@ -361,6 +374,8 @@ Fairness notes:
                 f"(req/s `{_fmt(open_knee.get('throughput'))}`, "
                 f"tok/s `{_fmt(open_knee.get('completion_tokens_per_second'))}`).",
             ]
+        else:
+            open_lines += ["", f"Open-loop knee: none{_no_knee_reason(stdout_open)}."]
         open_lines.append("")
     else:
         open_lines += ["| n/a | n/a | n/a | n/a | n/a |", ""]
