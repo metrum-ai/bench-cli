@@ -21,11 +21,13 @@ asks for power, energy, J/token, GPU util, KV cache, or preemption trends.
    `[t_start_ns, t_end_ns)`. Counters: always Δ in the window. Gauges:
    time-weight for means; trapezoid for ∫power when no energy counter.
 6. Treat `request.telemetry_at_done` as debug sugar only.
-7. Prefer metric names present in the file; fall back to
-   [exporters.md](exporters.md) / [examples/](examples/) for expected labels.
+7. Prefer metric names present in the file. Example YAML `include` lists are
+   starting points, not the inventory. Curl the live `/metrics` page when the
+   file and the example disagree.
 8. Default hardware source for this repo: Metrum
    [chetan-metrum-ai/all-smi](https://github.com/chetan-metrum-ai/all-smi) at
-   `http://127.0.0.1:9090/metrics`.
+   `http://127.0.0.1:9090/metrics`. Pair it with the serving engine's
+   `/metrics` (vLLM and the other engines in [exporters.md](exporters.md)).
 
 ## Do not
 

@@ -16,6 +16,52 @@ through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
 source, not a crate dependency.
 
+## The series list is not in the binary
+
+`--telemetry` YAML is loaded at startup. Each source is a URL plus `include`
+regexes. The parser keeps every exposition sample whose name matches, and the
+startup probe prints `matched_series` from that live response. There is no
+compiled catalog of metric names.
+
+Files under [docs/telemetry/examples/](telemetry/examples/) are starting
+points. Exporters add and rename series between releases. Before a run, curl
+the live page (the Metrum all-smi fork, the serving engine's `/metrics`, and
+any other exporter you add) and set `include` from what that page serves.
+Record the exporter version in the SUT notes. Client JSONL fields are a
+separate schema. They are not the set of series the NDJSON will store.
+
+Legacy `--metrics-url` desugars to one engine source with a small convenience
+allowlist (`engine_include_patterns` in `src/telemetry/parser.rs`). Use
+`--telemetry` when the page has series outside that allowlist.
+
+## Compared with AIPerf
+
+[AIPerf](https://github.com/ai-dynamo/aiperf) is NVIDIA's replacement for
+GenAI-Perf. Its metrics reference is a named client catalog. It also scrapes
+the inference server's `/metrics` (`--server-metrics`, on by default) and
+collects GPU telemetry from DCGM, pynvml, and amdsmi (`--gpu-telemetry`), then
+derives a power-efficiency family for NVIDIA and AMD.
+
+Bench CLI splits the same job differently. `request.v3` and `summary.v3` are
+the fixed client schema. Telemetry is not a second catalog in the binary:
+`TelemetryConfig::load` reads YAML at startup, `parse_exposition` keeps samples
+whose names match `include`, and the probe prints `matched_series` from the
+live page. A count of client JSONL fields, or of names in an example YAML, is
+not the set of data points a run stores.
+
+Publish campaign `publish-20261002T162512Z` already did this. Each modality
+cell scraped the Metrum all-smi fork (`:9090/metrics`, 500 ms) and the serving
+engine (`/metrics`, 1 s) into one `telemetry.ndjson`. LLM, VLM, and ASR used
+vLLM; ImageGen used vLLM-Omni. Those cells stored 88,808 all-smi samples and
+3,219 engine samples. The strategic remediation sidecar stored 13,678 rows from
+the same two endpoints. DCGM and the other exporters under
+[docs/telemetry/examples/](telemetry/examples/) are further YAML sources on the
+same writer.
+
+To compare a later release, curl the live `/metrics` pages and count series in
+that run's NDJSON. Leave the count out of this document. Exporters rename
+series between releases.
+
 ## Flags
 
 | Flag | Role |
