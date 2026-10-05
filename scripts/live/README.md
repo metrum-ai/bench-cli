@@ -22,10 +22,23 @@ scripts/live/serve/asr.sh stop
 
 **Search first and reuse binaries.** Before each run, web-search the current
 vendor docs for the exact model and engine version, and override the launcher
-(`MODEL=`, `SERVE_ARGS_OVERRIDE=`, `SOURCES_OVERRIDE=`, `SUT_NOTES_OVERRIDE=`)
-when they differ from the pins here. A launcher's notes and sources describe
-its default model only, so `start` exits with an error naming
-`SUT_NOTES_OVERRIDE` when `MODEL` is overridden without it. The SUT's
+(`MODEL=`, `IMAGE=`, `SERVE_ARGS_OVERRIDE=`, `SOURCES_OVERRIDE=`,
+`SUT_NOTES_OVERRIDE=`) when they differ from the pins here. A launcher's
+notes and sources describe its default model, image, and flags only, so
+`start` and `sut` exit with an error naming each missing variable when one of
+those changes without its SUT overrides:
+
+| Override (differs from the launcher default) | Requires |
+|---|---|
+| `MODEL=` | `SUT_NOTES_OVERRIDE` and `SOURCES_OVERRIDE` |
+| `IMAGE=` | `SUT_NOTES_OVERRIDE` and `SOURCES_OVERRIDE` |
+| `SERVE_ARGS_OVERRIDE=` | `SUT_NOTES_OVERRIDE` and `SOURCES_OVERRIDE` |
+
+An override equal to the default (for example `IMAGE=vllm/vllm-openai:v0.30.0`
+on `llm.sh`) is not an override and needs neither. For example, a run on
+`IMAGE=vllm/vllm-openai:v0.31.0` without `SUT_NOTES_OVERRIDE` would otherwise
+write a SUT whose notes still say vLLM 0.30.0. `print`, `stop`, and `logs`
+are not checked. The SUT's
 `model.quantization` comes from `QUANTIZATION=` (`none` for null), then
 `--quantization`/`-q` in the serve flags, then a quantizer token in the
 `MODEL` name (`-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is `gptq`,
@@ -69,7 +82,7 @@ Launchers take `start` (default), `stop`, `print` (show the docker command),
 to skip the Hub revision lookup). `scripts/tests/serve_sut_test.sh` is the
 offline self-test for the SUT the launchers write. `PORT`, `HF_HOME`,
 `HF_TOKEN` (passed by name, never written), `GPU_DEVICES`, and
-`IMAGE`/`MODEL` overrides are read from the environment.
+`IMAGE`/`MODEL` overrides (guarded as above) are read from the environment.
 The SUT they write records the exact docker command in `runtime.config`, the
 model revision SHA from the Hub, the GPU from `nvidia-smi`, and the source
 URLs in `extra.launcher_sources`.

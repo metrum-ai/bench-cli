@@ -15,14 +15,16 @@
 #   https://huggingface.co/Qwen/Qwen3-8B
 # Thinking stays on server-side; local_smoke.sh disables it per request with
 # chat_template_kwargs so the 64-token chat-short profile reaches visible text.
-# These flags, SOURCES, and SUT_NOTES describe DEFAULT_MODEL only. With
-# MODEL=<other>, set SUT_NOTES_OVERRIDE (and usually SERVE_ARGS_OVERRIDE and
-# SOURCES_OVERRIDE) from a fresh search; start exits otherwise.
+# These flags, SOURCES, and SUT_NOTES describe DEFAULT_MODEL on DEFAULT_IMAGE
+# only. With MODEL=<other>, IMAGE=<other>, or a different SERVE_ARGS_OVERRIDE,
+# set SUT_NOTES_OVERRIDE and SOURCES_OVERRIDE from a fresh search; start and
+# sut exit otherwise.
 # model.quantization comes from QUANTIZATION, --quantization, or the MODEL
 # name (for example Qwen/Qwen3-8B-FP8 records fp8); see common.sh.
 set -euo pipefail
 MODALITY=llm
-IMAGE="${IMAGE:-vllm/vllm-openai:v0.30.0}"
+DEFAULT_IMAGE=vllm/vllm-openai:v0.30.0
+IMAGE="${IMAGE:-${DEFAULT_IMAGE}}"
 DEFAULT_MODEL=Qwen/Qwen3-8B
 MODEL="${MODEL:-${DEFAULT_MODEL}}"
 SERVE_ARGS=(--reasoning-parser qwen3 --max-model-len 32768)
