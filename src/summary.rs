@@ -42,6 +42,15 @@ pub struct RunSummary {
     pub completion_tokens_per_second: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_tokens_source: Option<&'static str>,
+    /// Sum of prompt tokens over measured successes (server `usage`, tokenizer
+    /// fills `usage_missing` rows); null when no row reports tokens or a gap is unfilled.
+    pub prompt_tokens_total: Option<u64>,
+    /// Sum of completion tokens behind `completion_tokens_per_second`; null when that is null.
+    pub completion_tokens_total: Option<u64>,
+    /// `prompt_tokens_total / window_seconds`; null when the total is null.
+    pub input_tokens_per_second: Option<f64>,
+    /// `(prompt_tokens_total + completion_tokens_total) / window_seconds`; null unless both totals exist.
+    pub total_tokens_per_second: Option<f64>,
     pub latency_s: DistSummary,
     pub coordinated_omission_latency_s: DistSummary,
     pub ttft_s: DistSummary,
@@ -75,6 +84,13 @@ pub struct RunSummary {
     pub connections_reused: Option<usize>,
     /// `connections_reused` over successes carrying the flag; null when none do.
     pub connection_reuse_rate: Option<f64>,
+    /// Per-request prefill rate `isl_tokens / min(first_reasoning_s, ttft_s)`; rows with both values
+    /// and visible-token TTFT (first-byte approximations excluded).
+    pub prefill_tps_per_user: DistSummary,
+    /// Per-request `ttft_s + itl_s[0]`; streaming rows with at least two content chunks.
+    pub time_to_second_token_s: DistSummary,
+    /// Per-request `completion_tokens / latency_s` (same definition as the `user_tps=` SLO).
+    pub user_tps: DistSummary,
     /// Per-request input tokens (server `usage`, tokenizer fills `usage_missing` rows).
     pub isl_tokens: DistSummary,
     /// Provenance of `isl_tokens`: `server_usage`, `tokenizer_fallback`, or `mixed`.
@@ -274,6 +290,9 @@ struct RecordedFieldDists {
     first_byte_s: DistSummary,
     queue_delay_s: DistSummary,
     first_reasoning_s: DistSummary,
+    prefill_tps_per_user: DistSummary,
+    time_to_second_token_s: DistSummary,
+    user_tps: DistSummary,
     isl_tokens: DistSummary,
     isl_tokens_source: Option<&'static str>,
     osl_tokens: DistSummary,
@@ -300,6 +319,24 @@ impl RecordedFieldDists {
             .iter()
             .filter_map(|r| r.first_reasoning_s)
             .collect();
+        let prefill_rates: Vec<f64> = successes
+            .iter()
+            .filter(|r| !ttft_is_first_byte_approx(r.ttft_source))
+            .filter_map(|r| {
+                match (
+                    record_isl_tokens(r),
+                    first_generated_token_s(r.ttft_s, r.first_reasoning_s),
+                ) {
+                    (Some(isl), Some(first)) if isl > 0 && first > 0.0 => Some(isl as f64 / first),
+                    _ => None,
+                }
+            })
+            .collect();
+        let second_token: Vec<f64> = successes
+            .iter()
+            .filter_map(|r| Some(r.ttft_s? + r.itl_s.first()?))
+            .collect();
+        let user_rates: Vec<f64> = successes.iter().filter_map(|r| r.user_tps()).collect();
         let isl = token_samples(successes, |r| (r.prompt_tokens, r.tokenized_prompt_tokens));
         let osl = token_samples(successes, |r| {
             (r.completion_tokens, r.tokenized_completion_tokens)
@@ -317,6 +354,9 @@ impl RecordedFieldDists {
             first_byte_s: DistSummary::from_values(&first_byte),
             queue_delay_s: DistSummary::from_values(&queue_delay),
             first_reasoning_s: DistSummary::from_values(&first_reasoning),
+            prefill_tps_per_user: DistSummary::from_values(&prefill_rates),
+            time_to_second_token_s: DistSummary::from_values(&second_token),
+            user_tps: DistSummary::from_values(&user_rates),
             isl_tokens: DistSummary::from_values(&isl.values),
             isl_tokens_source: isl.source(),
             osl_tokens: DistSummary::from_values(&osl.values),
@@ -353,6 +393,39 @@ impl TokenSamples {
             (true, true) => Some("mixed"),
             (false, false) => None,
         }
+    }
+}
+
+/// First-byte TTFT can land before prefill ends, which would inflate an
+/// ISL / TTFT rate, so prefill rates use visible-token TTFT only.
+pub(crate) fn ttft_is_first_byte_approx(source: Option<crate::measurement::TtftSource>) -> bool {
+    matches!(
+        source,
+        Some(crate::measurement::TtftSource::FirstByteApprox)
+    )
+}
+
+/// Prefill end for `prefill_tps_per_user`: the first generated token of any
+/// kind. A thinking model's first reasoning token ends prefill; visible TTFT
+/// would fold the whole reasoning phase into the denominator.
+pub(crate) fn first_generated_token_s(
+    ttft_s: Option<f64>,
+    first_reasoning_s: Option<f64>,
+) -> Option<f64> {
+    let ttft = ttft_s?;
+    Some(first_reasoning_s.map_or(ttft, |reasoning| reasoning.min(ttft)))
+}
+
+/// Prompt tokens for one row with the same rule as `isl_tokens`: server
+/// `usage` wins, the tokenizer fills `usage_missing` rows, and a row with no
+/// token accounting at all yields `None`.
+fn record_isl_tokens(record: &RequestRecord) -> Option<u64> {
+    if record.usage_missing {
+        record.tokenized_prompt_tokens
+    } else if record.prompt_tokens > 0 || record.completion_tokens > 0 || record.total_tokens > 0 {
+        Some(record.prompt_tokens)
+    } else {
+        None
     }
 }
 
@@ -447,8 +520,14 @@ impl RunSummary {
         let prefill: Vec<f64> = successes.iter().filter_map(|r| r.prefill_s).collect();
         let decode: Vec<f64> = successes.iter().filter_map(|r| r.decode_s).collect();
         let decode_tok: Vec<f64> = successes.iter().filter_map(|r| r.decode_tok_s).collect();
-        let (usage_missing_count, completion_tokens, completion_tokens_source, ctps_valid) =
-            token_throughput_accounting(&successes);
+        let completion = token_sum_accounting(&successes, |r| {
+            (r.completion_tokens, r.tokenized_completion_tokens)
+        });
+        let prompt =
+            token_sum_accounting(&successes, |r| (r.prompt_tokens, r.tokenized_prompt_tokens));
+        let usage_missing_count = completion.usage_missing_count;
+        let completion_tokens_total = completion.total();
+        let prompt_tokens_total = prompt.total();
         let window = if window_seconds > 0.0 {
             window_seconds
         } else {
@@ -476,10 +555,11 @@ impl RunSummary {
         let recorded = RecordedFieldDists::from_successes(&successes);
         let http = HttpTraceDists::from_successes(&successes);
         let bins = throughput_bins(&successes, window, bin_seconds);
-        let completion_tokens_per_second = if ctps_valid {
-            Some(completion_tokens as f64 / window)
-        } else {
-            None
+        let completion_tokens_per_second = completion_tokens_total.map(|t| t as f64 / window);
+        let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / window);
+        let total_tokens_per_second = match (prompt_tokens_total, completion_tokens_total) {
+            (Some(p), Some(c)) => Some(p.saturating_add(c) as f64 / window),
+            _ => None,
         };
         Self {
             schema_version: SCHEMA_VERSION_SUMMARY,
@@ -496,11 +576,11 @@ impl RunSummary {
             requests_per_second: successes.len() as f64 / window,
             usage_missing_count,
             completion_tokens_per_second,
-            completion_tokens_source: if ctps_valid {
-                completion_tokens_source
-            } else {
-                None
-            },
+            completion_tokens_source: completion.source,
+            prompt_tokens_total,
+            completion_tokens_total,
+            input_tokens_per_second,
+            total_tokens_per_second,
             latency_s: DistSummary::from_values(&lat),
             coordinated_omission_latency_s: DistSummary::from_values(&corrected_lat),
             ttft_s: DistSummary::from_values(&ttft),
@@ -520,6 +600,9 @@ impl RunSummary {
             chunks_received: http.chunks_received,
             connections_reused: http.connections_reused,
             connection_reuse_rate: http.connection_reuse_rate,
+            prefill_tps_per_user: recorded.prefill_tps_per_user,
+            time_to_second_token_s: recorded.time_to_second_token_s,
+            user_tps: recorded.user_tps,
             isl_tokens: recorded.isl_tokens,
             isl_tokens_source: recorded.isl_tokens_source,
             osl_tokens: recorded.osl_tokens,
@@ -689,6 +772,17 @@ pub fn print_run_summary(summary: &RunSummary) {
             }
         }
     }
+    if let (Some(prompt), Some(rate)) =
+        (summary.prompt_tokens_total, summary.input_tokens_per_second)
+    {
+        println!("  Prompt tokens: {prompt}  Input tokens/sec: {rate:.3}");
+    }
+    if let Some(completion) = summary.completion_tokens_total {
+        println!("  Completion tokens: {completion}");
+    }
+    if let Some(rate) = summary.total_tokens_per_second {
+        println!("  Total tokens/sec: {rate:.3}");
+    }
     print_dist("Latency", &summary.latency_s);
     print_dist(
         "CO-corrected latency",
@@ -722,6 +816,15 @@ pub fn print_run_summary(summary: &RunSummary) {
             fmt_opt(summary.decode_tok_s.avg, 3),
             fmt_opt(summary.decode_tok_s.p50, 3),
         );
+    }
+    if summary.time_to_second_token_s.n > 0 {
+        print_dist("Time to second token", &summary.time_to_second_token_s);
+    }
+    if summary.prefill_tps_per_user.n > 0 {
+        print_dist_unit("Prefill tok/s per user", &summary.prefill_tps_per_user, "");
+    }
+    if summary.user_tps.n > 0 {
+        print_dist_unit("User tok/s", &summary.user_tps, "");
     }
     if summary.first_byte_s.n > 0 {
         print_dist("First byte", &summary.first_byte_s);
@@ -826,43 +929,60 @@ pub fn print_run_summary(summary: &RunSummary) {
     }
 }
 
-/// Returns `(usage_missing_count, token_sum, source, ctps_valid)`.
-fn token_throughput_accounting(
+/// Run-level token sum for one usage field (prompt or completion).
+struct TokenSum {
+    usage_missing_count: usize,
+    sum: u64,
+    /// `None` when the sum is not reportable (unfilled gap or no token work).
+    source: Option<&'static str>,
+}
+
+impl TokenSum {
+    fn total(&self) -> Option<u64> {
+        self.source.map(|_| self.sum)
+    }
+}
+
+/// Sum one token field over successes. Server `usage` wins; the tokenizer
+/// fills `usage_missing` rows. Any unfilled gap makes the sum unreportable.
+fn token_sum_accounting(
     successes: &[&RequestRecord],
-) -> (usize, u64, Option<&'static str>, bool) {
+    pick: impl Fn(&RequestRecord) -> (u64, Option<u64>),
+) -> TokenSum {
     let mut usage_missing_count = 0usize;
-    let mut completion_tokens = 0u64;
+    let mut sum = 0u64;
     let mut used_tokenizer_fallback = false;
     let mut any_unfilled_gap = false;
     for record in successes {
+        let (server, tokenized) = pick(record);
         if record.usage_missing {
             usage_missing_count += 1;
-            if let Some(tokens) = record.tokenized_completion_tokens {
-                completion_tokens += tokens;
+            if let Some(tokens) = tokenized {
+                sum = sum.saturating_add(tokens);
                 used_tokenizer_fallback = true;
             } else {
                 any_unfilled_gap = true;
             }
         } else {
-            completion_tokens += record.completion_tokens;
+            sum = sum.saturating_add(server);
         }
     }
-    if any_unfilled_gap {
-        return (usage_missing_count, 0, None, false);
-    }
-    let source = if successes.is_empty() {
+    let source = if any_unfilled_gap || successes.is_empty() {
         None
     } else if used_tokenizer_fallback {
         Some("tokenizer_fallback")
-    } else if completion_tokens > 0 || usage_missing_count > 0 {
+    } else if sum > 0 || usage_missing_count > 0 {
         Some("server_usage")
     } else {
-        // Non-token modalities (ASR/imagegen) report 0 completion tokens without
-        // a usage gap; do not claim server_usage token throughput (N-07).
+        // Non-token modalities (ASR/imagegen) report 0 tokens without a
+        // usage gap; do not claim server_usage token throughput (N-07).
         None
     };
-    let ctps_valid = source.is_some();
-    (usage_missing_count, completion_tokens, source, ctps_valid)
+    TokenSum {
+        usage_missing_count,
+        sum,
+        source,
+    }
 }
 
 impl CrossRunSummary {
@@ -1402,6 +1522,143 @@ mod tests {
     }
 
     #[test]
+    fn token_totals_and_rates_cross_check_per_request() {
+        let mut records = vec![
+            ok(0, 500, 100, 20, &[20; 19]),
+            ok(1, 1000, 200, 40, &[50, 30]),
+            // Unary: no TTFT and no ITL.
+            RequestRecord::success(
+                2,
+                Phase::Measure,
+                "ep".into(),
+                Utc::now(),
+                Utc::now(),
+                Duration::from_millis(400),
+                None,
+                None,
+                Vec::new(),
+                30,
+                10,
+                40,
+            ),
+        ];
+        // Errors and warmup never count.
+        let mut warm = ok(3, 500, 100, 20, &[20]);
+        warm.phase = Phase::Warmup;
+        records.push(warm);
+        let window = 4.0;
+        let summary = RunSummary::from_records(&records, window, false);
+
+        // Recompute every value from the per-request rows.
+        let measured: Vec<&RequestRecord> = records
+            .iter()
+            .filter(|r| r.phase == Phase::Measure && r.is_success())
+            .collect();
+        let prompt: u64 = measured.iter().map(|r| r.prompt_tokens).sum();
+        let completion: u64 = measured.iter().map(|r| r.completion_tokens).sum();
+        assert_eq!(summary.prompt_tokens_total, Some(prompt));
+        assert_eq!(summary.completion_tokens_total, Some(completion));
+        assert_eq!(
+            summary.input_tokens_per_second,
+            Some(prompt as f64 / window)
+        );
+        assert_eq!(
+            summary.total_tokens_per_second,
+            Some((prompt + completion) as f64 / window)
+        );
+        assert_eq!(
+            summary.completion_tokens_per_second,
+            Some(completion as f64 / window)
+        );
+
+        let prefill: Vec<f64> = measured
+            .iter()
+            .filter_map(|r| Some(r.prompt_tokens as f64 / r.ttft_s?))
+            .collect();
+        let second: Vec<f64> = measured
+            .iter()
+            .filter_map(|r| Some(r.ttft_s? + r.itl_s.first()?))
+            .collect();
+        let user: Vec<f64> = measured
+            .iter()
+            .map(|r| r.completion_tokens as f64 / r.latency_s)
+            .collect();
+        for (dist, values) in [
+            (&summary.prefill_tps_per_user, &prefill),
+            (&summary.time_to_second_token_s, &second),
+            (&summary.user_tps, &user),
+        ] {
+            let expected = DistSummary::from_values(values);
+            assert_eq!(dist.n, expected.n);
+            assert!((dist.avg.unwrap() - expected.avg.unwrap()).abs() < 1e-9);
+            assert!((dist.p50.unwrap() - expected.p50.unwrap()).abs() < 1e-9);
+        }
+        assert_eq!(summary.prefill_tps_per_user.n, 2);
+        assert!((summary.prefill_tps_per_user.p50.unwrap() - 135.0).abs() < 1e-9);
+        assert_eq!(summary.time_to_second_token_s.n, 2);
+        assert_eq!(summary.user_tps.n, 3);
+
+        let value = serde_json::to_value(&summary).unwrap();
+        for key in [
+            "prompt_tokens_total",
+            "completion_tokens_total",
+            "input_tokens_per_second",
+            "total_tokens_per_second",
+            "prefill_tps_per_user",
+            "time_to_second_token_s",
+            "user_tps",
+        ] {
+            assert!(value.get(key).is_some(), "{key} missing");
+        }
+    }
+
+    #[test]
+    fn token_totals_null_without_token_work_or_with_unfilled_gap() {
+        // ASR/imagegen-style rows: no usage, not flagged missing.
+        let mut bare = ok(0, 500, 100, 0, &[]);
+        bare.prompt_tokens = 0;
+        bare.total_tokens = 0;
+        let none = RunSummary::from_records(&[bare], 1.0, false);
+        assert!(none.prompt_tokens_total.is_none());
+        assert!(none.completion_tokens_total.is_none());
+        assert!(none.input_tokens_per_second.is_none());
+        assert!(none.total_tokens_per_second.is_none());
+        assert_eq!(none.prefill_tps_per_user.n, 0);
+        assert_eq!(none.user_tps.n, 0);
+        let value = serde_json::to_value(&none).unwrap();
+        assert!(value["prompt_tokens_total"].is_null());
+        assert!(value["total_tokens_per_second"].is_null());
+
+        // A usage gap with no tokenizer count makes totals unreportable.
+        let server = ok(0, 500, 100, 8, &[]);
+        let mut gap = ok(1, 500, 100, 0, &[]);
+        gap.usage_missing = true;
+        gap.prompt_tokens = 0;
+        gap.total_tokens = 0;
+        let unfilled = RunSummary::from_records(&[server.clone(), gap.clone()], 1.0, false);
+        assert!(unfilled.prompt_tokens_total.is_none());
+        assert!(unfilled.completion_tokens_total.is_none());
+        assert!(unfilled.total_tokens_per_second.is_none());
+
+        // Tokenizer-filled gap counts, matching isl_tokens / osl_tokens.
+        gap.tokenized_prompt_tokens = Some(17);
+        gap.tokenized_completion_tokens = Some(12);
+        let filled = RunSummary::from_records(&[server, gap], 2.0, false);
+        assert_eq!(filled.prompt_tokens_total, Some(18 + 17));
+        assert_eq!(filled.completion_tokens_total, Some(8 + 12));
+        assert_eq!(filled.total_tokens_per_second, Some(55.0 / 2.0));
+        assert_eq!(filled.prefill_tps_per_user.n, 2);
+
+        // First-byte approximated TTFT is excluded from the prefill rate only.
+        let mut approx = ok(0, 500, 100, 20, &[]);
+        approx.ttft_source = Some(crate::measurement::TtftSource::FirstByteApprox);
+        let summary = RunSummary::from_records(&[approx], 1.0, false);
+        assert_eq!(summary.prefill_tps_per_user.n, 0);
+        assert_eq!(summary.ttft_s.n, 1);
+        assert_eq!(summary.prompt_tokens_total, Some(18));
+    }
+
+    #[test]
     fn token_dists_label_tokenizer_fallback_and_mixed() {
         let server = ok(0, 100, 20, 8, &[]);
         let mut gap = ok(1, 100, 20, 0, &[]);
@@ -1456,5 +1713,22 @@ mod tests {
         let value = serde_json::to_value(&none).unwrap();
         assert!(value["connection_reuse_rate"].is_null());
         assert_eq!(value["bytes_received"]["n"], 0);
+    }
+
+    #[test]
+    fn prefill_rate_ends_at_first_reasoning_token() {
+        // Thinking row: reasoning starts at 50 ms, visible content at 400 ms.
+        let mut reasoning = ok(0, 800, 400, 20, &[20; 19]);
+        reasoning.first_reasoning_s = Some(0.050);
+        let plain = ok(1, 800, 100, 20, &[20; 19]);
+        let summary = RunSummary::from_records(&[reasoning, plain], 1.0, false);
+        assert_eq!(summary.prefill_tps_per_user.n, 2);
+        // 18 prompt tokens / 0.050 s and 18 / 0.100 s, not 18 / 0.400 s.
+        assert!((summary.prefill_tps_per_user.max.unwrap() - 360.0).abs() < 1e-9);
+        assert!((summary.prefill_tps_per_user.min.unwrap() - 180.0).abs() < 1e-9);
+        assert_eq!(first_generated_token_s(Some(0.4), Some(0.05)), Some(0.05));
+        assert_eq!(first_generated_token_s(Some(0.1), Some(0.3)), Some(0.1));
+        assert_eq!(first_generated_token_s(Some(0.1), None), Some(0.1));
+        assert_eq!(first_generated_token_s(None, Some(0.05)), None);
     }
 }

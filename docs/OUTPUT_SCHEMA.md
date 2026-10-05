@@ -114,6 +114,45 @@ Additional v3 fields:
   `usage_missing` without a tokenizer count to fill the gap; otherwise a rate
 - `completion_tokens_source` - `"server_usage"` or `"tokenizer_fallback"` when
   the rate is present
+- `prompt_tokens_total` (integer tokens, #193) - sum of prompt tokens over
+  measured successes. Server `usage` wins; `tokenized_prompt_tokens` fills
+  only `usage_missing` rows (same accounting as
+  `completion_tokens_per_second`). Always present; `null` when no measured
+  success reports tokens (ASR, imagegen) or any `usage_missing` row lacks a
+  tokenizer count.
+- `completion_tokens_total` (integer tokens, #193) - the completion token sum
+  behind `completion_tokens_per_second`. Always present; `null` exactly when
+  `completion_tokens_per_second` is `null`.
+- `input_tokens_per_second` (tokens/second, #193) -
+  `prompt_tokens_total / window_seconds`. Always present; `null` when
+  `prompt_tokens_total` is `null`.
+- `total_tokens_per_second` (tokens/second, #193) -
+  `(prompt_tokens_total + completion_tokens_total) / window_seconds`. Always
+  present; `null` unless both totals are non-null.
+- `prefill_tps_per_user` (tokens/second, #193) - type-7 distribution of
+  per-request `isl_tokens / min(first_reasoning_s, ttft_s)` over measured
+  successes with ISL > 0 and TTFT > 0 (ISL per the `isl_tokens` rule below).
+  The denominator is the first generated token of any kind (`ttft_s` alone
+  when no reasoning delta streamed), so a thinking model's reasoning phase
+  does not count as prefill. Always present; `n=0` without streaming TTFT.
+  TTFT includes connect time and server queueing; the rate does not use
+  `prefill_s`, so it stays comparable to AIPerf.
+  Rows with first-byte approximated TTFT (`ttft_source = first_byte_approx`)
+  are excluded.
+- `time_to_second_token_s` (seconds, #193) - type-7 distribution of
+  per-request `ttft_s + itl_s[0]` over measured successes with a TTFT and at
+  least one ITL sample (two content chunks). ITL is measured between SSE
+  content chunks, so with multi-token chunks this is time to second chunk.
+  Visible content chunks only; reasoning deltas do not count. Always present;
+  `n=0` when no request qualifies.
+- `user_tps` (tokens/second, #193) - type-7 distribution of per-request
+  `completion_tokens / latency_s` over measured successes with server usage
+  `completion_tokens > 0` (no tokenizer fallback). Same definition as the
+  `user_tps=` SLO and strategic `SweepPoint.user_tps`. Counts reasoning plus
+  visible tokens, since server `completion_tokens` includes reasoning (#192).
+  Always present; `n=0` when no request qualifies.
+- These seven fields are top level only; `per_endpoint` entries do not carry
+  them.
 - `ttft_approx_count` - measured successes whose TTFT came from HTTP
   time-to-first-byte via `--infer-ttft-from-first-byte` (omitted when zero)
 - `ttft_warning` - optional human-readable note when TTFT was approximated or
@@ -232,6 +271,33 @@ HTTP phase trace fields (additive, #194), same definitions and null rules as
 `chunks_received` (`DistSummary`, `n=0` when none), plus `connections_reused`
 (integer) and `connection_reuse_rate` (fraction), both `null` when no measured
 success carries `connection_reused`.
+
+Token totals, rates, and per-user latency fields (additive, #193). Server
+`usage` only (no tokenizer fallback); formulas in [METRICS.md](METRICS.md).
+`user_tps` already existed and is unchanged.
+
+- `prompt_tokens_total` (integer tokens) - sum of `input_tokens` over
+  measured successes that report usage (`input_tokens > 0` or
+  `output_tokens > 0`). `null` when no success reports input tokens. Rerank
+  sums `usage.total_tokens` (all input).
+- `completion_tokens_total` (integer tokens) - sum of `output_tokens` over the
+  same rows. `null` when no success reports output tokens, and always `null`
+  for `--kind embeddings` and `--kind rerank` stages (no generated output).
+  The pre-existing `completion_tokens_per_second` is unchanged and reads
+  `0.0` (not `null`) for those stages, so it can be `0.0` while this total is
+  `null`.
+- `input_tokens_per_second` (tokens/second) - `prompt_tokens_total` divided by
+  the stage window; `null` when that total is `null`.
+- `total_tokens_per_second` (tokens/second) -
+  `(prompt_tokens_total + completion_tokens_total)` divided by the stage
+  window; `null` unless both totals are non-null.
+- `prefill_tps_per_user` (tokens/second) - `DistSummary` of per-request
+  `input_tokens / min(first_reasoning_s, ttft_s)` (first generated token of
+  any kind) over successes with `input_tokens > 0` and
+  `ttft_s > 0`, excluding first-byte approximated TTFT
+  (`ttft_source = first_byte_approx`); `n=0` without streaming TTFT.
+- `time_to_second_token_s` (seconds) - `DistSummary` of per-request
+  `ttft_s + itl_s[0]` over successes with a TTFT and at least one ITL sample.
 
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
 trailing optional columns, in this order: `first_reasoning_s` (seconds),
