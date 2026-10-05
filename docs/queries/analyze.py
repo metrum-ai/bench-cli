@@ -12,8 +12,8 @@ docs/telemetry/ANALYSIS.md derived metrics (gpu_util_mean, sm_active_p50,
 sm_occupancy_p50, tensor_active_p50, hollow_util_mean, kv_cache_util_mean,
 preemptions_delta). Engine `_seconds` histograms get p50/p95 from bucket
 deltas; a rank in the first bucket or in +Inf is reported as a bound
-(`<=0.3`, `>60`), never interpolated from 0. Pass the strategic stdout JSON to resolve the knee and report
-kv_cache_util_at_knee. --json prints the same result as one JSON object.
+(`<=0.3`, `>60`), never interpolated from 0. Pass the strategic stdout JSON
+to resolve the knee and report kv_cache_util_at_knee. --json prints the same result as one JSON object.
 
 Utilization-style outputs are ratios in [0, 1]; percent gauges are scaled.
 """

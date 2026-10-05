@@ -446,8 +446,8 @@ to a modality run's single `measure` stage as well.
   reason, `below_first_bucket` or `above_last_bucket`, #231). Given the
   strategic stdout JSON it also reports `kv_cache_util_at_knee`. A metric
   with no source series in the window, or a counter that resets, is null,
-  never 0. These are computed
-  offline from the NDJSON and are not fields of any bench-cli record.
+  never 0. These are computed offline from the NDJSON and are not fields of
+  any bench-cli record.
   Definitions, source series, and DCGM fallbacks:
   [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md#derived-metrics-per-measured-stage) (#199).
 - **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-

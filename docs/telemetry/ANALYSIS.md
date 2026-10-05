@@ -194,6 +194,11 @@ are null when `p50` is an interpolated number. The text table prints
 with finer buckets near the observed values or read the client-side
 percentiles. Do not use the bound as the percentile.
 
+When every observation of a stage falls in a single interior bucket, p50
+and p95 only locate that bucket: the interpolated values (for example live
+TTFT p50/p95 = 0.03/0.039 s) say the latency is in the 0.02 to 0.04 s
+bucket, not where inside it. Read them as that range.
+
 The result is bounded by bucket resolution. It is the server's view of
 latency; do not mix it with client-side type 7 percentiles.
 
