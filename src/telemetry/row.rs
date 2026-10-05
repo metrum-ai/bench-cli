@@ -106,6 +106,9 @@ pub struct RequestRow {
     pub success: bool,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Server-reported reasoning tokens; omitted when not reported (#192).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
     pub latency_s: f64,
     pub queue_delay_s: f64,
     pub service_latency_s: f64,

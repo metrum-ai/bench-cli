@@ -544,6 +544,17 @@ fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
     }
 }
 
+/// Server-reported reasoning tokens for chat responses; `None` when absent
+/// and for embeddings or rerank, which do not generate (#192).
+fn response_reasoning_tokens(kind: EndpointKind, response: &Value) -> Option<u64> {
+    match kind {
+        EndpointKind::Chat => response
+            .get("usage")
+            .and_then(metrum_ai_bench::usage::reasoning_tokens),
+        EndpointKind::Embeddings | EndpointKind::Rerank => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_one_request(
     args: &Args,
@@ -628,9 +639,16 @@ fn spawn_one_request(
                 stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());
                 first_reasoning_s = stream.first_reasoning.map(|d| d.as_secs_f64());
                 itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
+                let mut usage = json!({
+                    "prompt_tokens": stream.prompt_tokens,
+                    "completion_tokens": stream.completion_tokens
+                });
+                if let Some(reasoning) = stream.reasoning_tokens {
+                    usage["completion_tokens_details"] = json!({"reasoning_tokens": reasoning});
+                }
                 Ok(json!({
                     "choices": [{"message": {"role": "assistant", "content": stream.completion_text}}],
-                    "usage": {"prompt_tokens": stream.prompt_tokens, "completion_tokens": stream.completion_tokens}
+                    "usage": usage
                 }))
             } else {
                 Ok(response.json::<Value>().await?)
@@ -639,7 +657,7 @@ fn spawn_one_request(
         .await;
         let completed = Instant::now();
         let t_done_ns = run_epoch.elapsed_ns();
-        let (success, valid, input_tokens, output_tokens, error) = match result {
+        let (success, valid, input_tokens, output_tokens, reasoning_tokens, error) = match result {
             Ok(value) => {
                 let (input_tokens, output_tokens) = response_tokens(kind, &value);
                 (
@@ -647,10 +665,11 @@ fn spawn_one_request(
                     validator.as_ref().map(|check| check.validate(&value)),
                     input_tokens,
                     output_tokens,
+                    response_reasoning_tokens(kind, &value),
                     None,
                 )
             }
-            Err(error) => (false, None, 0, 0, Some(error.to_string())),
+            Err(error) => (false, None, 0, 0, None, Some(error.to_string())),
         };
         // InFlightSlot leaves the gauge before freeing the permit (#189).
         drop(request_slot);
@@ -687,6 +706,7 @@ fn spawn_one_request(
             error: error.clone(),
             warmup,
             first_reasoning_s,
+            reasoning_tokens,
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -704,6 +724,7 @@ fn spawn_one_request(
                         success,
                         input_tokens,
                         output_tokens,
+                        reasoning_tokens: record.reasoning_tokens,
                         latency_s: record.latency_s,
                         queue_delay_s: record.queue_delay_s,
                         service_latency_s: record.service_latency_s,

@@ -121,7 +121,50 @@ Workload section. This page focuses on measured fields.
   minus send, reported separately from TTFT. Summary and strategic sweep
   point `first_reasoning_s` (seconds) is the type-7 distribution over
   measured successes that recorded it; `n=0` for non-thinking models. The
-  strategic request CSV carries it per request as the last column.
+  strategic request CSV carries it per request.
+- **Reasoning tokens** (`reasoning_tokens`, tokens): the server-reported
+  count of reasoning tokens inside `completion_tokens` (#192). Read from the
+  `usage` object (final usage chunk when streaming, response `usage`
+  otherwise). Accepted locations, in order:
+  `usage.completion_tokens_details.reasoning_tokens` (OpenAI Chat
+  Completions, SGLang, DeepSeek-style servers),
+  `usage.output_tokens_details.reasoning_tokens` (OpenAI Responses API shape),
+  then flat `usage.reasoning_tokens`. The first non-zero value wins; `0` is
+  recorded only when every reported location is `0`, so a placeholder
+  `completion_tokens_details.reasoning_tokens: 0` cannot hide a real count
+  elsewhere. Absent, `null`, negative, or non-integer values mean "not
+  reported" (`null`), never `0`. There is no tokenizer
+  fallback, so servers that do not report the field give `null` even when
+  they stream reasoning deltas.
+- **vLLM** (the default LLM and VLM engine, see [SERVING.md](SERVING.md))
+  reports `usage.completion_tokens_details.reasoning_tokens` on chat
+  completions, streaming and non-streaming, from v0.28.0
+  ([vllm#45802](https://github.com/vllm-project/vllm/pull/45802)), and only
+  when the server starts with `--reasoning-parser`
+  ([reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/)).
+  Without a reasoning parser, or on vLLM before v0.28.0,
+  `completion_tokens_details` is `null`, so Bench records `reasoning_tokens:
+  null` and the summary shows `n=0`. That means "not reported", not "no
+  reasoning". With a parser but a non-thinking model, vLLM reports `0`, which
+  Bench records as `0`. Intermediate stream chunks can carry a placeholder
+  `0`; the final usage chunk carries the count.
+- **Visible completion tokens** (`visible_completion_tokens`, tokens):
+  `completion_tokens - reasoning_tokens`. `null` when reasoning is not
+  reported, or when `reasoning_tokens > completion_tokens` (inconsistent
+  payload).
+- Summary `reasoning_tokens` / `visible_completion_tokens` are type-7
+  distributions over measured successes whose row carries the value;
+  `reasoning_tokens_total` / `visible_completion_tokens_total` are their sums
+  and are `null` when `n=0`. Strategic sweep points carry `reasoning_tokens`,
+  `reasoning_tokens_total`, `visible_completion_tokens`
+  (`output_tokens - reasoning_tokens`), and `visible_completion_tokens_total`
+  for chat stages; embeddings and rerank
+  never report reasoning.
+- `completion_tokens`, OSL, `completion_tokens_per_second`, TPOT,
+  `user_tps`, decode tok/s, and cost per million output tokens keep counting
+  reasoning tokens as output, because they use the server's
+  `completion_tokens` unchanged. `visible_completion_tokens` is the split for
+  readers who need answer-only token counts.
 
 Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 [REASONING_MODELS.md](REASONING_MODELS.md).
@@ -166,5 +209,5 @@ full distributions are emitted independently per endpoint.
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
 values written as `summary.v3`. There is no separate nearest-rank console
 estimator. The console prints First byte, Queue delay, First reasoning,
-ISL tokens (source), and OSL tokens (source) lines only when that
-distribution has `n > 0`.
+ISL tokens (source), OSL tokens (source), Reasoning tokens (with the total),
+and Visible completion tokens lines only when that distribution has `n > 0`.

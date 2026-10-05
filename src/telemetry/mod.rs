@@ -65,6 +65,7 @@ mod tests {
                 success: true,
                 input_tokens: 10,
                 output_tokens: 20,
+                reasoning_tokens: None,
                 latency_s: 0.003,
                 queue_delay_s: 0.0,
                 service_latency_s: 0.003,
@@ -103,6 +104,23 @@ mod tests {
         let third: serde_json::Value = serde_json::from_str(lines[2]).expect("json");
         assert_eq!(third["kind"], "summary");
         assert_eq!(third["partial"], false);
+    }
+
+    #[test]
+    fn request_row_reasoning_tokens_is_optional_and_additive() {
+        let mut row: RequestRow = serde_json::from_value(json!({
+            "run_id": "run-1", "seq": 1, "stage": 1.0, "warmup": false,
+            "t_sched_ns": 0, "t_sent_ns": 1, "t_done_ns": 2, "success": true,
+            "input_tokens": 3, "output_tokens": 9, "latency_s": 0.1,
+            "queue_delay_s": 0.0, "service_latency_s": 0.1
+        }))
+        .expect("pre-#192 row without reasoning_tokens deserializes");
+        assert_eq!(row.reasoning_tokens, None);
+        let omitted = serde_json::to_value(&row).expect("json");
+        assert!(omitted.get("reasoning_tokens").is_none());
+        row.reasoning_tokens = Some(6);
+        let present = serde_json::to_value(&row).expect("json");
+        assert_eq!(present["reasoning_tokens"], 6);
     }
 
     #[tokio::test]

@@ -100,6 +100,85 @@ func TestVLLMIgnoreEOSIncludeUsageReasoning(t *testing.T) {
 	}
 }
 
+// finalUsage returns the last usage object in an SSE body.
+func finalUsage(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var found map[string]any
+	for _, line := range strings.Split(raw, "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok || data == "[DONE]" {
+			continue
+		}
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if u, ok := chunk["usage"].(map[string]any); ok {
+			found = u
+		}
+	}
+	if found == nil {
+		t.Fatal("no usage chunk")
+	}
+	return found
+}
+
+func TestReasoningTokensStreamUsage(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) {
+		c.ReasoningTokens = 3
+	}))
+	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi"}],"max_tokens":4,"stream":true,"stream_options":{"include_usage":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	raw := rec.Body.String()
+	if n := strings.Count(raw, `"reasoning_content":"think"`); n != 3 {
+		t.Fatalf("reasoning chunks = %d, want 3", n)
+	}
+	u := finalUsage(t, raw)
+	if got := int(u["completion_tokens"].(float64)); got != 7 {
+		t.Fatalf("completion_tokens = %d, want 4 visible + 3 reasoning", got)
+	}
+	details := u["completion_tokens_details"].(map[string]any)
+	if got := int(details["reasoning_tokens"].(float64)); got != 3 {
+		t.Fatalf("reasoning_tokens = %d, want 3", got)
+	}
+}
+
+func TestReasoningTokensNonStreamUsage(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) {
+		c.ReasoningTokens = 5
+	}))
+	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi"}],"max_tokens":4,"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	u := resp["usage"].(map[string]any)
+	if got := int(u["completion_tokens"].(float64)); got != 9 {
+		t.Fatalf("completion_tokens = %d, want 9", got)
+	}
+	if got := int(u["completion_tokens_details"].(map[string]any)["reasoning_tokens"].(float64)); got != 5 {
+		t.Fatalf("reasoning_tokens = %d, want 5", got)
+	}
+}
+
+func TestDefaultUsageHasNoCompletionTokensDetails(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) {
+		c.Reasoning = true
+	}))
+	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi"}],"max_tokens":2,"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "completion_tokens_details") {
+		t.Fatal("default usage must not carry completion_tokens_details")
+	}
+}
+
 func TestSGLangUnknownFieldsOK(t *testing.T) {
 	h := server.New(testCfg(func(c *config.Config) {
 		c.Compat = config.CompatSGLang

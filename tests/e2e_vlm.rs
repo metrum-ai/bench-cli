@@ -169,6 +169,28 @@ fn vlm_non_streaming_reports_no_ttft() {
     }
 }
 
+/// #192: VLM reads server-reported reasoning tokens from the usage payload,
+/// streaming and non-streaming, and derives visible completion tokens.
+#[test]
+fn vlm_reasoning_tokens_match_dummy_usage() {
+    let Some(dummy) = spawn_dummy(&["-reasoning-tokens", "4", "-chunk-interval", "2ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    for extra in [&["--streaming"][..], &[][..]] {
+        let fixture = fixture();
+        run_vlm(&fixture, &dummy.url("/v1/chat/completions"), 2, extra);
+        for record in request_records(&fixture.data_log) {
+            assert_eq!(record["reasoning_tokens"], 4, "{extra:?}");
+            assert_eq!(record["completion_tokens"], 24, "{extra:?}");
+            assert_eq!(record["visible_completion_tokens"], 20, "{extra:?}");
+        }
+        let summary = summary_record(&fixture.data_log).expect("summary");
+        assert_eq!(summary["reasoning_tokens_total"], 8, "{extra:?}");
+        assert_eq!(summary["visible_completion_tokens_total"], 40, "{extra:?}");
+    }
+}
+
 /// By default the original image bytes are sent; `--reencode-jpeg` opts in to
 /// re-encoding. The payload size difference makes the choice observable.
 #[test]
