@@ -39,7 +39,7 @@ MODEL="${MODEL:-${DEFAULT_MODEL}}"
 DOCKER_ENV=()
 case "${ASR_STACK:-vllm}" in
   vllm)
-    IMAGE="${IMAGE:-vllm/vllm-openai:v0.30.0}"
+    DEFAULT_IMAGE=vllm/vllm-openai:v0.30.0
     ENTRYPOINT_CMD=()
     SERVE_ARGS=(--max-model-len 448)
     SOURCES=(
@@ -51,7 +51,7 @@ case "${ASR_STACK:-vllm}" in
     SUT_NOTES="vLLM 0.30.0 speech-to-text, whisper-large-v3-turbo, --max-model-len 448 (Whisper decoder positions) per vLLM speech-to-text docs and examples. vLLM-Omni is the intended ASR stack but --omni disables /v1/audio/transcriptions in vllm-omni v0.30.0 (vllm-omni#5722); researched 2026-10-02"
     ;;
   omni)
-    IMAGE="${IMAGE:-vllm/vllm-omni:v0.30.0}"
+    DEFAULT_IMAGE=vllm/vllm-omni:v0.30.0
     ENTRYPOINT_CMD=(vllm serve)
     SERVE_ARGS=(--omni --max-model-len 448 --port 8000)
     SOURCES=(
@@ -64,6 +64,7 @@ case "${ASR_STACK:-vllm}" in
     ;;
   *) echo "error: ASR_STACK must be vllm or omni" >&2; exit 2 ;;
 esac
+IMAGE="${IMAGE:-${DEFAULT_IMAGE}}"
 # shellcheck source=scripts/live/serve/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 serve_main "$@"

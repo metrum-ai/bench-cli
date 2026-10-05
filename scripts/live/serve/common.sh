@@ -3,10 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Metrum AI Bench CLI: shared launcher logic for scripts/live/serve/*.sh.
-# Each launcher sets MODALITY, IMAGE, DEFAULT_MODEL, MODEL, SERVE_ARGS
+# Each launcher sets MODALITY, DEFAULT_IMAGE, IMAGE, DEFAULT_MODEL, MODEL,
+# SERVE_ARGS
 # (array), optional DOCKER_ENV (array) and ENTRYPOINT_CMD (array, for images
 # without a default entrypoint), SOURCES (array of URLs), and SUT_NOTES, then
-# calls serve_main. SUT_NOTES and SOURCES describe DEFAULT_MODEL only.
+# calls serve_main. SUT_NOTES and SOURCES describe DEFAULT_MODEL on
+# DEFAULT_IMAGE with the default SERVE_ARGS only.
 #
 # Environment:
 #   PORT         host port (default 8000)
@@ -18,10 +20,14 @@
 #                (default live-results/serve-<modality>)
 #   READY_TIMEOUT_S  seconds to wait for /v1/models (default 1800)
 #   SERVE_ARGS_OVERRIDE / SOURCES_OVERRIDE / SUT_NOTES_OVERRIDE  replace the
-#                launcher's flags, source URLs, and SUT notes (with MODEL=...).
-#                When MODEL differs from DEFAULT_MODEL, SUT_NOTES_OVERRIDE is
-#                required: start and sut exit with an error naming it, because
-#                the launcher notes were researched for DEFAULT_MODEL only.
+#                launcher's flags, source URLs, and SUT notes (with MODEL=...
+#                and IMAGE=...). The launcher notes and sources were researched
+#                for DEFAULT_MODEL on DEFAULT_IMAGE with the default SERVE_ARGS
+#                only, so start and sut exit with an error naming each missing
+#                variable when: MODEL differs from DEFAULT_MODEL, IMAGE from
+#                DEFAULT_IMAGE, or SERVE_ARGS_OVERRIDE from the default flags
+#                (SUT_NOTES_OVERRIDE required), and when any of the three is
+#                overridden (SOURCES_OVERRIDE required). See serve_check_overrides.
 #   QUANTIZATION SUT model.quantization (use "none" for null). When unset it
 #                comes from --quantization/-q in SERVE_ARGS, then from a
 #                quantizer token in the MODEL name (for example -FP8 is fp8,
@@ -140,16 +146,33 @@ serve_quantization() {
   return 0
 }
 
-# Fails when MODEL overrides DEFAULT_MODEL without SUT_NOTES_OVERRIDE, so a
-# SUT never carries notes researched for a different model.
-serve_check_model_notes() {
-  [[ -z "${DEFAULT_MODEL:-}" || "${MODEL}" == "${DEFAULT_MODEL}" ]] && return 0
-  if [[ -z "${SUT_NOTES_OVERRIDE:-}" ]]; then
-    serve_die "MODEL=${MODEL} overrides the ${MODALITY} launcher default ${DEFAULT_MODEL}; set SUT_NOTES_OVERRIDE to the researched flags and sources for ${MODEL} (the launcher notes describe ${DEFAULT_MODEL} only)"
+# Fails when MODEL, IMAGE, or SERVE_ARGS_OVERRIDE departs from the launcher
+# default without the matching SUT overrides, so a SUT never carries notes or
+# sources researched for a different model, engine version, or flag set.
+# $1 is the default SERVE_ARGS joined with spaces (captured before the
+# override). SUT_NOTES_OVERRIDE is required for each change; SOURCES_OVERRIDE
+# is required for any of them. An override equal to the default is not one.
+serve_check_overrides() {
+  local default_args="$1" changed=() missing=() joined
+  if [[ -n "${DEFAULT_MODEL:-}" && "${MODEL}" != "${DEFAULT_MODEL}" ]]; then
+    changed+=("MODEL=${MODEL} overrides the default ${DEFAULT_MODEL}")
   fi
-  if [[ -z "${SOURCES_OVERRIDE:-}" ]]; then
-    echo "warning: MODEL=${MODEL} without SOURCES_OVERRIDE; extra.launcher_sources still lists the ${DEFAULT_MODEL} sources" >&2
+  if [[ -n "${DEFAULT_IMAGE:-}" && "${IMAGE}" != "${DEFAULT_IMAGE}" ]]; then
+    changed+=("IMAGE=${IMAGE} overrides the default ${DEFAULT_IMAGE}")
   fi
+  if [[ -n "${SERVE_ARGS_OVERRIDE:-}" ]]; then
+    joined="${SERVE_ARGS[*]-}"
+    [[ "${joined}" != "${default_args}" ]] && changed+=("SERVE_ARGS_OVERRIDE='${joined}' overrides the default '${default_args}'")
+  fi
+  (( ${#changed[@]} == 0 )) && return 0
+  [[ -z "${SUT_NOTES_OVERRIDE:-}" ]] && missing+=(SUT_NOTES_OVERRIDE)
+  [[ -z "${SOURCES_OVERRIDE:-}" ]] && missing+=(SOURCES_OVERRIDE)
+  (( ${#missing[@]} == 0 )) && return 0
+  local what why
+  what="$(printf '%s; ' "${changed[@]}")"
+  why="${missing[0]}"
+  (( ${#missing[@]} > 1 )) && why="${missing[0]} and ${missing[1]}"
+  serve_die "${MODALITY} launcher: ${what}set ${why} to the researched notes and source URLs for this configuration (the launcher notes and sources describe ${DEFAULT_MODEL:-the default model} on ${DEFAULT_IMAGE:-the default image} with the default flags only)"
 }
 
 serve_write_sut() {
@@ -195,13 +218,13 @@ serve_write_sut() {
 }
 
 serve_main() {
-  local sub="${1:-start}"
+  local sub="${1:-start}" default_args="${SERVE_ARGS[*]-}"
   # Campaign overrides (space-separated; use --flag=value forms for values
   # that contain spaces). Sources and notes for the override go in the SUT.
   if [[ -n "${SERVE_ARGS_OVERRIDE:-}" ]]; then read -r -a SERVE_ARGS <<<"${SERVE_ARGS_OVERRIDE}"; fi
   if [[ -n "${SOURCES_OVERRIDE:-}" ]]; then read -r -a SOURCES <<<"${SOURCES_OVERRIDE}"; fi
   if [[ -n "${SUT_NOTES_OVERRIDE:-}" ]]; then SUT_NOTES="${SUT_NOTES_OVERRIDE}"; fi
-  case "${sub}" in start|sut) serve_check_model_notes ;; esac
+  case "${sub}" in start|sut) serve_check_overrides "${default_args}" ;; esac
   local name="metrum-live-${MODALITY}"
   local out="${SERVE_OUT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/live-results/serve-${MODALITY}}"
   local docker_cmd
