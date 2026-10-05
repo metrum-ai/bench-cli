@@ -1201,9 +1201,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 infer_ttft,
             )
             .await;
-            drop(permit);
+            // Gauge before permit so the next request cannot read cap+1 (#189).
             drop(endpoint_lease);
-            drop(inflight_guard);
+            metrum_ai_bench::concurrency::release_slot(inflight_guard, permit);
 
             let tokenizer = match metrum_ai_bench::tokenizer::LocalTokenizer::from_file(
                 tokenizer_path.as_deref(),
