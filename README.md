@@ -421,7 +421,8 @@ distributions.
 | RTFx (ASR) | Audio seconds / client request seconds |
 
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
-[output schema](docs/OUTPUT_SCHEMA.md), [CLI reference](docs/CLI.md),
+[output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
+[CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),

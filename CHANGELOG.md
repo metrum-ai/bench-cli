@@ -60,8 +60,6 @@
   measured requests is above 0.9 (`--max-ttft-ratio`) and exits 3, because a
   single-chunk mock (such as `metrum-ai-bench-cli-mock-server`) collapses
   TTFT into E2E and makes every streaming field meaningless.
-
-### Added
 - `summary.v3` (additive) summarizes per-request fields that were recorded
   but not aggregated: `first_byte_s`, `queue_delay_s`, `first_reasoning_s`,
   `isl_tokens`, and `osl_tokens` as type-7 `DistSummary` blocks, plus optional
@@ -230,6 +228,20 @@
   `dropped_telemetry_rows`. Omitted otherwise. Strategic sweep points do not
   gain it; strategic stdout already reports `ndjson` and
   `dropped_telemetry_rows` per run (#196).
+- `docs/DATA_POINTS.md`: published data-point counts per release (#202),
+  generated from the serde schemas by `tests/data_points.rs` and
+  `scripts/render_data_points.sh`. It lists `summary.v3` quantities,
+  distributions, blocks, and value slots, the 10-number distribution width,
+  `request.v3` numeric fields, strategic sweep-point quantities, and
+  `telemetry.v1` `request` row fields, with every optional field and the
+  condition that fires it (streaming, reasoning, open loop, SLO, price,
+  ISL/OSL targets, tokenizer, `--ndjson`). Telemetry series are selected by YAML `include`
+  and get no fixed count. A real llm run against dummy-model-server checks
+  that the fired fields equal the documented set (plain run: 47 summary
+  quantities and 21 per-request fields, as in the `scripts/parity/` harness).
+  CI fails when the file is stale; the release workflow checks it and
+  prepends it to the GitHub release notes
+  (`scripts/release_notes_data_points.sh`). No schema change.
 
 ### Changed
 - VLM, ASR, and imagegen now record `connect_s` and the HTTP phase trace
