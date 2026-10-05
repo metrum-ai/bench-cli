@@ -486,19 +486,20 @@ pub fn summarize_stage_with_options(
     }
 }
 
-/// Minimum number of measured sweep stages before a knee is reported. With
-/// fewer stages Kneedle has at most two interior candidates, so a 3-stage
-/// sweep would always return its middle stage.
+/// Minimum number of measured sweep stages (stages with a p95) before a knee
+/// is reported: both endpoints plus at least 3 interior candidates. With
+/// fewer, Kneedle has at most two interior candidates, so a 3-stage sweep
+/// would always return its middle stage.
 pub const KNEE_MIN_POINTS: usize = 5;
 
 /// Why [`detect_knee_with_reason`] reported no knee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KneeReason {
-    /// Fewer than [`KNEE_MIN_POINTS`] stages.
+    /// Fewer than [`KNEE_MIN_POINTS`] measured stages (stages with a p95).
     InsufficientPoints,
-    /// A stage needed for the curve (an endpoint, or every interior stage)
-    /// has no p95 latency (for example, no successes).
+    /// The first or last stage has no p95 latency (for example, no
+    /// successes), so the curve has no endpoints.
     MissingLatency,
     /// Throughput or p95 latency does not change between the first and last
     /// stage, so the curve cannot be normalized.
@@ -513,7 +514,7 @@ pub struct KneeDetection {
     pub index: Option<usize>,
     /// Set exactly when `index` is `None`.
     pub reason: Option<KneeReason>,
-    /// Number of sweep stages considered.
+    /// Number of measured sweep stages (stages with a p95).
     pub points: usize,
     /// Always [`KNEE_MIN_POINTS`].
     pub min_points: usize,
@@ -534,10 +535,12 @@ impl KneeDetection {
         let reason = self.reason?;
         Some(match reason {
             KneeReason::InsufficientPoints => format!(
-                "no knee: {} sweep stage(s), knee detection needs at least {}",
+                "no knee: {} measured sweep stage(s) (stages with a p95), knee detection needs at least {}",
                 self.points, self.min_points
             ),
-            KneeReason::MissingLatency => "no knee: a sweep stage has no p95 latency".to_string(),
+            KneeReason::MissingLatency => {
+                "no knee: the first or last sweep stage has no p95 latency".to_string()
+            }
             KneeReason::FlatCurve => {
                 "no knee: throughput or p95 latency is flat across the sweep".to_string()
             }
@@ -548,7 +551,8 @@ impl KneeDetection {
 /// Finds the maximum distance from the endpoint chord after normalizing the
 /// throughput/latency curve. This is the standard deterministic Kneedle
 /// construction and is robust to units and uneven sweep spacing. Returns no
-/// knee below [`KNEE_MIN_POINTS`] stages; see [`detect_knee_with_reason`].
+/// knee below [`KNEE_MIN_POINTS`] measured stages (stages with a p95); see
+/// [`detect_knee_with_reason`].
 pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
     detect_knee_with_reason(points).index
 }
@@ -556,19 +560,23 @@ pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
 /// [`detect_knee`] plus the machine-readable reason when there is no knee.
 pub fn detect_knee_with_reason(points: &[SweepPoint]) -> KneeDetection {
     let count = points.len();
-    if count < KNEE_MIN_POINTS {
-        return KneeDetection::none(KneeReason::InsufficientPoints, count);
+    // Interior stages without a p95 are skipped below, so the minimum counts
+    // measured stages only: otherwise gaps could leave one candidate, which
+    // would always be returned.
+    let measured = points.iter().filter(|point| point.p95_s.is_some()).count();
+    if measured < KNEE_MIN_POINTS {
+        return KneeDetection::none(KneeReason::InsufficientPoints, measured);
     }
     let (Some(first), Some(last)) = (points.first(), points.last()) else {
-        return KneeDetection::none(KneeReason::InsufficientPoints, count);
+        return KneeDetection::none(KneeReason::InsufficientPoints, measured);
     };
     let (Some(y_min), Some(y_max)) = (first.p95_s, last.p95_s) else {
-        return KneeDetection::none(KneeReason::MissingLatency, count);
+        return KneeDetection::none(KneeReason::MissingLatency, measured);
     };
     let x_min = first.throughput;
     let x_max = last.throughput;
     if (x_max - x_min).abs() <= f64::EPSILON || (y_max - y_min).abs() <= f64::EPSILON {
-        return KneeDetection::none(KneeReason::FlatCurve, count);
+        return KneeDetection::none(KneeReason::FlatCurve, measured);
     }
     let index = points
         .iter()
@@ -587,10 +595,10 @@ pub fn detect_knee_with_reason(points: &[SweepPoint]) -> KneeDetection {
         Some(_) => KneeDetection {
             index,
             reason: None,
-            points: count,
+            points: measured,
             min_points: KNEE_MIN_POINTS,
         },
-        None => KneeDetection::none(KneeReason::MissingLatency, count),
+        None => KneeDetection::none(KneeReason::MissingLatency, measured),
     }
 }
 
@@ -1319,34 +1327,60 @@ mod tests {
             detect_knee_with_reason(&flat).reason,
             Some(KneeReason::FlatCurve)
         );
-        let mut missing =
-            knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
-        missing[4].p95_s = None;
-        assert_eq!(
-            detect_knee_with_reason(&missing).reason,
-            Some(KneeReason::MissingLatency)
-        );
+        // Five measured stages but no last-stage p95: no curve endpoint.
+        let mut missing = knee_points(&[
+            (1.0, 1.0),
+            (2.0, 1.1),
+            (3.0, 1.2),
+            (4.0, 2.0),
+            (5.0, 4.0),
+            (6.0, 6.0),
+        ]);
+        missing[5].p95_s = None;
+        let detection = detect_knee_with_reason(&missing);
+        assert_eq!(detection.reason, Some(KneeReason::MissingLatency));
+        assert_eq!(detection.points, 5);
+        // Only 4 measured stages: too few, whichever stage lost its p95.
+        let mut short = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        short[4].p95_s = None;
+        let detection = detect_knee_with_reason(&short);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 4);
         let mut interior =
             knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
         for point in &mut interior[1..4] {
             point.p95_s = None;
         }
-        assert_eq!(
-            detect_knee_with_reason(&interior).reason,
-            Some(KneeReason::MissingLatency)
-        );
-        // A single interior gap is skipped; the remaining stages still decide.
+        let detection = detect_knee_with_reason(&interior);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 2);
+        // A single interior gap is skipped when 5 measured stages remain.
         let mut gap = knee_points(&[
             (1.0, 1.0),
             (2.0, 1.02),
             (3.0, 1.04),
+            (3.5, 1.05),
             (4.0, 1.06),
             (4.2, 4.0),
         ]);
         gap[1].p95_s = None;
         let detection = detect_knee_with_reason(&gap);
-        assert_eq!(detection.index, Some(3));
+        assert_eq!(detection.index, Some(4));
         assert_eq!(detection.reason, None);
+        assert_eq!(detection.points, 5);
+    }
+
+    #[test]
+    fn knee_five_stages_with_two_interior_gaps_reports_insufficient_points() {
+        // Pre-fix: one interior candidate left, always returned as the knee.
+        let mut points = knee_points(&[(1.0, 1.0), (2.0, 1.1), (3.0, 1.2), (4.0, 2.0), (5.0, 4.0)]);
+        points[1].p95_s = None;
+        points[3].p95_s = None;
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.index, None);
+        assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
+        assert_eq!(detection.points, 3);
+        assert_eq!(detection.min_points, KNEE_MIN_POINTS);
     }
 
     #[test]
@@ -1422,7 +1456,7 @@ mod tests {
         assert!(html.contains("p95 latency (s)"));
         assert!(html.contains("text-anchor"));
         assert!(html.contains("<polyline"));
-        assert!(html.contains("no knee: 1 sweep stage(s), knee detection needs at least 5."));
+        assert!(html.contains("no knee: 1 measured sweep stage(s) (stages with a p95), knee detection needs at least 5."));
     }
 
     #[test]

@@ -1217,8 +1217,11 @@ async fn main() -> Result<()> {
     let duration_s = started.elapsed().as_secs_f64();
     let server = aggregate_server(&server_samples.lock().await);
     let knee = detect_knee_with_reason(&points);
-    if let Some(note) = knee.note() {
-        eprintln!("note: {note}");
+    // Single-stage and sessions runs never expect a knee; keep them quiet.
+    if points.len() >= 2 {
+        if let Some(note) = knee.note() {
+            eprintln!("note: {note}");
+        }
     }
     export_csv(&args.csv, &all_records)?;
     export_html(

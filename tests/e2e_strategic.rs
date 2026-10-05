@@ -83,7 +83,7 @@ fn strategic_sweep_exports_all_formats() {
         })
     );
     assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("note: no knee: 3 sweep stage(s), knee detection needs at least 5"));
+        .contains("note: no knee: 3 measured sweep stage(s) (stages with a p95), knee detection needs at least 5"));
     assert!(fs::read_to_string(&html)
         .expect("HTML report")
         .contains("Throughput (req/s)"));

@@ -218,14 +218,16 @@ knee result in two fields (`knee_detection` is additive, #190):
   - `index` (integer or null) - index of the knee in `points`; null when there
     is no knee.
   - `reason` (string or null) - why there is no knee: `insufficient_points`
-    (fewer than `min_points` stages), `missing_latency` (a stage needed for the
-    curve has no p95, for example no successes), or `flat_curve` (throughput or
+    (fewer than `min_points` measured stages, that is stages with a p95),
+    `missing_latency` (the first or last stage has no p95, for example no
+    successes), or `flat_curve` (throughput or
     p95 does not change from the first to the last stage). Null exactly when
     `index` is set.
-  - `points` (integer) - number of sweep stages considered.
-  - `min_points` (integer) - minimum stages for a knee, always 5.
+  - `points` (integer) - number of measured stages (stages with a p95).
+  - `min_points` (integer) - minimum measured stages for a knee, always 5
+    (both endpoints plus 3 interior candidates).
 
-Sweeps with fewer than 5 measured stages report `"knee": null`. 3- and
+Sweeps with fewer than 5 measured stages (stages with a p95) report `"knee": null`. 3- and
 4-stage sweeps from earlier versions reported an interior stage as the knee;
 treat those knees as unreliable. See
 [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
