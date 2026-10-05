@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Metrum AI Bench CLI live smoke: serve Qwen/Qwen3-8B on vLLM 0.30.0, 1 GPU.
-# Usage: scripts/live/serve/llm.sh [start|stop|print|logs]
+# Usage: scripts/live/serve/llm.sh [start|stop|print|logs|sut]
 #
 # Flags researched 2026-10-02:
 # - vLLM 0.30.0 released 2026-09-22; image vllm/vllm-openai:v0.30.0.
@@ -15,10 +15,16 @@
 #   https://huggingface.co/Qwen/Qwen3-8B
 # Thinking stays on server-side; local_smoke.sh disables it per request with
 # chat_template_kwargs so the 64-token chat-short profile reaches visible text.
+# These flags, SOURCES, and SUT_NOTES describe DEFAULT_MODEL only. With
+# MODEL=<other>, set SUT_NOTES_OVERRIDE (and usually SERVE_ARGS_OVERRIDE and
+# SOURCES_OVERRIDE) from a fresh search; start exits otherwise.
+# model.quantization comes from QUANTIZATION, --quantization, or the MODEL
+# name (for example Qwen/Qwen3-8B-FP8 records fp8); see common.sh.
 set -euo pipefail
 MODALITY=llm
 IMAGE="${IMAGE:-vllm/vllm-openai:v0.30.0}"
-MODEL="${MODEL:-Qwen/Qwen3-8B}"
+DEFAULT_MODEL=Qwen/Qwen3-8B
+MODEL="${MODEL:-${DEFAULT_MODEL}}"
 SERVE_ARGS=(--reasoning-parser qwen3 --max-model-len 32768)
 DOCKER_ENV=()
 ENTRYPOINT_CMD=()
