@@ -89,7 +89,8 @@
   `completion_tokens`, OSL, completion tok/s, and cost per million output
   tokens still count reasoning as output (#192).
 - Strategic sweep points gain `reasoning_tokens`, `reasoning_tokens_total`,
-  and `visible_completion_tokens` (chat stages only); the request CSV gains a
+  `visible_completion_tokens`, and `visible_completion_tokens_total` (chat
+  stages only); the request CSV gains a
   trailing optional `reasoning_tokens` column after `first_reasoning_s`
   (older CSVs still load); `telemetry.v1` request rows gain an optional
   `reasoning_tokens`, omitted when not reported (#192).

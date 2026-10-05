@@ -196,6 +196,8 @@ embeddings` and `--kind rerank` never report reasoning):
 - `visible_completion_tokens` (tokens) - `DistSummary` of
   `output_tokens - reasoning_tokens` over the same rows, skipping rows where
   reasoning exceeds `output_tokens`.
+- `visible_completion_tokens_total` (integer tokens) - sum of those samples;
+  `null` when `visible_completion_tokens` has `n=0`.
 
 The strategic request CSV (`--csv`, one `BenchRecord` row per request) gains
 trailing optional columns, in this order: `first_reasoning_s` (seconds), then

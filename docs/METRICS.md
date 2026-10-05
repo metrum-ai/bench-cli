@@ -142,8 +142,9 @@ Workload section. This page focuses on measured fields.
   distributions over measured successes whose row carries the value;
   `reasoning_tokens_total` / `visible_completion_tokens_total` are their sums
   and are `null` when `n=0`. Strategic sweep points carry `reasoning_tokens`,
-  `reasoning_tokens_total`, and `visible_completion_tokens`
-  (`output_tokens - reasoning_tokens`) for chat stages; embeddings and rerank
+  `reasoning_tokens_total`, `visible_completion_tokens`
+  (`output_tokens - reasoning_tokens`), and `visible_completion_tokens_total`
+  for chat stages; embeddings and rerank
   never report reasoning.
 - `completion_tokens`, OSL, `completion_tokens_per_second`, TPOT,
   `user_tps`, decode tok/s, and cost per million output tokens keep counting

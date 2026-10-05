@@ -203,6 +203,8 @@ pub struct SweepPoint {
     pub reasoning_tokens_total: Option<u64>,
     /// Per-request `output_tokens - reasoning_tokens` for reasoning-reporting rows.
     pub visible_completion_tokens: crate::stats::DistSummary,
+    /// Sum of `visible_completion_tokens`; null when `n = 0`.
+    pub visible_completion_tokens_total: Option<u64>,
     /// Count of measured successes whose TTFT came from HTTP time-to-first-byte.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub ttft_approx_count: usize,
@@ -407,12 +409,11 @@ pub fn summarize_stage_with_options(
         .iter()
         .filter_map(|record| record.reasoning_tokens)
         .collect();
-    let visible: Vec<f64> = success_rows
+    let visible: Vec<u64> = success_rows
         .iter()
         .filter_map(|record| {
             crate::usage::visible_completion_tokens(record.output_tokens, record.reasoning_tokens)
         })
-        .map(|tokens| tokens as f64)
         .collect();
     let ttft_approx_count = success_rows
         .iter()
@@ -473,8 +474,11 @@ pub fn summarize_stage_with_options(
         reasoning_tokens: crate::stats::DistSummary::from_values(
             &reasoning.iter().map(|&v| v as f64).collect::<Vec<_>>(),
         ),
-        reasoning_tokens_total: (!reasoning.is_empty()).then(|| reasoning.iter().sum()),
-        visible_completion_tokens: crate::stats::DistSummary::from_values(&visible),
+        reasoning_tokens_total: crate::summary::total(&reasoning),
+        visible_completion_tokens: crate::stats::DistSummary::from_values(
+            &visible.iter().map(|&v| v as f64).collect::<Vec<_>>(),
+        ),
+        visible_completion_tokens_total: crate::summary::total(&visible),
         ttft_approx_count,
         ttft_warning: None,
         isl_osl,
@@ -1164,6 +1168,7 @@ mod tests {
                     osl_tokens: crate::stats::DistSummary::from_values(&[]),
                     reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
                     reasoning_tokens_total: None,
+                    visible_completion_tokens_total: None,
                     visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
                     ttft_approx_count: 0,
                     ttft_warning: None,
@@ -1211,6 +1216,7 @@ mod tests {
             osl_tokens: crate::stats::DistSummary::from_values(&[]),
             reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
             reasoning_tokens_total: None,
+            visible_completion_tokens_total: None,
             visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
             ttft_approx_count: 0,
             ttft_warning: None,
@@ -1448,6 +1454,7 @@ mod tests {
         assert_eq!(point.reasoning_tokens_total, Some(12));
         assert_eq!(point.visible_completion_tokens.n, 2);
         assert_eq!(point.visible_completion_tokens.avg, Some(14.0));
+        assert_eq!(point.visible_completion_tokens_total, Some(28));
         // The new column round-trips through CSV; absence stays empty, not 0.
         let mut writer = csv::Writer::from_writer(Vec::new());
         for written in [&row, &unreported] {

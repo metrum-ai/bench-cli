@@ -286,8 +286,9 @@ fn as_f64(values: &[u64]) -> Vec<f64> {
 }
 
 /// Sum of reported counts; `None` (not `0`) when nothing was reported.
-fn total(values: &[u64]) -> Option<u64> {
-    (!values.is_empty()).then(|| values.iter().sum())
+/// Saturates so a bogus server count cannot overflow the total.
+pub(crate) fn total(values: &[u64]) -> Option<u64> {
+    (!values.is_empty()).then(|| values.iter().fold(0u64, |acc, &v| acc.saturating_add(v)))
 }
 
 struct TokenSamples {
@@ -1299,6 +1300,12 @@ mod tests {
             summary.per_endpoint["other"].visible_completion_tokens.avg,
             Some(20.0)
         );
+    }
+
+    #[test]
+    fn reasoning_total_saturates_instead_of_overflowing() {
+        assert_eq!(total(&[u64::MAX, 5]), Some(u64::MAX));
+        assert_eq!(total(&[]), None);
     }
 
     #[test]
