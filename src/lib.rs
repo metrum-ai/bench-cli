@@ -11,6 +11,7 @@ pub mod endpoints;
 pub mod environment;
 pub mod error;
 pub mod http_client;
+pub mod imagegen;
 pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
@@ -25,10 +26,12 @@ pub mod stats;
 pub mod strategic;
 pub mod summary;
 pub mod sut;
+pub mod sweep_modality;
 pub mod telemetry;
 pub mod time_weighted;
 pub mod tokenizer;
 pub mod usage;
+pub mod vlm;
 
 pub mod banner {
     use std::io::IsTerminal;

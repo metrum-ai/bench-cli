@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::too_many_arguments)]
 
-use base64::Engine;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use image::GenericImageView;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{self, File, OpenOptions};
@@ -995,7 +992,7 @@ async fn run_logical_request(
     let request_id = format!("{:06}", request_index + 1);
     let seed = resolve_seed(args, &prompt, request_index);
     let size = prompt.size.clone().unwrap_or_else(|| args.size.clone());
-    let prompt_sha256 = hex_sha256(prompt.prompt.as_bytes());
+    let prompt_sha256 = metrum_ai_bench::imagegen::hex_sha256(prompt.prompt.as_bytes());
     let started_at = Utc::now();
     let mut attempts = Vec::new();
     let mut last_error_type = None;
@@ -1200,48 +1197,33 @@ async fn make_image_request(
 ) -> Result<(u16, Vec<ImageArtifact>, usize, u32, Duration, Duration), (String, Option<u16>, String)>
 {
     let url = generations_url(&endpoint.url);
-    let mut body = Map::new();
-    body.insert("model".to_string(), json!(args.model));
-    body.insert("prompt".to_string(), json!(prompt.prompt));
-    body.insert("n".to_string(), json!(args.n));
-    body.insert("size".to_string(), json!(size));
-    body.insert(
-        "response_format".to_string(),
-        json!(args.response_format.to_string()),
-    );
-    if let Some(seed) = seed {
-        body.insert("seed".to_string(), json!(seed));
+    let extra =
+        load_extra_body(args).map_err(|e| ("schema_error".to_string(), None, e.to_string()))?;
+    let response_format = args.response_format.to_string();
+    let body = metrum_ai_bench::imagegen::GenerationBody {
+        model: &args.model,
+        prompt: &prompt.prompt,
+        n: args.n,
+        size,
+        response_format: &response_format,
+        seed,
+        negative_prompt: prompt
+            .negative_prompt
+            .as_deref()
+            .or(args.negative_prompt.as_deref()),
+        num_inference_steps: args.num_inference_steps,
+        guidance_scale: args.guidance_scale,
+        true_cfg_scale: args.true_cfg_scale,
+        extra: extra.as_ref(),
     }
-    if let Some(v) = prompt
-        .negative_prompt
-        .as_ref()
-        .or(args.negative_prompt.as_ref())
-    {
-        body.insert("negative_prompt".to_string(), json!(v));
-    }
-    if let Some(v) = args.num_inference_steps {
-        body.insert("num_inference_steps".to_string(), json!(v));
-    }
-    if let Some(v) = args.guidance_scale {
-        body.insert("guidance_scale".to_string(), json!(v));
-    }
-    if let Some(v) = args.true_cfg_scale {
-        body.insert("true_cfg_scale".to_string(), json!(v));
-    }
-    if let Some(extra) =
-        load_extra_body(args).map_err(|e| ("schema_error".to_string(), None, e.to_string()))?
-    {
-        for (k, v) in extra {
-            body.insert(k, v);
-        }
-    }
+    .to_json();
 
     let send_start = Instant::now();
     let resp = metrum_ai_bench::connect_timing::send(
         client
             .post(&url)
             .bearer_auth(&endpoint.api_key)
-            .json(&Value::Object(body))
+            .json(&body)
             .timeout(Duration::from_secs(args.request_timeout)),
     )
     .await
@@ -1298,40 +1280,19 @@ async fn make_image_request(
         )
         .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
     }
-    let data = parsed
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            (
-                "schema_error".to_string(),
-                Some(status),
-                "response missing data array".to_string(),
-            )
-        })?;
+    let data = metrum_ai_bench::imagegen::response_items(&parsed)
+        .map_err(|(kind, message)| (kind.to_string(), Some(status), message))?;
     let mut artifacts = Vec::new();
     if args.response_format == ResponseFormat::B64Json {
+        // Decode and write one image at a time, as before the move into the
+        // library: earlier images reach disk even if a later one fails.
         for (idx, item) in data.iter().enumerate() {
-            let b64 = item
-                .get("b64_json")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    (
-                        "schema_error".to_string(),
-                        Some(status),
-                        "image item missing b64_json".to_string(),
-                    )
-                })?;
-            let image_bytes = base64::engine::general_purpose::STANDARD
-                .decode(b64)
-                .map_err(|e| ("decode_error".to_string(), Some(status), e.to_string()))?;
-            let img = image::load_from_memory(&image_bytes)
-                .map_err(|e| ("decode_error".to_string(), Some(status), e.to_string()))?;
-            let (width, height) = img.dimensions();
-            let sha = hex_sha256(&image_bytes);
+            let image = metrum_ai_bench::imagegen::decode_image_item(item)
+                .map_err(|(kind, message)| (kind.to_string(), Some(status), message))?;
             let path =
                 Path::new(&args.artifact_dir).join(format!("{:06}-{}.png", request_index + 1, idx));
             if !args.no_save_images {
-                fs::write(&path, &image_bytes)
+                fs::write(&path, &image.bytes)
                     .map_err(|e| ("artifact_error".to_string(), Some(status), e.to_string()))?;
             }
             artifacts.push(ImageArtifact {
@@ -1341,11 +1302,11 @@ async fn make_image_request(
                 } else {
                     path.to_string_lossy().to_string()
                 },
-                sha256: sha,
-                bytes: image_bytes.len(),
+                sha256: image.sha256,
+                bytes: image.bytes.len(),
                 mime_type: "image/png".to_string(),
-                width,
-                height,
+                width: image.width,
+                height: image.height,
             });
         }
     }
@@ -1386,11 +1347,6 @@ async fn write_error(
     let mut file = error_log.lock().await;
     writeln!(file, "{}", line)?;
     Ok(())
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn parse_size(size: &str) -> Option<(u32, u32)> {

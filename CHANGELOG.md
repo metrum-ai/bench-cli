@@ -206,6 +206,44 @@
   advances by a fixed step per scrape, so J/token from these fixtures is not
   meaningful (see `docs/telemetry/ANALYSIS.md`). No Rust or schema change
   (#199).
+- Strategic `--kind vlm`, `--kind asr`, and `--kind imagegen` sweeps (#197,
+  additive, schema stays `metrum-ai-bench-cli.strategic.v1`). Requests use
+  the modality binaries' builders, now in the library (`src/vlm.rs`,
+  `src/asr.rs`, `src/imagegen.rs`); modality binary output is unchanged. New
+  flags: `--temperature` (chat and vlm; omitted from chat bodies when unset,
+  vlm default 0.1), `--image` (repeatable), `--image-detail`,
+  `--max-image-dimension`, `--audio-samples`, `--ground-truth`,
+  `--asr-response-format`, `--language`, `--normalizer`, `--image-size`,
+  `--images-per-request`, and `--image-response-format`. `--extra-body-json`
+  now also works for vlm and imagegen, and `--ignore-eos` / `--min-tokens`
+  for vlm. ASR audio and VLM images load before the first request, so file
+  I/O is not in latency. For asr and imagegen the sweep clock stops when the
+  body is read; parsing, WER/CER and image decode/hash run after it, on the
+  blocking pool and after the concurrency slot is released, and an
+  undecodable `b64_json` image fails the request. That matches the imagegen
+  binary; the ASR binary's clock also covers form building and response
+  parsing (see `docs/METRICS.md`). These flag combinations are rejected:
+  `--streaming`, `--max-tokens`, `--shared-prefix` and
+  `--infer-ttft-from-first-byte` for asr and imagegen; `--shared-prefix`, and
+  `--image` together with `--prompts`, for vlm; `--image` and
+  `--max-image-dimension` outside vlm; `--audio-samples` and `--ground-truth`
+  outside asr; `--prompts` for asr; `--json-schema`, `--tools` and
+  `--sessions` for modality kinds. Other kind flags are ignored where they do
+  not apply. The imagegen binary still writes each image as it decodes.
+- Strategic sweep points gain `modality_metrics` (key to type-7
+  distribution over measured successes, same names as modality `request.v3`:
+  VLM `image_count`, `image_bytes`; ASR `wer`, `cer`, `rtfx_client`,
+  `audio_duration_s`; imagegen `images_requested`, `images_returned`; `n=0`
+  when unmeasured, omitted for chat, embeddings, and rerank) and, for
+  imagegen only, `image_digests` `{images, distinct}` (0/0 for `url`
+  responses). Strategic `config` gains a `modality` object for modality kinds
+  and `temperature` when `--temperature` is set. `osl_tokens` and
+  `completion_tokens_total` come from usage for vlm and asr and are
+  `n=0` / `null` for imagegen; `ttft_s` is `n=0` for asr and imagegen. The
+  telemetry NDJSON `run` row `config.kind` can be `vlm`, `asr`, or
+  `imagegen`, and its `config` carries the same `modality` and `temperature`
+  keys. Request CSV columns and chat, embeddings, and rerank output are
+  unchanged (#197).
 - Run telemetry for every binary (#196, additive, no schema version bump).
   `metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, and `-imagegen` gain the
   strategic telemetry flags `--ndjson PATH`, `--telemetry YAML`,
@@ -269,6 +307,10 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- `metrum-ai-bench-cli-asr` no longer records `rtfx_client: 0` for a sample
+  whose `duration` is 0; like `audio_duration_s`, it is omitted (no usable
+  duration, no real-time factor). Strategic `--kind asr` follows the same
+  rule (`asr::rtfx`, #197).
 - The telemetry NDJSON `run` row is now always written before any
   `telemetry` sample; scrapers could previously emit samples ahead of it.
   The NDJSON `summary` row now waits (up to 2 s) for queued rows to drain

@@ -820,104 +820,242 @@ Usage: metrum-ai-bench-cli-strategic [OPTIONS]
 Options:
       --version-only
           Print version information and exit
+
       --url <URL>
           
+
       --api-key <API_KEY>
-          [env: OPENAI_API_KEY=] [default: ""]
+          [env: OPENAI_API_KEY=]
+          [default: ""]
+
       --model <MODEL>
           
+
       --kind <KIND>
-          [default: chat] [possible values: chat, embeddings, rerank]
+          Possible values:
+          - chat
+          - embeddings
+          - rerank
+          - vlm:        Chat completions with `image_url` parts (metrum-ai-bench-cli-vlm bodies)
+          - asr:        `/v1/audio/transcriptions` multipart uploads (metrum-ai-bench-cli-asr forms)
+          - imagegen:   `/v1/images/generations` (metrum-ai-bench-cli-imagegen bodies)
+          
+          [default: chat]
+
       --streaming
-          Stream chat responses to measure TTFT; embeddings and rerank remain JSON
+          Stream chat and vlm responses to measure TTFT; embeddings, rerank, asr and imagegen remain unary
+
       --infer-ttft-from-first-byte
           When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+
       --requests-per-stage <REQUESTS_PER_STAGE>
           [default: 100]
+
       --sweep <SWEEP>
           [default: 1,2,4,8]
+
       --sweep-by <SWEEP_BY>
-          [default: concurrency] [possible values: concurrency, rate]
+          [default: concurrency]
+          [possible values: concurrency, rate]
+
       --max-in-flight <MAX_IN_FLIGHT>
-          Maximum outstanding requests during a rate sweep [default: 256]
+          Maximum outstanding requests during a rate sweep
+          
+          [default: 256]
+
       --prompt <PROMPT>
-          Single prompt string (ignored when --prompts or --sessions is set) [default: Hello]
+          Single prompt string (ignored when --prompts or --sessions is set)
+          
+          [default: Hello]
+
       --prompts <PROMPTS>
-          JSONL prompt file or http(s) URL (objects with "prompt"); cycles across requests
+          JSONL prompt file (objects with "prompt"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests
+
       --max-tokens <MAX_TOKENS>
-          Max completion tokens for chat bodies; required when --prompts is set, recommended for all chat sweeps
+          Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps
+
       --ignore-eos
           Send ignore_eos=true in chat request bodies (engine extension; for fixed-length throughput studies)
+
       --min-tokens <N>
           Send min_tokens=N in chat request bodies (engine extension; must be <= --max-tokens)
+
       --extra-body-json <JSON>
-          Merge extra JSON object fields into chat request bodies
+          Merge extra JSON object fields into chat, vlm or imagegen request bodies
+
+      --temperature <TEMPERATURE>
+          Sampling temperature for chat and vlm bodies; omitted from chat bodies when unset, vlm defaults to 0.1 as metrum-ai-bench-cli-vlm
+
+      --image <PATH_OR_URL>
+          --kind vlm: image attached to --prompt (repeatable; local path, http(s) or data: URL); ignored with --prompts
+
+      --image-detail <IMAGE_DETAIL>
+          --kind vlm: image_url detail
+          
+          [default: low]
+          [possible values: low, high]
+
+      --max-image-dimension <PIXELS>
+          --kind vlm: downscale images whose longer side exceeds PIXELS (re-encoded as PNG)
+
+      --audio-samples <PATH>
+          --kind asr: audio samples JSONL (id, path or url, format, optional duration), as metrum-ai-bench-cli-asr --input
+
+      --ground-truth <PATH>
+          --kind asr: reference transcripts JSONL (id, transcript) for stage WER/CER
+
+      --asr-response-format <ASR_RESPONSE_FORMAT>
+          --kind asr: transcription response_format
+          
+          [default: verbose_json]
+          [possible values: verbose_json, json, text, srt, vtt]
+
+      --language <LANGUAGE>
+          --kind asr: language form field (empty to omit)
+          
+          [default: en]
+
+      --normalizer <NORMALIZER>
+          --kind asr: text normalization applied to both sides of WER/CER
+
+          Possible values:
+          - whisper-english: Whisper basic normalization plus English contraction and numeral folding
+          - whisper-basic:   Case, punctuation and bracketed-filler folding only
+          - none:            Compare raw strings
+          
+          [default: whisper-english]
+
+      --image-size <IMAGE_SIZE>
+          --kind imagegen: image size
+          
+          [default: 1024x1024]
+
+      --images-per-request <IMAGES_PER_REQUEST>
+          --kind imagegen: images per request (n)
+          
+          [default: 1]
+
+      --image-response-format <IMAGE_RESPONSE_FORMAT>
+          --kind imagegen: response_format; b64_json images are decoded and digested
+          
+          [default: b64_json]
+          [possible values: b64_json, url]
+
       --warmup-requests <WARMUP_REQUESTS>
-          Per-stage warmup requests excluded from measured aggregates (cold-start control) [default: 0]
+          Per-stage warmup requests excluded from measured aggregates (cold-start control)
+          
+          [default: 0]
+
       --seed <SEED>
-          RNG seed used when --shuffle-prompts is set [default: 0]
+          RNG seed used when --shuffle-prompts is set
+          
+          [default: 0]
+
       --shuffle-prompts
           Shuffle --prompts with --seed before cycling
+
       --sessions <SESSIONS>
           
+
       --prefix-control <PREFIX_CONTROL>
-          [default: shared] [possible values: shared, unique, none]
+          [default: shared]
+          [possible values: shared, unique, none]
+
       --shared-prefix <SHARED_PREFIX>
           
+
       --json-schema <JSON_SCHEMA>
           
+
       --tools <TOOLS>
           
+
       --metrics-url <METRICS_URL>
           
+
       --metrics-interval-ms <METRICS_INTERVAL_MS>
           [default: 250]
+
       --ndjson <PATH>
           Tagged NDJSON run log (run/stage/request/telemetry/summary rows)
+
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources)
+
       --require-telemetry
           Abort after N consecutive scrape failures on any source (default N=3)
+
       --require-telemetry-failures <REQUIRE_TELEMETRY_FAILURES>
-          Consecutive scrape failures before --require-telemetry aborts [default: 3]
+          Consecutive scrape failures before --require-telemetry aborts
+          
+          [default: 3]
+
       --html <HTML>
           [default: metrum-ai-bench-cli-report.html]
+
       --csv <CSV>
           [default: metrum-ai-bench-cli-requests.csv]
+
       --mlperf-dir <MLPERF_DIR>
           
+
       --mlperf-scenario <MLPERF_SCENARIO>
-          [default: server] [possible values: server, offline]
+          [default: server]
+          [possible values: server, offline]
+
       --otlp-endpoint <OTLP_ENDPOINT>
           
+
       --otlp-service-name <OTLP_SERVICE_NAME>
           [default: metrum-ai-bench-cli]
+
       --timeout-seconds <TIMEOUT_SECONDS>
           [default: 300]
+
       --slo <METRIC=VALUE>
           Repeatable goodput threshold: e2e=, ttft=, tpot= (streaming, seconds); user_tps= (tok/s per in-flight user)
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for stage cost_per_million_output_tokens
+
       --isl-target <TOKENS>
           Expected input tokens for runtime ISL validation (overrides mix-report)
+
       --osl-target <TOKENS>
           Expected output tokens for runtime OSL validation (overrides mix-report)
+
       --isl-tolerance <ISL_TOLERANCE>
-          Allowed absolute deviation from --isl-target (tokens) [default: 0]
+          Allowed absolute deviation from --isl-target (tokens)
+          
+          [default: 0]
+
       --osl-tolerance <OSL_TOLERANCE>
-          Allowed absolute deviation from --osl-target (tokens) [default: 0]
+          Allowed absolute deviation from --osl-target (tokens)
+          
+          [default: 0]
+
       --prompt-mix-report <PATH>
           Prompt-library mix report JSON; fills ISL/OSL targets when CLI targets are unset
+
       --fail-on-osl-mismatch
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance
+
       --sut <PATH>
           Operator-declared SUT block (JSON/YAML) embedded in sweep summary and HTML
+
       --require-sut
-          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+          Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
+          
+          [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
       --redact-hostname
-          Reserved for parity with modality binaries (strategic stamps SUT only) [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+          Reserved for parity with modality binaries (strategic stamps SUT only)
+          
+          [env: METRUM_AI_BENCH_REDACT_HOSTNAME=]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
   -V, --version
           Print version
 ```
