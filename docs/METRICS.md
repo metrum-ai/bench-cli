@@ -75,25 +75,34 @@ Workload section. This page focuses on measured fields.
   `completion_tokens` only (no tokenizer fallback), so `usage_missing` rows
   contribute no sample. This is the same per-request value the `user_tps=` SLO
   tests, and the modality counterpart of strategic `SweepPoint.user_tps`.
+  For thinking models the numerator counts reasoning plus visible tokens,
+  because server `completion_tokens` includes reasoning tokens (#192).
 - **Prefill tok/s per user (`prefill_tps_per_user`)**: per-request
   client-observed prefill rate, tokens/second (#193):
-  `prefill_tps_per_user = isl_tokens / ttft_s`. On modality summaries the ISL
+  `prefill_tps_per_user = isl_tokens / first_token_s`, where
+  `first_token_s = min(first_reasoning_s, ttft_s)` (just `ttft_s` when the
+  request streamed no reasoning delta). The denominator is the first generated
+  token of any kind: for a thinking model, visible `ttft_s` also covers the
+  whole reasoning phase, which would understate prefill speed. On modality summaries the ISL
   follows the `isl_tokens` rule (server usage `prompt_tokens` wins, tokenizer
   count fills `usage_missing` rows, rows with no token accounting are
-  skipped); strategic uses `input_tokens / ttft_s` from server usage only.
-  Only rows with ISL > 0 and TTFT > 0 contribute, so the distribution is
+  skipped); strategic uses `input_tokens` from server usage only, with the
+  same denominator. Only rows with ISL > 0 and TTFT > 0 contribute, so the distribution is
   `n=0` without streaming TTFT. TTFT includes connect time, TLS, and queueing
   on the server, so this is a lower bound on engine prefill speed, not a
   server prefill trace. Rows whose TTFT was approximated from first byte
   (`--infer-ttft-from-first-byte`, `ttft_source = first_byte_approx`) are
   excluded: headers can arrive before prefill ends, which would inflate the
-  rate.
+  rate. It deliberately does not use `prefill_s` (`ttft_s - connect_s`): a
+  TTFT-based rate stays comparable to AIPerf's per-user prefill throughput,
+  and `prefill_s` exists only where connect timing is installed.
 - **Time to second token (`time_to_second_token_s`)**: per-request
   `time_to_second_token_s = ttft_s + itl_s[0]`, seconds (#193). Only rows with
   a TTFT and at least one ITL sample (two visible content chunks) contribute.
   ITL is measured between SSE content chunks, so when a server packs several
   tokens into one chunk this is the time to the second chunk, not strictly
-  the second token. Same definition on modality summaries and strategic sweep
+  the second token. It counts visible content chunks only: reasoning deltas
+  never enter `ttft_s` or `itl_s`. Same definition on modality summaries and strategic sweep
   points.
 - **Request throughput**: measured successes divided by the explicit window.
   The window is first measured send → last measured successful completion,

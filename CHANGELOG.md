@@ -122,16 +122,17 @@
   `input_tokens_per_second = prompt_tokens_total / window_seconds`, and
   `total_tokens_per_second = (prompt_tokens_total + completion_tokens_total) / window_seconds`
   (`null` unless both totals exist). It also gains type-7 distributions
-  `prefill_tps_per_user` (`isl_tokens / ttft_s`, rows with ISL > 0 and
-  visible-token TTFT > 0; first-byte approximations excluded; TTFT includes
-  connect and queueing), `time_to_second_token_s`
+  `prefill_tps_per_user` (`isl_tokens / min(first_reasoning_s, ttft_s)`, the
+  first generated token of any kind so a thinking model's reasoning phase is
+  not counted as prefill; rows with ISL > 0 and visible-token TTFT > 0;
+  first-byte approximations excluded; TTFT includes connect and queueing), `time_to_second_token_s`
   (`ttft_s + itl_s[0]`, time to the second content chunk), and `user_tps`
   (`completion_tokens / latency_s`, the `user_tps=` SLO definition). The
   console prints the new lines when they have values.
 - Strategic sweep points gain `prompt_tokens_total`,
   `completion_tokens_total`, `input_tokens_per_second`,
   `total_tokens_per_second`, `prefill_tps_per_user`
-  (`input_tokens / ttft_s`), and `time_to_second_token_s`, from server usage
+  (`input_tokens / min(first_reasoning_s, ttft_s)`), and `time_to_second_token_s`, from server usage
   only. A total is `null` when no success reported that field, and
   `completion_tokens_total` and `total_tokens_per_second` are `null` for
   embeddings and rerank stages (#193).

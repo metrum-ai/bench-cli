@@ -83,6 +83,15 @@ fn assert_close(actual: &Value, expected: f64, label: &str) {
     );
 }
 
+/// Prefill end per row: the first generated token of any kind (reasoning or
+/// visible), matching `prefill_tps_per_user`.
+fn first_generated_token_s(record: &Value) -> f64 {
+    let ttft = f64_at(record, "ttft_s");
+    record["first_reasoning_s"]
+        .as_f64()
+        .map_or(ttft, |reasoning| reasoning.min(ttft))
+}
+
 /// Recompute totals and rates from request rows and compare to the summary.
 fn assert_matches_rows(data_log: &Path, streaming: bool) {
     let label = if streaming { "streaming" } else { "unary" };
@@ -129,7 +138,7 @@ fn assert_matches_rows(data_log: &Path, streaming: bool) {
     }
     let prefill: Vec<f64> = records
         .iter()
-        .map(|r| r["prompt_tokens"].as_f64().unwrap() / f64_at(r, "ttft_s"))
+        .map(|r| r["prompt_tokens"].as_f64().unwrap() / first_generated_token_s(r))
         .collect();
     assert_eq!(summary["prefill_tps_per_user"]["n"], REQUESTS, "{label}");
     assert_close(
@@ -168,6 +177,47 @@ fn llm_token_totals_and_rates_match_request_rows() {
     let url = dummy.url("/v1/chat/completions");
     assert_matches_rows(&run_llm(&url, dir.path(), true), true);
     assert_matches_rows(&run_llm(&url, dir.path(), false), false);
+}
+
+/// #221 review: a thinking model's prefill rate ends at the first reasoning
+/// token, not at visible TTFT, which would fold reasoning time into prefill.
+#[test]
+fn llm_prefill_rate_ends_at_first_reasoning_token() {
+    let Some(dummy) = spawn_dummy(&["-reasoning", "-latency", "20ms", "-chunk-interval", "10ms"])
+    else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let data_log = run_llm(&dummy.url("/v1/chat/completions"), dir.path(), true);
+    let records = request_records(&data_log);
+    assert_eq!(records.len(), REQUESTS);
+    let summary = summary_record(&data_log).expect("summary");
+    let mut by_reasoning = Vec::new();
+    let mut by_visible = Vec::new();
+    for record in &records {
+        let isl = record["prompt_tokens"].as_f64().expect("prompt_tokens");
+        let reasoning = f64_at(record, "first_reasoning_s");
+        let ttft = f64_at(record, "ttft_s");
+        // Wire check: reasoning streams before the first visible chunk.
+        assert!(
+            reasoning < ttft,
+            "reasoning {reasoning}s not before ttft {ttft}s"
+        );
+        assert_eq!(first_generated_token_s(record), reasoning);
+        by_reasoning.push(isl / reasoning);
+        by_visible.push(isl / ttft);
+    }
+    assert_eq!(summary["prefill_tps_per_user"]["n"], REQUESTS);
+    assert_close(
+        &summary["prefill_tps_per_user"]["avg"],
+        mean(&by_reasoning),
+        "reasoning prefill",
+    );
+    assert!(
+        f64_at(&summary["prefill_tps_per_user"], "avg") > mean(&by_visible),
+        "prefill rate still divides by visible TTFT"
+    );
 }
 
 #[test]

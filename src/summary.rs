@@ -70,7 +70,7 @@ pub struct RunSummary {
     pub queue_delay_s: DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: DistSummary,
-    /// Per-request prefill rate `isl_tokens / ttft_s`; rows with both values
+    /// Per-request prefill rate `isl_tokens / min(first_reasoning_s, ttft_s)`; rows with both values
     /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: DistSummary,
     /// Per-request `ttft_s + itl_s[0]`; streaming rows with at least two content chunks.
@@ -274,9 +274,14 @@ impl RecordedFieldDists {
         let prefill_rates: Vec<f64> = successes
             .iter()
             .filter(|r| !ttft_is_first_byte_approx(r.ttft_source))
-            .filter_map(|r| match (record_isl_tokens(r), r.ttft_s) {
-                (Some(isl), Some(ttft)) if isl > 0 && ttft > 0.0 => Some(isl as f64 / ttft),
-                _ => None,
+            .filter_map(|r| {
+                match (
+                    record_isl_tokens(r),
+                    first_generated_token_s(r.ttft_s, r.first_reasoning_s),
+                ) {
+                    (Some(isl), Some(first)) if isl > 0 && first > 0.0 => Some(isl as f64 / first),
+                    _ => None,
+                }
             })
             .collect();
         let second_token: Vec<f64> = successes
@@ -350,6 +355,17 @@ pub(crate) fn ttft_is_first_byte_approx(source: Option<crate::measurement::TtftS
         source,
         Some(crate::measurement::TtftSource::FirstByteApprox)
     )
+}
+
+/// Prefill end for `prefill_tps_per_user`: the first generated token of any
+/// kind. A thinking model's first reasoning token ends prefill; visible TTFT
+/// would fold the whole reasoning phase into the denominator.
+pub(crate) fn first_generated_token_s(
+    ttft_s: Option<f64>,
+    first_reasoning_s: Option<f64>,
+) -> Option<f64> {
+    let ttft = ttft_s?;
+    Some(first_reasoning_s.map_or(ttft, |reasoning| reasoning.min(ttft)))
 }
 
 /// Prompt tokens for one row with the same rule as `isl_tokens`: server
@@ -1588,5 +1604,22 @@ mod tests {
         assert_eq!(mixed.osl_tokens.avg, Some(10.0));
         assert_eq!(mixed.osl_tokens_source, Some("mixed"));
         assert_eq!(mixed.isl_tokens_source, Some("mixed"));
+    }
+
+    #[test]
+    fn prefill_rate_ends_at_first_reasoning_token() {
+        // Thinking row: reasoning starts at 50 ms, visible content at 400 ms.
+        let mut reasoning = ok(0, 800, 400, 20, &[20; 19]);
+        reasoning.first_reasoning_s = Some(0.050);
+        let plain = ok(1, 800, 100, 20, &[20; 19]);
+        let summary = RunSummary::from_records(&[reasoning, plain], 1.0, false);
+        assert_eq!(summary.prefill_tps_per_user.n, 2);
+        // 18 prompt tokens / 0.050 s and 18 / 0.100 s, not 18 / 0.400 s.
+        assert!((summary.prefill_tps_per_user.max.unwrap() - 360.0).abs() < 1e-9);
+        assert!((summary.prefill_tps_per_user.min.unwrap() - 180.0).abs() < 1e-9);
+        assert_eq!(first_generated_token_s(Some(0.4), Some(0.05)), Some(0.05));
+        assert_eq!(first_generated_token_s(Some(0.1), Some(0.3)), Some(0.1));
+        assert_eq!(first_generated_token_s(Some(0.1), None), Some(0.1));
+        assert_eq!(first_generated_token_s(None, Some(0.05)), None);
     }
 }

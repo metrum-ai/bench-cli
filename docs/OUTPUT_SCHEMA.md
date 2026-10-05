@@ -111,21 +111,27 @@ Additional v3 fields:
   `(prompt_tokens_total + completion_tokens_total) / window_seconds`. Always
   present; `null` unless both totals are non-null.
 - `prefill_tps_per_user` (tokens/second, #193) - type-7 distribution of
-  per-request `isl_tokens / ttft_s` over measured successes with ISL > 0 and
-  TTFT > 0 (ISL per the `isl_tokens` rule below). Always present; `n=0`
-  without streaming TTFT. TTFT includes connect time and server queueing.
+  per-request `isl_tokens / min(first_reasoning_s, ttft_s)` over measured
+  successes with ISL > 0 and TTFT > 0 (ISL per the `isl_tokens` rule below).
+  The denominator is the first generated token of any kind (`ttft_s` alone
+  when no reasoning delta streamed), so a thinking model's reasoning phase
+  does not count as prefill. Always present; `n=0` without streaming TTFT.
+  TTFT includes connect time and server queueing; the rate does not use
+  `prefill_s`, so it stays comparable to AIPerf.
   Rows with first-byte approximated TTFT (`ttft_source = first_byte_approx`)
   are excluded.
 - `time_to_second_token_s` (seconds, #193) - type-7 distribution of
   per-request `ttft_s + itl_s[0]` over measured successes with a TTFT and at
   least one ITL sample (two content chunks). ITL is measured between SSE
   content chunks, so with multi-token chunks this is time to second chunk.
-  Always present; `n=0` when no request qualifies.
+  Visible content chunks only; reasoning deltas do not count. Always present;
+  `n=0` when no request qualifies.
 - `user_tps` (tokens/second, #193) - type-7 distribution of per-request
   `completion_tokens / latency_s` over measured successes with server usage
   `completion_tokens > 0` (no tokenizer fallback). Same definition as the
-  `user_tps=` SLO and strategic `SweepPoint.user_tps`. Always present; `n=0`
-  when no request qualifies.
+  `user_tps=` SLO and strategic `SweepPoint.user_tps`. Counts reasoning plus
+  visible tokens, since server `completion_tokens` includes reasoning (#192).
+  Always present; `n=0` when no request qualifies.
 - These seven fields are top level only; `per_endpoint` entries do not carry
   them.
 - `ttft_approx_count` - measured successes whose TTFT came from HTTP
@@ -252,7 +258,8 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   `(prompt_tokens_total + completion_tokens_total)` divided by the stage
   window; `null` unless both totals are non-null.
 - `prefill_tps_per_user` (tokens/second) - `DistSummary` of per-request
-  `input_tokens / ttft_s` over successes with `input_tokens > 0` and
+  `input_tokens / min(first_reasoning_s, ttft_s)` (first generated token of
+  any kind) over successes with `input_tokens > 0` and
   `ttft_s > 0`, excluding first-byte approximated TTFT
   (`ttft_source = first_byte_approx`); `n=0` without streaming TTFT.
 - `time_to_second_token_s` (seconds) - `DistSummary` of per-request

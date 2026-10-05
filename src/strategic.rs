@@ -185,7 +185,7 @@ pub struct SweepPoint {
     pub input_tokens_per_second: Option<f64>,
     /// `(prompt_tokens_total + completion_tokens_total) / window`; null unless both totals exist.
     pub total_tokens_per_second: Option<f64>,
-    /// Per-request prefill rate `input_tokens / ttft_s` over successes with both
+    /// Per-request prefill rate `input_tokens / min(first_reasoning_s, ttft_s)` over successes with both
     /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: crate::stats::DistSummary,
     /// Per-request `ttft_s + itl_s[0]`; streaming successes with two or more content chunks.
@@ -440,11 +440,13 @@ pub fn summarize_stage_with_options(
     let prefill_rates: Vec<f64> = success_rows
         .iter()
         .filter(|record| !crate::summary::ttft_is_first_byte_approx(record.ttft_source))
-        .filter_map(|record| match record.ttft_s {
-            Some(ttft) if record.input_tokens > 0 && ttft > 0.0 => {
-                Some(record.input_tokens as f64 / ttft)
+        .filter_map(|record| {
+            match crate::summary::first_generated_token_s(record.ttft_s, record.first_reasoning_s) {
+                Some(first) if record.input_tokens > 0 && first > 0.0 => {
+                    Some(record.input_tokens as f64 / first)
+                }
+                _ => None,
             }
-            _ => None,
         })
         .collect();
     let second_token: Vec<f64> = success_rows
@@ -1766,6 +1768,14 @@ mod tests {
         assert_eq!(point.prefill_tps_per_user.n, 2);
         let prefill_mean = (40.0 / 0.1 + 100.0 / 0.2) / 2.0;
         assert!((point.prefill_tps_per_user.avg.unwrap() - prefill_mean).abs() < 1e-9);
+        // A reasoning row ends prefill at its first reasoning token (#221 review).
+        let mut thinking = base.clone();
+        thinking.ttft_s = Some(0.4);
+        thinking.first_reasoning_s = Some(0.05);
+        let slos_default = crate::summary::SloConfig::default();
+        let reasoning_point = summarize_stage(1.0, &[thinking], 1.0, &slos_default, None);
+        assert_eq!(reasoning_point.prefill_tps_per_user.n, 1);
+        assert!((reasoning_point.prefill_tps_per_user.avg.unwrap() - 40.0 / 0.05).abs() < 1e-9);
         assert_eq!(point.time_to_second_token_s.n, 2);
         let ttst_mean = ((0.1 + 0.02) + (0.2 + 0.05)) / 2.0;
         assert!((point.time_to_second_token_s.avg.unwrap() - ttst_mean).abs() < 1e-9);
