@@ -3,7 +3,7 @@
 
 //! Compare two or more strategic sweep summaries or request CSVs.
 
-use crate::strategic::{summarize_stage, BenchRecord, SweepPoint};
+use crate::strategic::{stage_window_seconds, summarize_stage, BenchRecord, SweepPoint};
 use crate::summary::SloConfig;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -158,11 +158,10 @@ fn points_from_csv(path: &Path) -> Result<Vec<ComparePoint>> {
     let mut points = Vec::new();
     for group in by_stage.values() {
         let load = group.first().map(|r| r.stage).unwrap_or(0.0);
-        let measured: Vec<&BenchRecord> = group.iter().filter(|r| !r.warmup).collect();
-        if measured.is_empty() {
+        // Same stage window as the live strategic run (#224).
+        let Some(window) = stage_window_seconds(group) else {
             continue;
-        }
-        let window = stage_window_seconds(&measured);
+        };
         let sweep = summarize_stage(load, group, window, &slos, None);
         points.push(compare_point_from_sweep(&sweep));
     }
@@ -173,20 +172,6 @@ fn points_from_csv(path: &Path) -> Result<Vec<ComparePoint>> {
         );
     }
     Ok(points)
-}
-
-fn stage_window_seconds(records: &[&BenchRecord]) -> f64 {
-    let mut min_ns = u128::MAX;
-    let mut max_end = 0u128;
-    for record in records {
-        min_ns = min_ns.min(record.sent_unix_ns);
-        let end = record.sent_unix_ns + ((record.service_latency_s.max(0.0) * 1e9) as u128);
-        max_end = max_end.max(end);
-    }
-    if max_end <= min_ns {
-        return f64::EPSILON;
-    }
-    (max_end - min_ns) as f64 / 1e9
 }
 
 fn compare_point_from_sweep(point: &SweepPoint) -> ComparePoint {

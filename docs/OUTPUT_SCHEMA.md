@@ -335,7 +335,10 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   `0.0` (not `null`) for those stages, so it can be `0.0` while this total is
   `null`.
 - `input_tokens_per_second` (tokens/second) - `prompt_tokens_total` divided by
-  the stage window; `null` when that total is `null`.
+  the stage window (earliest measured send of any outcome to the latest
+  successful completion, or the latest completion of any outcome when the
+  stage has no success; warmup excluded, #224); `null` when that total is
+  `null`.
 - `total_tokens_per_second` (tokens/second) -
   `(prompt_tokens_total + completion_tokens_total)` divided by the stage
   window; `null` unless both totals are non-null.
@@ -356,8 +359,9 @@ present, with the same `null` rules. Differences from the summary:
 
 - Intervals are `[sent_unix_ns, sent_unix_ns + service_latency_s]`, so
   client queue delay is excluded. The window runs from the first measured
-  send of the stage to the latest successful `sent + service_latency_s`, so
-  it can differ slightly from the stage window behind `throughput`.
+  send of the stage to the latest successful `sent + service_latency_s`,
+  the same stage window behind `throughput` and the stage token rates
+  (#224).
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
   reporting neither are skipped. `--kind embeddings`, `--kind rerank`, and
   `--kind imagegen` stages have no output, so `tokens_in_flight` and

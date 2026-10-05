@@ -49,8 +49,12 @@ self-describing notice as the modality binaries.
 Each load stage is measured independently. `--warmup-requests` are issued and
 fully completed at the start of every stage, then the measurement epoch resets.
 Warmup rows are written to the CSV with `warmup=true` and excluded from stage
-`n`, latency percentiles, throughput, goodput, and knee detection. Measured
-prompt indexing restarts at zero after warmup so the mix is not shifted.
+`n`, latency percentiles, throughput, goodput, and knee detection. Stage
+throughput, goodput, and token rates divide by the stage window: earliest
+measured send (any outcome) to the latest successful completion, or the
+latest completion of any outcome when the stage has no success (#224).
+Measured prompt indexing restarts at zero after warmup so the mix is not
+shifted.
 Prefer a warmup count at least as large as stage concurrency on GPU endpoints
 so cold model-load and CUDA graph capture do not inflate the baseline stage.
 `--warmup-requests 0` is for mock/determinism only.

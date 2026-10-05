@@ -1486,16 +1486,8 @@ async fn run_stage(
             .await?;
     }
 
-    let measured_seconds = {
-        let measured: Vec<_> = records.iter().filter(|r| !r.warmup).collect();
-        if let (Some(first), Some(last)) = (measured.first(), measured.last()) {
-            let start_ns = first.sent_unix_ns;
-            let end_ns = last.sent_unix_ns + ((last.service_latency_s * 1e9) as u128);
-            ((end_ns.saturating_sub(start_ns)) as f64 / 1e9).max(f64::EPSILON)
-        } else {
-            measure_epoch.elapsed().as_secs_f64()
-        }
-    };
+    let measured_seconds = metrum_ai_bench::strategic::stage_window_seconds(&records)
+        .unwrap_or_else(|| measure_epoch.elapsed().as_secs_f64());
     Ok((
         records,
         samples,

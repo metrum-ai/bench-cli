@@ -113,8 +113,9 @@ Workload section. This page focuses on measured fields.
     `window_seconds`) and lasts `window_seconds`, which ends at the latest
     successful completion, so no success is clipped. Strategic uses the same
     rule over the stage rows (first measured send to latest successful
-    `sent + service_latency_s`), which can differ slightly from the stage
-    window behind `throughput`. Intervals are clipped to the window. AIPerf
+    `sent + service_latency_s`), which is the same stage window behind
+    `throughput` and the stage token rates (#224). Intervals are clipped to
+    the window. AIPerf
     ends its window at the final response of any outcome; Bench ends it at
     the last successful completion, like `window_seconds`.
   - **Failures are excluded.** Under errors or timeouts the server was also
@@ -243,7 +244,13 @@ Workload section. This page focuses on measured fields.
   `latency_s`. Wall-clock `started_at` is metadata only and must not be used
   to recompute the window (an NTP step would otherwise inflate it).
   The window excludes warmup and includes drain for requests issued during
-  measurement.
+  measurement. Strategic stages use the same rule over the stage rows (#224):
+  the stage window runs from the earliest measured send of any outcome
+  (`sent_unix_ns`) to the latest successful `sent + service_latency_s`
+  (the latest completion of any outcome when the stage has no success).
+  Stage `throughput`, `goodput`, token rates,
+  `cost_per_million_output_tokens`, the time-weighted blocks, and `compare`
+  all share this window.
 - **Throughput bins**: fixed-width bins over send offsets (open-loop:
   `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
@@ -268,7 +275,8 @@ Workload section. This page focuses on measured fields.
   `null` unless both totals exist. Strategic sweep points carry the same four
   fields per stage from server usage only (no tokenizer fallback), summed over
   successes that report usage (`input_tokens > 0` or `output_tokens > 0`) and
-  divided by the stage window. Strategic `completion_tokens_total` (and so
+  divided by the stage window (first measured send to latest successful
+  completion). Strategic `completion_tokens_total` (and so
   `total_tokens_per_second`) is `null` for stages that generate no output
   (`--kind embeddings`, `--kind rerank`, `--kind imagegen`); rerank `prompt_tokens_total` sums
   `usage.total_tokens` (all input). A strategic total whose field sums to 0

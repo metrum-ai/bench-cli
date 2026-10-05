@@ -354,6 +354,27 @@ fn stage_time_weighted(
     crate::time_weighted::compute(&spans, 0.0, window)
 }
 
+/// Stage window in seconds behind every stage rate (`throughput`, `goodput`,
+/// the token rates): the earliest measured send (any outcome) to the latest
+/// successful completion, the same rule as the time-weighted blocks and
+/// `runner::window_seconds_from_records`. Taking min and max over the rows,
+/// not the first and last spawned, keeps an earlier request that finishes
+/// last inside the window (#224). A stage with no success ends at the latest
+/// completion of any outcome. Warmup rows are ignored. `None` when the stage
+/// has no measured rows.
+pub fn stage_window_seconds(records: &[BenchRecord]) -> Option<f64> {
+    let measured: Vec<&BenchRecord> = records.iter().filter(|r| !r.warmup).collect();
+    let start = measured.iter().map(|r| r.sent_unix_ns).min()?;
+    let end_of = |r: &&BenchRecord| r.sent_unix_ns + (r.service_latency_s.max(0.0) * 1e9) as u128;
+    let end = measured
+        .iter()
+        .filter(|r| r.success)
+        .map(end_of)
+        .max()
+        .or_else(|| measured.iter().map(end_of).max())?;
+    Some((end.saturating_sub(start) as f64 / 1e9).max(f64::EPSILON))
+}
+
 pub fn summarize_stage(
     load: f64,
     records: &[BenchRecord],
@@ -2515,6 +2536,86 @@ true,,64,16,,,,false\n";
                 .pointer("/resourceMetrics/0/scopeMetrics/0/metrics/0/name"),
             Some(&json!("benchmark.requests"))
         );
+    }
+
+    /// #224: the stage window ends at the latest successful completion, not
+    /// at the completion of the last-spawned row. Row 0 is sent first and
+    /// finishes last, so the old rule (first row send to last row end) gave a
+    /// 2 s window and read throughput high.
+    #[test]
+    fn stage_window_ends_at_latest_completion() {
+        let epoch: u128 = 1_790_000_000_000_000_000;
+        let row = |seq, send_s: f64, latency: f64, success: bool, warmup: bool| BenchRecord {
+            seq,
+            stage: 4.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: epoch + (send_s * 1e9) as u128,
+            sent_unix_ns: epoch + (send_s * 1e9) as u128,
+            latency_s: latency,
+            queue_delay_s: 0.0,
+            service_latency_s: latency,
+            first_byte_s: None,
+            connect_s: None,
+            ttft_s: Some(0.1),
+            ttft_source: None,
+            prefill_s: None,
+            decode_s: None,
+            decode_tok_s: None,
+            itl_s: Vec::new(),
+            in_flight_at_send: None,
+            success,
+            valid: None,
+            input_tokens: 10,
+            output_tokens: 20,
+            session_id: None,
+            turn: None,
+            error: None,
+            warmup,
+            first_reasoning_s: None,
+            reasoning_tokens: None,
+            connection_reused: None,
+            dns_s: None,
+            bytes_sent: None,
+            receive_s: None,
+            bytes_received: None,
+            chunks_received: None,
+        };
+        // Spawn order: row 0 (sent 0 s, ends 5 s), row 1 (sent 1 s, ends 2 s).
+        // A failure ending at 9 s and a warmup row ending at 20 s stay out.
+        let rows = [
+            row(0, 0.0, 5.0, true, false),
+            row(1, 1.0, 1.0, true, false),
+            row(2, 0.5, 8.5, false, false),
+            row(9, 0.0, 20.0, true, true),
+        ];
+        let window = stage_window_seconds(&rows).expect("window");
+        assert!((window - 5.0).abs() < 1e-9, "{window}");
+
+        // Every stage rate and the time-weighted blocks share that window.
+        let point = summarize_stage(
+            4.0,
+            &rows,
+            window,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert!((point.throughput - 2.0 / 5.0).abs() < 1e-9);
+        assert!((point.goodput - 2.0 / 5.0).abs() < 1e-9);
+        let tokens = point.completion_tokens_per_second.expect("token rate");
+        assert!((tokens - 40.0 / 5.0).abs() < 1e-9);
+        let avg = point.time_weighted.effective_concurrency.avg.expect("avg");
+        assert!((avg - 6.0 / window).abs() < 1e-9, "{avg}");
+
+        // No success: the window falls back to the latest completion of any
+        // outcome. No measured rows: no window.
+        let failed = [
+            row(0, 0.0, 3.0, false, false),
+            row(1, 1.0, 1.0, false, false),
+        ];
+        let window = stage_window_seconds(&failed).expect("window");
+        assert!((window - 3.0).abs() < 1e-9, "{window}");
+        assert_eq!(stage_window_seconds(&[row(9, 0.0, 1.0, true, true)]), None);
+        assert_eq!(stage_window_seconds(&[]), None);
     }
 
     /// #195: sweep points carry the same time-weighted blocks as `summary.v3`

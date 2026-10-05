@@ -319,6 +319,16 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- The strategic stage window now ends at the latest successful completion
+  instead of the completion of the last-started request (#224). It runs from
+  the earliest measured send (any outcome) to the latest successful
+  completion, or the latest completion of any outcome when the stage has no
+  success; warmup is excluded. Strategic stage `throughput`, `goodput`, token
+  rates, and `cost_per_million_output_tokens` can shift slightly (typically
+  down) versus earlier versions. All stage rates and the #195 time-weighted
+  blocks now share this one window, and `compare` uses the same window, so
+  numbers recomputed from the CSV match the live strategic output. No schema
+  change.
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be
   interpolated from 0, and a rank in `+Inf` used to return the highest finite
