@@ -175,6 +175,10 @@ pub struct TelemetrySession {
     load: Option<f64>,
     warmup: Option<Window>,
     measure: Option<Window>,
+    /// First NDJSON write failure from [`Self::record_request`]. Later
+    /// rows are skipped and [`Self::finish`] reports it, so a dead writer
+    /// never costs the run its `summary.v3`.
+    write_error: Option<anyhow::Error>,
 }
 
 impl TelemetrySession {
@@ -203,6 +207,7 @@ impl TelemetrySession {
             load: None,
             warmup: None,
             measure: None,
+            write_error: None,
         };
         let mut stamps: Vec<TelemetrySourceStamp> = Vec::new();
         let mut scrape_plan = None;
@@ -243,10 +248,13 @@ impl TelemetrySession {
                 options.require_telemetry,
                 options.require_failures,
             );
+            // Only a required source may stop the run; without
+            // --require-telemetry a scraper exit stays a warning.
+            let abort = options.abort.filter(|_| options.require_telemetry);
             session.scrapers = handles
                 .into_iter()
                 .map(|handle| {
-                    let abort = options.abort.clone();
+                    let abort = abort.clone();
                     tokio::spawn(async move {
                         let outcome = match handle.await {
                             Ok(result) => result,
@@ -288,11 +296,13 @@ impl TelemetrySession {
 
     /// Write one `request` row for a modality record and widen its phase
     /// window. `run_start` is the `Instant` that `send_offset_s` counts from.
-    pub async fn record_request(
-        &mut self,
-        record: &RequestRecord,
-        run_start: Instant,
-    ) -> Result<()> {
+    ///
+    /// Never fails the caller: the first write error is kept, warned once,
+    /// and returned by [`Self::finish`] after the run summary is written.
+    pub async fn record_request(&mut self, record: &RequestRecord, run_start: Instant) {
+        if self.write_error.is_some() {
+            return;
+        }
         let base_ns = run_start
             .saturating_duration_since(self.epoch.mono())
             .as_nanos() as u64;
@@ -305,7 +315,10 @@ impl TelemetrySession {
         if let Some(window) = window {
             Window::widen(window, row.t_sent_ns, row.t_done_ns);
         }
-        self.writer.send_priority(Row::Request(row)).await
+        if let Err(err) = self.writer.send_priority(Row::Request(row)).await {
+            eprintln!("warning: telemetry NDJSON write failed; skipping further rows: {err:#}");
+            self.write_error = Some(err);
+        }
     }
 
     /// Stop the scrapers and wait for them. A scraper that failed is an
@@ -336,6 +349,10 @@ impl TelemetrySession {
     /// Write the stage windows seen by [`Self::record_request`], then the
     /// `summary` row, and close the file. Call after [`Self::join_scrapers`].
     pub async fn finish(mut self, partial: bool) -> Result<TelemetryRunInfo> {
+        if let Some(err) = self.write_error.take() {
+            self.stop_scrapers.store(true, Ordering::Relaxed);
+            return Err(err.context(format!("telemetry NDJSON {}", self.ndjson.display())));
+        }
         if !self.scrapers.is_empty() {
             // Strict callers check join_scrapers themselves; here only the
             // scrape tasks must be gone before the file closes.
@@ -383,7 +400,7 @@ impl TelemetrySession {
         let stats: WriterStats = self.handle.shutdown().await?;
         Ok(TelemetryRunInfo {
             schema_version: TELEMETRY_SCHEMA_VERSION,
-            ndjson: display_path(&ndjson),
+            ndjson: file_name(&ndjson),
             sources,
             request_rows: stats.request_rows,
             stage_rows: stats.stage_rows,
@@ -395,23 +412,29 @@ impl TelemetrySession {
 }
 
 /// End-of-run close for an optional session: join the scrapers, then write
-/// stage and summary rows. Returns the `summary.v3.telemetry` stamp and the
-/// `--require-telemetry` verdict. Callers write their own summary first and
-/// raise the verdict after, so a failed requirement still leaves the data.
+/// stage and summary rows. Returns the `summary.v3.telemetry` stamp and a
+/// verdict that is `Err` when a required source failed or the NDJSON could
+/// not be written. Callers write their own summary first and raise the
+/// verdict after, so a telemetry failure never costs the run its result.
 pub async fn close_session(
     session: Option<TelemetrySession>,
     stopped: bool,
-) -> Result<(Option<TelemetryRunInfo>, Result<()>)> {
+) -> (Option<TelemetryRunInfo>, Result<()>) {
     let Some(mut session) = session else {
-        return Ok((None, Ok(())));
+        return (None, Ok(()));
     };
     let verdict = session.join_scrapers().await;
-    let info = session.finish(stopped || verdict.is_err()).await?;
-    Ok((Some(info), verdict))
+    match session.finish(stopped || verdict.is_err()).await {
+        Ok(info) => (Some(info), verdict),
+        Err(err) => (None, verdict.and(Err(err))),
+    }
 }
 
-fn display_path(path: &Path) -> String {
-    path.display().to_string()
+/// File name only: `summary.v3` is publishable, so no local directories.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn secs_to_ns(seconds: f64) -> u64 {
@@ -571,12 +594,10 @@ mod tests {
         let run_start = Instant::now();
         session
             .record_request(&record(0, Phase::Warmup, 0.0, 0.01), run_start)
-            .await
-            .expect("warmup row");
+            .await;
         session
             .record_request(&record(1, Phase::Measure, 0.02, 0.01), run_start)
-            .await
-            .expect("measure row");
+            .await;
         session.join_scrapers().await.expect("no scrapers");
         let info = session.finish(false).await.expect("finish");
         assert_eq!(info.request_rows, 2);
@@ -598,5 +619,110 @@ mod tests {
         assert_eq!(rows[4]["t_end_ns"], rows[2]["t_done_ns"]);
         assert_eq!(rows[5]["request_rows"], 2);
         assert_eq!(rows[5]["stage_rows"], 2);
+    }
+
+    /// Serve `/metrics` with 200 for the first `ok` requests, then 500.
+    async fn flaky_metrics(ok: usize) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let mut served = 0usize;
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let response = if served < ok {
+                    let body = "all_smi_gpu_utilization{gpu=\"0\"} 50\n";
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                } else {
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                };
+                served += 1;
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        addr
+    }
+
+    fn flaky_config(addr: std::net::SocketAddr) -> TelemetryConfig {
+        serde_yaml::from_str(&format!(
+            "timeout_ms: 500\nsources:\n  - name: flaky\n    url: http://{addr}/metrics\n    interval_ms: 100\n    include: [\"^all_smi_\"]\n"
+        ))
+        .expect("yaml")
+    }
+
+    async fn run_flaky(
+        require: bool,
+    ) -> (StopFlag, Option<TelemetryRunInfo>, Result<()>, Vec<Value>) {
+        let addr = flaky_metrics(1).await;
+        let cfg = flaky_config(addr);
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("run.ndjson");
+        let stop = StopFlag::new();
+        let session = TelemetrySession::start(
+            Arc::new(RunEpoch::new()),
+            RunStamp {
+                run_id: "run-1".into(),
+                tool_version: "0.0.0".into(),
+                sut: None,
+                config: serde_json::json!({}),
+            },
+            SessionOptions {
+                ndjson: path.clone(),
+                config: Some(&cfg),
+                require_telemetry: require,
+                require_failures: 1,
+                abort: Some(stop.clone()),
+            },
+        )
+        .await
+        .expect("probe passes on the first 200");
+        // Long enough for several failing 100 ms scrapes.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let (info, verdict) = close_session(Some(session), stop.is_stopped()).await;
+        let rows = std::fs::read_to_string(&path)
+            .expect("read")
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("json"))
+            .collect();
+        (stop, info, verdict, rows)
+    }
+
+    #[tokio::test]
+    async fn required_source_failing_mid_run_stops_the_run() {
+        let (stop, info, verdict, rows) = run_flaky(true).await;
+        assert!(
+            stop.is_stopped(),
+            "required failure must trip the run stop flag"
+        );
+        let err = verdict.expect_err("required failure is an error");
+        assert!(
+            format!("{err:#}").contains("--require-telemetry"),
+            "{err:#}"
+        );
+        let info = info.expect("NDJSON still closed");
+        assert!(info.scrape_error_rows >= 1);
+        let summary = rows.last().expect("rows");
+        assert_eq!(summary["kind"], "summary");
+        assert_eq!(summary["partial"], true);
+    }
+
+    #[tokio::test]
+    async fn optional_source_failing_mid_run_only_warns() {
+        let (stop, info, verdict, rows) = run_flaky(false).await;
+        assert!(!stop.is_stopped(), "optional source must not stop the run");
+        verdict.expect("optional failures are warnings");
+        let info = info.expect("info");
+        assert!(info.scrape_error_rows >= 1);
+        assert_eq!(
+            info.ndjson, "run.ndjson",
+            "summary keeps the file name only"
+        );
+        assert_eq!(rows.last().expect("rows")["partial"], false);
     }
 }

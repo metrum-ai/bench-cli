@@ -1410,7 +1410,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
     while let Some(rec) = record_rx.recv().await {
         if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, start_time).await?;
+            session.record_request(&rec, start_time).await;
         }
         let _endpoint_name = rec.endpoint.clone();
         let phase = rec.phase;
@@ -1513,7 +1513,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         completed, args.num_requests, errors
     );
     let (telemetry_info, telemetry_verdict) =
-        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await?;
+        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
     let window_seconds = if window_seconds > 0.0 {
         window_seconds

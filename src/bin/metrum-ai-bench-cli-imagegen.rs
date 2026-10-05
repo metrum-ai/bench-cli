@@ -650,7 +650,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut shared_records = Vec::new();
     while let Some(rec) = record_rx.recv().await {
         if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, run_start).await?;
+            session.record_request(&rec, run_start).await;
         }
         shared_records.push(rec);
     }
@@ -658,7 +658,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         h.await?;
     }
     let (telemetry_info, telemetry_verdict) =
-        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await?;
+        metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
 
     let metrics = metrics.lock().await;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);

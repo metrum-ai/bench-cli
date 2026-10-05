@@ -252,7 +252,8 @@ Additional v3 fields:
   Omitted from JSON otherwise (not `null`). Readers must treat it as
   optional. Fields:
   - `schema_version` (string) - `"metrum-ai-bench-cli.telemetry.v1"`.
-  - `ndjson` (string) - the `--ndjson` path the rows were written to.
+  - `ndjson` (string) - file name of the `--ndjson` output (no directories, so
+    the publishable summary carries no local paths).
   - `sources` (integer) - configured scrape sources; `0` without
     `--telemetry`.
   - `request_rows`, `stage_rows`, `telemetry_rows`, `scrape_error_rows`

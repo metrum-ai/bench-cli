@@ -3,9 +3,9 @@
 
 //! E2E (#196): llm, vlm, asr and imagegen write `telemetry.v1` NDJSON that
 //! scrapes the mock `--telemetry-fixture` page and joins to their request
-//! rows on one monotonic clock. llm sends its requests to the Rust mock; vlm,
-//! asr and imagegen send theirs to dummy-model-server in strict mode and are
-//! skipped when `go` is missing (CI sets `METRUM_BENCH_REQUIRE_DUMMY=1`).
+//! rows on one monotonic clock. The joins send their requests to
+//! dummy-model-server in strict mode and are skipped when `go` is missing
+//! (CI sets `METRUM_BENCH_REQUIRE_DUMMY=1`); flag checks use the Rust mock.
 
 mod common;
 
@@ -194,7 +194,10 @@ fn assert_joined(run: &Run, binary: &str) {
     let run_summary = summary_record(&run.data_log).expect("summary.v3");
     let stamp = &run_summary["telemetry"];
     assert_eq!(stamp["schema_version"], "metrum-ai-bench-cli.telemetry.v1");
-    assert_eq!(stamp["ndjson"], run.ndjson.to_str().unwrap());
+    assert_eq!(
+        stamp["ndjson"], "run.ndjson",
+        "file name only, no local dirs"
+    );
     assert_eq!(stamp["sources"], 2);
     assert_eq!(stamp["request_rows"], REQUESTS);
     assert_eq!(stamp["telemetry_rows"], kinds["telemetry"]);
@@ -237,16 +240,17 @@ fn llm_command(run: &Run, url: &str) -> Command {
 
 #[test]
 fn llm_telemetry_joins_request_rows() {
-    let mock = spawn_mock(&["--latency-ms", "100", "--telemetry-fixture"]);
+    let mock = spawn_mock(&["--telemetry-fixture"]);
+    let Some(dummy) = spawn_dummy(&["-latency", "100ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
     let run = new_run();
     let yaml = telemetry_yaml(run._dir.path(), mock.address);
-    let output = llm_command(
-        &run,
-        &format!("http://{}/v1/chat/completions", mock.address),
-    )
-    .args(telemetry_flags(&run, &yaml))
-    .output()
-    .expect("run llm");
+    let output = llm_command(&run, &dummy.url("/v1/chat/completions"))
+        .args(telemetry_flags(&run, &yaml))
+        .output()
+        .expect("run llm");
     assert_ok(&output, "llm");
     assert_joined(&run, "metrum-ai-bench-cli-llm");
 }
@@ -391,9 +395,19 @@ fn imagegen_telemetry_joins_request_rows() {
     assert_joined(&run, "metrum-ai-bench-cli-imagegen");
 }
 
-/// A source nobody serves fails the run before any request is sent.
+/// A source nobody serves fails the run before any request is sent, with
+/// and without `--require-telemetry`.
 #[test]
 fn llm_require_telemetry_fails_when_no_source_scrapes() {
+    dead_source_fails_before_requests(true);
+}
+
+#[test]
+fn llm_dead_source_fails_without_require_telemetry() {
+    dead_source_fails_before_requests(false);
+}
+
+fn dead_source_fails_before_requests(require: bool) {
     let mock = spawn_mock(&["--latency-ms", "5"]);
     let run = new_run();
     // Bind and drop a listener so the port is free and refuses connections.
@@ -402,11 +416,15 @@ fn llm_require_telemetry_fails_when_no_source_scrapes() {
         .local_addr()
         .expect("addr");
     let yaml = telemetry_yaml(run._dir.path(), dead);
+    let mut flags = telemetry_flags(&run, &yaml);
+    if !require {
+        flags.retain(|flag| flag != "--require-telemetry");
+    }
     let output = llm_command(
         &run,
         &format!("http://{}/v1/chat/completions", mock.address),
     )
-    .args(telemetry_flags(&run, &yaml))
+    .args(flags)
     .output()
     .expect("run llm");
     assert!(!output.status.success(), "dead telemetry source must fail");

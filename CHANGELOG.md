@@ -222,7 +222,7 @@
   concurrency above 1. See `docs/TELEMETRY.md` "Modality binaries" and
   `docs/OUTPUT_SCHEMA.md`.
 - `summary.v3` gains an optional top-level `telemetry` object, present only
-  with `--ndjson`: `schema_version`, `ndjson` (path), `sources` (configured
+  with `--ndjson`: `schema_version`, `ndjson` (file name only), `sources` (configured
   source count, `0` without `--telemetry`), and integer `request_rows`,
   `stage_rows`, `telemetry_rows`, `scrape_error_rows`, and
   `dropped_telemetry_rows`. Omitted otherwise. Strategic sweep points do not
@@ -256,7 +256,10 @@
 - With `--require-telemetry`, a source that fails N consecutive scrapes
   (`--require-telemetry-failures`, default 3) now also trips the run stop
   flag, so no new requests or stages are issued; in-flight requests finish
-  and the binary exits non-zero. Before, the run kept issuing load and only
+  and the binary exits non-zero after writing `summary.v3` and closing the
+  NDJSON with `partial: true` (strategic now closes it too). Without the flag
+  a scraper exit stays a warning. An NDJSON write failure no longer costs a
+  modality run its `summary.v3`. Before, the run kept issuing load and only
   failed at the end. Strategic CLI flags and stdout are otherwise unchanged
   (#196).
 - `scripts/live/telemetry_sidecar.py` is deprecated (docstring and a stderr

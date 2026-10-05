@@ -101,7 +101,13 @@ Failure policy, the same for every binary:
   on one source stop the run from issuing new requests (or stages), the
   in-flight requests finish, and the binary exits non-zero. Modality
   binaries still write `summary.v3` (with `partial: true`) and close the
-  NDJSON with `partial: true` before exiting.
+  NDJSON with `partial: true` before exiting. Strategic also closes its
+  NDJSON with `partial: true` before exiting non-zero.
+- A scraper that exits without `--require-telemetry` (for example a panic)
+  is a warning and never stops the run.
+- If the NDJSON itself cannot be written (for example a full disk), the
+  modality binary stops writing rows, still writes `summary.v3`, and then
+  exits non-zero.
 - `--require-telemetry` without `--telemetry` (or `--metrics-url` on
   strategic) is rejected at startup.
 `--telemetry` and telemetry via `--metrics-url` require `--ndjson`. Without
@@ -163,7 +169,7 @@ A modality run is one stage. Its NDJSON holds:
 - `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
   row last.
 
-`summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON path,
+`summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 

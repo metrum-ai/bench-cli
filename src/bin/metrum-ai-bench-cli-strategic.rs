@@ -1181,7 +1181,16 @@ async fn main() -> Result<()> {
     }
     stop_legacy.store(true, Ordering::Relaxed);
     if let Some(session) = telemetry_session.as_mut() {
-        session.join_scrapers().await?;
+        if let Err(err) = session.join_scrapers().await {
+            // Close the NDJSON (partial) so rows already queued are kept.
+            drop(ndjson_writer);
+            if let Some(session) = telemetry_session.take() {
+                if let Err(close) = session.finish(true).await {
+                    eprintln!("warning: {close:#}");
+                }
+            }
+            return Err(err);
+        }
     }
     if let Some(scraper) = legacy_scraper {
         scraper.await?;
