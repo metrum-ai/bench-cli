@@ -4,7 +4,7 @@
 #
 # Metrum AI Bench CLI live smoke: serve Tongyi-MAI/Z-Image-Turbo on
 # vllm-omni 0.30.0, 1 GPU, at POST /v1/images/generations (b64_json).
-# Usage: scripts/live/serve/imagegen.sh [start|stop|print|logs]
+# Usage: scripts/live/serve/imagegen.sh [start|stop|print|logs|sut]
 #
 # Researched 2026-10-02:
 # - vllm-omni 0.30.0 (2026-09-25), image vllm/vllm-omni:v0.30.0. The image

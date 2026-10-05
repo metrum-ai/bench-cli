@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Metrum AI Bench CLI live smoke: serve Qwen/Qwen3-8B on vLLM 0.30.0, 1 GPU.
-# Usage: scripts/live/serve/llm.sh [start|stop|print|logs]
+# Usage: scripts/live/serve/llm.sh [start|stop|print|logs|sut]
 #
 # Flags researched 2026-10-02:
 # - vLLM 0.30.0 released 2026-09-22; image vllm/vllm-openai:v0.30.0.

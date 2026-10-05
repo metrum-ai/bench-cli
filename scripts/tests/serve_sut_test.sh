@@ -47,6 +47,24 @@ check "vlm AWQ name" '.model.quantization == "awq"' vlm.sh MODEL=Qwen/Qwen3-VL-8
 check "GPTQ-Int4 prefers method" '.model.quantization == "gptq"' llm.sh MODEL=Qwen/Qwen3-8B-GPTQ-Int4 SUT_NOTES_OVERRIDE=n
 check "dot and underscore tokens" '.model.quantization == "w8a8"' llm.sh MODEL=x/Model_W8A8 SUT_NOTES_OVERRIDE=n
 check "no false match inside a word" '.model.quantization == null' llm.sh MODEL=x/awqward-fp80 SUT_NOTES_OVERRIDE=n
+# q <label> <MODEL> <want quantization as JSON>: name-derived marker cases.
+q() { check "$1" ".model.quantization == $3" llm.sh "MODEL=$2" SUT_NOTES_OVERRIDE=n; }
+q "w8a16" x/Model-W8A16 '"w8a16"'
+q "w4a16g128 one token" x/Model-w4a16g128 '"w4a16"'
+q "w4a16-g128 split" x/Model-W4A16-G128 '"w4a16"'
+q "nvfp4a16" x/Model-NVFP4A16 '"nvfp4a16"'
+q "fp8e4m3" x/Model-fp8e4m3 '"fp8"'
+q "int4wo" x/Model-int4wo '"int4wo"'
+q "trailing slash" Qwen/Qwen3-8B-FP8/ '"fp8"'
+q "rightmost marker wins" x/Model-FP8-to-BF16 null
+q "weak only" nvidia/Llama-3.1-8B-Instruct-FP4 '"fp4"'
+check "unquantized marker source" '.extra.quantization_source == "model_name" and (.notes | contains("model.quantization=null"))' \
+  llm.sh MODEL=x/Model-FP8-to-BF16 SUT_NOTES_OVERRIDE=n
+check "QUANTIZATION trimmed" '.model.quantization == "fp8" and .extra.quantization_source == "env"' llm.sh "QUANTIZATION=  fp8 "
+for v in None NONE null Null; do
+  check "QUANTIZATION=${v}" '.model.quantization == null and .extra.quantization_source == "env"' llm.sh "QUANTIZATION=${v}"
+done
+reject "QUANTIZATION with inner space" "must be one word" llm.sh "QUANTIZATION=fp8 dynamic"
 check "serve args flag" '.model.quantization == "fp8" and .extra.quantization_source == "serve_args"' \
   llm.sh "SERVE_ARGS_OVERRIDE=--quantization fp8 --max-model-len 32768"
 check "serve args flag=value" '.model.quantization == "awq"' llm.sh SERVE_ARGS_OVERRIDE=--quantization=awq

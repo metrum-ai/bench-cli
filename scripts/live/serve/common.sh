@@ -25,7 +25,8 @@
 #   QUANTIZATION SUT model.quantization (use "none" for null). When unset it
 #                comes from --quantization/-q in SERVE_ARGS, then from a
 #                quantizer token in the MODEL name (for example -FP8 is fp8,
-#                -AWQ is awq), else null. See serve_quantization.
+#                -AWQ is awq), else null. Set it for checkpoints quantized
+#                natively without a name marker. See serve_quantization.
 #   HF_HUB_OFFLINE=1  skip the Hub revision lookup (revision is then null)
 #
 # Subcommands: start (default) | stop | print | logs | sut
@@ -68,17 +69,42 @@ serve_model_revision() {
     | jq -r '.sha // empty' 2>/dev/null || true
 }
 
-# Quantizer tokens recognized in the MODEL basename, method names before bare
-# bit widths so -GPTQ-Int4 is gptq. Token form: <lowercase token>=<SUT value>.
-SERVE_QUANT_TOKENS=(nvfp4=nvfp4 mxfp4=mxfp4 fp8=fp8 awq=awq gptq=gptq gguf=gguf
-                    w8a8=w8a8 w4a16=w4a16 w4a8=w4a8 bnb=bitsandbytes
-                    bitsandbytes=bitsandbytes exl2=exl2 int8=int8 int4=int4 fp4=fp4)
+# Classifies one lowercase MODEL-name token. Prints "strong <value>",
+# "weak <value>", or nothing. Strong markers name a method (or say the weights
+# are unquantized, value "-"); weak markers are bare bit widths, used only
+# when no strong marker exists, so -GPTQ-Int4 is gptq.
+serve_quant_token() {
+  case "$1" in
+    nvfp4|nvfp4a16|mxfp4|awq|gptq|gguf|exl2|exl3|hqq|aqlm|int4wo|int8wo) echo "strong $1" ;;
+    fp8|fp8e4m3|fp8e5m2|fp8dynamic) echo "strong fp8" ;;
+    bnb|bitsandbytes) echo "strong bitsandbytes" ;;
+    bf16|fp16|f16|fp32|f32) echo "strong -" ;;
+    int4|int8|fp4) echo "weak $1" ;;
+    *)
+      # wXaY with an optional group-size suffix: w8a16, w4a16g128, w4a16-g128.
+      if [[ "$1" =~ ^(w[0-9]+a[0-9]+)(g[0-9]+)?$ ]]; then echo "strong ${BASH_REMATCH[1]}"; fi
+      ;;
+  esac
+}
 
-# Prints "<value> <source>", where value is "" for null and source is one of
-# env, serve_args, model_name, none.
+# Sets SERVE_QUANT ("" for null) and SERVE_QUANT_SRC (env, serve_args,
+# model_name, or none). Precedence: QUANTIZATION, then --quantization/-q in
+# SERVE_ARGS, then the rightmost strong marker in the MODEL basename (so
+# x/Model-FP8-to-BF16 is unquantized), then the rightmost weak one, else null.
+# A checkpoint quantized natively without saying so in its name (for example
+# openai/gpt-oss-20b is MXFP4) needs QUANTIZATION=.
 serve_quantization() {
-  if [[ -n "${QUANTIZATION:-}" ]]; then
-    if [[ "${QUANTIZATION}" == none ]]; then echo " env"; else echo "${QUANTIZATION} env"; fi
+  SERVE_QUANT="" SERVE_QUANT_SRC=none
+  local q
+  # Trim surrounding whitespace; inner whitespace is a typo, not a value.
+  q="$(printf '%s' "${QUANTIZATION:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [[ -n "${q}" ]]; then
+    [[ "${q}" == *[[:space:]]* ]] && serve_die "QUANTIZATION='${QUANTIZATION}' must be one word (or none)"
+    SERVE_QUANT_SRC=env
+    case "$(printf '%s' "${q}" | tr '[:upper:]' '[:lower:]')" in
+      none|null) ;;
+      *) SERVE_QUANT="${q}" ;;
+    esac
     return 0
   fi
   local i arg next
@@ -86,23 +112,32 @@ serve_quantization() {
   for ((i = 0; i < ${#args[@]}; i++)); do
     arg="${args[i]}"
     case "${arg}" in
-      --quantization=*) echo "${arg#*=} serve_args"; return 0 ;;
+      --quantization=*) SERVE_QUANT="${arg#*=}" SERVE_QUANT_SRC=serve_args; return 0 ;;
       --quantization|-q)
         next="${args[i + 1]:-}"
-        [[ -n "${next}" ]] && { echo "${next} serve_args"; return 0; }
+        [[ -n "${next}" ]] && { SERVE_QUANT="${next}" SERVE_QUANT_SRC=serve_args; return 0; }
         ;;
     esac
   done
-  # Lowercase, treat . and _ as -, and pad so each token is -delimited.
-  local base pair
-  base="-$(printf '%s' "${MODEL##*/}" | tr '[:upper:]._' '[:lower:]--')-"
-  for pair in "${SERVE_QUANT_TOKENS[@]}"; do
-    if [[ "${base}" == *"-${pair%%=*}-"* ]]; then
-      echo "${pair#*=} model_name"
-      return 0
-    fi
+  # Lowercase the basename (trailing / stripped) and split on - . _ tokens.
+  local m="${MODEL%/}" toks tok kind val weak="" n
+  m="$(printf '%s' "${m##*/}" | tr '[:upper:]._' '[:lower:]--')"
+  IFS=- read -r -a toks <<<"${m}"
+  for ((n = ${#toks[@]} - 1; n >= 0; n--)); do
+    tok="${toks[n]}"
+    [[ -z "${tok}" ]] && continue
+    read -r kind val <<<"$(serve_quant_token "${tok}")" || true
+    case "${kind}" in
+      strong)
+        SERVE_QUANT_SRC=model_name
+        [[ "${val}" != - ]] && SERVE_QUANT="${val}"
+        return 0
+        ;;
+      weak) [[ -z "${weak}" ]] && weak="${val}" ;;
+    esac
   done
-  echo " none"
+  if [[ -n "${weak}" ]]; then SERVE_QUANT="${weak}" SERVE_QUANT_SRC=model_name; fi
+  return 0
 }
 
 # Fails when MODEL overrides DEFAULT_MODEL without SUT_NOTES_OVERRIDE, so a
@@ -123,11 +158,11 @@ serve_write_sut() {
   work="$(mktemp)"
   gpu="$(serve_gpu_json)"
   rev="$(serve_model_revision)"
-  read -r quant quant_src <<<"$(serve_quantization)" || true
-  if [[ -z "${quant_src}" ]]; then quant_src="${quant}"; quant=""; fi
+  serve_quantization
+  quant="${SERVE_QUANT}" quant_src="${SERVE_QUANT_SRC}"
   notes="${SUT_NOTES}"
   if [[ "${quant_src}" == model_name ]]; then
-    notes="${notes}; model.quantization=${quant} derived from the MODEL name ${MODEL}"
+    notes="${notes}; model.quantization=${quant:-null} derived from the MODEL name ${MODEL}"
   fi
   jq -n \
     --arg name "${SUT_NAME:-local GPU / ${MODALITY} live smoke}" \
@@ -152,9 +187,11 @@ serve_write_sut() {
       host_os: $os,
       notes: $notes,
       extra: {launcher_sources: ($ARGS.positional | join(" ")), recorded_at_utc: $recorded, image: $image, quantization_source: $quant_src}
-    }' "${SOURCES[@]}" >"${work}"
-  if [[ "${out}" == - ]]; then cat "${work}"; else cat "${work}" >"${out}"; fi
+    }' "${SOURCES[@]}" >"${work}" || { rm -f "${work}"; return 1; }
+  local rc=0
+  if [[ "${out}" == - ]]; then cat "${work}" || rc=$?; else cat "${work}" >"${out}" || rc=$?; fi
   rm -f "${work}"
+  return "${rc}"
 }
 
 serve_main() {

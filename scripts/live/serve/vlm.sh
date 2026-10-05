@@ -4,7 +4,7 @@
 #
 # Metrum AI Bench CLI live smoke: serve Qwen/Qwen3-VL-8B-Instruct on vLLM
 # 0.30.0, 1 GPU.
-# Usage: scripts/live/serve/vlm.sh [start|stop|print|logs]
+# Usage: scripts/live/serve/vlm.sh [start|stop|print|logs|sut]
 #
 # Flags researched 2026-10-02 from the vLLM Qwen3-VL recipe (written for the
 # 235B model on 8 GPUs; the single-GPU 8B values here are extrapolated):

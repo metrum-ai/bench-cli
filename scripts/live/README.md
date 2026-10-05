@@ -28,9 +28,13 @@ its default model only, so `start` exits with an error naming
 `SUT_NOTES_OVERRIDE` when `MODEL` is overridden without it. The SUT's
 `model.quantization` comes from `QUANTIZATION=` (`none` for null), then
 `--quantization`/`-q` in the serve flags, then a quantizer token in the
-`MODEL` name (`-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is `gptq`), else
-null; `extra.quantization_source` records which. The scripts resolve prebuilt binaries
-through `lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
+`MODEL` name (`-FP8` is `fp8`, `-AWQ` is `awq`, `-GPTQ-Int4` is `gptq`,
+`-W4A16-G128` is `w4a16`; the rightmost method marker wins, so
+`-FP8-to-BF16` is unquantized), else null; `extra.quantization_source`
+records which. Set `QUANTIZATION=` for a checkpoint quantized natively
+without a name marker (for example `openai/gpt-oss-20b` ships MXFP4, so use
+`QUANTIZATION=mxfp4`). The scripts resolve prebuilt binaries through
+`lib/bench_bin.sh`: `BENCH_BIN_DIR`, then release tarball `bin/`, then
 `target/release`, then `target/rel-user/release`, then `PATH`. They fail
 clearly instead of compiling. `local_smoke.sh` records the binary path,
 `--version`, and the checkout in the SUT.
@@ -63,8 +67,9 @@ which have no `--telemetry` flag).
 Launchers take `start` (default), `stop`, `print` (show the docker command),
 `logs`, and `sut` (print the SUT JSON without docker; add `HF_HUB_OFFLINE=1`
 to skip the Hub revision lookup). `scripts/tests/serve_sut_test.sh` is the
-offline self-test for the SUT the launchers write. `PORT`, `HF_HOME`, `HF_TOKEN` (passed by name, never written),
-`GPU_DEVICES`, and `IMAGE`/`MODEL` overrides are read from the environment.
+offline self-test for the SUT the launchers write. `PORT`, `HF_HOME`,
+`HF_TOKEN` (passed by name, never written), `GPU_DEVICES`, and
+`IMAGE`/`MODEL` overrides are read from the environment.
 The SUT they write records the exact docker command in `runtime.config`, the
 model revision SHA from the Hub, the GPU from `nvidia-smi`, and the source
 URLs in `extra.launcher_sources`.
