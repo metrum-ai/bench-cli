@@ -11,7 +11,8 @@ p95), energy from counter delta and from the power trapezoid, J/token, and the
 docs/telemetry/ANALYSIS.md derived metrics (gpu_util_mean, sm_active_p50,
 sm_occupancy_p50, tensor_active_p50, hollow_util_mean, kv_cache_util_mean,
 preemptions_delta). Engine `_seconds` histograms get p50/p95 from bucket
-deltas. Pass the strategic stdout JSON to resolve the knee and report
+deltas; a rank in the first bucket or in +Inf is reported as a bound
+(`<=0.3`, `>60`), never interpolated from 0. Pass the strategic stdout JSON to resolve the knee and report
 kv_cache_util_at_knee. --json prints the same result as one JSON object.
 
 Utilization-style outputs are ratios in [0, 1]; percent gauges are scaled.
@@ -222,36 +223,61 @@ def percentile_type7(values: List[float], p: float) -> Optional[float]:
     return xs[lo] * (hi - h) + xs[hi] * (h - lo)
 
 
-def histogram_quantile(buckets: List[Tuple[float, float]], q: float) -> Optional[float]:
-    """Prometheus histogram_quantile on cumulative (le, count) buckets.
+BELOW_FIRST_BUCKET = "below_first_bucket"
+ABOVE_LAST_BUCKET = "above_last_bucket"
 
-    Linear interpolation inside the bucket that holds rank q * total. The first
-    bucket's lower bound is 0. A rank in the +Inf bucket returns the highest
-    finite bound. None when there are no observations.
+
+def histogram_quantile(buckets: List[Tuple[float, float]], q: float) -> Dict[str, Any]:
+    """Quantile on cumulative (le, count) buckets as {value, reason, bound}.
+
+    Linear interpolation inside the bucket that holds rank q * total, as
+    Prometheus histogram_quantile does, but only between two finite bounds.
+    The first bucket has no lower bound, so a rank there is not interpolated
+    from 0: value is None, reason is below_first_bucket and bound is the first
+    finite `le` (the quantile is <= bound). A rank in +Inf is likewise None
+    with reason above_last_bucket and bound the highest finite `le` (the
+    quantile is > bound). All three are None when there are no observations
+    or no finite bucket.
     """
+    out: Dict[str, Any] = {"value": None, "reason": None, "bound": None}
     if not buckets:
-        return None
+        return out
     bs = sorted(buckets)
     total = bs[-1][1]
     if total <= 0:
-        return None
+        return out
     rank = q * total
-    prev_le = 0.0
+    prev_le: Optional[float] = None
     prev_count = 0.0
     for le, count in bs:
         if count >= rank:
             if math.isinf(le):
-                return prev_le if len(bs) > 1 else None
-            if count == prev_count:
-                return le
-            return prev_le + (le - prev_le) * (rank - prev_count) / (count - prev_count)
+                if prev_le is not None:
+                    out.update(reason=ABOVE_LAST_BUCKET, bound=prev_le)
+            elif prev_le is None:
+                out.update(reason=BELOW_FIRST_BUCKET, bound=le)
+            elif count == prev_count:
+                out["value"] = le
+            else:
+                out["value"] = prev_le + (le - prev_le) * (rank - prev_count) / (count - prev_count)
+            return out
         prev_le, prev_count = le, count
-    return prev_le
+    return out
+
+
+def fmt_quantile(hist: Dict[str, Any], name: str) -> str:
+    """Text form of engine_histograms[m][name]: number, <=bound or >bound."""
+    reason = hist.get(name + "_reason")
+    if reason == BELOW_FIRST_BUCKET:
+        return f"<={fmt(hist[name + '_bound'])}"
+    if reason == ABOVE_LAST_BUCKET:
+        return f">{fmt(hist[name + '_bound'])}"
+    return fmt(hist[name])
 
 
 def stage_histogram_quantile(
     window: List[Dict[str, Any]], metric: str, q: float
-) -> Optional[float]:
+) -> Dict[str, Any]:
     """Quantile of `metric` (base name, no _bucket) observed inside a stage.
 
     Buckets are counters: take the delta per series (last - first in the
@@ -368,15 +394,17 @@ def derived_metrics(window: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
     sources["preemptions_delta"] = preempt_src
 
-    hist: Dict[str, Dict[str, Optional[float]]] = {}
+    hist: Dict[str, Dict[str, Any]] = {}
     for base in sorted(
         {r["metric"][: -len("_bucket")] for r in window
          if r.get("metric", "").endswith("_seconds_bucket")}
     ):
-        hist[base] = {
-            "p50": stage_histogram_quantile(window, base, 0.50),
-            "p95": stage_histogram_quantile(window, base, 0.95),
-        }
+        hist[base] = {}
+        for name, q in (("p50", 0.50), ("p95", 0.95)):
+            qv = stage_histogram_quantile(window, base, q)
+            hist[base][name] = qv["value"]
+            hist[base][name + "_reason"] = qv["reason"]
+            hist[base][name + "_bound"] = qv["bound"]
     out["engine_histograms"] = hist
     out["sources"] = sources
     return out
@@ -562,7 +590,8 @@ def render(result: Dict[str, Any]) -> None:
         print("\n## engine histograms (bucket deltas, seconds)")
         print("stage\tload\tmetric\tp50\tp95")
         for s, m, q in hist_rows:
-            print(f"{fmt(s['stage'])}\t{fmt(s['load'])}\t{m}\t{fmt(q['p50'])}\t{fmt(q['p95'])}")
+            print(f"{fmt(s['stage'])}\t{fmt(s['load'])}\t{m}\t"
+                  f"{fmt_quantile(q, 'p50')}\t{fmt_quantile(q, 'p95')}")
 
     knee = result["knee"]
     print("\n## knee")
