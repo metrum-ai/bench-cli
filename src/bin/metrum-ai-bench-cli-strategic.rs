@@ -584,6 +584,8 @@ fn spawn_one_request(
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
+        // Closed loop keeps scheduled == sent exactly. Stage summaries rely on
+        // that equality to report queue_delay_s only for open-loop stages (#191).
         let (scheduled, scheduled_unix_ns) =
             scheduled_offset.map_or((sent, sent_unix_ns), |offset| {
                 (

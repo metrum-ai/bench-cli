@@ -1310,6 +1310,31 @@ mod tests {
     }
 
     #[test]
+    fn pre_191_csv_without_first_reasoning_column_still_loads() {
+        // Header and row as written before #191 (no trailing first_reasoning_s).
+        let old = "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,\
+service_latency_s,first_byte_s,connect_s,ttft_s,ttft_source,prefill_s,decode_s,decode_tok_s,\
+itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup\n\
+0,1.0,http://example.test,5,5,0.5,0.0,0.5,0.04,0.0,0.1,stream,0.1,0.4,40.0,0.01;0.02,1,\
+true,,64,16,,,,false\n";
+        let records: Vec<BenchRecord> = csv::Reader::from_reader(old.as_bytes())
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .expect("old CSV deserializes");
+        assert_eq!(records.len(), 1);
+        assert!(records[0].first_reasoning_s.is_none());
+        let point = summarize_stage(
+            1.0,
+            &records,
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert_eq!(point.first_reasoning_s.n, 0);
+        assert_eq!(point.first_byte_s.n, 1);
+    }
+
+    #[test]
     fn summarize_stage_excludes_warmup_records() {
         let measured = BenchRecord {
             seq: 1,
