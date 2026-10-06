@@ -676,7 +676,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (record_tx, mut record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
 
+    let mut warmup_barrier =
+        metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
+            .with_tracker(Arc::clone(&inflight_tracker));
     'request_loop: for slot in slots {
+        // Measured requests wait for every warmup request (#226).
+        let slot = warmup_barrier
+            .before_slot(slot, &mut handles, start_time)
+            .await;
         if stop.is_stopped() {
             info!("Stop flag set; not issuing further requests");
             break 'request_loop;
@@ -960,6 +967,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     // Ensure spawned tasks finished (channel already drained when all senders dropped).
+    errors += warmup_barrier.join_errors();
     for handle in handles {
         if let Err(e) = handle.await {
             error!("Task join error: {e}");

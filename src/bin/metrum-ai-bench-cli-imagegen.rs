@@ -497,8 +497,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.request_rate.unwrap_or(0.0),
         &mut arrival_rng,
     );
+    let mut warmup_barrier = metrum_ai_bench::runner::WarmupBarrier::new(args.warmup_requests)
+        .with_tracker(Arc::clone(&inflight_tracker));
     for slot in slots {
-        if stop.is_stopped() {
+        // Measured requests wait for every warmup request (#226).
+        let slot = warmup_barrier
+            .before_slot(slot, &mut handles, run_start)
+            .await;
+        // A failed warmup task fails the run; skip the measured phase.
+        if stop.is_stopped() || warmup_barrier.join_errors() > 0 {
             break;
         }
         let wait = slot.scheduled_delay.saturating_sub(run_start.elapsed());
@@ -660,6 +667,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     let (telemetry_info, telemetry_verdict) =
         metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
+    if warmup_barrier.join_errors() > 0 {
+        return Err(format!(
+            "{} warmup task(s) failed to join",
+            warmup_barrier.join_errors()
+        )
+        .into());
+    }
 
     let metrics = metrics.lock().await;
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);

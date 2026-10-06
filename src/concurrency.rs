@@ -87,6 +87,19 @@ impl InFlightTracker {
         }
     }
 
+    /// Clear occupancy samples, the max gauge and the acquire/wait counters
+    /// so a later [`Self::snapshot`] covers only what follows, such as the
+    /// measured phase after the warmup barrier (#226). Requests still inside
+    /// the gauge keep counting in `current`; after the barrier that is zero.
+    pub fn reset_counts(&self) {
+        if let Ok(mut samples) = self.samples.lock() {
+            samples.clear();
+        }
+        self.max.store(self.current(), Ordering::Relaxed);
+        self.acquires.store(0, Ordering::Relaxed);
+        self.waits.store(0, Ordering::Relaxed);
+    }
+
     pub fn snapshot(&self) -> ObservedConcurrency {
         let samples = self.samples.lock().map(|g| g.clone()).unwrap_or_default();
         let dist = DistSummary::from_values(&samples);
@@ -182,6 +195,30 @@ pub async fn acquire_with_engagement(
 mod tests {
     use super::*;
     use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+    /// #226: after the warmup barrier the snapshot covers measured slots only.
+    #[tokio::test]
+    async fn reset_counts_drops_earlier_acquires_and_samples() {
+        let tracker = Arc::new(InFlightTracker::new(1));
+        let sem = Arc::new(Semaphore::new(1));
+        let warm = acquire_with_engagement(Arc::clone(&sem), &tracker)
+            .await
+            .unwrap();
+        drop(InFlightSlot::new(&tracker, warm));
+        tracker.reset_counts();
+        let empty = tracker.snapshot();
+        assert_eq!(empty.acquire_count, 0);
+        assert_eq!(empty.in_flight_max, None);
+        assert_eq!(empty.cap_engagement_fraction, None);
+        let measured = acquire_with_engagement(Arc::clone(&sem), &tracker)
+            .await
+            .unwrap();
+        let slot = InFlightSlot::new(&tracker, measured);
+        let snap = tracker.snapshot();
+        assert_eq!(snap.acquire_count, 1);
+        assert_eq!(snap.in_flight_max, Some(1.0));
+        drop(slot);
+    }
 
     #[tokio::test]
     async fn tracks_occupancy_and_cap_engagement() {

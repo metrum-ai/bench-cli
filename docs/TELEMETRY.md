@@ -164,9 +164,9 @@ A modality run is one stage. Its NDJSON holds:
 - Up to two `stage` rows, `warmup` and `measure`, written at the end. Each
   window runs from the phase's first send to its last completion. `stage`
   and `load` are the offered load: `--request-rate` in open-loop runs, the
-  effective concurrency cap otherwise. Modality binaries do not drain
-  warmup before measuring, so at concurrency above 1 the two windows can
-  overlap; filter on `phase = 'measure'` as usual.
+  effective concurrency cap otherwise. Warmup is a barrier (#226): every
+  warmup request completes before the first measured send, so the `warmup`
+  window ends at or before the `measure` window starts, at any concurrency.
 - `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
   row last.
 
