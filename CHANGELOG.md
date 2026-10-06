@@ -322,8 +322,8 @@
 - Request bodies are built before the send time is taken (#242).
   `metrum-ai-bench-cli-vlm` builds the chat body (base64 data URLs) and
   serializes it to JSON (on the blocking pool for large inline images,
-  >= 256 KiB) before the send offset, `started_at`, and the send `Instant`, and no longer pretty-prints the full
-  body inside the window. Cached images share their base64 instead of
+  >= 256 KiB) before the send offset, `started_at`, and the send
+  `Instant`, and no longer pretty-prints the full body inside the window. Cached images share their base64 instead of
   copying it per request, and image decode, resize and base64 encoding run
   on the blocking pool. `metrum-ai-bench-cli-asr` assembles the
   multipart form before the send offset. Strategic `--kind vlm` serializes
