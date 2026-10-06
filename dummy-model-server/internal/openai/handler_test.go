@@ -252,6 +252,29 @@ func TestOmitDoneAndRoleOnly(t *testing.T) {
 	}
 }
 
+func TestReasoningOnlyStreamHasNoContent(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) {
+		c.ReasoningOnly = true
+	}))
+	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi"}],"max_tokens":8,"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	raw := rec.Body.String()
+	if strings.Contains(raw, `"content":`) {
+		t.Fatalf("reasoning-only should not emit content: %s", raw)
+	}
+	if n := strings.Count(raw, `"reasoning_content":"think"`); n != 8 {
+		t.Fatalf("want 8 reasoning deltas, got %d", n)
+	}
+	if !strings.Contains(raw, `"finish_reason":"length"`) || !strings.Contains(raw, `"reasoning_tokens":8`) {
+		t.Fatalf("want length finish and 8 reasoning tokens: %s", raw)
+	}
+	if !strings.Contains(raw, "data: [DONE]") {
+		t.Fatal("want [DONE]")
+	}
+}
+
 func TestGoldenTimingShape(t *testing.T) {
 	// latency=100ms, chunk-interval=20ms, max_tokens=20 → TTFT~120ms, RT~500ms
 	h := server.New(testCfg(func(c *config.Config) {

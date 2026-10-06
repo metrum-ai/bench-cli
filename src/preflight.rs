@@ -328,35 +328,56 @@ async fn check_streaming_first_token(
             remediation: Some(remediation_docker()),
         };
     }
-    match chat_stream::consume(response.bytes_stream(), started).await {
-        Ok(result) => match result.ttft {
-            Some(ttft) => {
-                let ttft_ms = ttft.as_secs_f64() * 1000.0;
-                PreflightCheck {
-                    name: "streaming_first_token".into(),
-                    status: CheckStatus::Pass,
-                    detail: format!("first visible token in {ttft_ms:.0} ms"),
-                    remediation: None,
-                }
-            }
-            None => PreflightCheck {
+    // Keep a stream that ends without visible content: a thinking model can
+    // spend the whole small probe budget on reasoning (#230).
+    let result = chat_stream::consume_with_options(response.bytes_stream(), started, true).await;
+    streaming_check(result)
+}
+
+/// Remediation for a stream that delivered neither content nor reasoning.
+fn remediation_streaming() -> String {
+    format!(
+        "Streaming may be broken or gateways may synthesize SSE; check engine flags. \
+         For a thinking model, retry with --extra-body-json \
+         '{{\"chat_template_kwargs\":{{\"enable_thinking\":false}}}}'. {}",
+        remediation_docker()
+    )
+}
+
+/// Classify a consumed probe stream. A visible token or a streamed reasoning
+/// delta (`reasoning_content` or `reasoning`) proves that streaming works.
+fn streaming_check(
+    result: Result<chat_stream::ChatStreamResult, crate::error::RequestError>,
+) -> PreflightCheck {
+    match result {
+        Ok(result) => match (result.ttft, result.first_reasoning) {
+            (Some(ttft), _) => PreflightCheck {
+                name: "streaming_first_token".into(),
+                status: CheckStatus::Pass,
+                detail: format!("first visible token in {:.0} ms", ttft.as_secs_f64() * 1000.0),
+                remediation: None,
+            },
+            (None, Some(reasoning)) => PreflightCheck {
+                name: "streaming_first_token".into(),
+                status: CheckStatus::Pass,
+                detail: format!(
+                    "first token was reasoning in {:.0} ms (no visible content within the probe's max_tokens)",
+                    reasoning.as_secs_f64() * 1000.0
+                ),
+                remediation: None,
+            },
+            (None, None) => PreflightCheck {
                 name: "streaming_first_token".into(),
                 status: CheckStatus::Fail,
-                detail: "stream finished without a visible output token".into(),
-                remediation: Some(format!(
-                    "Streaming may be broken or gateways may synthesize SSE; check engine flags. {}",
-                    remediation_docker()
-                )),
+                detail: "stream finished without a visible output or reasoning token".into(),
+                remediation: Some(remediation_streaming()),
             },
         },
         Err(err) => PreflightCheck {
             name: "streaming_first_token".into(),
             status: CheckStatus::Fail,
             detail: format!("stream smoke failed: {err}"),
-            remediation: Some(format!(
-                "Streaming may be broken or gateways may synthesize SSE; check engine flags. {}",
-                remediation_docker()
-            )),
+            remediation: Some(remediation_streaming()),
         },
     }
 }
@@ -572,6 +593,80 @@ mod tests {
         assert!(!report.all_passed);
         assert_eq!(report.checks[0].name, "reachability");
         assert_eq!(report.checks[0].status, CheckStatus::Fail);
+    }
+
+    fn probe(events: &[&str]) -> PreflightCheck {
+        let body: Vec<Result<Vec<u8>, reqwest::Error>> = events
+            .iter()
+            .map(|event| Ok(format!("data: {event}\n\n").into_bytes()))
+            .collect();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = rt.block_on(chat_stream::consume_with_options(
+            futures_util::stream::iter(body),
+            Instant::now(),
+            true,
+        ));
+        streaming_check(result)
+    }
+
+    #[test]
+    fn visible_token_passes_streaming_check() {
+        let check = probe(&[r#"{"choices":[{"delta":{"content":"hi"}}]}"#, "[DONE]"]);
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert!(
+            check.detail.starts_with("first visible token"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn reasoning_only_stream_passes_streaming_check() {
+        // vLLM sends `reasoning_content`; newer servers send `reasoning`.
+        for field in ["reasoning_content", "reasoning"] {
+            let delta = format!(r#"{{"choices":[{{"delta":{{"{field}":"think"}}}}]}}"#);
+            let check = probe(&[
+                &delta,
+                r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#,
+                "[DONE]",
+            ]);
+            assert_eq!(check.status, CheckStatus::Pass, "{field}");
+            assert!(
+                check.detail.starts_with("first token was reasoning"),
+                "{field}: {}",
+                check.detail
+            );
+            assert!(check.remediation.is_none());
+        }
+    }
+
+    #[test]
+    fn empty_stream_fails_streaming_check_with_thinking_hint() {
+        let check = probe(&[
+            r#"{"choices":[{"delta":{"role":"assistant"}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "[DONE]",
+        ]);
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(check
+            .detail
+            .contains("without a visible output or reasoning token"));
+        let remediation = check.remediation.expect("remediation");
+        assert!(remediation.contains(r#"{"chat_template_kwargs":{"enable_thinking":false}}"#));
+    }
+
+    #[test]
+    fn truncated_stream_still_fails_streaming_check() {
+        let check = probe(&[r#"{"choices":[{"delta":{"reasoning_content":"think"}}]}"#]);
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(
+            check.detail.starts_with("stream smoke failed"),
+            "{}",
+            check.detail
+        );
     }
 
     #[test]
