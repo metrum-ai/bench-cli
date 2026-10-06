@@ -624,6 +624,21 @@ mod tests {
     }
 
     #[test]
+    fn visible_token_after_reasoning_reports_visible_token() {
+        let check = probe(&[
+            r#"{"choices":[{"delta":{"reasoning_content":"think"}}]}"#,
+            r#"{"choices":[{"delta":{"content":"hi"}}]}"#,
+            "[DONE]",
+        ]);
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert!(
+            check.detail.starts_with("first visible token"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
     fn reasoning_only_stream_passes_streaming_check() {
         // vLLM sends `reasoning_content`; newer servers send `reasoning`.
         for field in ["reasoning_content", "reasoning"] {
