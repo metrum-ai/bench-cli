@@ -319,6 +319,26 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- The `scripts/parity/` values count no longer depends on sample size
+  (#245). A `DistSummary` `std` is null for n < 2, and a ~8 s parity run
+  fills one 10 s throughput bin while a longer one fills two, so the plain
+  Bench values count read 267 or 268 between identical runs.
+  `scripts/parity/count_points.py` now counts every statistic slot of a
+  distribution with at least one sample (a Bench `DistSummary` with
+  `n` >= 1, an AIPerf block with a `unit` and `count` >= 1 or no `count`),
+  numeric or null, on both sides. An empty distribution (`n` or `count`
+  0) still counts as a quantity but adds only its `n`, as before, so its
+  undefined statistics are never credited as data points. Nulls outside a
+  distribution still never count. The JSON output gains `null_values` and
+  `empty_dists`, and the second table gains matching columns; the old
+  count is values minus `null_values`. On bench-cli 1.5.3 (main `be721d3`)
+  and AIPerf 0.13.0, three full runs were identical. Bench moves from
+  47/267/21 to 47/268/21 (plain), 49/296/24 to 49/297/24 (reasoning), and
+  49/271/21 to 49/272/21 (slo). AIPerf is unchanged at 65/653/33, 70/700/36,
+  and 68/656/34 (no null or empty distribution). CI runs the new unit tests
+  with `python3 -m unittest discover -s scripts/parity`. No Rust behavior or
+  schema change; only the `tests/data_points.rs` doc string that renders
+  `docs/DATA_POINTS.md` changes. See `scripts/parity/README.md`.
 - Request bodies are built before the send time is taken (#242).
   `metrum-ai-bench-cli-vlm` builds the chat body (base64 data URLs) and
   serializes it to JSON (on the blocking pool for large inline images,

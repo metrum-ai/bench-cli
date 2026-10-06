@@ -15,8 +15,16 @@ table (AIPerf 0.13.0 plain: 65 / 653 / 33).
                numeric leaves outside any DistSummary are non-empty (goodput,
                observed_concurrency, ...). Those leftover leaves, including
                leaves of nested non-distribution dicts, form the block.
-  values       numeric leaves inside those quantities (booleans and strings
-               never count; null never counts).
+  values       statistic slots inside those quantities. Inside a non-empty
+               distribution (Bench DistSummary with n >= 1, AIPerf block with
+               a "unit" and count >= 1 or no count) every statistic the block
+               defines counts whether it is numeric or null, so std, null for
+               n < 2, does not make the count depend on the sample size
+               (#245). Those nulls are also reported as null_values. An empty
+               distribution (n == 0 / count == 0) holds no data: only its
+               numeric leaves count (its n), as before, and it is reported in
+               empty_dists. Outside distributions only numeric leaves count.
+               Booleans and strings never count.
   per-request  distinct numeric fields on measured per-request records.
                AIPerf: metric names under "metrics" on profiling-phase rows of
                profile_export.jsonl. Bench: non-null numeric leaves on
@@ -82,6 +90,28 @@ def is_num(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def is_slot(v: Any) -> bool:
+    """A distribution statistic slot: numeric or null (an undefined statistic)."""
+    return v is None or is_num(v)
+
+
+def dist_slots(node: dict, size_key: str) -> list[float | None]:
+    """The counted statistics of a distribution dict, in key order.
+
+    Non-empty (node[size_key] >= 1, or no size_key): every statistic it
+    defines, nulls kept. Empty (node[size_key] == 0): only its numeric leaves,
+    so the undefined statistics of a distribution with no samples never count
+    as data points."""
+    if is_empty_dist(node, size_key):
+        return [float(v) for v in node.values() if is_num(v)]
+    return [None if v is None else float(v) for v in node.values() if is_slot(v)]
+
+
+def is_empty_dist(node: dict, size_key: str) -> bool:
+    """True when the distribution's sample size field is present and 0."""
+    return is_num(node.get(size_key)) and node[size_key] == 0
+
+
 def numeric_leaves(node: Any) -> list[float]:
     """All numeric leaves under node, depth first, in key order."""
     if is_num(node):
@@ -99,17 +129,24 @@ def numeric_leaves(node: Any) -> list[float]:
     return []
 
 
-def find_duplicates(quantities: dict[str, list[float]]) -> list[list[str]]:
+def find_duplicates(quantities: dict[str, list[float | None]]) -> list[list[str]]:
     """Groups of quantity names whose number vectors are identical.
 
-    Numbers are rounded to 12 decimals before comparing; quantities with a
-    single number are skipped (see the module docstring)."""
+    Numbers are rounded to 12 decimals before comparing (a null slot matches
+    only a null); quantities with a single slot are skipped (see the module
+    docstring)."""
     groups: dict[tuple, list[str]] = {}
     for name, vals in quantities.items():
         if len(vals) < 2:
             continue  # lone scalars collide on 0/1 by chance; not a copy
-        groups.setdefault(tuple(round(v, 12) for v in vals), []).append(name)
+        key = tuple(None if v is None else round(v, 12) for v in vals)
+        groups.setdefault(key, []).append(name)
     return [names for names in groups.values() if len(names) > 1]
+
+
+def null_count(quantities: dict[str, list[float | None]]) -> int:
+    """Counted slots that are null (undefined for this run's sample size)."""
+    return sum(1 for vals in quantities.values() for v in vals if v is None)
 
 
 def pacing_check(pairs: Iterable[tuple[Any, Any]], successes: int, limit: float, tool: str) -> float:
@@ -147,7 +184,8 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
     if not summaries:
         raise SystemExit(f"{path}: no metrum-ai-bench-cli.summary.v3 line (run interrupted?)")
     summary = summaries[-1]
-    quantities: dict[str, list[float]] = {}
+    quantities: dict[str, list[float | None]] = {}
+    empty: list[str] = []
     dists = blocks = 0
     for key, val in summary.items():
         if key in BENCH_EXCLUDE or key in BENCH_ERROR_KEYS:
@@ -155,8 +193,8 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
         if is_num(val):
             quantities[key] = [float(val)]
         elif isinstance(val, dict):
-            found: dict[str, list[float]] = {}
-            leftover = split_dists(val, key, found)
+            found: dict[str, list[float | None]] = {}
+            leftover = split_dists(val, key, found, empty)
             for name, nums in found.items():
                 quantities[name] = nums
                 dists += 1
@@ -181,6 +219,8 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
         "tool_version": (summary.get("environment") or {}).get("package_version"),
         "quantities": len(quantities),
         "values": sum(len(v) for v in quantities.values()),
+        "null_values": null_count(quantities),
+        "empty_dists": len(empty),
         "per_request": len(fields),
         "duplicates": sum(len(g) - 1 for g in dups),
         "dists": dists,
@@ -191,26 +231,30 @@ def count_bench(path: Path, limit: float) -> dict[str, Any]:
         "median_ttft_over_e2e": med,
         "duplicate_groups": dups,
         "quantity_names": sorted(quantities),
+        "empty_dist_names": sorted(empty),
         "per_request_fields": sorted(fields),
     }
 
 
-def split_dists(node: dict, path: str, found: dict[str, list[float]]) -> list[float]:
+def split_dists(node: dict, path: str, found: dict[str, list[float | None]],
+                empty: list[str] | None = None) -> list[float]:
     """Record every DistSummary under node in found (by dotted path); return the
     numeric leaves that are not inside any DistSummary."""
     if DIST_KEYS_BENCH <= set(node):
-        found[path] = numeric_leaves(node)
+        found[path] = dist_slots(node, "n")
+        if empty is not None and is_empty_dist(node, "n"):
+            empty.append(path)
         return []
     leftover: list[float] = []
     for k, v in node.items():
         if is_num(v):
             leftover.append(float(v))
         elif isinstance(v, dict):
-            leftover.extend(split_dists(v, f"{path}.{k}", found))
+            leftover.extend(split_dists(v, f"{path}.{k}", found, empty))
         elif isinstance(v, list):
             for i, item in enumerate(v):
                 if isinstance(item, dict):
-                    leftover.extend(split_dists(item, f"{path}.{k}[{i}]", found))
+                    leftover.extend(split_dists(item, f"{path}.{k}[{i}]", found, empty))
                 else:
                     leftover.extend(numeric_leaves(item))
     return leftover
@@ -237,7 +281,8 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
     if not summary_path.is_file():
         raise SystemExit(f"{art}: missing profile_export_aiperf.json")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    quantities: dict[str, list[float]] = {}
+    quantities: dict[str, list[float | None]] = {}
+    empty = []
     dists = blocks = error_q = 0
     for key, val in summary.items():
         if key in AIPERF_EXCLUDE or not (isinstance(val, dict) and "unit" in val):
@@ -245,10 +290,12 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
         if key.startswith("error_"):
             error_q += 1
             continue
-        nums = [float(x) for x in val.values() if is_num(x)]
-        if not nums:
-            continue
+        nums = dist_slots({k: v for k, v in val.items() if k != "unit"}, "count")
+        if not any(v is not None for v in nums):
+            continue  # nothing reported at all
         quantities[key] = nums
+        if is_empty_dist(val, "count"):
+            empty.append(key)
         if len(nums) == 1:
             continue
         if "count" in val and "p1" in val:
@@ -279,6 +326,8 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
         "tool_version": summary.get("aiperf_version"),
         "quantities": len(quantities),
         "values": sum(len(v) for v in quantities.values()),
+        "null_values": null_count(quantities),
+        "empty_dists": len(empty),
         "per_request": len(fields),
         "duplicates": sum(len(g) - 1 for g in dups),
         "dists": dists,
@@ -288,6 +337,7 @@ def count_aiperf(art: Path, limit: float) -> dict[str, Any]:
         "median_ttft_over_e2e": med,
         "duplicate_groups": dups,
         "quantity_names": sorted(quantities),
+        "empty_dist_names": sorted(empty),
         "per_request_fields": sorted(fields),
     }
 
@@ -357,15 +407,17 @@ def table(path: Path) -> str:
                 c = by[sc].get(tool)
                 cell.append(f"{c['quantities']} / {c['values']} / {c['per_request']}" if c else "n/a")
             lines.append(f"| {sc:<10} | {cell[0]:<40} | {cell[1]:<39} |")
-        lines += ["", "| Scenario   | Tool   | dists | blocks | duplicates | measured | median TTFT/E2E |",
-                  "|------------|--------|-------|--------|------------|----------|-----------------|"]
+        lines += ["", "| Scenario   | Tool   | dists | empty dists | blocks | duplicates | null values | measured | median TTFT/E2E |",
+                  "|------------|--------|-------|-------------|--------|------------|-------------|----------|-----------------|"]
         for sc in client:
             for tool in ("aiperf", "bench"):
                 c = by[sc].get(tool)
                 if c:
                     med = c.get("median_ttft_over_e2e")
-                    lines.append(f"| {sc:<10} | {tool:<6} | {c['dists']:>5} | {c['blocks']:>6} | "
-                                 f"{c['duplicates']:>10} | {c['measured_requests']:>8} | "
+                    lines.append(f"| {sc:<10} | {tool:<6} | {c['dists']:>5} | "
+                                 f"{c.get('empty_dists', 'n/a'):>11} | {c['blocks']:>6} | "
+                                 f"{c['duplicates']:>10} | {c.get('null_values', 'n/a'):>11} | "
+                                 f"{c['measured_requests']:>8} | "
                                  f"{(f'{med:.3f}' if med is not None else 'n/a'):>15} |")
     for sc in (s for s in order if s.startswith("telemetry")):
         lines += ["", f"Telemetry ({sc}):", "",
@@ -414,7 +466,8 @@ def main() -> int:
         with args.append.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(out) + "\n")
     shown = out if args.full else {k: v for k, v in out.items()
-                                   if k not in ("quantity_names", "per_request_fields")}
+                                   if k not in ("quantity_names", "per_request_fields",
+                                                "empty_dist_names")}
     print(json.dumps(shown, indent=2))
     return 0
 

@@ -22,13 +22,20 @@ scripts/parity/run_tele.sh live-results/parity      # optional: telemetry ingest
 ```text
 | Scenario   | AIPerf quantities / values / per-request | Bench quantities / values / per-request |
 |------------|------------------------------------------|-----------------------------------------|
-| plain      | 65 / 653 / 33                            | ...                                     |
-| reasoning  | 70 / 700 / 36                            | ...                                     |
-| slo        | 68 / 656 / 34                            | ...                                     |
+| plain      | 65 / 653 / 33                            | 47 / 268 / 21                           |
+| reasoning  | 70 / 700 / 36                            | 49 / 297 / 24                           |
+| slo        | 68 / 656 / 34                            | 49 / 272 / 21                           |
 ```
 
 The AIPerf column above is the harness output for AIPerf 0.13.0 at the
-defaults, and it matches the 2026-10-05 epic table. A second table lists
+defaults, and it matches the 2026-10-05 epic table. The Bench column is
+bench-cli 1.5.3 (main at be721d3). Both columns use the #245 values rule
+(see "Nullable statistics" below) and were identical over three full runs.
+AIPerf 0.13.0 reported no null statistic and no empty distribution, so its
+column is the same under the old rule. Bench gains one value per scenario
+(the `throughput_bins_rps` `std`); under the old rule it read
+47 / 267 / 21, 49 / 296 / 24 and 49 / 271 / 21, or 268 for plain when a
+run crossed one 10 s bin. A second table lists
 distributions, nested blocks, duplicate quantities, measured requests, and
 the median TTFT/E2E ratio per run.
 
@@ -126,7 +133,7 @@ The thresholds come from `SLO_TTFT_S`, `SLO_E2E_S` and `PRICE_PER_HOUR`.
 | Column      | AIPerf (`profile_export_aiperf.json`, `profile_export.jsonl`) | Bench (`--data-log` JSONL) |
 |-------------|------------------------------------------|----------------------------|
 | quantities  | each top-level block with a `unit` | every `DistSummary` (a dict with `n`, `p50` and `p99`) at any depth, named by its dotted path; each top-level numeric scalar; each top-level block whose numeric leaves outside any `DistSummary` are non-empty (`goodput`, `observed_concurrency`) |
-| values      | numeric leaves of those blocks | numeric leaves of those quantities |
+| values      | every statistic slot of those blocks except `unit`, numeric or null; only the numeric leaves of a block with `count` 0 | every statistic slot of each `DistSummary` with `n` >= 1, numeric or null; only `n` of an empty one; numeric leaves of scalars and non-distribution blocks |
 | per-request | metric names on `profiling` records | non-null numeric fields on `phase=measure` `request.v3` records, except `seq` and `error` |
 | duplicates  | quantities whose numbers equal an earlier quantity's | same |
 
@@ -145,6 +152,29 @@ A few details matter for before and after counts:
   quantities with a single number are never compared, because lone scalars
   collide on 0 or 1 by chance. Duplicates still count as quantities; the
   column shows how many are copies.
+- **Nullable statistics (#245).** A statistic can be null because the
+  sample is small, not because the tool reported less: `DistSummary.std` is
+  null for n < 2, and every statistic but `n` is null for n = 0. A parity
+  run of about 8 s fills one 10 s `throughput_bins_rps` bin, so its `std`
+  is null, and a run just over 10 s fills two and makes it numeric. Under
+  the old rule the plain `values` count read 267 or 268 between identical
+  runs. So inside a distribution with at least one sample every statistic
+  the block defines counts, numeric or null: a Bench `DistSummary` with
+  `n` >= 1 always adds 10 values, and an AIPerf block with `count` >= 1 (or
+  no `count`) adds every key but `unit`. The nulls are also reported as
+  `null_values` (JSON field, and the `null values` column of the second
+  table), so the old count is values minus `null_values`. An empty
+  distribution (`n` or `count` is 0) holds no data, so its undefined
+  statistics never count: it still counts as a quantity and adds only its
+  numeric leaves (its `n`), exactly as before, and is reported in
+  `empty_dists` (`empty_dist_names` with `--full`). A Bench closed-loop
+  `queue_delay_s` and the reasoning distributions of a plain run are
+  empty. The same rule applies on both sides. An AIPerf block with no number
+  at all is still not a quantity. Outside distributions a null still never counts:
+  there it means a feature did not fire (`price_per_hour` with no price,
+  `reasoning_tokens_total` with no reasoning), which depends on flags, not
+  on the sample size. Duplicate detection compares null slots as equal only
+  to null.
 - **Errors.** Data whose presence depends on the error rate is left out of
   the headline counts and reported as `error_quantities`: Bench
   `errors_by_type` and per-request `error`, AIPerf `error_summary` and
@@ -152,7 +182,8 @@ A few details matter for before and after counts:
   counts. Always-present rate fields (`errors`, `error_rate`,
   `request_error_rate`) still count.
 
-Some things never count: booleans, strings, nulls, warmup data, run metadata
+Some things never count: booleans, strings, nulls outside a distribution,
+warmup data, run metadata
 (AIPerf `input_config`/`run_info`, Bench `config`/`environment`/`sut`), and
 Bench `per_endpoint`. The last is a per-endpoint copy of the headline
 distributions and is reported separately as `per_endpoint_quantities`. The
@@ -161,6 +192,13 @@ Bench summary is picked by `schema_version`, not by line position.
 An AIPerf full distribution carries 15 numbers (avg, p1 to p99, min, max,
 std, count, sum). Its time-weighted blocks (`effective_*`, `active_*`,
 `tokens_in_flight`) carry 8. A Bench `DistSummary` carries 10.
+
+Unit tests for these rules (`test_count_points.py`, standard library only,
+also run in CI):
+
+```bash
+python3 -m unittest discover -s scripts/parity
+```
 
 Count a single run by hand:
 
