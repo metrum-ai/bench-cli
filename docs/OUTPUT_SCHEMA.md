@@ -173,7 +173,9 @@ Additional v3 fields:
 - `observed_concurrency` - optional client outstanding-request snapshot:
   `cap`, `in_flight_mean` / `in_flight_p50` / `in_flight_max`,
   `cap_engagement_fraction` (acquires that blocked on the semaphore),
-  `acquire_count`, `wait_count`
+  `acquire_count`, `wait_count`. Measured phase only: the tracker resets at
+  the warmup barrier (per stage in strategic), so warmup acquires and
+  occupancy are excluded (#226)
 - `effective_concurrency` / `effective_prefill_concurrency` /
   `effective_decode_concurrency` (requests), `tokens_in_flight` (tokens),
   `effective_prefill_throughput` / `effective_decode_throughput`
@@ -524,6 +526,9 @@ in [TELEMETRY.md](TELEMETRY.md#modality-binaries-llm-vlm-asr-imagegen)):
 - `warmup` - `true` when the record's `phase` is `warmup`.
 
 Up to two `stage` rows (`warmup`, `measure`) are written at the end of the
-run. Each window runs from the phase's first send to its last completion;
-at concurrency above 1 the two windows can overlap. The run also stamps the
+run. Each window runs from the phase's first send to its last completion.
+Warmup is a barrier (#226): measured requests start only after every warmup
+request has completed, so the `warmup` window ends at or before the
+`measure` window starts, at any concurrency. See the warmup barrier entry in
+`docs/METRICS.md`. The run also stamps the
 additive `summary.v3.telemetry` block described above.

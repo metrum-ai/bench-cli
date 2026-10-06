@@ -328,18 +328,43 @@
   last-started request often finished well before the stage ended and the
   window was cut short. Strategic stage `throughput`, `goodput`, token rates
   and `cost_per_million_output_tokens` therefore read lower than earlier
-  versions, by little at low concurrency: -21% at concurrency 16 in one
+  versions: slightly lower at low concurrency; -21% at concurrency 16 in one
   64-request mock run (-2% in another); the old error depended on task
   scheduling and could be larger at other concurrency or request counts. A
-  stage whose last-finishing request failed can read slightly higher. The time-weighted blocks and `compare`
-  now take this same window, so numbers recomputed from the CSV match the
-  live strategic output (before, `compare` ended at the latest completion of
-  any outcome). The window is measured on a monotonic clock: the strategic
-  CSV gains a trailing `send_offset_s` column (seconds from the run start,
-  the NDJSON `t_sent_ns` origin; additive), so an NTP step cannot stretch a
-  stage. `compare` falls back to wall-clock `sent_unix_ns` only for older
-  CSVs without the column. Compare strategic rates across versions with
-  care.
+  stage whose last-finishing request failed can read slightly higher. The
+  time-weighted blocks and `compare` now take this same window, so numbers
+  recomputed from the CSV match the live strategic output (before, `compare`
+  ended at the latest completion of any outcome). The window is measured on a
+  monotonic clock: the strategic CSV gains a trailing `send_offset_s` column
+  (seconds from the run start, the NDJSON `t_sent_ns` origin; additive), so an
+  NTP step cannot stretch a stage. `compare` falls back to wall-clock
+  `sent_unix_ns` only for older CSVs without the column. Compare strategic
+  rates across versions with care.
+- `--warmup-requests` is now a barrier in `metrum-ai-bench-cli-llm`, `-vlm`,
+  `-asr`, and `-imagegen` (`metrum_ai_bench::runner::WarmupBarrier`).
+  Measured requests start only after every warmup request completes (success
+  or error), so the `warmup` and `measure` NDJSON stage windows no longer
+  overlap at concurrency above 1 and measurement no longer shares the server
+  with warmup traffic. Open-loop (`--request-rate`) measured schedules shift
+  by the barrier wait and keep their seeded inter-arrival gaps, so measured
+  `scheduled_offset_s` / `t_sched_ns` carry the shifted value and
+  `queue_delay_s` no longer counts warmup time. Strategic already ran a
+  per-stage barrier; `tests/e2e_warmup_barrier.rs` now covers it. Runs from
+  earlier versions with `--concurrency` above `--warmup-requests` may include
+  warmup overlap in early measured latency and `connect_s`, while open-loop
+  measured `scheduled_offset_s` / `t_sched_ns` and `throughput_bins_rps` now
+  start at the first measured request, so compare across versions with care.
+  No schema change (#226).
+- Open-loop `throughput_bins_rps` bins start at the first measured
+  `scheduled_offset_s` instead of offset 0, so measured requests scheduled
+  after warmup no longer fall past the last bin and drop out of the bins.
+  Closed loop already anchored at the first measured send (#226).
+- `observed_concurrency` (`in_flight_*`, `cap_engagement_fraction`,
+  `acquire_count`, `wait_count`) now covers the measured phase only in
+  `metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen` and each strategic
+  stage. The tracker resets at the warmup barrier, so `acquire_count` equals
+  the measured requests dispatched; before, warmup acquires and occupancy
+  were included. No schema change (#226).
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be
   interpolated from 0, and a rank in `+Inf` used to return the highest finite

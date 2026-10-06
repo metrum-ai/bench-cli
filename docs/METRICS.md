@@ -97,7 +97,11 @@ Workload section. This page focuses on measured fields.
   is held. Summary fields `observed_concurrency.in_flight_{mean,p50,max}` and
   `cap_engagement_fraction` (fraction of acquires that blocked on the cap).
   Optional per-request `in_flight_at_send`. In-flight values never exceed
-  `cap`: a request leaves the gauge before its permit is released.
+  `cap`: a request leaves the gauge before its permit is released. Measured
+  phase only: the gauge resets at the warmup barrier (per stage in
+  strategic), so `in_flight_*`, `cap_engagement_fraction`, `acquire_count`
+  and `wait_count` exclude warmup and `acquire_count` equals the measured
+  requests dispatched (#226).
 - **Time-weighted metrics** (#195): six blocks, each an object
   `{n, avg, active_avg, max, active_s}`, built by a sweep line over
   per-request intervals. The design matches AIPerf
@@ -109,14 +113,14 @@ Workload section. This page focuses on measured fields.
     like every rate in the summary): `[send, send + latency_s]`, where `send`
     is the monotonic `send_offset_s`. Strategic uses its own monotonic
     `send_offset_s` (#224; `compare` falls back to wall-clock `sent_unix_ns`
-    for older CSVs without it) and `service_latency_s`, so client queue delay is excluded. The window starts
-    at the first measured send of any outcome (the same start as
-    `window_seconds`) and lasts `window_seconds`, which ends at the latest
-    successful completion, so no success is clipped. Strategic uses the same
-    rule over the stage rows (first measured send to latest successful
-    `sent + service_latency_s`), which is the same stage window behind
-    `throughput` and the stage token rates (#224). Intervals are clipped to
-    the window. AIPerf ends its window at the final response of any
+    for older CSVs without it) and `service_latency_s`, so client queue delay
+    is excluded. The window starts at the first measured send of any outcome
+    (the same start as `window_seconds`) and lasts `window_seconds`, which
+    ends at the latest successful completion, so no success is clipped.
+    Strategic uses the same rule over the stage rows (first measured send to
+    latest successful `sent + service_latency_s`), which is the same stage
+    window behind `throughput` and the stage token rates (#224). Intervals are
+    clipped to the window. AIPerf ends its window at the final response of any
     outcome; Bench ends it at the last successful completion, like
     `window_seconds`.
   - **Failures are excluded.** Under errors or timeouts the server was also
@@ -243,20 +247,31 @@ Workload section. This page focuses on measured fields.
   The window is first measured send → last measured successful completion,
   derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
   `latency_s`. Wall-clock `started_at` is metadata only and must not be used
-  to recompute the window (an NTP step would otherwise inflate it).
-  The window excludes warmup and includes drain for requests issued during
-  measurement. Strategic stages use the same rule over the stage rows (#224):
-  the stage window runs from the earliest measured send of any outcome
-  (the monotonic CSV `send_offset_s`) to the latest successful
-  `send + service_latency_s`
-  (the latest completion of any outcome when the stage has no success).
-  Stage `throughput`, `goodput`, token rates,
-  `cost_per_million_output_tokens`, the time-weighted blocks, and `compare`
-  all share this window. `compare` reads CSVs written before
-  `send_offset_s` existed on wall-clock `sent_unix_ns`, which an NTP step
-  can inflate.
+  to recompute the window (an NTP step would otherwise inflate it). The window
+  excludes warmup and includes drain for requests issued during measurement.
+  Strategic stages use the same rule over the stage rows (#224): the stage
+  window runs from the earliest measured send of any outcome (the monotonic
+  CSV `send_offset_s`) to the latest successful `send + service_latency_s`
+  (the latest completion of any outcome when the stage has no success). Stage
+  `throughput`, `goodput`, token rates, `cost_per_million_output_tokens`, the
+  time-weighted blocks, and `compare` all share this window. `compare` reads
+  CSVs written before `send_offset_s` existed on wall-clock `sent_unix_ns`,
+  which an NTP step can inflate.
+- **Warmup barrier** (#226): with `--warmup-requests N`, measured requests
+  start only after all N warmup requests have completed (success or error),
+  so measurement sees a warmed, drained server. This holds in llm, vlm, asr,
+  imagegen and in every strategic stage. Every measured `t_sent_ns` is at or
+  after the last warmup `t_done_ns`, and the `warmup` and `measure` NDJSON
+  stage windows never overlap. Open loop (`--request-rate`): the measured
+  schedule shifts by the time the barrier added. The first measured request
+  is due when warmup drains, and the seeded inter-arrival gaps are kept, so
+  measured requests do not burst to catch up and `queue_delay_s` does not
+  count warmup time. Measured `scheduled_offset_s` / `t_sched_ns` carry the
+  shifted value on the run clock. Strategic restarts its measure clock per
+  stage instead.
 - **Throughput bins**: fixed-width bins over send offsets (open-loop:
-  `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
+  `scheduled_offset_s`; closed-loop: `send_offset_s`), measured from the
+  first measured request's offset. Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
 - **Effective max concurrency**: stamped on `summary.v3.config` as
   `effective_max_concurrency`: `--max-concurrency` when set, otherwise the
