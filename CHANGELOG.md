@@ -44,6 +44,20 @@
   does not copy AIPerf's `cli_command`. It recommends a narrow
   `metrum-ai-bench-cli import aiperf` after #192 to #195, with telemetry
   joins after #196. Design only; no behavior change.
+- Re-recorded `docs/queries/fixtures` with binaries from main `d43d9bc`
+  (#240). `record.sh` now puts `sweep5` behind a new test-only capacity gate,
+  `docs/queries/fixtures/capacity_proxy.py` (4 concurrent requests in front
+  of the mock server, Nagle off), so it carries a real kneedle knee at c=4
+  (p95 0.203 to 1.419 s, rise +599%). A new `sweep5_no_bend` fixture
+  (fixed-latency mock, p95 rise +0.12%) records `no_bend`, and `sweep3`
+  records `insufficient_points`. Each stage sends 64 requests so it spans
+  at least 3 telemetry scrapes. Points keep only `load`, `p95_s`,
+  `throughput` and `error_rate`, the legacy `knee` only its `load`, and
+  `run_id` and `t0_wall` are pinned, so re-records diff cleanly.
+  `docs/queries/test_analyze.py` asserts the recorded knee, the recorded
+  `no_bend`, and at least 2 power and preemption samples per stage.
+  `docs/telemetry/ANALYSIS.md` and `docs/STRATEGIC_BENCHMARKING.md` describe
+  the new fixtures. No binary, CLI, metric, or schema change.
 
 ### Added
 - `scripts/parity/`: a data-point count harness for Metrum AI Bench CLI vs

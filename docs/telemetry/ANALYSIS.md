@@ -154,7 +154,7 @@ Time-weighted mean of engine KV gauges: `vllm:kv_cache_usage_perc`
 there is no knee, and the output says why: the `knee_detection.reason` from
 the strategic stdout (`insufficient_points` below 5 points, `missing_latency`,
 `flat_curve`, `no_bend` when p95 rises less than 20% above its running minimum
-and no stage is saturated, #232),
+and no stage is saturated, #232; the recorded `sweep5_no_bend` fixture),
 or `insufficient_points` for an older output without
 `knee_detection` whose sweep has fewer than 5 points with a `p95_s`. Also
 null when the knee index is out of range (`knee_index_out_of_range`) or the
@@ -224,7 +224,7 @@ latency; do not mix it with client-side type 7 percentiles.
 | [stage_power.sql](../queries/stage_power.sql) | Power samples and crude means per measure stage |
 | [energy_crosscheck.sql](../queries/energy_crosscheck.sql) | Counter Δ vs trapezoid power |
 | [analyze.py](../queries/analyze.py) | Stdlib-only Python: every derived metric above. Pass the strategic stdout JSON as the second argument for `kv_cache_util_at_knee`; `--json` for machine output |
-| [fixtures/](../queries/fixtures/) | Recorded mock sweeps (5 and 3 stages) for `test_analyze.py`; `record.sh` re-records them |
+| [fixtures/](../queries/fixtures/) | Recorded mock sweeps for `test_analyze.py`: `sweep5` (5 stages through `capacity_proxy.py`, p95 0.203 s at c=1 to 1.419 s at c=16, a real knee at c=4), `sweep5_no_bend` (5 stages, `no_bend`), `sweep3` (3 stages, `insufficient_points`); `record.sh` re-records them |
 
 Do not invent metric names that are not in the NDJSON or in
 [exporters.md](exporters.md).
