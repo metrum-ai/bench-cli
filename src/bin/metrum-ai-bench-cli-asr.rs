@@ -181,33 +181,22 @@ async fn read_audio(audio_sample: &AudioSample) -> Result<Vec<u8>, Box<dyn Error
     Ok(file_content)
 }
 
-async fn make_request(
-    client: &Client,
-    url: &str,
-    model: &str,
+/// Build the multipart form for one sample from its audio bytes. Callers do
+/// this before taking the send offset, like the file read (#227, #242). The
+/// bytes move into the form without a copy. Returns the form and the audio
+/// size in bytes.
+fn audio_form(
     audio_sample: &AudioSample,
     file_content: Vec<u8>,
-    request_timeout: u64,
-    api_key: &str,
+    model: &str,
     response_format: &str,
     language: &str,
-) -> Result<
-    (Duration, Duration, String, f64, &'static str, usize, usize),
-    Box<dyn Error + Send + Sync>,
-> {
+) -> Result<(reqwest::multipart::Form, usize), Box<dyn Error + Send + Sync>> {
     let local_file_path = match &audio_sample.local_file_path {
         Some(path) => path,
         None => return Err("No local file path available for audio sample".into()),
     };
-
-    debug!("Request URL: {}", url);
-    debug!("Model: {}", model);
-    debug!("Response format: {}", response_format);
-
-    // The caller read the file before starting the request clock.
     let content_size = file_content.len();
-    let start_time = Instant::now();
-
     // Use basename only for multipart filename (do not leak full path); MIME from format
     let basename = Path::new(local_file_path)
         .file_name()
@@ -221,6 +210,29 @@ async fn make_request(
         &audio_sample.format,
         bytes::Bytes::from(file_content),
     )?;
+    Ok((form, content_size))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn make_request(
+    client: &Client,
+    url: &str,
+    model: &str,
+    form: reqwest::multipart::Form,
+    content_size: usize,
+    request_timeout: u64,
+    api_key: &str,
+    response_format: &str,
+) -> Result<
+    (Duration, Duration, String, f64, &'static str, usize, usize),
+    Box<dyn Error + Send + Sync>,
+> {
+    debug!("Request URL: {}", url);
+    debug!("Model: {}", model);
+    debug!("Response format: {}", response_format);
+
+    // The caller read the file and built the form before the request clock.
+    let start_time = Instant::now();
 
     let response = match metrum_ai_bench::connect_timing::send(
         client
@@ -610,7 +622,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let in_flight_at_send = request_slot.in_flight();
             // Read the audio before the send offset so t_sent_ns, latency_s
             // and the telemetry join exclude the file read (#227).
-            let audio = read_audio(&sample).await;
+            // The multipart form is built here too, so its assembly is not
+            // timed either (#242).
+            let audio = read_audio(&sample).await.and_then(|content| {
+                audio_form(
+                    &sample,
+                    content,
+                    &model,
+                    &response_format_str,
+                    &language_str,
+                )
+            });
             let send_offset = run_start.elapsed();
             // From the send offset, so send - scheduled == queue_delay_s
             // with the file read on the client side of the send.
@@ -623,19 +645,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let send_instant = Instant::now();
             let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
             let result = match audio {
-                Ok(file_content) => {
+                Ok((form, content_size)) => {
                     metrum_ai_bench::connect_timing::with_connect_slot(
                         Arc::clone(&connect_slot),
                         make_request(
                             &client,
                             &url,
                             &model,
-                            &sample,
-                            file_content,
+                            form,
+                            content_size,
                             request_timeout,
                             &api_key,
                             &response_format_str,
-                            &language_str,
                         ),
                     )
                     .await

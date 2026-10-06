@@ -10,12 +10,15 @@ use log::debug;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::error::Error;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Loaded image bytes (base64) plus the metadata recorded per request.
+/// `base64_data` is shared, so a cache hit or a clone never copies the
+/// payload (#242).
 #[derive(Clone)]
 pub struct ImageData {
-    pub base64_data: String,
+    pub base64_data: Arc<str>,
     pub mime_type: String,
     pub width: u32,
     pub height: u32,
@@ -128,73 +131,21 @@ impl ImageCache {
                 .map_err(|e| format!("Failed to read local image file '{}': {}", path, e))?
         };
 
-        let detected_format = image::guess_format(&image_data).ok();
-        let mut mime_type = match detected_format {
-            Some(image::ImageFormat::Png) => "image/png",
-            Some(image::ImageFormat::Gif) => "image/gif",
-            Some(image::ImageFormat::WebP) => "image/webp",
-            _ => "image/jpeg",
-        }
-        .to_string();
-        if let Some(declared) = declared_mime.filter(|d| !d.is_empty() && *d != mime_type) {
-            debug!(
-                "data: URL {} declares {} but the bytes look like {}; sending {}",
-                label, declared, mime_type, mime_type
-            );
-        }
-
-        // Read the header for dimensions; the payload stays byte-identical to
-        // the source unless a resize or an explicit re-encode is requested.
-        let (source_width, source_height) =
-            image::ImageReader::new(std::io::Cursor::new(&image_data))
-                .with_guessed_format()
-                .map_err(|e| format!("Failed to read image header from '{}': {}", label, e))?
-                .into_dimensions()
-                .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
-
-        // The limit, only when the image exceeds it.
-        let resize_to =
-            max_dimension.filter(|max_dim| source_width > *max_dim || source_height > *max_dim);
-        let oversized = resize_to.is_some();
-
-        let (encoded, width, height) = if oversized || reencode_jpeg {
-            let mut img = image::load_from_memory(&image_data)
-                .map_err(|e| format!("Failed to decode image from '{}': {}", label, e))?;
-            if let Some(max_dim) = resize_to {
-                let scale = max_dim as f32 / source_width.max(source_height) as f32;
-                let new_width = (source_width as f32 * scale) as u32;
-                let new_height = (source_height as f32 * scale) as u32;
-                img = img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3);
-                debug!(
-                    "Resized image from {}x{} to {}x{}",
-                    source_width, source_height, new_width, new_height
-                );
-            }
-            let format = if reencode_jpeg {
-                image::ImageFormat::Jpeg
-            } else {
-                image::ImageFormat::Png
-            };
-            let mut cursor = std::io::Cursor::new(Vec::new());
-            // JPEG cannot store alpha; drop it rather than failing the request.
-            if format == image::ImageFormat::Jpeg {
-                image::DynamicImage::ImageRgb8(img.to_rgb8()).write_to(&mut cursor, format)?;
-            } else {
-                img.write_to(&mut cursor, format)?;
-            }
-            mime_type = match format {
-                image::ImageFormat::Jpeg => "image/jpeg",
-                _ => "image/png",
-            }
-            .to_string();
-            let dimensions = (img.width(), img.height());
-            (cursor.into_inner(), dimensions.0, dimensions.1)
-        } else {
-            (image_data, source_width, source_height)
-        };
-
-        let base64_data = base64::engine::general_purpose::STANDARD.encode(&encoded);
-        let size_bytes = encoded.len() as u64;
+        // Header parse, optional resize / re-encode and base64 are CPU work
+        // on large inputs: run them off the async worker threads (#242).
+        let label_owned = label.to_string();
+        let (base64_data, mime_type, width, height, size_bytes) =
+            tokio::task::spawn_blocking(move || {
+                encode_image(
+                    image_data,
+                    declared_mime,
+                    &label_owned,
+                    max_dimension,
+                    reencode_jpeg,
+                )
+            })
+            .await
+            .map_err(|e| format!("image processing task failed for '{}': {}", label, e))??;
 
         let image_data = ImageData {
             base64_data,
@@ -210,6 +161,87 @@ impl ImageCache {
         self.put(key, image_data.clone());
         Ok(image_data)
     }
+}
+
+/// Detect the MIME type, read the dimensions, optionally resize or
+/// re-encode, and base64 the payload. Blocking CPU work: callers run it on
+/// the blocking pool. Returns (base64, mime, width, height, payload bytes).
+#[allow(clippy::type_complexity)]
+fn encode_image(
+    image_data: Vec<u8>,
+    declared_mime: Option<String>,
+    label: &str,
+    max_dimension: Option<u32>,
+    reencode_jpeg: bool,
+) -> Result<(Arc<str>, String, u32, u32, u64), Box<dyn Error + Send + Sync>> {
+    let detected_format = image::guess_format(&image_data).ok();
+    let mut mime_type = match detected_format {
+        Some(image::ImageFormat::Png) => "image/png",
+        Some(image::ImageFormat::Gif) => "image/gif",
+        Some(image::ImageFormat::WebP) => "image/webp",
+        _ => "image/jpeg",
+    }
+    .to_string();
+    if let Some(declared) = declared_mime.filter(|d| !d.is_empty() && *d != mime_type) {
+        debug!(
+            "data: URL {} declares {} but the bytes look like {}; sending {}",
+            label, declared, mime_type, mime_type
+        );
+    }
+
+    // Read the header for dimensions; the payload stays byte-identical to
+    // the source unless a resize or an explicit re-encode is requested.
+    let (source_width, source_height) =
+        image::ImageReader::new(std::io::Cursor::new(&image_data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to read image header from '{}': {}", label, e))?
+            .into_dimensions()
+            .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
+
+    // The limit, only when the image exceeds it.
+    let resize_to =
+        max_dimension.filter(|max_dim| source_width > *max_dim || source_height > *max_dim);
+    let oversized = resize_to.is_some();
+
+    let (encoded, width, height) = if oversized || reencode_jpeg {
+        let mut img = image::load_from_memory(&image_data)
+            .map_err(|e| format!("Failed to decode image from '{}': {}", label, e))?;
+        if let Some(max_dim) = resize_to {
+            let scale = max_dim as f32 / source_width.max(source_height) as f32;
+            let new_width = (source_width as f32 * scale) as u32;
+            let new_height = (source_height as f32 * scale) as u32;
+            img = img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3);
+            debug!(
+                "Resized image from {}x{} to {}x{}",
+                source_width, source_height, new_width, new_height
+            );
+        }
+        let format = if reencode_jpeg {
+            image::ImageFormat::Jpeg
+        } else {
+            image::ImageFormat::Png
+        };
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        // JPEG cannot store alpha; drop it rather than failing the request.
+        if format == image::ImageFormat::Jpeg {
+            image::DynamicImage::ImageRgb8(img.to_rgb8()).write_to(&mut cursor, format)?;
+        } else {
+            img.write_to(&mut cursor, format)?;
+        }
+        mime_type = match format {
+            image::ImageFormat::Jpeg => "image/jpeg",
+            _ => "image/png",
+        }
+        .to_string();
+        let dimensions = (img.width(), img.height());
+        (cursor.into_inner(), dimensions.0, dimensions.1)
+    } else {
+        (image_data, source_width, source_height)
+    };
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&encoded);
+    let size_bytes = encoded.len() as u64;
+    Ok((Arc::from(base64_data), mime_type, width, height, size_bytes))
 }
 
 /// Options for one `image_url` content part.
@@ -345,6 +377,21 @@ pub fn build_request_body(
     Ok(body)
 }
 
+/// Serialize a request body to the bytes sent on the wire (#242). Callers
+/// do this before taking the send time, so JSON encoding of a large base64
+/// payload never lands in `latency_s`, TTFT or `t_sent_ns`. The buffer is
+/// sized from the inline image payload, so the body is written in one pass.
+pub fn body_bytes(body: &Value, images: &[ImageData]) -> Result<bytes::Bytes, serde_json::Error> {
+    let hint = images
+        .iter()
+        .map(|image| image.base64_data.len() + image.mime_type.len() + 64)
+        .sum::<usize>()
+        + 1024;
+    let mut buf = Vec::with_capacity(hint);
+    serde_json::to_writer(&mut buf, body)?;
+    Ok(bytes::Bytes::from(buf))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +405,20 @@ mod tests {
             size_bytes: bytes,
             url: url.into(),
         }
+    }
+
+    #[test]
+    fn body_bytes_match_the_json_body_and_share_image_data() {
+        let images = [image("a.png", 3)];
+        let shared = images[0].clone();
+        assert!(Arc::ptr_eq(&shared.base64_data, &images[0].base64_data));
+        let body = build_request_body(
+            "m", 8, 0.1, "x", &images, "low", false, false, false, None, None, None,
+        )
+        .expect("body");
+        let bytes = body_bytes(&body, &images).expect("bytes");
+        let parsed: Value = serde_json::from_slice(&bytes).expect("parse");
+        assert_eq!(parsed, body);
     }
 
     #[test]
