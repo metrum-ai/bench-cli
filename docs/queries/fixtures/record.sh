@@ -4,9 +4,15 @@
 #
 # Re-records the analyze.py NDJSON fixtures against the mock server.
 # Usage: BIN_DIR=/path/to/target/release docs/queries/fixtures/record.sh
-# Writes sweep5.{ndjson,stdout.json} (5 stages; a knee, or no_bend when the
-# mock p95 rises less than 20%, #232) and
-# sweep3.{ndjson,stdout.json} (3 stages, no knee) next to this script.
+# Writes next to this script:
+#   sweep5.{ndjson,stdout.json}: 5 stages through capacity_proxy.py (at most
+#     $CAPACITY requests reach the mock at once), so p95 bends past
+#     c=$CAPACITY and knee_detection reports a real knee (#232, #240).
+#   sweep5_no_bend.{ndjson,stdout.json}: the same sweep straight to the
+#     fixed-latency mock; p95 rises less than 20%, so the reason is no_bend.
+#   sweep3.{ndjson,stdout.json}: 3 stages, insufficient_points.
+# Every stage runs $RPS requests so it spans several telemetry scrapes
+# (250 ms interval) and each stage has power and preemption samples.
 # The generated .ndjson and .stdout.json fixtures are Copyright (c) 2026
 # Metrum AI, Inc., SPDX-License-Identifier: Apache-2.0. They carry no comment
 # header because JSON and NDJSON have no comment syntax.
@@ -15,7 +21,9 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 bin="${BIN_DIR:?set BIN_DIR to a directory with the release binaries}"
 work="$(mktemp -d)"
-trap 'kill "${mock_pid:-0}" 2>/dev/null || true; rm -rf "$work"' EXIT
+trap 'kill "${mock_pid:-0}" "${proxy_pid:-0}" 2>/dev/null || true; rm -rf "$work"' EXIT
+CAPACITY=4
+RPS=64
 
 # Older mock builds print the --listen flag, not the bound port, so pick one here.
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
@@ -27,34 +35,63 @@ for _ in $(seq 50); do
   curl -fsS "$url/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
+free_port() {
+  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
+}
+gate_port="$(free_port)"
+gate_url="http://127.0.0.1:$gate_port"
+python3 "$here/capacity_proxy.py" "$gate_port" "$url" "$CAPACITY" >"$work/proxy.log" 2>&1 &
+proxy_pid=$!
+for _ in $(seq 50); do
+  curl -fsS "$gate_url/health" >/dev/null 2>&1 && break
+  sleep 0.1
+done
 sed "s#MOCK_URL#$url#" "$here/mock-telemetry.yaml" >"$work/telemetry.yaml"
 
 record() {
-  local name="$1" sweep="$2"
-  # Relative paths: points[].config echoes --ndjson and --telemetry verbatim.
+  local name="$1" sweep="$2" target="$3"
+  # Telemetry and --metrics-url always read the mock directly; only the
+  # inference requests go to $target. Relative paths: points[].config
+  # echoes --ndjson and --telemetry verbatim.
   (cd "$work" && "$bin/metrum-ai-bench-cli-strategic" \
-    --url "$url/v1/chat/completions" --model mock --api-key dummy \
-    --sweep "$sweep" --sweep-by concurrency --requests-per-stage 32 \
+    --url "$target/v1/chat/completions" --model mock --api-key dummy \
+    --sweep "$sweep" --sweep-by concurrency --requests-per-stage "$RPS" \
     --max-tokens 16 --warmup-requests 0 \
     --ndjson "$name.ndjson" --telemetry telemetry.yaml \
     --metrics-url "$url/metrics" >"$name.stdout.json")
-  # The mock port varies per run; pin it so re-records diff cleanly.
-  sed -e "s#$url#http://127.0.0.1:MOCK_PORT#g" "$work/$name.ndjson" \
+  # The ports, run_id and t0_wall vary per run; pin them so re-records diff
+  # cleanly. analyze.py only compares run_id for equality and never reads
+  # t0_wall. The trailing slash keeps one port from matching a prefix of
+  # the other.
+  local run_id
+  run_id="$(head -1 "$work/$name.ndjson" | python3 -c 'import json, sys; print(json.load(sys.stdin)["run_id"])')"
+  sed -e "s#$url/#http://127.0.0.1:MOCK_PORT/#g" -e "s#$gate_url/#http://127.0.0.1:GATE_PORT/#g" \
+    -e "s#$run_id#RUN_ID#g" \
+    -e 's#"t0_wall":"[^"]*"#"t0_wall":"T0_WALL"#' \
+    "$work/$name.ndjson" \
     >"$here/$name.ndjson"
   # Keep only the stdout keys analyze.py reads. environment carries the
   # hostname and strategic has no working --redact-hostname, so it is omitted.
-  python3 - "$work/$name.stdout.json" "$here/$name.stdout.json" "$url" <<'PY'
+  # Points keep load and p95_s (read by analyze.py) plus throughput and
+  # error_rate (the knee rule's other inputs); the legacy knee keeps its load.
+  python3 - "$work/$name.stdout.json" "$here/$name.stdout.json" "$url" "$gate_url" <<'PY'
 import json, sys
 keep = ("schema_version", "tool_version", "partial", "points", "knee", "knee_detection")
 with open(sys.argv[1], encoding="utf-8") as f:
-    text = f.read().replace(sys.argv[3], "http://127.0.0.1:MOCK_PORT")
+    text = f.read().replace(sys.argv[3] + "/", "http://127.0.0.1:MOCK_PORT/")
+    text = text.replace(sys.argv[4] + "/", "http://127.0.0.1:GATE_PORT/")
 src = json.loads(text)
 out = {k: src[k] for k in keep if k in src}
+point_keys = ("load", "p95_s", "throughput", "error_rate")
+out["points"] = [{k: p.get(k) for k in point_keys} for p in out.get("points") or []]
+if out.get("knee") is not None:
+    out["knee"] = {"load": out["knee"].get("load")}
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     json.dump(out, f, indent=2, sort_keys=True)
     f.write("\n")
 PY
 }
 
-record sweep5 1,2,4,8,16
-record sweep3 1,4,16
+record sweep5 1,2,4,8,16 "$gate_url"
+record sweep5_no_bend 1,2,4,8,16 "$url"
+record sweep3 1,4,16 "$url"

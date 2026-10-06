@@ -1,50 +1,48 @@
 {
-  "knee": {
-    "load": 4.0
-  },
+  "knee": null,
   "knee_detection": {
-    "index": 2,
+    "index": null,
     "max_error_rate_rise": 0.05,
-    "method": "kneedle",
+    "method": null,
     "min_marginal_gain": 0.5,
     "min_p95_rise": 0.2,
     "min_points": 5,
-    "p95_rise": 5.993099482406764,
+    "p95_rise": 0.0012360848858181672,
     "points": 5,
-    "reason": null,
-    "saturated_index": 3
+    "reason": "no_bend",
+    "saturated_index": null
   },
   "partial": false,
   "points": [
     {
       "error_rate": 0.140625,
       "load": 1.0,
-      "p95_s": 0.2028785205,
-      "throughput": 4.245871727262735
+      "p95_s": 0.20203566369999998,
+      "throughput": 4.26613773095043
     },
     {
-      "error_rate": 0.140625,
+      "error_rate": 0.15625,
       "load": 2.0,
-      "p95_s": 0.20313009880000002,
-      "throughput": 8.488909182197359
+      "p95_s": 0.20192775825,
+      "throughput": 8.380042981643935
     },
     {
       "error_rate": 0.140625,
       "load": 4.0,
-      "p95_s": 0.20377404079999997,
-      "throughput": 16.938124252336554
+      "p95_s": 0.201966765,
+      "throughput": 17.080507471678104
     },
     {
       "error_rate": 0.140625,
       "load": 8.0,
-      "p95_s": 0.40878257510000005,
-      "throughput": 16.939484664287225
+      "p95_s": 0.20217735809999998,
+      "throughput": 34.09554906542028
     },
     {
       "error_rate": 0.140625,
       "load": 16.0,
-      "p95_s": 1.4187496767,
-      "throughput": 16.917665263874273
+      "p95_s": 0.2019287339,
+      "throughput": 68.29190685214853
     }
   ],
   "schema_version": "metrum-ai-bench-cli.strategic.v1",
