@@ -596,9 +596,18 @@ mod tests {
     }
 
     fn probe(events: &[&str]) -> PreflightCheck {
-        let body: Vec<Result<Vec<u8>, reqwest::Error>> = events
+        let raw: Vec<String> = events
             .iter()
-            .map(|event| Ok(format!("data: {event}\n\n").into_bytes()))
+            .map(|event| format!("data: {event}\n\n"))
+            .collect();
+        probe_raw(&raw.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+
+    /// Feed raw SSE byte chunks (comment lines included) to the stream check.
+    fn probe_raw(chunks: &[&str]) -> PreflightCheck {
+        let body: Vec<Result<Vec<u8>, reqwest::Error>> = chunks
+            .iter()
+            .map(|chunk| Ok(chunk.as_bytes().to_vec()))
             .collect();
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -640,7 +649,7 @@ mod tests {
 
     #[test]
     fn reasoning_only_stream_passes_streaming_check() {
-        // vLLM sends `reasoning_content`; newer servers send `reasoning`.
+        // Servers emit reasoning_content or reasoning depending on engine and version.
         for field in ["reasoning_content", "reasoning"] {
             let delta = format!(r#"{{"choices":[{{"delta":{{"{field}":"think"}}}}]}}"#);
             let check = probe(&[
@@ -671,6 +680,25 @@ mod tests {
             .contains("without a visible output or reasoning token"));
         let remediation = check.remediation.expect("remediation");
         assert!(remediation.contains(r#"{"chat_template_kwargs":{"enable_thinking":false}}"#));
+    }
+
+    #[test]
+    fn empty_reasoning_usage_and_keep_alive_fail_streaming_check() {
+        let check = probe_raw(&[
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":0}}\n\n",
+            ": keep-alive\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ]);
+        assert_eq!(check.status, CheckStatus::Fail, "{}", check.detail);
+        assert!(
+            check
+                .detail
+                .contains("without a visible output or reasoning token"),
+            "{}",
+            check.detail
+        );
     }
 
     #[test]
