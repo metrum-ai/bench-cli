@@ -168,11 +168,25 @@ impl std::fmt::Display for MetrumAiBenchASRResponseFormat {
     }
 }
 
+/// Read a sample's audio bytes. Callers do this before taking the request's
+/// send offset, so the file read stays outside the request window (#227).
+async fn read_audio(audio_sample: &AudioSample) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+    let local_file_path = match &audio_sample.local_file_path {
+        Some(path) => path,
+        None => return Err("No local file path available for audio sample".into()),
+    };
+    debug!("Using local file: {}", local_file_path);
+    let file_content = tokio::fs::read(local_file_path).await?;
+    debug!("File size: {} bytes", file_content.len());
+    Ok(file_content)
+}
+
 async fn make_request(
     client: &Client,
     url: &str,
     model: &str,
     audio_sample: &AudioSample,
+    file_content: Vec<u8>,
     request_timeout: u64,
     api_key: &str,
     response_format: &str,
@@ -187,14 +201,11 @@ async fn make_request(
     };
 
     debug!("Request URL: {}", url);
-    debug!("Using local file: {}", local_file_path);
     debug!("Model: {}", model);
     debug!("Response format: {}", response_format);
 
-    // Read the file content before starting the request clock.
-    let file_content = tokio::fs::read(local_file_path).await?;
+    // The caller read the file before starting the request clock.
     let content_size = file_content.len();
-    debug!("File size: {} bytes", content_size);
     let start_time = Instant::now();
 
     // Use basename only for multipart filename (do not leak full path); MIME from format
@@ -561,11 +572,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         )
         .await?;
         let client = client.clone();
-        let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
-            arrival_kind,
-            start_time.elapsed(),
-            slot.scheduled_delay,
-        );
         let i = slot.seq as u32;
 
         // Get the next audio sample (round-robin if fewer samples than requests)
@@ -602,24 +608,40 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let request_slot =
                 metrum_ai_bench::concurrency::InFlightSlot::new(&tracker_task, permit);
             let in_flight_at_send = request_slot.in_flight();
+            // Read the audio before the send offset so t_sent_ns, latency_s
+            // and the telemetry join exclude the file read (#227).
+            let audio = read_audio(&sample).await;
             let send_offset = run_start.elapsed();
+            // From the send offset, so send - scheduled == queue_delay_s
+            // with the file read on the client side of the send.
+            let queue_delay = metrum_ai_bench::runner::queue_delay_for_slot(
+                arrival_kind,
+                send_offset,
+                scheduled_delay,
+            );
             let started_at = Utc::now();
             let send_instant = Instant::now();
             let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
-            let result = metrum_ai_bench::connect_timing::with_connect_slot(
-                Arc::clone(&connect_slot),
-                make_request(
-                    &client,
-                    &url,
-                    &model,
-                    &sample,
-                    request_timeout,
-                    &api_key,
-                    &response_format_str,
-                    &language_str,
-                ),
-            )
-            .await;
+            let result = match audio {
+                Ok(file_content) => {
+                    metrum_ai_bench::connect_timing::with_connect_slot(
+                        Arc::clone(&connect_slot),
+                        make_request(
+                            &client,
+                            &url,
+                            &model,
+                            &sample,
+                            file_content,
+                            request_timeout,
+                            &api_key,
+                            &response_format_str,
+                            &language_str,
+                        ),
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
             let http_trace = connect_slot.trace();
             // InFlightSlot leaves the gauge before freeing the permit (#189).
             drop(endpoint_lease);
