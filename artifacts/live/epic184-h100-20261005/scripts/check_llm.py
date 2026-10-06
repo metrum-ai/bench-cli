@@ -65,12 +65,13 @@ for run, cap in (("r1-plain", 16), ("r2-reasoning", 8)):
     print(f"#196 data-log send_offset_s vs ndjson t_sent_ns: max |diff| = {max(diffs) if diffs else None} ns over {len(diffs)} rows: {ok(diffs and max(diffs) < 1000)}")
     tele = [r for r in nd if r.get("kind") == "telemetry"]
     ts = [r["t_ns"] for r in tele if "t_ns" in r]
-    names = sorted({r.get("name") for r in tele})
+    # telemetry.v1 rows carry the series name in "metric".
+    names = sorted({r.get("metric") for r in tele})
     lo = min(r["t_sent_ns"] for r in nreq.values() if r.get("t_sent_ns") is not None)
     hi = max(r["t_done_ns"] for r in nreq.values() if r.get("t_done_ns") is not None)
     print(f"#196 telemetry samples={len(tele)} series_names={len(names)} t_ns range=[{min(ts) if ts else None},{max(ts) if ts else None}] request window=[{lo},{hi}]")
     print(f"#198 vllm histogram names present: {[n for n in names if n and 'vllm:' in n and n.endswith('_bucket')][:6]}")
-    print(f"#198 per-core cpu series present: {[n for n in names if n and 'cpu_core' in n][:2]}; process series: {[n for n in names if n and 'process' in n][:2]}")
+    print(f"#198 per-core cpu series present: {[n for n in names if n and n.startswith('all_smi_cpu_core_') and not n.endswith('_count')][:2]}; process series: {[n for n in names if n and 'process' in n][:2]}")
     if run == "r2-reasoning":
         pt = dist(s, "prefill_tps_per_user").get("p50")
         fr = dist(s, "first_reasoning_s").get("p50")
