@@ -456,42 +456,36 @@ knee result in two fields (`knee_detection` is additive, #190):
   - `reason` (string or null) - why there is no knee: `insufficient_points`
     (fewer than `min_points` measured stages, that is stages with a p95),
     `missing_latency` (the first or last stage has no p95, for example no
-    successes), `flat_curve` (throughput or p95 does not change across the
-    measured stages, or p95 bends over flat throughput), `no_bend`
-    (additive, #232: p95 rises less than `min_p95_rise` above its sweep
-    minimum and no saturation check fires), or `saturated_at_first_stage`
-    (additive, #232: the first stage is already saturated, so no stage is
-    unsaturated; lower the starting load). Since #232, `missing_latency` and
-    `flat_curve` are also reported only when no saturation check fires, and
-    a p95 bend is ignored when the first or last stage has no p95. Null
-    exactly when `index` is set.
+    successes; since #232 only when neither a p95 bend nor a saturated stage
+    gives a knee), `flat_curve` (throughput or p95 does not change across the
+    measured stages, or p95 bends over flat throughput), or `no_bend`
+    (additive, #232: p95 rises less than `min_p95_rise` above its running
+    minimum and no stage is saturated). Null exactly when `index` is set.
   - `points` (integer) - number of measured stages (stages with a p95).
   - `min_points` (integer) - minimum measured stages for a knee, always 5
     (both endpoints plus 3 interior candidates).
   - Additive (#232):
-    - `method` (string or null) - `kneedle` (p95 bend; Kneedle on the
-      measured stages from the lowest p95 to the highest p95 after it, or
-      that baseline stage itself when the peak is the next measured stage)
-      or `saturation` (the stage before `saturated_index`, used when p95 has
-      no bend, when the first or last stage has no p95, or when it comes
-      before the Kneedle knee). Null when there is no knee.
-    - `p95_rise` (number or null) - relative rise from the lowest measured
-      p95 to the highest p95 at or after it (0.41 = +41%). Null below
-      `min_points` or when the lowest p95 is not positive.
-    - `saturated_index` (integer or null) - first stage flagged saturated:
-      segment efficiency `(X_i / X_{i-1}) / (load_i / load_{i-1})` below
-      `min_segment_efficiency` (skipped on concurrency segments where both
-      stages run all `n` requests in one wave, `load >= n`), achieved
-      throughput below `min_achieved_ratio` of the expected unsaturated
-      throughput `successes / ((n - 1) / load + p50_s)` (rate sweeps; the
-      stage window includes the drain of the last send), or an error rate
-      at least `max_error_rate_rise` above the lowest earlier stage. Null
-      when no stage is saturated or below `min_points`.
+    - `method` (string or null) - `kneedle` (Kneedle on the measured stages
+      from the baseline to the peak of `p95_rise`, or the baseline stage
+      itself when the peak is the next measured stage) or `saturation` (the
+      stage before `saturated_index`). When both apply, the earlier stage
+      wins. Null when there is no knee.
+    - `p95_rise` (number or null) - largest p95 rise over the running
+      minimum, `max_j (p95_j / min_{i<=j} p95_i - 1)` over measured stages
+      (0.41 = +41%). Null below `min_points` or when no p95 is positive.
+    - `saturated_index` (integer or null) - first stage flagged saturated.
+      Concurrency sweeps: relative throughput gain below `min_marginal_gain`
+      times the relative load gain,
+      `(X_i - X_{i-1}) / X_{i-1} < 0.5 * (load_i - load_{i-1}) / load_{i-1}`
+      (`X` is success throughput; skipped when both stages run all `n`
+      requests in one wave, `load >= n`). Any sweep: an error rate at least
+      `max_error_rate_rise` above the lowest earlier stage. Rate sweeps use
+      the error rate only, because their stage window ends at the latest
+      completion (#224). Never the first stage. Null when no stage is
+      saturated or below `min_points`.
     - `min_p95_rise` (number) - p95 rise threshold, 0.2 (provisional).
-    - `min_segment_efficiency` (number) - segment efficiency threshold, 0.5.
-    - `min_achieved_ratio` (number or null) - 0.9 of expected throughput on
-      `--sweep-by rate`;
-      null on concurrency sweeps, where it does not apply.
+    - `min_marginal_gain` (number or null) - 0.5 on concurrency sweeps;
+      null on `--sweep-by rate`, where the throughput check does not run.
     - `max_error_rate_rise` (number) - error-rate rise threshold, 0.05.
 
 Sweeps with fewer than 5 measured stages (stages with a p95) report `"knee": null`. 3- and

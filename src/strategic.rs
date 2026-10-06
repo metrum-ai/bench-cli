@@ -735,37 +735,31 @@ pub fn summarize_stage_with_options(
 pub const KNEE_MIN_POINTS: usize = 5;
 
 /// Minimum relative p95 rise before a latency bend counts (0.20 = +20%). The
-/// rise runs from the lowest measured p95 (the baseline) to the highest p95 at
-/// or after it, so a cold first stage or a bend that recovers by the last
-/// stage is not missed (#232). Kneedle always returns the interior stage
-/// farthest from the chord, so without a minimum bend a nearly linear sweep
-/// still yields a knee. A chord-distance threshold cannot separate the live
-/// H100 curves: the LLM sweep with a real knee at c=32 (+41% p95) peaks at
-/// 0.095, below the bend-free VLM sweep (+11% p95, peak 0.164). Provisional:
-/// the value sits about 2x above the bend-free sweeps seen so far (+8% to
-/// +11%) and about 2x below the smallest real bend (+41%), from two live
-/// curves.
+/// rise is the largest p95 rise over the running minimum,
+/// `max_j (p95_j / min_{i<=j} p95_i - 1)`, so a cold first stage, or a bend
+/// that recovers by the last stage, is not missed (#232). Kneedle always
+/// returns the interior stage farthest from the chord, so without a minimum
+/// bend a nearly linear sweep still yields a knee. A chord-distance threshold
+/// cannot separate the live H100 curves: the LLM sweep with a real knee at
+/// c=32 (+41% p95) peaks at 0.095, below the bend-free VLM sweep (+11% p95,
+/// peak 0.164). Provisional: the value sits about 2x above the bend-free
+/// sweeps seen so far (+8% to +11%) and about 2x below the smallest real
+/// bend (+41%), from two live curves.
 pub const KNEE_MIN_P95_RISE: f64 = 0.20;
 
-/// Segment efficiency below which a sweep counts as saturated (#232):
-/// `(X_i / X_{i-1}) / (load_i / load_{i-1})` over consecutive stages, where
-/// `X` is success throughput. Load shedding (fast 429/503, admission control)
-/// keeps success p95 flat while throughput plateaus, so p95 alone misses it.
-/// Tuned for geometric sweeps (for example 2x steps); on linear steps such
-/// as 10, 20, 30 it needs a larger throughput drop to fire. Concurrency
-/// segments where both stages run their requests in one wave
-/// (`load >= n`) are skipped, since their throughput cannot scale.
-pub const KNEE_MIN_SEGMENT_EFFICIENCY: f64 = 0.5;
-
-/// Rate sweeps only: achieved over expected unsaturated throughput below
-/// which a stage counts as saturated (#232). The stage window includes the
-/// drain tail of the last send, so a healthy stage of `n` requests at
-/// `load` req/s with median latency `p50_s` achieves about
-/// `successes / ((n - 1) / load + p50_s)`, not `load`.
-pub const KNEE_MIN_ACHIEVED_RATIO: f64 = 0.9;
+/// Concurrency sweeps only: a stage is saturated when its relative throughput
+/// gain is below this fraction of its relative load gain,
+/// `(X_i - X_{i-1}) / X_{i-1} < 0.5 * (load_i - load_{i-1}) / load_{i-1}`,
+/// where `X` is success throughput (#232). On 2x steps that is a throughput
+/// ratio below 1.5. Load shedding (fast 429/503, admission control) keeps
+/// success p95 flat while throughput plateaus, so p95 alone misses it. Rate
+/// sweeps skip this check: their stage window ends at the latest completion
+/// (#224), so latency spread, not saturation, moves achieved throughput.
+pub const KNEE_MIN_MARGINAL_GAIN: f64 = 0.5;
 
 /// Error-rate rise (absolute, 0.05 = 5 points) over the lowest earlier stage
-/// at which a stage counts as saturated (#232).
+/// at which a stage counts as saturated (#232). The only saturation check on
+/// rate sweeps.
 pub const KNEE_MAX_ERROR_RATE_RISE: f64 = 0.05;
 
 /// What the sweep `load` axis means, for the saturation checks.
@@ -785,18 +779,16 @@ pub enum KneeReason {
     /// Fewer than [`KNEE_MIN_POINTS`] measured stages (stages with a p95).
     InsufficientPoints,
     /// The first or last stage has no p95 latency (for example, no
-    /// successes), so the curve has no endpoints.
+    /// successes), and neither a p95 bend nor a saturation check gave a knee.
     MissingLatency,
     /// Throughput or p95 latency does not change across the measured
-    /// stages, so the curve cannot be normalized.
+    /// stages, or p95 bends over flat throughput, so the curve cannot be
+    /// normalized.
     FlatCurve,
-    /// p95 latency rises less than [`KNEE_MIN_P95_RISE`] (relative) from its
-    /// sweep minimum, and no saturation check fired, so the curve has no
+    /// p95 latency rises less than [`KNEE_MIN_P95_RISE`] (relative) over its
+    /// running minimum, and no saturation check fired, so the curve has no
     /// meaningful bend.
     NoBend,
-    /// The first stage is already saturated, so the sweep has no
-    /// unsaturated stage to report; lower the starting load.
-    SaturatedAtFirstStage,
 }
 
 /// How a reported knee was found.
@@ -806,9 +798,8 @@ pub enum KneeMethod {
     /// Kneedle chord distance on the throughput/p95 curve from the p95
     /// baseline stage to the p95 peak.
     Kneedle,
-    /// The stage before the first saturated stage (low segment efficiency,
-    /// low achieved rate on a rate sweep, or a rising error rate). Used when
-    /// p95 has no bend, or when it comes before the Kneedle knee.
+    /// The stage before the first saturated stage. Used when p95 has no
+    /// bend, or when it comes before the Kneedle knee.
     Saturation,
 }
 
@@ -826,19 +817,16 @@ pub struct KneeDetection {
     pub min_points: usize,
     /// How the knee was found; `None` when there is no knee.
     pub method: Option<KneeMethod>,
-    /// Observed relative rise from the lowest measured p95 to the highest
-    /// p95 at or after it; `None` below [`KNEE_MIN_POINTS`] or when the
-    /// baseline p95 is not positive.
+    /// Largest p95 rise over the running minimum; `None` below
+    /// [`KNEE_MIN_POINTS`] or when no measured p95 is positive.
     pub p95_rise: Option<f64>,
     /// First stage index flagged saturated, if any.
     pub saturated_index: Option<usize>,
     /// Always [`KNEE_MIN_P95_RISE`].
     pub min_p95_rise: f64,
-    /// Always [`KNEE_MIN_SEGMENT_EFFICIENCY`].
-    pub min_segment_efficiency: f64,
-    /// [`KNEE_MIN_ACHIEVED_RATIO`] on rate sweeps; `None` on concurrency
-    /// sweeps, where it does not apply.
-    pub min_achieved_ratio: Option<f64>,
+    /// [`KNEE_MIN_MARGINAL_GAIN`] on concurrency sweeps; `None` on rate
+    /// sweeps, where the check does not run.
+    pub min_marginal_gain: Option<f64>,
     /// Always [`KNEE_MAX_ERROR_RATE_RISE`].
     pub max_error_rate_rise: f64,
 }
@@ -854,8 +842,8 @@ impl KneeDetection {
             p95_rise: None,
             saturated_index: None,
             min_p95_rise: KNEE_MIN_P95_RISE,
-            min_segment_efficiency: KNEE_MIN_SEGMENT_EFFICIENCY,
-            min_achieved_ratio: (axis == KneeLoadAxis::Rate).then_some(KNEE_MIN_ACHIEVED_RATIO),
+            min_marginal_gain: (axis == KneeLoadAxis::Concurrency)
+                .then_some(KNEE_MIN_MARGINAL_GAIN),
             max_error_rate_rise: KNEE_MAX_ERROR_RATE_RISE,
         }
     }
@@ -889,13 +877,9 @@ impl KneeDetection {
                 "no knee: throughput or p95 latency is flat across the sweep".to_string()
             }
             KneeReason::NoBend => format!(
-                "no knee: p95 latency rises less than {:.0}% above its sweep minimum and throughput keeps scaling",
+                "no knee: p95 latency rises less than {:.0}% above its running minimum and no stage is saturated",
                 self.min_p95_rise * 100.0
             ),
-            KneeReason::SaturatedAtFirstStage => {
-                "no knee: the first sweep stage is already saturated; lower the starting load"
-                    .to_string()
-            }
         })
     }
 }
@@ -904,7 +888,7 @@ impl KneeDetection {
 /// throughput/latency curve. This is the standard deterministic Kneedle
 /// construction and is robust to units and uneven sweep spacing. Returns no
 /// knee below [`KNEE_MIN_POINTS`] measured stages (stages with a p95) or when
-/// the sweep has neither a p95 bend nor a saturation signal; see
+/// the sweep has neither a p95 bend nor a saturated stage; see
 /// [`detect_knee_with_reason`].
 pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
     detect_knee_with_reason(points).index
@@ -916,41 +900,27 @@ pub fn detect_knee_with_reason(points: &[SweepPoint]) -> KneeDetection {
     detect_knee_on_axis(points, KneeLoadAxis::Concurrency)
 }
 
-/// First stage that shows saturation (#232): a segment efficiency below
-/// [`KNEE_MIN_SEGMENT_EFFICIENCY`], achieved below
-/// [`KNEE_MIN_ACHIEVED_RATIO`] of the expected unsaturated throughput on rate
-/// sweeps, or an error rate at least [`KNEE_MAX_ERROR_RATE_RISE`] above the
-/// lowest earlier stage.
+/// First saturated stage (#232): on concurrency sweeps a marginal throughput
+/// gain below [`KNEE_MIN_MARGINAL_GAIN`] of the marginal load gain; on any
+/// sweep an error rate at least [`KNEE_MAX_ERROR_RATE_RISE`] above the lowest
+/// earlier stage. Never the first stage.
 fn first_saturated_stage(points: &[SweepPoint], axis: KneeLoadAxis) -> Option<usize> {
-    let mut min_error_rate: Option<f64> = None;
-    for (index, point) in points.iter().enumerate() {
-        if axis == KneeLoadAxis::Rate {
-            let successes = point.n.saturating_sub(point.errors) as f64;
-            let expected = match point.p50_s {
-                Some(p50) if point.load > 0.0 && point.n > 0 => {
-                    successes / ((point.n - 1) as f64 / point.load + p50)
-                }
-                _ => 0.0,
-            };
-            if expected > 0.0 && point.throughput / expected < KNEE_MIN_ACHIEVED_RATIO {
+    let mut min_error_rate = points.first().and_then(|point| point.error_rate);
+    for (index, pair) in points.windows(2).enumerate() {
+        let (previous, point) = (&pair[0], &pair[1]);
+        let index = index + 1;
+        // One-wave stages (`load >= n`) cannot scale throughput.
+        let one_wave = previous.load >= previous.n as f64 && point.load >= point.n as f64;
+        if axis == KneeLoadAxis::Concurrency
+            && !one_wave
+            && previous.throughput > 0.0
+            && previous.load > 0.0
+            && point.load > previous.load
+        {
+            let gain = (point.throughput - previous.throughput) / previous.throughput;
+            let load_gain = (point.load - previous.load) / previous.load;
+            if gain < KNEE_MIN_MARGINAL_GAIN * load_gain {
                 return Some(index);
-            }
-        }
-        if let Some(previous) = index.checked_sub(1).map(|i| &points[i]) {
-            // One-wave concurrency stages cannot scale throughput.
-            let one_wave = axis == KneeLoadAxis::Concurrency
-                && previous.load >= previous.n as f64
-                && point.load >= point.n as f64;
-            if !one_wave
-                && previous.throughput > 0.0
-                && previous.load > 0.0
-                && point.load > previous.load
-            {
-                let efficiency =
-                    (point.throughput / previous.throughput) / (point.load / previous.load);
-                if efficiency < KNEE_MIN_SEGMENT_EFFICIENCY {
-                    return Some(index);
-                }
             }
         }
         if let Some(rate) = point.error_rate {
@@ -964,23 +934,19 @@ fn first_saturated_stage(points: &[SweepPoint], axis: KneeLoadAxis) -> Option<us
 }
 
 /// Kneedle over `(index, throughput, p95)`, normalized by the data range.
-/// Callers pass the curve from the lowest p95 to the highest, so the
-/// normalized chord is the unit diagonal in y. Returns the interior entry
-/// farthest from it.
+/// Callers pass the curve from the p95 baseline to the p95 peak. Returns the
+/// interior entry farthest from the normalized diagonal.
 fn kneedle(curve: &[(usize, f64, f64)]) -> Option<usize> {
     if curve.len() < 3 {
         return None;
     }
-    let (x_min, x_max) = curve
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-            (lo.min(p.1), hi.max(p.1))
-        });
-    let (y_min, y_max) = curve
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-            (lo.min(p.2), hi.max(p.2))
-        });
+    let range = |values: &mut dyn Iterator<Item = f64>| {
+        values.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        })
+    };
+    let (x_min, x_max) = range(&mut curve.iter().map(|p| p.1));
+    let (y_min, y_max) = range(&mut curve.iter().map(|p| p.2));
     if x_max - x_min <= f64::EPSILON || y_max - y_min <= f64::EPSILON {
         return None;
     }
@@ -995,17 +961,36 @@ fn kneedle(curve: &[(usize, f64, f64)]) -> Option<usize> {
         .map(|pair| pair.0)
 }
 
-/// [`detect_knee_with_reason`] with the meaning of `load` stated, so rate
-/// sweeps also check achieved/offered.
+/// Largest p95 rise over the running minimum, as positions into `curve`:
+/// `(baseline, peak, rise)`. `None` when no p95 is positive.
+fn largest_p95_rise(curve: &[(usize, f64, f64)]) -> Option<(usize, usize, f64)> {
+    let mut best: Option<(usize, usize, f64)> = None;
+    let mut low: Option<usize> = None;
+    for (position, point) in curve.iter().enumerate() {
+        if point.2 > 0.0 && low.is_none_or(|low| point.2 < curve[low].2) {
+            low = Some(position);
+        }
+        if let Some(low) = low {
+            let rise = point.2 / curve[low].2 - 1.0;
+            if best.is_none_or(|(_, _, top)| rise > top) {
+                best = Some((low, position, rise));
+            }
+        }
+    }
+    best
+}
+
+/// [`detect_knee_with_reason`] with the meaning of `load` stated.
 ///
-/// A knee is reported when p95 rises at least [`KNEE_MIN_P95_RISE`] above its
-/// sweep minimum (Kneedle from that baseline stage on) or when a saturation
-/// check fires (the stage before the first saturated stage). Otherwise the
-/// reason is `no_bend` (or `flat_curve` / `missing_latency`).
+/// Two candidates: Kneedle from the p95 baseline to the peak of the largest
+/// rise over the running minimum, when that rise is at least
+/// [`KNEE_MIN_P95_RISE`]; and the stage before the first saturated stage.
+/// The earlier one is the knee. Otherwise the reason is `missing_latency`
+/// (an endpoint has no p95), `flat_curve`, or `no_bend`.
 pub fn detect_knee_on_axis(points: &[SweepPoint], axis: KneeLoadAxis) -> KneeDetection {
-    // Interior stages without a p95 are skipped below, so the minimum counts
-    // measured stages only: otherwise gaps could leave one candidate, which
-    // would always be returned.
+    // Stages without a p95 are skipped, so the minimum counts measured
+    // stages only: otherwise gaps could leave one candidate, which would
+    // always be returned.
     let curve: Vec<(usize, f64, f64)> = points
         .iter()
         .enumerate()
@@ -1016,68 +1001,39 @@ pub fn detect_knee_on_axis(points: &[SweepPoint], axis: KneeLoadAxis) -> KneeDet
         return detection.none(KneeReason::InsufficientPoints);
     }
     detection.saturated_index = first_saturated_stage(points, axis);
-    if detection.saturated_index == Some(0) {
-        return detection.none(KneeReason::SaturatedAtFirstStage);
-    }
-    let saturation_knee = detection
-        .saturated_index
-        .map(|index| index.saturating_sub(1));
+    let saturation_knee = detection.saturated_index.map(|index| index - 1);
 
-    // Baseline: the lowest p95 (first one on ties); peak: the highest p95 at
-    // or after it (first one on ties). A cold first stage or a falling curve
-    // is not a bend.
-    let base = curve
-        .iter()
-        .enumerate()
-        .min_by(|left, right| left.1 .2.total_cmp(&right.1 .2))
-        .map(|(position, _)| position)
-        .unwrap_or(0);
-    let peak = curve[base..]
-        .iter()
-        .enumerate()
-        .fold(base, |best, (offset, point)| {
-            if point.2 > curve[best].2 {
-                base + offset
-            } else {
-                best
+    let rise = largest_p95_rise(&curve);
+    detection.p95_rise = rise.map(|(_, _, rise)| rise);
+    let mut bend_over_flat_throughput = false;
+    let kneedle_knee = match rise {
+        // Multiplicative form, so exactly +20% counts despite rounding.
+        Some((base, peak, _)) if curve[peak].2 >= curve[base].2 * (1.0 + KNEE_MIN_P95_RISE) => {
+            match kneedle(&curve[base..=peak]) {
+                Some(index) => Some(index),
+                // Peak right after the baseline: the baseline is the last
+                // stage before the rise.
+                None if peak == base + 1 => Some(curve[base].0),
+                None => {
+                    bend_over_flat_throughput = true;
+                    None
+                }
             }
-        });
-    let (base_p95, peak_p95) = (curve[base].2, curve[peak].2);
-    detection.p95_rise = (base_p95 > 0.0).then(|| peak_p95 / base_p95 - 1.0);
-    let bend = base_p95 > 0.0 && peak_p95 >= base_p95 * (1.0 + KNEE_MIN_P95_RISE);
-
-    // A bend needs both endpoints; a stage with no p95 has no successes, so
-    // the error-rate gate usually reports it as saturation instead.
-    let endpoints = (points.first(), points.last());
-    let missing_endpoint = !matches!(endpoints, (Some(first), Some(last)) if first.p95_s.is_some() && last.p95_s.is_some());
-    if missing_endpoint {
-        return match saturation_knee {
-            Some(index) => detection.knee(index, KneeMethod::Saturation),
-            None => detection.none(KneeReason::MissingLatency),
-        };
-    }
-    let kneedle_knee = if bend {
-        match kneedle(&curve[base..=peak]) {
-            Some(index) => Some(index),
-            // Baseline right before the peak: it is the last stage before
-            // the rise.
-            None if peak == base + 1 => Some(curve[base].0),
-            // A bend over flat throughput cannot be normalized.
-            None if saturation_knee.is_none() => {
-                return detection.none(KneeReason::FlatCurve);
-            }
-            None => None,
         }
-    } else {
-        None
+        _ => None,
     };
-    // Both fired: the earlier knee wins, so shedding before a later p95
-    // bend is still reported at the shedding point.
+    // Earlier wins, so shedding ahead of a later p95 bend is reported where
+    // it starts, and a later all-failure stage cannot override a bend.
     match (kneedle_knee, saturation_knee) {
         (Some(k), Some(s)) if s < k => return detection.knee(s, KneeMethod::Saturation),
         (Some(k), _) => return detection.knee(k, KneeMethod::Kneedle),
         (None, Some(s)) => return detection.knee(s, KneeMethod::Saturation),
         (None, None) => {}
+    }
+    let endpoints = (points.first(), points.last());
+    if !matches!(endpoints, (Some(first), Some(last)) if first.p95_s.is_some() && last.p95_s.is_some())
+    {
+        return detection.none(KneeReason::MissingLatency);
     }
     let flat = |values: &mut dyn Iterator<Item = f64>| {
         let (lo, hi) = values.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
@@ -1085,7 +1041,10 @@ pub fn detect_knee_on_axis(points: &[SweepPoint], axis: KneeLoadAxis) -> KneeDet
         });
         hi - lo <= f64::EPSILON
     };
-    if flat(&mut curve.iter().map(|p| p.1)) || flat(&mut curve.iter().map(|p| p.2)) {
+    if bend_over_flat_throughput
+        || flat(&mut curve.iter().map(|p| p.1))
+        || flat(&mut curve.iter().map(|p| p.2))
+    {
         return detection.none(KneeReason::FlatCurve);
     }
     detection.none(KneeReason::NoBend)
@@ -1792,27 +1751,6 @@ mod tests {
             .collect()
     }
 
-    /// Healthy open-loop throughput for 100 requests at `rate` with a 10 s
-    /// median latency: the window includes the drain of the last send.
-    fn tail_inflated(rate: f64) -> f64 {
-        100.0 / (99.0 / rate + 10.0)
-    }
-
-    fn rate_points(throughputs: &[f64]) -> Vec<SweepPoint> {
-        let loads = [1.0, 2.0, 4.0, 8.0, 16.0];
-        let pairs: Vec<(f64, f64)> = throughputs
-            .iter()
-            .zip([10.0, 10.1, 10.2, 10.3, 10.4])
-            .map(|(&x, p95)| (x, p95))
-            .collect();
-        let mut points = loaded_points(&loads, &pairs);
-        for point in &mut points {
-            point.n = 100;
-            point.p50_s = Some(10.0);
-        }
-        points
-    }
-
     #[test]
     fn knee_throughput_plateau_with_flat_p95_and_rising_failures() {
         // #232 load shedding: fast 429/503 keep success p95 flat while
@@ -1833,68 +1771,61 @@ mod tests {
         let detection = detect_knee_with_reason(&points);
         assert_eq!(detection.reason, None);
         assert_eq!(detection.method, Some(KneeMethod::Saturation));
-        // c=8 is the first stage with failures, so c=4 is the knee.
+        // c=8 both fails requests and gains 2.5% throughput for 2x load.
         assert_eq!(detection.saturated_index, Some(3));
         assert_eq!(detection.index, Some(2));
-        // Without the failures, the efficiency gate alone still fires at
-        // c=16: (4.0 / 4.1) / 2 = 0.49.
-        for point in &mut points {
-            point.error_rate = Some(0.0);
-        }
-        let detection = detect_knee_with_reason(&points);
-        assert_eq!(detection.saturated_index, Some(4));
-        assert_eq!(detection.index, Some(3));
     }
 
     #[test]
-    fn knee_rate_sweep_tail_inflated_window_is_not_saturated() {
-        // Reviewer case: 100 requests, 10 s latency. achieved/offered is
-        // 0.92 at 1 req/s and 0.39 at 16 req/s on a healthy server, so a raw
-        // achieved/offered gate flagged stage 1 of every LLM rate sweep.
-        let healthy: Vec<f64> = [1.0, 2.0, 4.0, 8.0, 16.0]
-            .iter()
-            .map(|&rate| tail_inflated(rate))
-            .collect();
-        let detection = detect_knee_on_axis(&rate_points(&healthy), KneeLoadAxis::Rate);
+    fn knee_flat_plateau_without_errors_is_saturated() {
+        // Admission control that queues instead of failing: no errors, flat
+        // success p95, throughput stops at c=8 (ratio 1.05 < 1.5 on a 2x step).
+        let points = loaded_points(
+            &[1.0, 2.0, 4.0, 8.0, 16.0],
+            &[
+                (1.0, 1.0),
+                (2.0, 1.0),
+                (4.0, 1.01),
+                (4.2, 1.01),
+                (4.2, 1.02),
+            ],
+        );
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(detection.saturated_index, Some(3));
+        assert_eq!(
+            (detection.index, detection.method),
+            (Some(2), Some(KneeMethod::Saturation))
+        );
+        assert_eq!(detection.min_marginal_gain, Some(KNEE_MIN_MARGINAL_GAIN));
+    }
+
+    #[test]
+    fn knee_rate_sweep_saturates_on_errors_only() {
+        // Rate stage windows end at the latest completion (#224), so achieved
+        // throughput lags offered on healthy servers; it is not checked.
+        let mut points = loaded_points(
+            &[1.0, 2.0, 4.0, 8.0, 16.0],
+            &[
+                (0.9, 10.0),
+                (1.7, 10.1),
+                (2.9, 10.2),
+                (3.5, 10.3),
+                (3.7, 10.4),
+            ],
+        );
+        let detection = detect_knee_on_axis(&points, KneeLoadAxis::Rate);
         assert_eq!(detection.saturated_index, None);
         assert_eq!(detection.reason, Some(KneeReason::NoBend));
-        assert_eq!(detection.min_achieved_ratio, Some(KNEE_MIN_ACHIEVED_RATIO));
-    }
-
-    #[test]
-    fn knee_rate_sweep_achieved_below_expected_is_saturated() {
-        // The last stage reaches 5.0 req/s of an expected 6.2.
-        let mut throughputs: Vec<f64> = [1.0, 2.0, 4.0, 8.0]
-            .iter()
-            .map(|&rate| tail_inflated(rate))
-            .collect();
-        throughputs.push(5.0);
-        let points = rate_points(&throughputs);
+        assert_eq!(detection.min_marginal_gain, None);
+        for (point, rate) in points.iter_mut().zip([0.0, 0.0, 0.0, 0.0, 0.08]) {
+            point.error_rate = Some(rate);
+        }
         let detection = detect_knee_on_axis(&points, KneeLoadAxis::Rate);
         assert_eq!(detection.saturated_index, Some(4));
-        assert_eq!(detection.index, Some(3));
-        assert_eq!(detection.method, Some(KneeMethod::Saturation));
-        // The same numbers on a concurrency axis: efficiency 0.56, no knee.
-        let detection = detect_knee_with_reason(&points);
-        assert_eq!(detection.reason, Some(KneeReason::NoBend));
-        assert_eq!(detection.min_achieved_ratio, None);
-    }
-
-    #[test]
-    fn knee_saturated_first_stage_reports_no_knee() {
-        let mut throughputs: Vec<f64> = [1.0, 2.0, 4.0, 8.0, 16.0]
-            .iter()
-            .map(|&rate| tail_inflated(rate))
-            .collect();
-        throughputs[0] = 0.5;
-        let detection = detect_knee_on_axis(&rate_points(&throughputs), KneeLoadAxis::Rate);
-        assert_eq!(detection.saturated_index, Some(0));
-        assert_eq!(detection.index, None);
-        assert_eq!(detection.reason, Some(KneeReason::SaturatedAtFirstStage));
-        assert!(detection
-            .note()
-            .expect("note")
-            .contains("lower the starting load"));
+        assert_eq!(
+            (detection.index, detection.method),
+            (Some(3), Some(KneeMethod::Saturation))
+        );
     }
 
     #[test]
@@ -1979,6 +1910,29 @@ mod tests {
     }
 
     #[test]
+    fn knee_later_all_failure_stage_does_not_override_earlier_bend() {
+        // p95 bends at c=8..16, then c=32 fails every request (no p95).
+        let mut points = loaded_points(
+            &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0],
+            &[
+                (1.0, 1.0),
+                (2.0, 1.02),
+                (4.0, 1.04),
+                (7.0, 1.6),
+                (8.0, 2.0),
+                (0.0, 1.0),
+            ],
+        );
+        points[5].p95_s = None;
+        points[5].error_rate = Some(1.0);
+        let detection = detect_knee_with_reason(&points);
+        assert_eq!(
+            (detection.index, detection.method),
+            (Some(2), Some(KneeMethod::Kneedle))
+        );
+    }
+
+    #[test]
     fn knee_baseline_right_before_peak_is_the_knee() {
         // p95 falls to its minimum at stage 3 and jumps at the last stage.
         let points = loaded_points(
@@ -2016,8 +1970,10 @@ mod tests {
 
     #[test]
     fn knee_mid_sweep_bend_with_last_stage_drop() {
-        // p95 bends at c=8..16 and the last stage drops back near the
-        // first. Pre-fix the last/first ratio was +10%, so no_bend.
+        // p95 bends at c=8..16 and the last stage drops below the first
+        // (orchestrator review curve). The global minimum is the last stage,
+        // so a min-then-later-max rule found no rise; the running minimum
+        // finds +100% from stage 0 to stage 4.
         let points = loaded_points(
             &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0],
             &[
@@ -2026,7 +1982,7 @@ mod tests {
                 (4.0, 1.04),
                 (7.0, 1.6),
                 (8.0, 2.0),
-                (8.5, 1.1),
+                (8.5, 0.99),
             ],
         );
         let detection = detect_knee_with_reason(&points);
@@ -2091,13 +2047,14 @@ mod tests {
             detect_knee_with_reason(&flat).reason,
             Some(KneeReason::FlatCurve)
         );
-        // Five measured stages but no last-stage p95: no curve endpoint.
+        // Five measured stages, no bend, no saturation, and no last-stage
+        // p95: no curve endpoint.
         let mut missing = knee_points(&[
             (1.0, 1.0),
-            (2.0, 1.1),
-            (3.0, 1.2),
-            (4.0, 2.0),
-            (5.0, 4.0),
+            (2.0, 1.02),
+            (3.0, 1.03),
+            (4.0, 1.04),
+            (5.0, 1.05),
             (6.0, 6.0),
         ]);
         missing[5].p95_s = None;
@@ -2169,8 +2126,8 @@ mod tests {
     #[test]
     fn knee_live_vlm_nearly_linear_sweep_reports_no_bend() {
         // Pre-#232 this returned index 1 (c=2) on a +11% p95 rise.
-        // Real loads c=1..16: every segment efficiency is about 0.93 to 0.98,
-        // so the saturation gate stays quiet too.
+        // Real loads c=1..16: every 2x step gains 1.87x to 1.97x throughput
+        // (above 1.5), so the saturation gate stays quiet too.
         let points = loaded_points(&[1.0, 2.0, 4.0, 8.0, 16.0], &LIVE_VLM_SWEEP);
         let detection = detect_knee_with_reason(&points);
         assert_eq!(detection.index, None);
@@ -2234,8 +2191,7 @@ mod tests {
                 "p95_rise": null,
                 "saturated_index": null,
                 "min_p95_rise": 0.2,
-                "min_segment_efficiency": 0.5,
-                "min_achieved_ratio": null,
+                "min_marginal_gain": 0.5,
                 "max_error_rate_rise": 0.05
             })
         );

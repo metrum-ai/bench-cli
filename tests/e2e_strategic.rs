@@ -84,8 +84,7 @@ fn strategic_sweep_exports_all_formats() {
             "p95_rise": null,
             "saturated_index": null,
             "min_p95_rise": 0.2,
-            "min_segment_efficiency": 0.5,
-            "min_achieved_ratio": 0.9,
+            "min_marginal_gain": null,
             "max_error_rate_rise": 0.05
         })
     );
@@ -260,13 +259,12 @@ fn strategic_flat_sweep_reports_no_bend() {
     assert_eq!(detection["method"], Value::Null);
     assert_eq!(detection["saturated_index"], Value::Null);
     assert_eq!(detection["min_p95_rise"], 0.2);
-    assert_eq!(detection["min_segment_efficiency"], 0.5);
-    assert_eq!(detection["min_achieved_ratio"], Value::Null);
+    assert_eq!(detection["min_marginal_gain"], 0.5);
     assert_eq!(detection["max_error_rate_rise"], 0.05);
     let rise = detection["p95_rise"].as_f64().expect("p95_rise");
     assert!((0.0..0.2).contains(&rise), "p95_rise {rise}");
     let note =
-        "no knee: p95 latency rises less than 20% above its sweep minimum and throughput keeps scaling";
+        "no knee: p95 latency rises less than 20% above its running minimum and no stage is saturated";
     assert!(stderr.contains(note), "stderr: {stderr}");
     assert!(fs::read_to_string(&html)
         .expect("HTML report")

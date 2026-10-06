@@ -153,8 +153,8 @@ Time-weighted mean of engine KV gauges: `vllm:kv_cache_usage_perc`
 `kv_cache_util_mean` of the knee stage (Joins, step 5). Null, never 0, when
 there is no knee, and the output says why: the `knee_detection.reason` from
 the strategic stdout (`insufficient_points` below 5 points, `missing_latency`,
-`flat_curve`, `no_bend` when p95 rises less than 20% above its sweep minimum
-and throughput keeps scaling, #232),
+`flat_curve`, `no_bend` when p95 rises less than 20% above its running minimum
+and no stage is saturated, #232),
 or `insufficient_points` for an older output without
 `knee_detection` whose sweep has fewer than 5 points with a `p95_s`. Also
 null when the knee index is out of range (`knee_index_out_of_range`) or the

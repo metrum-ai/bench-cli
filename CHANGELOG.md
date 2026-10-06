@@ -322,42 +322,38 @@
 - Strategic knee detection no longer reports a knee on a sweep with no
   meaningful bend, and no longer misses a saturated sweep whose p95 stays flat
   (#232). Kneedle always returns the interior stage farthest from the chord,
-  so a nearly linear sweep still got a knee. A knee now needs either a p95
-  bend or a saturation signal. The bend is measured from the lowest measured
-  p95 to the highest p95 at or after it (at least 20%, `KNEE_MIN_P95_RISE`,
-  provisional from two live curves), so an inflated cold first stage, or a
-  mid-sweep bend that recovers by the last stage, does not hide the knee;
-  Kneedle then runs from that baseline stage to the peak, normalized by the
-  data range. A stage is saturated when its segment efficiency `(X_i /
-  X_{i-1}) / (load_i / load_{i-1})` is below 0.5 (geometric sweeps; one-wave
-  concurrency segments skipped), when achieved throughput is below 0.9 of the
-  expected unsaturated `successes / ((n - 1) / load + p50_s)` on a rate sweep
-  (the stage window includes the drain of the last send), or when its error
-  rate is 5 points above the lowest earlier stage. The knee is then the stage
-  before it, used when p95 has no bend or when it comes before the Kneedle
-  knee, which catches load shedding (fast 429/503 keep success p95 flat while
-  throughput plateaus). A saturated sweep whose first or last stage has no p95
-  now reports that saturation knee instead of `missing_latency`. A sweep with
-  neither signal reports `"knee": null` with the new `knee_detection.reason`
-  `no_bend`, and a sweep saturated at its first stage reports the new reason
-  `saturated_at_first_stage`. `knee_detection` gains `method` (`kneedle` or
+  so a nearly linear sweep still got a knee. A knee now has two candidates,
+  and the earlier stage wins. (1) Kneedle, when the largest p95 rise over the
+  running minimum, `max_j (p95_j / min_{i<=j} p95_i - 1)`, is at least 20%
+  (`KNEE_MIN_P95_RISE`, provisional from two live curves); Kneedle runs from
+  that baseline to that peak, so an inflated cold first stage, a mid-sweep
+  bend that recovers, or a last stage below the first cannot hide the bend.
+  (2) The stage before the first saturated stage: on concurrency sweeps a
+  relative throughput gain under half the relative load gain (on 2x steps a
+  throughput ratio below 1.5; one-wave stages skipped), and on any sweep an
+  error rate 5 points above the lowest earlier stage. Rate sweeps use only the
+  error rate, since their stage window ends at the latest completion (#224).
+  This catches load shedding (fast 429/503 keep success p95 flat while
+  throughput plateaus), and a later all-failure stage no longer overrides an
+  earlier bend. A sweep with neither reports `"knee": null` with the new
+  `knee_detection.reason` `no_bend`; `missing_latency` now applies only when
+  neither candidate exists. `knee_detection` gains `method` (`kneedle` or
   `saturation`), `p95_rise`, `saturated_index`, and the thresholds
-  `min_p95_rise`, `min_segment_efficiency`, `min_achieved_ratio` (rate sweeps;
-  null otherwise) and `max_error_rate_rise` (all additive to
+  `min_p95_rise`, `min_marginal_gain` (concurrency sweeps; null on rate
+  sweeps) and `max_error_rate_rise` (all additive to
   `metrum-ai-bench-cli.strategic.v1`). Library API: `KneeDetection` no longer
-  derives `Eq` (it now has `f64` fields), `KneeReason` gains
-  `SaturatedAtFirstStage`, and `detect_knee_on_axis` with `KneeLoadAxis` is
-  new. The stderr note and the HTML report say "no knee: p95 latency rises
-  less than 20% above its sweep minimum and throughput keeps scaling".
-  Behavior change: bend-free sweeps used to report a knee and now report none;
-  such a sweep usually has not reached saturation, so check error rate and
-  throughput scaling and extend the sweep. On the live H100 #184 validation
-  (vLLM 0.31.0) the Qwen3-VL-8B sweep at c=1..16 (p95 +11%, segment efficiency
-  0.93 to 0.98) moves from a knee at index 1 to `no_bend`, and the LLM sweep
-  at c=1..64 (p95 +41%) keeps its knee at c=32. A threshold on the normalized
-  chord distance cannot separate them (LLM peak 0.095, VLM 0.164).
-  `docs/queries/analyze.py` passes `no_bend` through as
-  `kv_cache_util_at_knee_reason` (no code change, new test), and
+  derives `Eq` (it now has `f64` fields), and `detect_knee_on_axis` with
+  `KneeLoadAxis` is new. The stderr note and the HTML report say "no knee: p95
+  latency rises less than 20% above its running minimum and no stage is
+  saturated". Behavior change: bend-free sweeps used to report a knee and now
+  report none; such a sweep usually has not reached saturation, so check error
+  rate and throughput scaling and extend the sweep. On the live H100 #184
+  validation (vLLM 0.31.0) the Qwen3-VL-8B sweep at c=1..16 (p95 +11%, 2x
+  steps gaining 1.87x to 1.97x) moves from a knee at index 1 to `no_bend`, and
+  the LLM sweep at c=1..64 (p95 +41%, smallest step gain 1.77x) keeps its knee
+  at c=32. A threshold on the normalized chord distance cannot separate them
+  (LLM peak 0.095, VLM 0.164). `docs/queries/analyze.py` passes `no_bend`
+  through as `kv_cache_util_at_knee_reason` (no code change, new test), and
   `scripts/e2e/write_aiperf_comparison.py` explains `no_bend` next to a
   missing knee. See `docs/OUTPUT_SCHEMA.md` and
   `docs/STRATEGIC_BENCHMARKING.md`.

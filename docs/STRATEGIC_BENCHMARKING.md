@@ -106,39 +106,38 @@ why:
 
 - `insufficient_points`: fewer than `knee_detection.min_points` (5) measured
   stages (stages with a p95).
-- `missing_latency`: the first or last stage has no p95 (no successes).
+- `missing_latency`: the first or last stage has no p95 (no successes), and
+  neither a p95 bend nor a saturated stage gives a knee.
 - `flat_curve`: throughput or p95 does not change across the measured
-  stages.
-- `no_bend`: p95 rises less than 20% above its sweep minimum and no
-  saturation check fires, so the curve has no meaningful bend (#232).
-- `saturated_at_first_stage`: the first stage is already saturated, so no
-  stage is unsaturated; lower the starting load (#232).
+  stages, or p95 bends over flat throughput.
+- `no_bend`: p95 rises less than 20% above its running minimum and no stage
+  is saturated, so the curve has no meaningful bend (#232).
 
-A knee comes from one of two methods (`knee_detection.method`):
+A knee has two candidates, and the earlier stage wins
+(`knee_detection.method` says which):
 
-- `kneedle`: p95 rises at least 20% from its baseline, the lowest measured
-  p95, to the highest p95 at or after that stage. Kneedle then runs from the
-  baseline stage to that peak, normalized by the data range. Using the
-  minimum and the later maximum, not the first and last stage, keeps an inflated cold first
-  stage or a mid-sweep bend that recovers by the last stage from hiding the
-  knee. A p95 that only falls has no rise.
-- `saturation`: the sweep is saturated. The knee is the stage before the
-  first saturated stage (`knee_detection.saturated_index`). It is used when
-  p95 has no bend, and also when it comes before the Kneedle knee, so load
-  shedding ahead of a later p95 bend is reported where it starts. A stage is
-  saturated when its segment efficiency
-  `(X_i / X_{i-1}) / (load_i / load_{i-1})` is below 0.5 (`X` is success
-  throughput), when achieved throughput is below 0.9 of the expected
-  unsaturated `successes / ((n - 1) / load + p50_s)` on a `--sweep-by rate`
-  sweep (the stage window includes the drain of the last send, so a healthy
-  LLM stage achieves well under its offered rate), or when its error rate is
-  5 points or more above the lowest earlier stage. Load shedding (fast
-  429/503, admission control) keeps success p95 flat while throughput
-  plateaus, so p95 alone misses it. The efficiency gate assumes geometric
-  sweeps such as `1,2,4,8,16`; on linear steps it needs a larger throughput
-  drop. Concurrency segments where both stages fit all requests in one wave
-  (`load >= requests_per_stage`) are skipped. A first stage that is already
-  saturated reports `saturated_at_first_stage` instead of a knee.
+- `kneedle`: the p95 rise is the largest rise over the running minimum,
+  `max_j (p95_j / min_{i<=j} p95_i - 1)` (`knee_detection.p95_rise`). When it
+  is at least 20%, Kneedle runs on the measured stages from that baseline
+  `i` to that peak `j`, normalized by the data range. An inflated cold first
+  stage, a mid-sweep bend that recovers by the last stage, or a last stage
+  that drops below the first cannot hide the bend. A p95 that only falls has
+  no rise.
+- `saturation`: the stage before the first saturated stage
+  (`knee_detection.saturated_index`). On a concurrency sweep a stage is
+  saturated when its relative throughput gain is under half its relative
+  load gain, `(X_i - X_{i-1}) / X_{i-1} < 0.5 * (load_i - load_{i-1}) /
+  load_{i-1}` (`X` is success throughput; on 2x steps, a throughput ratio
+  below 1.5). Stages that both run all requests in one wave
+  (`load >= requests_per_stage`) are skipped. On any sweep a stage is also
+  saturated when its error rate is 5 points or more above the lowest earlier
+  stage. Rate sweeps use only the error rate: their stage window ends at the
+  latest completion (#224), so latency spread, not saturation, moves
+  achieved throughput. Load shedding (fast 429/503, admission control) keeps
+  success p95 flat while throughput plateaus or failures rise, so p95 alone
+  misses it. Earlier wins, so shedding ahead of a later p95 bend is reported
+  where it starts, and a later all-failure stage does not override an
+  earlier bend.
 
 Kneedle always returns the interior stage farthest from the chord, so a
 nearly linear sweep would still report a knee. The 20% minimum p95 rise
@@ -146,8 +145,8 @@ nearly linear sweep would still report a knee. The 20% minimum p95 rise
 two live curves. It separates the live H100 sweeps
 from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
 scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
-11% (1.200 to 1.333 s), and every segment efficiency was about 0.93 to
-0.98, so it reports `no_bend`. A fixed-latency mock
+11% (1.200 to 1.333 s), and each 2x step gained 1.87x to 1.97x throughput,
+so it reports `no_bend`. The LLM sweep's smallest step gain is 1.77x. A fixed-latency mock
 sweep also reports `no_bend` (the analyze.py `sweep5` fixture, recorded
 before #232, rises 8% and still carries its old knee). The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
 knee at c=32. A threshold on the normalized chord distance cannot make this
@@ -158,7 +157,7 @@ reached saturation; check the error rate and throughput scaling per stage,
 then extend the sweep to higher loads to find the knee.
 
 `knee_detection` is always present:
-`{"index", "reason", "points", "min_points", "method", "p95_rise", "saturated_index", "min_p95_rise", "min_segment_efficiency", "min_achieved_ratio", "max_error_rate_rise"}`.
+`{"index", "reason", "points", "min_points", "method", "p95_rise", "saturated_index", "min_p95_rise", "min_marginal_gain", "max_error_rate_rise"}`.
 See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md) for each field.
 `reason` is null exactly when `index` is set. The CLI also prints
 `note: no knee: ...` on stderr (only for runs with 2 or more stages, so
