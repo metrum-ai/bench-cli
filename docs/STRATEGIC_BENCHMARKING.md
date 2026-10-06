@@ -105,6 +105,21 @@ why:
 - `missing_latency`: the first or last stage has no p95 (no successes).
 - `flat_curve`: throughput or p95 does not change from the first to the last
   stage.
+- `no_bend`: p95 rises less than 20% from the first to the last stage
+  (including a p95 that falls), so the curve has no meaningful bend (#232).
+
+Kneedle always returns the interior stage farthest from the chord, so a
+nearly linear sweep would still report a knee. The 20% minimum p95 rise
+(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) separates the live H100 sweeps
+from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
+scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
+11% (1.200 to 1.333 s), and the mock-server fixture rises 8%. Both report
+`no_bend`. The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
+knee at c=32. A threshold on the normalized chord distance cannot make this
+split: the LLM curve peaks at 0.095, below the VLM curve's 0.164. At 20%, the
+threshold sits about 2x above the bend-free rises and about 2x below the
+smallest real bend. A sweep that ends with less than 20% p95 headroom has not
+reached saturation: extend the sweep to higher loads to find the knee.
 
 `knee_detection` is always present:
 `{"index": <stage index or null>, "reason": <string or null>, "points": <measured stages>, "min_points": 5}`.

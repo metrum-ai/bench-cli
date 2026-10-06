@@ -663,6 +663,16 @@ pub fn summarize_stage_with_options(
 /// would always return its middle stage.
 pub const KNEE_MIN_POINTS: usize = 5;
 
+/// Minimum relative p95 rise from the first to the last sweep stage before a
+/// knee is reported (0.20 = +20%). Kneedle always returns the interior stage
+/// farthest from the chord, so without a minimum bend a nearly linear sweep
+/// still yields a knee (#232). A chord-distance threshold cannot separate the
+/// live H100 curves: the LLM sweep with a real knee at c=32 (+41% p95) peaks
+/// at 0.095, below the bend-free VLM sweep (+11% p95, peak 0.164). The rise
+/// threshold sits about 2x above the bend-free sweeps seen so far (+8% to
+/// +11%) and about 2x below the smallest real bend (+41%).
+pub const KNEE_MIN_P95_RISE: f64 = 0.20;
+
 /// Why [`detect_knee_with_reason`] reported no knee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -675,6 +685,9 @@ pub enum KneeReason {
     /// Throughput or p95 latency does not change between the first and last
     /// stage, so the curve cannot be normalized.
     FlatCurve,
+    /// p95 latency rises less than [`KNEE_MIN_P95_RISE`] (relative) from the
+    /// first to the last stage, so the curve has no meaningful bend.
+    NoBend,
 }
 
 /// Knee detection outcome, serialized into the strategic summary as
@@ -715,6 +728,10 @@ impl KneeDetection {
             KneeReason::FlatCurve => {
                 "no knee: throughput or p95 latency is flat across the sweep".to_string()
             }
+            KneeReason::NoBend => format!(
+                "no knee: p95 latency rises less than {:.0}% from the first to the last sweep stage",
+                KNEE_MIN_P95_RISE * 100.0
+            ),
         })
     }
 }
@@ -722,7 +739,8 @@ impl KneeDetection {
 /// Finds the maximum distance from the endpoint chord after normalizing the
 /// throughput/latency curve. This is the standard deterministic Kneedle
 /// construction and is robust to units and uneven sweep spacing. Returns no
-/// knee below [`KNEE_MIN_POINTS`] measured stages (stages with a p95); see
+/// knee below [`KNEE_MIN_POINTS`] measured stages (stages with a p95) or when
+/// p95 rises less than [`KNEE_MIN_P95_RISE`] across the sweep; see
 /// [`detect_knee_with_reason`].
 pub fn detect_knee(points: &[SweepPoint]) -> Option<usize> {
     detect_knee_with_reason(points).index
@@ -748,6 +766,10 @@ pub fn detect_knee_with_reason(points: &[SweepPoint]) -> KneeDetection {
     let x_max = last.throughput;
     if (x_max - x_min).abs() <= f64::EPSILON || (y_max - y_min).abs() <= f64::EPSILON {
         return KneeDetection::none(KneeReason::FlatCurve, measured);
+    }
+    // Also covers a p95 that falls across the sweep.
+    if y_max < y_min * (1.0 + KNEE_MIN_P95_RISE) {
+        return KneeDetection::none(KneeReason::NoBend, measured);
     }
     let index = points
         .iter()
@@ -1568,6 +1590,67 @@ mod tests {
         assert_eq!(detection.reason, Some(KneeReason::InsufficientPoints));
         assert_eq!(detection.points, 3);
         assert_eq!(detection.min_points, KNEE_MIN_POINTS);
+    }
+
+    /// Live H100 sweeps from the #184 validation (vLLM 0.31.0), as
+    /// (throughput req/s, p95 s).
+    const LIVE_LLM_SWEEP: [(f64, f64); 7] = [
+        (1.7826, 0.63232),
+        (3.5073, 0.6436),
+        (6.9881, 0.650015),
+        (13.357, 0.669489),
+        (25.5903, 0.688941),
+        (50.0576, 0.752006),
+        (88.5565, 0.892026),
+    ];
+    const LIVE_VLM_SWEEP: [(f64, f64); 5] = [
+        (0.9401, 1.200315),
+        (1.758, 1.231624),
+        (3.4628, 1.233315),
+        (6.6041, 1.245416),
+        (12.3657, 1.333327),
+    ];
+
+    #[test]
+    fn knee_live_vlm_nearly_linear_sweep_reports_no_bend() {
+        // Pre-#232 this returned index 1 (c=2) on a +11% p95 rise.
+        let detection = detect_knee_with_reason(&knee_points(&LIVE_VLM_SWEEP));
+        assert_eq!(detection.index, None);
+        assert_eq!(detection.reason, Some(KneeReason::NoBend));
+        assert_eq!(detection.points, 5);
+        assert_eq!(detection.min_points, KNEE_MIN_POINTS);
+        let note = detection.note().expect("no-knee note");
+        assert!(note.contains("20%"), "{note}");
+    }
+
+    #[test]
+    fn knee_live_llm_sweep_keeps_knee_at_c32() {
+        let concurrency = [1, 2, 4, 8, 16, 32, 64];
+        let detection = detect_knee_with_reason(&knee_points(&LIVE_LLM_SWEEP));
+        assert_eq!(detection.reason, None);
+        let index = detection.index.expect("knee");
+        assert_eq!(concurrency[index], 32);
+    }
+
+    #[test]
+    fn knee_min_p95_rise_boundary_and_falling_curve() {
+        // Same interior shape; only the last-stage p95 moves across +20%.
+        let below = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (4.2, 1.19)]);
+        assert_eq!(
+            detect_knee_with_reason(&below).reason,
+            Some(KneeReason::NoBend)
+        );
+        let at = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (4.2, 1.21)]);
+        assert_eq!(detect_knee_with_reason(&at).index, Some(3));
+        let falling = knee_points(&[(1.0, 2.0), (2.0, 1.8), (3.0, 1.6), (4.0, 1.2), (5.0, 1.0)]);
+        assert_eq!(
+            detect_knee_with_reason(&falling).reason,
+            Some(KneeReason::NoBend)
+        );
+        assert_eq!(
+            serde_json::to_value(KneeReason::NoBend).expect("serialize"),
+            serde_json::json!("no_bend")
+        );
     }
 
     #[test]

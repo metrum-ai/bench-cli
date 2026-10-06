@@ -319,6 +319,25 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- Strategic knee detection no longer reports a knee on a sweep with no
+  meaningful bend (#232). Kneedle always returns the interior stage farthest
+  from the chord, so a nearly linear sweep still got a knee. After the
+  `flat_curve` check, a sweep whose p95 rises less than 20% from the first to
+  the last stage (`KNEE_MIN_P95_RISE`, including a p95 that falls) now
+  reports `"knee": null` with the new `knee_detection.reason` `no_bend`
+  (additive to `metrum-ai-bench-cli.strategic.v1`). The stderr note and the
+  HTML report say "no knee: p95 latency rises less than 20% from the first to
+  the last sweep stage". Behavior change: such sweeps used to report a knee
+  and now report none; extend the sweep to higher loads to find it. On the
+  live H100 #184 validation (vLLM 0.31.0) the Qwen3-VL-8B sweep at c=1..16
+  (p95 +11%) moves from a knee at index 1 to `no_bend`, and the LLM sweep at
+  c=1..64 (p95 +41%) keeps its knee at c=32. A threshold on the normalized
+  chord distance cannot separate them (LLM peak 0.095, VLM 0.164).
+  `docs/queries/analyze.py` passes `no_bend` through as
+  `kv_cache_util_at_knee_reason` (no code change, new test), and
+  `scripts/e2e/write_aiperf_comparison.py` explains `no_bend` next to a
+  missing knee. See `docs/OUTPUT_SCHEMA.md` and
+  `docs/STRATEGIC_BENCHMARKING.md`.
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be
   interpolated from 0, and a rank in `+Inf` used to return the highest finite

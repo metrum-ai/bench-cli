@@ -441,9 +441,11 @@ knee result in two fields (`knee_detection` is additive, #190):
   - `reason` (string or null) - why there is no knee: `insufficient_points`
     (fewer than `min_points` measured stages, that is stages with a p95),
     `missing_latency` (the first or last stage has no p95, for example no
-    successes), or `flat_curve` (throughput or
-    p95 does not change from the first to the last stage). Null exactly when
-    `index` is set.
+    successes), `flat_curve` (throughput or p95 does not change from the
+    first to the last stage), or `no_bend`
+    (additive, #232: p95 rises less than 20% from the first to the last
+    stage, so the curve has no meaningful bend). Null exactly when `index` is
+    set.
   - `points` (integer) - number of measured stages (stages with a p95).
   - `min_points` (integer) - minimum measured stages for a knee, always 5
     (both endpoints plus 3 interior candidates).
