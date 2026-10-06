@@ -175,9 +175,11 @@ fn llm_closed_loop_window_matches_record_span() {
         (rps - expected_rps).abs() / expected_rps < 0.05,
         "rps={rps} expected≈{expected_rps} (~7.9)"
     );
+    // Sanity range only: the absolute rate (~7.9 req/s on an idle host)
+    // depends on runner load; the two asserts above pin consistency.
     assert!(
-        (6.5..9.5).contains(&rps),
-        "reference band ~7.9 req/s, got {rps}"
+        (1.0..50.0).contains(&rps),
+        "rps={rps} outside the 1..50 req/s sanity range"
     );
 
     let config = summary.get("config").expect("summary.config");

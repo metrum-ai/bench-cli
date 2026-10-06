@@ -9,6 +9,15 @@
 //! done inside the window would push the tool's latency well above the
 //! reference. Skipped when `go` is missing (CI sets
 //! `METRUM_BENCH_REQUIRE_DUMMY=1`). Metrum AI.
+//!
+//! The vlm and strategic vlm tests fail on 7b4686d (before #242): JSON
+//! encoding the 11 MB image inside the window adds about 0.4 s to 0.9 s in a
+//! debug build. A release build encodes it in tens of milliseconds, inside
+//! the slack, so these tests catch the regression under the default debug
+//! test profile only. The ASR test is a guard, not a reproduction: ASR's
+//! form was already built from shared bytes with no copy, so it passes
+//! before and after #242 and pins the window to a raw upload of the file.
+//! The timing tests hold one lock so they never share the CPU.
 
 mod common;
 
@@ -17,6 +26,7 @@ use common::{request_records, sine_wav, skip, spawn_dummy, Dummy};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Dummy server latency per request.
@@ -26,10 +36,22 @@ const REQUESTS: usize = 3;
 /// dummy-model-server caps request bodies at 16 MiB; stay under it.
 const MAX_BODY: usize = 15 << 20;
 
+/// One timing test at a time: tool and reference runs see the same load.
+fn timing_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The large PNG, encoded once per test binary.
+fn large_png() -> &'static [u8] {
+    static PNG: OnceLock<Vec<u8>> = OnceLock::new();
+    PNG.get_or_init(encode_large_png)
+}
+
 /// A 4096x4096 RGB PNG whose top rows are noise (incompressible) and the
 /// rest flat, so it is large on the wire (about 11 MB) yet fits the dummy
 /// server's body limit once base64 encoded.
-fn large_png() -> Vec<u8> {
+fn encode_large_png() -> Vec<u8> {
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
     use image::ImageEncoder;
     const SIDE: u32 = 4096;
@@ -52,7 +74,7 @@ fn large_png() -> Vec<u8> {
 }
 
 /// The chat body the VLM tools send for one image (same shape and size).
-fn vlm_body(png: &[u8]) -> Vec<u8> {
+fn vlm_body(png: &[u8]) -> bytes::Bytes {
     let data_url = format!(
         "data:image/png;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(png)
@@ -72,7 +94,7 @@ fn vlm_body(png: &[u8]) -> Vec<u8> {
     });
     let bytes = serde_json::to_vec(&body).expect("body");
     assert!(bytes.len() < MAX_BODY, "body {} bytes", bytes.len());
-    bytes
+    bytes::Bytes::from(bytes)
 }
 
 /// Median of the reference POSTs: payload upload, server parse and media
@@ -100,11 +122,12 @@ fn median(values: &mut [f64]) -> f64 {
 }
 
 /// The tool may add connection and scheduling noise, but not the body build:
-/// allow 1.5x the reference plus 150 ms.
+/// allow 1.25x the reference plus 100 ms. Encoding the 11 MB image inside
+/// the window adds about 0.4 s (strategic) to 0.9 s (vlm) in a debug build.
 fn assert_window_excludes_body(what: &str, mut latencies: Vec<f64>, reference: f64) {
     assert_eq!(latencies.len(), REQUESTS, "{what}: {latencies:?}");
     let measured = median(&mut latencies);
-    let limit = reference * 1.5 + 0.15;
+    let limit = reference * 1.25 + 0.1;
     eprintln!("{what}: median latency {measured:.3} s, reference {reference:.3} s");
     assert!(
         measured < limit,
@@ -144,9 +167,8 @@ fn dummy() -> Option<Dummy> {
 }
 
 fn write_vlm_prompts(dir: &Path) -> std::path::PathBuf {
-    let png = large_png();
     let image = dir.join("large.png");
-    std::fs::write(&image, &png).expect("write png");
+    std::fs::write(&image, large_png()).expect("write png");
     let prompts = dir.join("prompts.jsonl");
     std::fs::write(
         &prompts,
@@ -159,8 +181,8 @@ fn write_vlm_prompts(dir: &Path) -> std::path::PathBuf {
     prompts
 }
 
-fn vlm_reference(dummy: &Dummy, dir: &Path) -> f64 {
-    let body = vlm_body(&std::fs::read(dir.join("large.png")).expect("read png"));
+fn vlm_reference(dummy: &Dummy) -> f64 {
+    let body = vlm_body(large_png());
     let client = client();
     let url = dummy.url("/v1/chat/completions");
     reference_latency(|| {
@@ -180,6 +202,7 @@ fn vlm_request_window_excludes_body_encoding() {
         skip("go dummy-model-server not available");
         return;
     };
+    let _timing = timing_lock();
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = write_vlm_prompts(dir.path());
     let data_log = dir.path().join("vlm.jsonl");
@@ -218,7 +241,7 @@ fn vlm_request_window_excludes_body_encoding() {
             record["latency_s"].as_f64().expect("latency_s")
         })
         .collect();
-    let reference = vlm_reference(&dummy, dir.path());
+    let reference = vlm_reference(&dummy);
     assert_window_excludes_body("vlm", latencies, reference);
 }
 
@@ -228,6 +251,7 @@ fn strategic_vlm_request_window_excludes_body_encoding() {
         skip("go dummy-model-server not available");
         return;
     };
+    let _timing = timing_lock();
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = write_vlm_prompts(dir.path());
     let csv = dir.path().join("requests.csv");
@@ -253,6 +277,8 @@ fn strategic_vlm_request_window_excludes_body_encoding() {
             "1",
             "--csv",
             csv.to_str().unwrap(),
+            "--html",
+            dir.path().join("report.html").to_str().unwrap(),
         ]),
         "strategic vlm",
     );
@@ -278,19 +304,22 @@ fn strategic_vlm_request_window_excludes_body_encoding() {
             fields[latency].parse().expect("service_latency_s")
         })
         .collect();
-    let reference = vlm_reference(&dummy, dir.path());
+    let reference = vlm_reference(&dummy);
     assert_window_excludes_body("strategic vlm", latencies, reference);
 }
 
+/// Guard (passes before and after #242): the ASR window matches a raw
+/// upload of the same 12.8 MB file.
 #[test]
 fn asr_request_window_excludes_form_build() {
     let Some(dummy) = dummy() else {
         skip("go dummy-model-server not available");
         return;
     };
+    let _timing = timing_lock();
     let dir = tempfile::tempdir().expect("tmpdir");
     // 16 kHz mono 16-bit: 400 s is about 12.8 MB, under the body limit.
-    let wav = sine_wav(400.0);
+    let wav = bytes::Bytes::from(sine_wav(400.0));
     assert!(wav.len() < MAX_BODY, "wav {} bytes", wav.len());
     let audio = dir.path().join("large.wav");
     std::fs::write(&audio, &wav).expect("write wav");
@@ -331,10 +360,13 @@ fn asr_request_window_excludes_form_build() {
     let client = client();
     let url = dummy.url("/v1/audio/transcriptions");
     let reference = reference_latency(|| {
-        let part = reqwest::blocking::multipart::Part::bytes(wav.clone())
-            .file_name("large.wav")
-            .mime_str("audio/wav")
-            .expect("mime");
+        let part = reqwest::blocking::multipart::Part::reader_with_length(
+            std::io::Cursor::new(wav.clone()),
+            wav.len() as u64,
+        )
+        .file_name("large.wav")
+        .mime_str("audio/wav")
+        .expect("mime");
         let form = reqwest::blocking::multipart::Form::new()
             .part("file", part)
             .text("model", "dummy")
@@ -354,10 +386,7 @@ fn asr_request_window_excludes_form_build() {
 /// must stay under it or every request would fail before the comparison.
 #[test]
 fn fixtures_fit_the_dummy_body_limit() {
-    let start = Instant::now();
-    let png = large_png();
-    eprintln!("png {} bytes in {:?}", png.len(), start.elapsed());
-    let body = vlm_body(&png);
+    let body = vlm_body(large_png());
     let parsed: Value = serde_json::from_slice(&body).expect("json");
     assert!(parsed["messages"][1]["content"][1]["image_url"]["url"]
         .as_str()

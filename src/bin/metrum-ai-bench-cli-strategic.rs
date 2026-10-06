@@ -384,7 +384,7 @@ struct Input {
     turn: Option<usize>,
     /// `--kind asr`: the audio upload sent as multipart instead of `body`.
     upload: Option<Arc<AudioUpload>>,
-    /// `--kind vlm`: image count and payload bytes in `body`.
+    /// `--kind vlm`: image count and payload bytes in `json`.
     images: Option<(usize, u64)>,
     /// `--kind imagegen`: images asked for and whether `b64_json` images are
     /// decoded, read from the body actually sent (after `--extra-body-json`).
@@ -804,7 +804,7 @@ async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
                 })?;
             images.push(image);
         }
-        let body = metrum_ai_bench::vlm::build_request_body(
+        let json = metrum_ai_bench::vlm::build_request_bytes(
             model,
             max_tokens,
             args.temperature.unwrap_or(0.1),
@@ -819,7 +819,6 @@ async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
             None,
         )
         .map_err(|err| anyhow::anyhow!("vlm body: {err}"))?;
-        let json = metrum_ai_bench::vlm::body_bytes(&body, &images).context("vlm body")?;
         inputs.push(Input {
             json: Some(json),
             images: Some((

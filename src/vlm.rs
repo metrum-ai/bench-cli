@@ -93,7 +93,12 @@ impl ImageCache {
         let mut declared_mime = None;
         // Load and process image
         let image_data = if crate::prompt_inputs::is_data_url(path) {
-            let decoded = crate::prompt_inputs::decode_data_url(path)?;
+            // Decoding a large inline image is CPU work: blocking pool (#242).
+            let inline = path.to_string();
+            let decoded =
+                tokio::task::spawn_blocking(move || crate::prompt_inputs::decode_data_url(&inline))
+                    .await
+                    .map_err(|e| format!("image decode task failed for '{}': {}", label, e))??;
             debug!(
                 "Decoded inline image {} ({} bytes)",
                 label,
@@ -191,12 +196,11 @@ fn encode_image(
 
     // Read the header for dimensions; the payload stays byte-identical to
     // the source unless a resize or an explicit re-encode is requested.
-    let (source_width, source_height) =
-        image::ImageReader::new(std::io::Cursor::new(&image_data))
-            .with_guessed_format()
-            .map_err(|e| format!("Failed to read image header from '{}': {}", label, e))?
-            .into_dimensions()
-            .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
+    let (source_width, source_height) = image::ImageReader::new(std::io::Cursor::new(&image_data))
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to read image header from '{}': {}", label, e))?
+        .into_dimensions()
+        .map_err(|e| format!("Failed to read image size from '{}': {}", label, e))?;
 
     // The limit, only when the image exceeds it.
     let resize_to =
@@ -377,19 +381,124 @@ pub fn build_request_body(
     Ok(body)
 }
 
-/// Serialize a request body to the bytes sent on the wire (#242). Callers
-/// do this before taking the send time, so JSON encoding of a large base64
-/// payload never lands in `latency_s`, TTFT or `t_sent_ns`. The buffer is
-/// sized from the inline image payload, so the body is written in one pass.
-pub fn body_bytes(body: &Value, images: &[ImageData]) -> Result<bytes::Bytes, serde_json::Error> {
-    let hint = images
+/// Inline base64 bytes across `images`: callers build bodies above a size
+/// threshold on the blocking pool.
+pub fn inline_image_bytes(images: &[ImageData]) -> usize {
+    images.iter().map(|image| image.base64_data.len()).sum()
+}
+
+/// Placeholder written in place of image `index`'s base64 in the skeleton
+/// body. The control characters serialize as `\u0001`, which no base64 text
+/// or JSON-escaped prompt text can produce by accident.
+fn image_placeholder(index: usize) -> String {
+    format!("\u{1}metrum-ai-image-{index}\u{1}")
+}
+
+/// Build and serialize a VLM chat body to the bytes sent on the wire (#242).
+/// Callers do this before taking the send time, so JSON encoding of a large
+/// base64 payload never lands in `latency_s`, TTFT or `t_sent_ns`. The
+/// output is byte-identical to `serde_json::to_vec(&build_request_body(..))`,
+/// but each image's base64 is copied once, straight from the shared cache
+/// entry into the body: the JSON skeleton carries a short placeholder that
+/// is replaced while writing the final buffer. Base64 and the image MIME
+/// types need no JSON escaping.
+#[allow(clippy::too_many_arguments)]
+pub fn build_request_bytes(
+    model: &str,
+    max_tokens: u32,
+    temperature: f32,
+    prompt: &str,
+    images: &[ImageData],
+    image_detail: &str,
+    server_side_download: bool,
+    streaming: bool,
+    ignore_eos: bool,
+    min_tokens: Option<u32>,
+    extra_body_json: Option<&str>,
+    system_prompt: Option<&str>,
+) -> Result<bytes::Bytes, Box<dyn Error + Send + Sync>> {
+    let inline = !server_side_download && inline_image_bytes(images) > 0;
+    let skeleton_images: Vec<ImageData> = if inline {
+        images
+            .iter()
+            .enumerate()
+            .map(|(index, image)| ImageData {
+                base64_data: Arc::from(image_placeholder(index)),
+                ..image.clone()
+            })
+            .collect()
+    } else {
+        images.to_vec()
+    };
+    let body = build_request_body(
+        model,
+        max_tokens,
+        temperature,
+        prompt,
+        &skeleton_images,
+        image_detail,
+        server_side_download,
+        streaming,
+        ignore_eos,
+        min_tokens,
+        extra_body_json,
+        system_prompt,
+    )?;
+    let skeleton = serde_json::to_vec(&body)?;
+    if !inline {
+        return Ok(bytes::Bytes::from(skeleton));
+    }
+    // JSON form of each placeholder, without the quotes (it sits inside the
+    // url string), and where it appears in the skeleton.
+    let tokens = (0..images.len())
+        .map(|index| {
+            serde_json::to_string(&image_placeholder(index))
+                .map(|quoted| quoted[1..quoted.len() - 1].to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let spans: Option<Vec<usize>> = tokens
         .iter()
-        .map(|image| image.base64_data.len() + image.mime_type.len() + 64)
-        .sum::<usize>()
-        + 1024;
-    let mut buf = Vec::with_capacity(hint);
-    serde_json::to_writer(&mut buf, body)?;
-    Ok(bytes::Bytes::from(buf))
+        .map(|token| {
+            let mut hits = skeleton
+                .windows(token.len())
+                .enumerate()
+                .filter(|(_, window)| *window == token.as_bytes())
+                .map(|(at, _)| at);
+            // Exactly one hit, or the prompt or extra body carries the same
+            // text and the splice could land in the wrong place.
+            match (hits.next(), hits.next()) {
+                (Some(at), None) => Some(at),
+                _ => None,
+            }
+        })
+        .collect();
+    let Some(spans) = spans.filter(|spans| spans.windows(2).all(|w| w[0] < w[1])) else {
+        // Fall back to plain serialization (one extra copy, same bytes).
+        let body = build_request_body(
+            model,
+            max_tokens,
+            temperature,
+            prompt,
+            images,
+            image_detail,
+            server_side_download,
+            streaming,
+            ignore_eos,
+            min_tokens,
+            extra_body_json,
+            system_prompt,
+        )?;
+        return Ok(bytes::Bytes::from(serde_json::to_vec(&body)?));
+    };
+    let mut out = Vec::with_capacity(skeleton.len() + inline_image_bytes(images));
+    let mut copied = 0;
+    for ((image, token), at) in images.iter().zip(&tokens).zip(spans) {
+        out.extend_from_slice(&skeleton[copied..at]);
+        out.extend_from_slice(image.base64_data.as_bytes());
+        copied = at + token.len();
+    }
+    out.extend_from_slice(&skeleton[copied..]);
+    Ok(bytes::Bytes::from(out))
 }
 
 #[cfg(test)]
@@ -408,17 +517,86 @@ mod tests {
     }
 
     #[test]
-    fn body_bytes_match_the_json_body_and_share_image_data() {
-        let images = [image("a.png", 3)];
+    fn request_bytes_match_the_serialized_json_body() {
+        let mut second = image("b.png", 4);
+        second.base64_data = Arc::from("iVBORw0KGgo+/=");
+        second.mime_type = "image/jpeg".into();
+        let images = [image("a.png", 3), second];
         let shared = images[0].clone();
         assert!(Arc::ptr_eq(&shared.base64_data, &images[0].base64_data));
-        let body = build_request_body(
-            "m", 8, 0.1, "x", &images, "low", false, false, false, None, None, None,
+        // A prompt that looks like a placeholder must survive unchanged.
+        let prompt = "describe metrum-ai-image-0 \"quoted\" \u{1}";
+        let colliding = format!("x {}", image_placeholder(0));
+        for (prompt, ssd, extra, system) in [
+            (prompt, false, None, None),
+            (prompt, false, Some(r#"{"top_p":0.9}"#), Some("sys")),
+            (prompt, true, None, Some("")),
+            (colliding.as_str(), false, None, None),
+        ] {
+            let body = build_request_body(
+                "m",
+                8,
+                0.1,
+                prompt,
+                &images,
+                "high",
+                ssd,
+                true,
+                true,
+                Some(2),
+                extra,
+                system,
+            )
+            .expect("body");
+            let bytes = build_request_bytes(
+                "m",
+                8,
+                0.1,
+                prompt,
+                &images,
+                "high",
+                ssd,
+                true,
+                true,
+                Some(2),
+                extra,
+                system,
+            )
+            .expect("bytes");
+            assert_eq!(bytes.as_ref(), serde_json::to_vec(&body).expect("json"));
+        }
+        let none = build_request_bytes(
+            "m",
+            8,
+            0.1,
+            "x",
+            &[],
+            "low",
+            false,
+            false,
+            false,
+            None,
+            None,
+            None,
         )
-        .expect("body");
-        let bytes = body_bytes(&body, &images).expect("bytes");
-        let parsed: Value = serde_json::from_slice(&bytes).expect("parse");
-        assert_eq!(parsed, body);
+        .expect("no images");
+        let parsed: Value = serde_json::from_slice(&none).expect("parse");
+        assert_eq!(parsed["messages"][1]["content"][0]["text"], "x");
+        assert!(build_request_bytes(
+            "m",
+            8,
+            0.1,
+            "x",
+            &images,
+            "low",
+            false,
+            false,
+            false,
+            None,
+            Some("{"),
+            None,
+        )
+        .is_err());
     }
 
     #[test]

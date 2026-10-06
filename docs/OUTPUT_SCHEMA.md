@@ -16,7 +16,10 @@ that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
 - ISO `started_at`/`completed_at`
 - optional monotonic `send_offset_s` (seconds from the run-epoch `Instant` to
-  actual send; preferred for window and closed-loop bins)
+  actual send; preferred for window and closed-loop bins). Taken after the
+  request body is built: ASR file read (#227), VLM body build and JSON
+  encoding, and the ASR multipart form (#242) fall before it, so they are
+  outside `latency_s` and, on open-loop runs, inside `queue_delay_s`
 - monotonic `latency_s`, optional `ttft_s`, `first_byte_s`, `connect_s`,
   `prefill_s`, `decode_s`, `decode_tok_s`, `first_reasoning_s`, and `itl_s`
   (`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated

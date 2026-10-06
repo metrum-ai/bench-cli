@@ -14,7 +14,13 @@ Workload section. This page focuses on measured fields.
   measure-phase requests only. ASR reads the audio file before it takes the
   send time, so `send_offset_s`, `started_at`, `latency_s` (failures
   included) and the NDJSON `t_sent_ns` / `t_done_ns` exclude the file read
-  (#227).
+  (#227). The same rule covers request body construction (#242): VLM builds
+  the chat body (base64 data URLs) and serializes it to JSON, and
+  ASR assembles the multipart form, before taking the send time, so those
+  fields and VLM `ttft_s` / `first_byte_s` exclude body build and JSON
+  encoding. On open-loop runs the build time counts toward `queue_delay_s`,
+  which is taken at the send offset. A VLM body build failure still emits a
+  failed request record.
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
 - **First byte**: response headers received minus send (`first_byte_s`).
@@ -351,12 +357,16 @@ Workload section. This page focuses on measured fields.
     from send until the response body is fully read; parsing, WER/CER and
     image decode/hash run after it, after the concurrency slot is released,
     on the blocking pool. That matches the imagegen binary exactly. The ASR
-    binary's clock also covers building the multipart form and parsing the
-    response, so a sweep's ASR `service_latency_s` can read slightly lower
+    binary builds the multipart form before the send (#242), but its clock
+    still covers parsing the response, so a sweep's ASR `service_latency_s`
+    can read slightly lower
     and its `rtfx_client` slightly higher than the binary's for the same
     server. An unparseable ASR body or an undecodable `b64_json` image fails
     the request, as in the binaries. Chat, embeddings, rerank and vlm keep
-    parsing inside the window, unchanged.
+    parsing inside the window, unchanged. The vlm body is serialized to JSON
+    once at setup and shared across requests, so vlm `service_latency_s`
+    excludes body encoding (#242; before, each request serialized it inside
+    the window).
   - `images_requested` and the decode choice come from the body actually
     sent, so an `--extra-body-json` override of `n` or `response_format` is
     recorded as sent.

@@ -8,7 +8,9 @@ use log::{debug, error, info, warn};
 use metrum_ai_bench::endpoints::resolve_endpoints;
 use metrum_ai_bench::prompt_inputs::{is_http_url, load_metrum_ai_bench_vlm_records};
 use metrum_ai_bench::unique_id;
-use metrum_ai_bench::vlm::{body_bytes, build_request_body, ImageCache, ImageData};
+use metrum_ai_bench::vlm::{
+    build_request_body, build_request_bytes, inline_image_bytes, ImageCache, ImageData,
+};
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use reqwest::Client;
@@ -63,6 +65,10 @@ fn emit_preprocess_failure(
     let _ = record_tx.send(rec);
 }
 
+/// Bodies with less inline image data than this are built on the request
+/// task; larger ones on the blocking pool (#242).
+const INLINE_BODY_BUILD_BYTES: usize = 256 * 1024;
+
 /// Per-run body settings; each request adds its prompt and images and
 /// serializes the result before its send offset (#242).
 struct BodyParams {
@@ -82,7 +88,7 @@ impl BodyParams {
     /// Build and serialize one request body. Blocking CPU work for large
     /// images: run it on the blocking pool.
     fn to_bytes(&self, prompt: &str, images: &[ImageData]) -> Result<bytes::Bytes, String> {
-        let body = build_request_body(
+        build_request_bytes(
             &self.model,
             self.max_tokens,
             self.temperature,
@@ -96,8 +102,7 @@ impl BodyParams {
             self.extra_body_json.as_deref(),
             self.system_prompt.as_deref(),
         )
-        .map_err(|e| e.to_string())?;
-        body_bytes(&body, images).map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -903,7 +908,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let request_timeout = args.request_timeout;
         let streaming = args.streaming;
         let infer_ttft = args.infer_ttft_from_first_byte;
-        let selected_images_clone = selected_images.clone();
+        let selected_images: Arc<[ImageData]> = selected_images.into();
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
         let seq = slot.seq;
         let scheduled_delay = slot.scheduled_delay;
@@ -912,32 +917,35 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let record_tx = record_tx.clone();
         let run_id_task = run_id.clone();
         let tokenizer_path = args.common.tokenizer.clone();
-        let prompt_text = metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt(
+        let prompt_text: Arc<str> = metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt(
             &selected_record.0,
             i as u64,
             args.common.unique_prompts,
             args.common.seed,
             &run_id,
-        );
+        )
+        .into();
         let run_start = start_time;
         let tracker_task = Arc::clone(&inflight_tracker);
         let body_params = Arc::clone(&body_params);
-        let body_prompt = prompt_text.clone();
         let warmup_requests = args.common.warmup_requests;
         let handle = tokio::spawn(async move {
             let request_slot =
                 metrum_ai_bench::concurrency::InFlightSlot::new(&tracker_task, permit);
             let in_flight_at_send = request_slot.in_flight();
-            // Build and serialize the body (base64 data URLs, JSON) on the
-            // blocking pool before the send offset, so encoding a large image
-            // stays out of latency_s, TTFT and t_sent_ns (#242).
-            let body_images = selected_images_clone.clone();
-            let built = tokio::task::spawn_blocking(move || {
-                body_params.to_bytes(&body_prompt, &body_images)
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|body| body);
+            // Build and serialize the body (base64 data URLs, JSON) before the
+            // send offset, so encoding a large image stays out of latency_s,
+            // TTFT and t_sent_ns (#242). Large bodies go to the blocking pool.
+            let built = if inline_image_bytes(&selected_images) < INLINE_BODY_BUILD_BYTES {
+                body_params.to_bytes(&prompt_text, &selected_images)
+            } else {
+                let images = Arc::clone(&selected_images);
+                let prompt = Arc::clone(&prompt_text);
+                tokio::task::spawn_blocking(move || body_params.to_bytes(&prompt, &images))
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|body| body)
+            };
             let send_offset = run_start.elapsed();
             // From the send offset, so send - scheduled == queue_delay_s with
             // the body build on the client side of the send.
@@ -978,7 +986,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     request_body,
                     request_timeout,
                     &api_key,
-                    &selected_images_clone,
+                    &selected_images,
                     streaming,
                     infer_ttft,
                 ),
