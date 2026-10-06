@@ -1,0 +1,27 @@
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+- name: all-smi
+  url: http://127.0.0.1:9090/metrics
+  interval_ms: 500
+  include:
+  - ^all_smi_gpu_
+  - ^all_smi_memory_
+  - ^all_smi_cpu_(utilization|info|frequency_mhz|power_consumption_watts|temperature_celsius)$
+  - ^all_smi_cpu_(socket|core|thread|gpu_core|p_core|e_core|s_core)_count$
+  - ^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$
+  - ^all_smi_cpu_([pes]_core_utilization|[pes]_cluster_frequency_mhz|ane_ops_per_second)$
+  - ^all_smi_chassis_
+  - ^all_smi_energy_consumed_joules_total$
+  - ^all_smi_nvlink_remote_device_type$
+  units:
+    all_smi_gpu_energy_hw_millijoules_total:
+      scale: 0.001
+      unit: J
+- name: vllm
+  url: http://127.0.0.1:8000/metrics
+  interval_ms: 1000
+  include:
+  - ^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$
+  - ^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds|request_queue_time_seconds|request_prefill_time_seconds|request_decode_time_seconds)_(bucket|sum|count)$
+  - ^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$
