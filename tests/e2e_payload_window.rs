@@ -386,6 +386,7 @@ fn asr_request_window_excludes_form_build() {
 /// must stay under it or every request would fail before the comparison.
 #[test]
 fn fixtures_fit_the_dummy_body_limit() {
+    let _timing = timing_lock();
     let body = vlm_body(large_png());
     let parsed: Value = serde_json::from_slice(&body).expect("json");
     assert!(parsed["messages"][1]["content"][1]["image_url"]["url"]
