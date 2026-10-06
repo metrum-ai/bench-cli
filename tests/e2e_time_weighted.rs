@@ -235,13 +235,18 @@ fn strategic_points_report_time_weighted_blocks() {
         .iter()
         .filter(|row| col(row, "warmup") == "false" && stage(row) == f64_at(point, "load"))
         .collect();
-    let sent = |row: &csv::StringRecord| col(row, "sent_unix_ns").parse::<u128>().expect("sent");
+    // Monotonic send offset, the clock behind the stage window (#224).
+    let sent = |row: &csv::StringRecord| col(row, "send_offset_s").parse::<f64>().expect("sent");
     let service = |row: &csv::StringRecord| {
         col(row, "service_latency_s")
             .parse::<f64>()
             .expect("service")
     };
-    let first = measured.iter().map(|row| sent(row)).min().expect("rows");
+    let first = measured
+        .iter()
+        .map(|row| sent(row))
+        .min_by(f64::total_cmp)
+        .expect("rows");
     let ok: Vec<&&csv::StringRecord> = measured
         .iter()
         .filter(|row| col(row, "success") == "true")
@@ -249,7 +254,7 @@ fn strategic_points_report_time_weighted_blocks() {
     assert_eq!(ok.len(), 4);
     let window = ok
         .iter()
-        .map(|row| (sent(row) - first) as f64 / 1e9 + service(row))
+        .map(|row| sent(row) - first + service(row))
         .fold(0.0, f64::max);
     let in_flight: f64 = ok.iter().map(|row| service(row)).sum();
     let output: f64 = ok

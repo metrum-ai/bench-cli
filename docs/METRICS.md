@@ -111,16 +111,18 @@ Workload section. This page focuses on measured fields.
   flight.
   - **Intervals**: one per measured success (failures and warmup excluded,
     like every rate in the summary): `[send, send + latency_s]`, where `send`
-    is the monotonic `send_offset_s`. Strategic uses `sent_unix_ns` and
-    `service_latency_s`, so client queue delay is excluded. The window starts
-    at the first measured send of any outcome (the same start as
-    `window_seconds`) and lasts `window_seconds`, which ends at the latest
-    successful completion, so no success is clipped. Strategic uses the same
-    rule over the stage rows (first measured send to latest successful
-    `sent + service_latency_s`), which can differ slightly from the stage
-    window behind `throughput`. Intervals are clipped to the window. AIPerf
-    ends its window at the final response of any outcome; Bench ends it at
-    the last successful completion, like `window_seconds`.
+    is the monotonic `send_offset_s`. Strategic uses its own monotonic
+    `send_offset_s` (#224; `compare` falls back to wall-clock `sent_unix_ns`
+    for older CSVs without it) and `service_latency_s`, so client queue delay
+    is excluded. The window starts at the first measured send of any outcome
+    (the same start as `window_seconds`) and lasts `window_seconds`, which
+    ends at the latest successful completion, so no success is clipped.
+    Strategic uses the same rule over the stage rows (first measured send to
+    latest successful `sent + service_latency_s`), which is the same stage
+    window behind `throughput` and the stage token rates (#224). Intervals are
+    clipped to the window. AIPerf ends its window at the final response of any
+    outcome; Bench ends it at the last successful completion, like
+    `window_seconds`.
   - **Failures are excluded.** Under errors or timeouts the server was also
     busy with the failed requests, so `effective_concurrency` understates
     server busyness. Compare it with `observed_concurrency`, which counts
@@ -245,9 +247,16 @@ Workload section. This page focuses on measured fields.
   The window is first measured send → last measured successful completion,
   derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
   `latency_s`. Wall-clock `started_at` is metadata only and must not be used
-  to recompute the window (an NTP step would otherwise inflate it).
-  The window excludes warmup and includes drain for requests issued during
-  measurement.
+  to recompute the window (an NTP step would otherwise inflate it). The window
+  excludes warmup and includes drain for requests issued during measurement.
+  Strategic stages use the same rule over the stage rows (#224): the stage
+  window runs from the earliest measured send of any outcome (the monotonic
+  CSV `send_offset_s`) to the latest successful `send + service_latency_s`
+  (the latest completion of any outcome when the stage has no success). Stage
+  `throughput`, `goodput`, token rates, `cost_per_million_output_tokens`, the
+  time-weighted blocks, and `compare` all share this window. `compare` reads
+  CSVs written before `send_offset_s` existed on wall-clock `sent_unix_ns`,
+  which an NTP step can inflate.
 - **Warmup barrier** (#226): with `--warmup-requests N`, measured requests
   start only after all N warmup requests have completed (success or error),
   so measurement sees a warmed, drained server. This holds in llm, vlm, asr,
@@ -285,7 +294,8 @@ Workload section. This page focuses on measured fields.
   `null` unless both totals exist. Strategic sweep points carry the same four
   fields per stage from server usage only (no tokenizer fallback), summed over
   successes that report usage (`input_tokens > 0` or `output_tokens > 0`) and
-  divided by the stage window. Strategic `completion_tokens_total` (and so
+  divided by the stage window (first measured send to latest successful
+  completion). Strategic `completion_tokens_total` (and so
   `total_tokens_per_second`) is `null` for stages that generate no output
   (`--kind embeddings`, `--kind rerank`, `--kind imagegen`); rerank `prompt_tokens_total` sums
   `usage.total_tokens` (all input). A strategic total whose field sums to 0

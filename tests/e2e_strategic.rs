@@ -192,6 +192,10 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
     assert_eq!(records.len(), 6);
     assert_eq!(records.iter().filter(|r| r.warmup).count(), 2);
     assert_eq!(records.iter().filter(|r| !r.warmup).count(), 4);
+    // Every row carries the monotonic send offset behind the stage window (#224).
+    assert!(records
+        .iter()
+        .all(|r| r.send_offset_s.is_some_and(|s| s.is_finite() && s >= 0.0)));
     let max_warmup_sent = records
         .iter()
         .filter(|r| r.warmup)
