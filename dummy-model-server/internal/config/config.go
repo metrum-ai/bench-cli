@@ -40,13 +40,17 @@ type Config struct {
 	// ReasoningTokens > 0 streams that many reasoning_content chunks (one
 	// token each) and reports them in usage.completion_tokens_details.
 	ReasoningTokens int
-	IncludeUsage    bool
-	Seed            int64
-	Compat          Compat
-	LogRequests     bool
-	ImageSize       string
-	MaxImages       int
-	AllowAnyModel   bool
+	// ReasoningOnly spends the whole max_tokens budget on reasoning_content
+	// deltas and sends no visible content, like a thinking model whose
+	// output cap ends inside its reasoning.
+	ReasoningOnly bool
+	IncludeUsage  bool
+	Seed          int64
+	Compat        Compat
+	LogRequests   bool
+	ImageSize     string
+	MaxImages     int
+	AllowAnyModel bool
 	// StrictMedia rejects media payloads real servers reject (see internal/media).
 	StrictMedia bool
 }
@@ -70,6 +74,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.RoleOnly, "role-only", false, "Adversarial: stream role delta only (no content)")
 	fs.BoolVar(&cfg.Reasoning, "reasoning", false, "Emit delta.reasoning_content before content (vLLM-style)")
 	fs.IntVar(&cfg.ReasoningTokens, "reasoning-tokens", 0, "Emit N reasoning tokens and report usage.completion_tokens_details.reasoning_tokens; 0 = off")
+	fs.BoolVar(&cfg.ReasoningOnly, "reasoning-only", false, "Stream max_tokens reasoning_content deltas and no content (thinking model cut off mid-reasoning)")
 	fs.BoolVar(&cfg.IncludeUsage, "include-usage", true, "Include usage on final stream chunk by default")
 	fs.Int64Var(&cfg.Seed, "seed", 0, "RNG seed for error injection and deterministic text; 0 = time-based")
 	compat := fs.String("compat", "openai", "Vendor profile: openai|vllm|sglang")

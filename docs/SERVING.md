@@ -69,7 +69,7 @@ LLM prompts come from Hugging Face [`metrum-ai/prompt-library`](https://huggingf
 ## Pitfalls specific to this CLI
 
 - **Thinking models** (Qwen3, Qwen3.8) emit reasoning tokens before visible text. Read [REASONING_MODELS.md](REASONING_MODELS.md) before choosing `--max-tokens`, and set `chat_template_kwargs` explicitly so the choice is recorded.
-- **Preflight cannot disable thinking.** `metrum-ai-bench-cli preflight` has no `--extra-body-json`, so its `streaming_first_token` check fails on a thinking model even when the server is healthy. Seen on `Qwen/Qwen3.8-27B-FP8` on 2026-10-02.
+- **Preflight on thinking models.** `metrum-ai-bench-cli preflight` sends a small streaming probe (`max_tokens` 8). A thinking model can spend all of it on reasoning, so `streaming_first_token` passes with `first token was reasoning in N ms` when only reasoning deltas arrive (#230). Before that fix the check failed with `no output token` on a healthy server (`Qwen/Qwen3.8-27B-FP8` on 2026-10-02, `Qwen/Qwen3-8B` on vLLM 0.31.0 on 2026-10-05). To see a visible token instead, pass `--extra-body-json '{"chat_template_kwargs":{"enable_thinking":false}}'`. See [REASONING_MODELS.md](REASONING_MODELS.md#preflight-on-thinking-models).
 - **Hybrid Mamba models** (Qwen3.8-27B) need `--max-num-seqs` at or below the Mamba cache block count vLLM reports. On 1x H100 PCIe that count was 793; the default of 1024 fails at engine start.
 - **Run the bench on the serving host.** Driving a cloud IP from a laptop puts WAN round-trip time into TTFT.
 - **Prefer vendor containers over `pip` wheels** on stock cloud images; see the docs site [Platforms](https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/platforms/) page.

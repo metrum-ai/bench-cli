@@ -54,7 +54,7 @@ pub struct TelemetryArgs {
     #[arg(
         long,
         default_value_t = false,
-        help = "Fail the run when a telemetry source cannot be scraped (startup probe, or N consecutive failures mid-run; default N=3)"
+        help = "Abort mid-run after N consecutive scrape failures on any source (default N=3); a failed startup probe fails the run with or without this flag"
     )]
     pub require_telemetry: bool,
 
@@ -265,8 +265,15 @@ impl TelemetrySession {
                             Ok(result) => result,
                             Err(err) => Err(anyhow::anyhow!("telemetry scraper panicked: {err}")),
                         };
-                        if outcome.is_err() {
-                            if let Some(flag) = abort {
+                        if let (Err(err), Some(flag)) = (&outcome, abort) {
+                            // A stop, not a signal: a later Ctrl-C still
+                            // drains and writes the summary (#227).
+                            if flag.is_stopped() {
+                                log::error!("{err:#}");
+                            } else {
+                                log::error!(
+                                    "{err:#}; stopping new requests and draining in-flight work"
+                                );
                                 flag.stop();
                             }
                         }

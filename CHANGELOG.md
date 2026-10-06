@@ -319,6 +319,23 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- `metrum-ai-bench-cli preflight` no longer fails `streaming_first_token`
+  against a thinking model that spends the whole probe budget (`max_tokens`
+  8) on reasoning (#230). The check now passes when the probe stream carries
+  only reasoning deltas (`delta.reasoning_content` or `delta.reasoning`), with
+  detail "first token was reasoning in N ms (no visible content within the
+  probe's max_tokens)". A visible token still reports "first visible token in
+  N ms". It fails only when neither content nor reasoning arrives, now with
+  detail "stream finished without a visible output or reasoning token", and
+  the remediation names `--extra-body-json
+  '{"chat_template_kwargs":{"enable_thinking":false}}'` for thinking models.
+  Only `detail` and `remediation` strings change; the
+  `metrum-ai-bench-cli.preflight.v1` report shape is unchanged. No schema
+  change. See `docs/REASONING_MODELS.md` and `docs/SERVING.md`.
+- dummy-model-server gains `-reasoning-only`, which streams `max_tokens`
+  `delta.reasoning_content` chunks with no content, `finish_reason` `length`,
+  and usage `reasoning_tokens` equal to `max_tokens` (a thinking model cut off
+  mid-reasoning), used by `tests/e2e_preflight_reasoning.rs` (#230).
 - Strategic knee detection no longer reports a knee on a sweep with no
   meaningful bend, and no longer misses a saturated sweep whose p95 stays flat
   (#232). Kneedle always returns the interior stage farthest from the chord,
@@ -403,6 +420,30 @@
   stage. The tracker resets at the warmup barrier, so `acquire_count` equals
   the measured requests dispatched; before, warmup acquires and occupancy
   were included. No schema change (#226).
+- A mid-run `--require-telemetry` abort no longer turns the next Ctrl-C or
+  SIGTERM into a hard exit (130 / 143) that skipped `summary.v3` and the NDJSON `summary`
+  row. `runner::StopFlag` now
+  tracks real signals apart from the stop itself, so the first real signal
+  always drains and writes the summary and only a second real signal exits
+  at once, in `metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`, and
+  strategic. The telemetry abort now also logs an error line when it stops
+  the run, `<error>; stopping new requests and draining in-flight work`. No
+  schema change (#227).
+- `--require-telemetry` help text (modality binaries and strategic) now
+  reads "Abort mid-run after N consecutive scrape failures on any source
+  (default N=3); a failed startup probe fails the run with or without this
+  flag", matching the #196 behavior; `docs/CLI.md` is regenerated (#227).
+- `metrum-ai-bench-cli-asr` reads the audio file before it takes the send
+  offset, `started_at`, and the send `Instant`. `request.v3`
+  `send_offset_s` / `started_at` / `completed_at` and NDJSON `t_sent_ns` /
+  `t_done_ns` used to land early by the read time, and failed requests'
+  `latency_s` included it; all of them now exclude the file read. Open-loop
+  `queue_delay_s` is now taken at the send offset, after the read, so
+  `send_offset_s - scheduled_offset_s` still equals `queue_delay_s` and the
+  read counts as client-side delay. An unreadable file fails only that
+  request, with a non-connect error. Covered by e2e tests with a FIFO and a
+  directory as the audio file. Compare ASR latency across versions with
+  care. No schema change (#227).
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be
   interpolated from 0, and a rank in `+Inf` used to return the highest finite

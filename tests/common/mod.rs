@@ -331,3 +331,52 @@ pub fn sine_wav(seconds: f64) -> Vec<u8> {
 pub fn skip(reason: &str) {
     eprintln!("skipping: {reason}");
 }
+
+/// Prometheus source that answers 200 with one `all_smi_` gauge for the
+/// first `ok` requests, then 500 (#227). Runs until the test process exits.
+pub fn spawn_flaky_metrics(ok: usize) -> SocketAddr {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind flaky metrics");
+    let address = listener.local_addr().expect("flaky metrics addr");
+    thread::spawn(move || {
+        for (served, stream) in listener.incoming().enumerate() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = if served < ok {
+                let body = "all_smi_gpu_utilization{gpu=\"0\"} 50\n";
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            } else {
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_string()
+            };
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    address
+}
+
+/// Telemetry YAML with one source at `address`, scraped every 100 ms.
+pub fn flaky_telemetry_yaml(dir: &std::path::Path, address: SocketAddr) -> PathBuf {
+    let path = dir.join("telemetry.yaml");
+    std::fs::write(
+        &path,
+        format!(
+            "timeout_ms: 500\nsources:\n  - name: flaky\n    url: http://{address}/metrics\n    interval_ms: 100\n    include: [\"^all_smi_\"]\n"
+        ),
+    )
+    .expect("write telemetry yaml");
+    path
+}
+
+/// Parsed NDJSON rows; a missing file reads as no rows.
+pub fn ndjson_rows(path: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
