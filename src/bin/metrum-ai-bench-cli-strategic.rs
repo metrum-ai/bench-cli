@@ -7,7 +7,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use metrum_ai_bench::strategic::{
-    controlled_messages, detect_knee_with_reason, export_csv, export_html, export_mlperf,
+    controlled_messages, detect_knee_on_axis, export_csv, export_html, export_mlperf,
     load_sessions, now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord,
     MlperfScenario, PrefixControl, ServerMetrics, Validity,
 };
@@ -1838,7 +1838,13 @@ async fn main() -> Result<()> {
     }
     let duration_s = started.elapsed().as_secs_f64();
     let server = aggregate_server(&server_samples.lock().await);
-    let knee = detect_knee_with_reason(&points);
+    let knee = detect_knee_on_axis(
+        &points,
+        match args.sweep_by {
+            SweepBy::Concurrency => metrum_ai_bench::strategic::KneeLoadAxis::Concurrency,
+            SweepBy::Rate => metrum_ai_bench::strategic::KneeLoadAxis::Rate,
+        },
+    );
     // Single-stage and sessions runs never expect a knee; keep them quiet.
     if points.len() >= 2 {
         if let Some(note) = knee.note() {

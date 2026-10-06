@@ -4,7 +4,8 @@
 #
 # Re-records the analyze.py NDJSON fixtures against the mock server.
 # Usage: BIN_DIR=/path/to/target/release docs/queries/fixtures/record.sh
-# Writes sweep5.{ndjson,stdout.json} (5 stages, knee) and
+# Writes sweep5.{ndjson,stdout.json} (5 stages; a knee, or no_bend when the
+# mock p95 rises less than 20%, #232) and
 # sweep3.{ndjson,stdout.json} (3 stages, no knee) next to this script.
 # The generated .ndjson and .stdout.json fixtures are Copyright (c) 2026
 # Metrum AI, Inc., SPDX-License-Identifier: Apache-2.0. They carry no comment

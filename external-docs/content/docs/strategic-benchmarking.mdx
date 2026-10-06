@@ -98,8 +98,15 @@ A knee needs at least 5 measured stages (stages with a p95): both endpoints
 plus 3 interior candidates. Shorter sweeps, or sweeps whose failed stages leave
 fewer than 5 measured stages, report `"knee": null` instead of a misleading
 middle stage. The always-present `knee_detection` object gives the reason
-(`insufficient_points`, `missing_latency`, or `flat_curve`) and the measured
-`points` count. Plan sweeps with 5 or more loads (for example
+(`insufficient_points`, `missing_latency`, `flat_curve`, or `no_bend`) and the
+measured `points` count. `no_bend` means p95 rose less than 20% above its
+running minimum and no stage was saturated (throughput kept scaling with load
+and the error rate did not rise), so a nearly linear sweep reports no knee.
+Such a sweep usually has not reached saturation; check the error rate and
+throughput scaling, then extend the sweep to higher loads. A throughput
+plateau or a rising error rate still yields a knee (`knee_detection.method`
+`saturation`). The 20% threshold is provisional, set from two live curves.
+Plan sweeps with 5 or more loads (for example
 `--sweep 1,2,4,8,16,32`) when the knee matters. See
 [docs/STRATEGIC_BENCHMARKING.md](https://github.com/metrum-ai/bench-cli/blob/main/docs/STRATEGIC_BENCHMARKING.md)
 and
