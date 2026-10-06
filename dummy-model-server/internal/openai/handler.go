@@ -189,6 +189,11 @@ func (h *Handler) serveChatStream(w http.ResponseWriter, model string, maxTokens
 		return
 	}
 
+	if h.Cfg.ReasoningOnly {
+		h.serveReasoningOnlyStream(sw, id, created, model, maxTokens, promptTokens, includeUsage)
+		return
+	}
+
 	// Counted reasoning deltas before visible content (-reasoning-tokens).
 	reasoningTokens := h.Cfg.ReasoningTokens
 	for i := 0; i < reasoningTokens; i++ {
@@ -265,6 +270,31 @@ func (h *Handler) serveCompletionStream(w http.ResponseWriter, model string, max
 		"id": id, "object": "text_completion.chunk", "model": model,
 		"choices": []map[string]any{{"index": 0, "text": "", "finish_reason": stop}},
 		"usage":   usage{PromptTokens: promptTokens, CompletionTokens: maxTokens, TotalTokens: promptTokens + maxTokens},
+	}
+	_ = sw.Data(final)
+	_ = sw.Done()
+}
+
+// serveReasoningOnlyStream spends every token of maxTokens on a
+// reasoning_content delta and finishes with "length", so no visible content
+// arrives (-reasoning-only). Usage reports them all as reasoning tokens.
+func (h *Handler) serveReasoningOnlyStream(sw *sse.Writer, id string, created int64, model string, maxTokens, promptTokens int, includeUsage bool) {
+	for i := 0; i < maxTokens; i++ {
+		if h.Cfg.ChunkInterval > 0 {
+			time.Sleep(h.Cfg.ChunkInterval)
+		}
+		_ = sw.Data(streamChunk{
+			ID: id, Object: "chat.completion.chunk", Created: created, Model: model,
+			Choices: []streamChoice{{Index: 0, Delta: streamDelta{ReasoningContent: "think"}}},
+		})
+	}
+	length := "length"
+	final := streamChunk{
+		ID: id, Object: "chat.completion.chunk", Created: created, Model: model,
+		Choices: []streamChoice{{Index: 0, Delta: streamDelta{}, FinishReason: &length}},
+	}
+	if includeUsage {
+		final.Usage = withReasoning(&usage{PromptTokens: promptTokens, TotalTokens: promptTokens}, maxTokens)
 	}
 	_ = sw.Data(final)
 	_ = sw.Done()

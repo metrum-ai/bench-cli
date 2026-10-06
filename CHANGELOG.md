@@ -336,6 +336,23 @@
   the ASR file read (#227). A VLM body build failure still emits a failed
   request record. Compare VLM latency across versions with care. No schema
   change.
+- `metrum-ai-bench-cli preflight` no longer fails `streaming_first_token`
+  against a thinking model that spends the whole probe budget (`max_tokens`
+  8) on reasoning (#230). The check now passes when the probe stream carries
+  only reasoning deltas (`delta.reasoning_content` or `delta.reasoning`), with
+  detail "first token was reasoning in N ms (no visible content within the
+  probe's max_tokens)". A visible token still reports "first visible token in
+  N ms". It fails only when neither content nor reasoning arrives, now with
+  detail "stream finished without a visible output or reasoning token", and
+  the remediation names `--extra-body-json
+  '{"chat_template_kwargs":{"enable_thinking":false}}'` for thinking models.
+  Only `detail` and `remediation` strings change; the
+  `metrum-ai-bench-cli.preflight.v1` report shape is unchanged. No schema
+  change. See `docs/REASONING_MODELS.md` and `docs/SERVING.md`.
+- dummy-model-server gains `-reasoning-only`, which streams `max_tokens`
+  `delta.reasoning_content` chunks with no content, `finish_reason` `length`,
+  and usage `reasoning_tokens` equal to `max_tokens` (a thinking model cut off
+  mid-reasoning), used by `tests/e2e_preflight_reasoning.rs` (#230).
 - Strategic knee detection no longer reports a knee on a sweep with no
   meaningful bend, and no longer misses a saturated sweep whose p95 stays flat
   (#232). Kneedle always returns the interior stage farthest from the chord,

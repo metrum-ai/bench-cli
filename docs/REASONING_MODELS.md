@@ -107,6 +107,30 @@ Probe procedure:
 3. Record that cap on the manifest (it is already in `config.body_template`
    as `max_tokens`) and use it for the full sweep.
 
+## Preflight on thinking models
+
+`metrum-ai-bench-cli preflight` checks streaming with one request capped at
+`max_tokens` 8. A thinking model (for example Qwen3 served by vLLM with
+`--reasoning-parser qwen3`) can spend all 8 tokens on reasoning, so no
+visible content arrives. A streamed reasoning delta (`delta.reasoning_content`
+or `delta.reasoning`) still proves that streaming works, so
+`streaming_first_token` reports PASS with
+`first token was reasoning in N ms (no visible content within the probe's max_tokens)`
+(#230). The check still fails when the stream ends with neither content nor
+reasoning.
+
+To make the probe return visible content, turn thinking off for preflight
+only:
+
+```bash
+metrum-ai-bench-cli preflight --url http://127.0.0.1:8000 --api-key dummy \
+  --model Qwen/Qwen3-8B \
+  --extra-body-json '{"chat_template_kwargs":{"enable_thinking":false}}'
+```
+
+This does not change the benchmark run. Pick the thinking setting and
+`--max-tokens` for the run itself as described above.
+
 ## Run-time budgeting
 
 Higher effort means more generated tokens per request. Sweep wall time scales
