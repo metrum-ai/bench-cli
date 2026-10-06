@@ -138,7 +138,8 @@ where
 }
 
 /// Like [`consume`], but keep a finished stream that never emitted a visible
-/// token when `allow_missing_ttft` is true (for `--infer-ttft-from-first-byte`).
+/// token when `allow_missing_ttft` is true (for `--infer-ttft-from-first-byte`
+/// and the preflight streaming probe, #230).
 pub async fn consume_with_options<S, B>(
     stream: S,
     started: Instant,
