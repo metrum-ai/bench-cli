@@ -99,3 +99,80 @@ sources:
     assert_eq!(summary["partial"], false);
     assert_eq!(summary["dropped_telemetry_rows"], 0);
 }
+
+/// #227: a required source that serves one 200 (the startup probe) and then
+/// 500s aborts a strategic sweep mid-run. The run exits non-zero, the NDJSON
+/// still ends with a `summary` row marked `partial`, and fewer stages than
+/// configured were measured.
+#[test]
+fn strategic_require_telemetry_aborts_mid_run() {
+    const STAGES: usize = 5;
+    // 8 requests at 300 ms keep each low-concurrency stage well past the
+    // 200 ms the two failing 100 ms scrapes take.
+    let server = common::spawn_mock(&["--latency-ms", "300"]);
+    let source = common::spawn_flaky_metrics(1);
+    let directory = tempfile::tempdir().expect("tmp");
+    let ndjson = directory.path().join("run.ndjson");
+    let telemetry = common::flaky_telemetry_yaml(directory.path(), source);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{}/v1/chat/completions", server.address),
+            "--model",
+            "mock",
+            "--api-key",
+            "dummy",
+            "--requests-per-stage",
+            "8",
+            "--warmup-requests",
+            "0",
+            "--sweep",
+            "1,2,4,8,16",
+            "--sweep-by",
+            "concurrency",
+            "--ndjson",
+            ndjson.to_str().unwrap(),
+            "--telemetry",
+            telemetry.to_str().unwrap(),
+            "--require-telemetry",
+            "--require-telemetry-failures",
+            "2",
+        ])
+        .output()
+        .expect("run strategic");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "abort must fail the run: {stderr}"
+    );
+    assert!(
+        stderr.contains("failed 2 consecutive scrapes (require-telemetry)"),
+        "{stderr}"
+    );
+
+    let rows = common::ndjson_rows(&ndjson);
+    assert_eq!(rows.first().map(|r| &r["kind"]), Some(&Value::from("run")));
+    let summary = rows.last().expect("ndjson rows");
+    assert_eq!(summary["kind"], "summary", "{summary}");
+    assert_eq!(summary["partial"], true, "{summary}");
+    assert!(
+        summary["scrape_error_rows"].as_u64().unwrap_or(0) >= 2,
+        "{summary}"
+    );
+    let measured: std::collections::BTreeSet<u64> = rows
+        .iter()
+        .filter(|r| r["kind"] == "stage" && r["phase"] == "measure")
+        .filter_map(|r| r["stage"].as_f64())
+        .map(|stage| stage as u64)
+        .collect();
+    // The first stage (8 requests at 300 ms, concurrency 1) drains after the
+    // abort; stages are numbered from 1.
+    assert!(measured.contains(&1), "stage rows: {measured:?}");
+    assert!(
+        measured.len() < STAGES,
+        "expected fewer than {STAGES} measured stages, got {measured:?}"
+    );
+    let stage_rows = rows.iter().filter(|r| r["kind"] == "stage").count() as u64;
+    assert_eq!(summary["stage_rows"], stage_rows, "{summary}");
+}

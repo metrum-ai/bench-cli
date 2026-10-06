@@ -275,8 +275,13 @@ Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 
 Warmup request lines remain in the file for audit but are excluded from
 summary distributions. Ctrl-C stops issuance, drains started requests, and
-writes a partial summary. A hard kill may leave valid request lines without a
-summary; consumers must accept that recoverable prefix.
+writes a partial summary. The first real Ctrl-C or SIGTERM always drains and
+writes `summary.v3` (and, with `--ndjson`, the NDJSON `summary` row), even
+after an internal stop such as a mid-run `--require-telemetry` abort. Only a
+second real signal (Ctrl-C or SIGTERM, in any order) exits at once with
+status 130 (SIGINT) or 143 (SIGTERM) and skips the summary (#227). A hard
+kill may leave valid request lines without a summary; consumers must accept
+that recoverable prefix.
 
 Unversioned / legacy dual-summary objects are no longer written. Console output
 and JSONL both derive from `RunSummary` / `DistSummary` (Hyndman–Fan type 7).

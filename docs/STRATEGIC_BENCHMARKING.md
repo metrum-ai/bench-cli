@@ -139,22 +139,23 @@ A knee has two candidates, and the earlier stage wins
   where it starts, and a later all-failure stage does not override an
   earlier bend.
 
-Kneedle always returns the interior stage farthest from the chord, so a
-nearly linear sweep would still report a knee. The 20% minimum p95 rise
-(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) is provisional: it is set from
-two live curves. It separates the live H100 sweeps
-from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
-scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
-11% (1.200 to 1.333 s), and each 2x step gained 1.87x to 1.97x throughput,
-so it reports `no_bend`. The LLM sweep's smallest step gain is 1.77x. A fixed-latency mock
-sweep also reports `no_bend` (the analyze.py `sweep5` fixture, recorded
-before #232, rises 8% and still carries its old knee). The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
-knee at c=32. A threshold on the normalized chord distance cannot make this
-split: the LLM curve peaks at 0.095, below the VLM curve's 0.164. At 20%, the
-threshold sits about 2x above the bend-free rises and about 2x below the
-smallest real bend. A sweep with less than 20% p95 rise usually has not
-reached saturation; check the error rate and throughput scaling per stage,
-then extend the sweep to higher loads to find the knee.
+Kneedle always returns the interior stage farthest from the chord, so a nearly
+linear sweep would still report a knee. The 20% minimum p95 rise
+(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) is provisional: it is set from two
+live curves. It separates the live H100 sweeps from the #184 validation (vLLM
+0.31.0). The Qwen3-VL-8B sweep at c=1..16 scaled throughput almost linearly
+(0.94 to 12.37 req/s) while p95 rose only 11% (1.200 to 1.333 s), and each 2x
+step gained 1.87x to 1.97x throughput, so it reports `no_bend`. A
+fixed-latency mock sweep also reports `no_bend` (the analyze.py `sweep5`
+fixture, recorded before #232, rises 8% and still carries its old knee). The
+LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its knee at c=32.
+The LLM sweep's smallest step gain is 1.77x. A threshold on the normalized
+chord distance cannot make this split: the LLM curve peaks at 0.095, below the
+VLM curve's 0.164. At 20%, the threshold sits about 2x above the bend-free
+rises and about 2x below the smallest real bend. A sweep with less than 20%
+p95 rise usually has not reached saturation; check the error rate and
+throughput scaling per stage, then extend the sweep to higher loads to find
+the knee.
 
 `knee_detection` is always present:
 `{"index", "reason", "points", "min_points", "method", "p95_rise", "saturated_index", "min_p95_rise", "min_marginal_gain", "max_error_rate_rise"}`.
