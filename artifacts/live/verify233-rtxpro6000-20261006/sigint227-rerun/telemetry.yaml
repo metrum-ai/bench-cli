@@ -1,0 +1,6 @@
+default_interval_ms: 500
+timeout_ms: 400
+sources:
+  - name: demo
+    url: http://127.0.0.1:48190/metrics
+    include: ["^demo_gauge$"]

@@ -291,11 +291,12 @@ Instance deleted and verified via `GET /instances/<id>/info`.
 | ASR | `openai/whisper-large-v3-turbo` | c=8 / sweep c=1..16 | 96/96 ok, WER/CER 0.0 / 0 errors, knee c=2 (saturation) | `asr/run.stdout`, `asr/sweep.stdout.json` |
 | ImageGen | `Tongyi-MAI/Z-Image-Turbo` | c=1 / sweep c=1..5 | 8/8 ok, 8 distinct PNG sha256 / 0 errors, flat 0.615 to 0.632 req/s, knee c=1 (saturation) | `imagegen/run.stdout`, `imagegen/sweep.stdout.json` |
 
-`checks.txt`: 11 PASS, 0 FAIL. Six fixes (#226, #224, #232, #230, #231, #216) are verified live with a
-proving number. The imagegen c=5 point that read 0.999 req/s on H100 now reads 0.628 and matches the
-CSV recompute (#224). #242 works live with a 2.2 MB image body. #227 is partly verified: the telemetry
-abort wrote `summary.v3` and a `partial=true` NDJSON summary, but the single SIGINT most likely arrived
-after exit, so a rerun with a long drain is recommended. The bundled checker's #224 test was vacuous (it
-keyed on a missing CSV column); an independent recompute in the bundle passes on all 22 stages. The VLM
-and ASR SUT `notes` carry stale "H100" text from a reused script; their `gpu` fields are correct.
+`checks.txt`: 11 PASS, 0 FAIL as run. Seven fixes (#226, #224, #232, #227, #230, #231, #216) are verified
+with a proving number. #224: the as-run checker's #224 test compared 0 stages (it keyed on a missing CSV
+column). The corrected `check_verify_fixed.py` compares 22/22 stages, with a max mismatch of 4.35e-15
+(`checks_fixed.txt`, 14 PASS). The imagegen c=5 point that read 0.999 req/s on H100 now reads 0.628. #227:
+the live telemetry abort wrote `summary.v3` and a `partial=true` NDJSON summary. A client-side rerun
+(`sigint227-rerun/`, mock server, same binaries) showed that one SIGINT during the drain still writes the
+summary (exit 1) and two SIGINTs hard-exit 130. #242 works live with a 2.2 MB image body. Because of an
+operator copy error, the VLM and ASR SUT `notes` say "H100"; their `gpu` fields are correct.
 Instance deleted and verified via `GET /instances/<id>/info`.

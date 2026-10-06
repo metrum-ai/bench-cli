@@ -20,14 +20,17 @@ directory.
 - `checks.txt` (the output of `scripts/check_verify.py`): **11 PASS, 0 FAIL**. Rerunning the checker on
   this redacted bundle gives byte-identical output, and `docs/queries/analyze.py` at `d43d9bc` reproduces
   `llm/analyze.txt` byte for byte (see [Reproduce the checks](#reproduce-the-checks)).
-- **Six of the eight fixes are verified live with a number that proves them: #226, #224, #232, #230,
-  #231, #216.** A further check of #224 found that the bundled checker's own #224 test was vacuous. An
-  independent recompute in `recompute_224.txt` closes that gap and passes on every stage of all four
-  sweeps. See [Checker note](#checker-note-the-224-check-in-check_verifypy-is-vacuous).
-- **#227 is only partly verified.** The telemetry abort wrote a full `summary.v3` and a `partial=true`
-  NDJSON summary row, with exit 1. But the single SIGINT most likely arrived after the process had
-  exited, so this run does not prove "Ctrl-C during the drain after a telemetry abort keeps the summary".
-  See [#227 timing](#227-timing-the-sigint-most-likely-missed-the-drain).
+- **Seven of the eight fixes are verified with a number that proves them: #226, #224, #232, #227, #230,
+  #231, #216.** The as-run checker's #224 test turned out to be vacuous: it compared 0 stages. The
+  corrected checker `scripts/check_verify_fixed.py` compares 22/22 stages (1,326 measured rows) and passes
+  with a max relative mismatch of 4.35e-15 (`checks_fixed.txt`: 14 PASS, 0 FAIL). See
+  [Checker note](#checker-note-the-224-check-in-check_verifypy-is-vacuous).
+- **#227 PASS needs two runs.** On the RTX PRO 6000, the live telemetry abort wrote a full `summary.v3`
+  and a `partial=true` NDJSON summary row (exit 1). There the single SIGINT most likely arrived after
+  exit, so the run was first reported as PARTIAL. A client-side rerun (`sigint227-rerun/`, mock server,
+  same `d43d9bc` binaries) then delivered one SIGINT while the process was still draining. It drained,
+  wrote the summary and exited 1; two SIGINTs hard-exit 130 as intended. See
+  [#227](#227-telemetry-follow-ups-signal-handling-after-a-telemetry-abort-pr-241-7b4686d).
 - **#242 works on a real engine**, with 14/14 requests carrying a 2.2 MB 2048x2048 image. This run shows
   that the code path works, but it cannot isolate the latency-window change itself. The before/after
   timing proof is the e2e test in PR #246.
@@ -95,7 +98,7 @@ Each table gives the fix, the live result, the number that proves it, the file, 
 
 | Live result | Number that proves it | File | Merged PR |
 |-------------|-----------------------|------|-----------|
-| PASS (by the independent recompute). Every strategic point's `throughput` equals successes / (latest successful completion minus earliest measured send), computed from the per-request CSV. | Max relative mismatch **4.35e-15** over 22 stages (LLM 7, VLM 5, ASR 5, imagegen 5); every stage measured 100% successes. The `checks.txt` #224 line (0.00e+00 over 7 stages) is vacuous; see the checker note below. | `recompute_224.txt`, `scripts/recompute_224.py`, `*/sweep.csv`, `llm/llm-sweep.csv`, `*/sweep.stdout.json` | #237 |
+| PASS (corrected recompute). Every strategic point's `throughput` equals successes / (latest successful completion minus earliest measured send), computed from the per-request CSV. | Max relative mismatch **4.35e-15 over 22 stages** (LLM 7/7, VLM 5/5, ASR 5/5, imagegen 5/5 compared; 1,326 measured rows, all successes). The as-run `checks.txt` #224 line (0.00e+00 over 7 stages) compared 0 stages and is superseded; see the checker note below. | `checks_fixed.txt` (`#224` lines), `scripts/check_verify_fixed.py`; cross-check `recompute_224.txt`, `scripts/recompute_224.py`; data `llm/llm-sweep.csv`, `*/sweep.csv`, `*/sweep.stdout.json` | #237 |
 
 **Before and after, against the H100 bundle.** This is the case that led to the issue. In
 `epic184-h100-20261005` the imagegen c=5 point reported **0.999 req/s**, but its 6 measured requests spanned
@@ -109,7 +112,7 @@ server should behave this way:
 | RTX PRO 6000 2026-10-06, reported req/s (after #237) | 0.615 | 0.632 | 0.631 | 0.629 | **0.628** |
 | RTX PRO 6000, CSV recompute | 0.615 | 0.632 | 0.631 | 0.629 | 0.628 (window 9.558 s) |
 
-Proof: `../epic184-h100-20261005/imagegen/sweep.stdout.json`, `imagegen/sweep.stdout.json`, `recompute_224.txt`.
+Proof: `../epic184-h100-20261005/imagegen/sweep.stdout.json`, `imagegen/sweep.stdout.json`, `checks_fixed.txt`, `recompute_224.txt`.
 The GPUs differ, so compare only the shape: before the fix the c=5 point jumped by 48%, and after it the
 curve is flat. Do not compare the absolute values across the two GPUs.
 
@@ -123,9 +126,24 @@ curve is flat. Do not compare the absolute values across the two GPUs.
 
 | Live result | Number that proves it | File | Merged PR |
 |-------------|-----------------------|------|-----------|
-| PARTIAL. The `--require-telemetry` mid-run abort path is verified: new requests stopped, in-flight work drained, a full `summary.v3` was written, and the NDJSON ends with a `partial: true` summary row. The "one Ctrl-C during that drain keeps the summary" half was **not exercised**, because the SIGINT most likely arrived after exit (see below). | Exit 1 (not 130). Data log ends with `summary.v3`, `partial: true`, 46/46 measured ok. NDJSON: 3 `scrape_error` rows at t0+8.00, 8.50 and 9.00 s, then `summary` with `partial: true`, `request_rows` 50, `dropped_telemetry_rows` 0. stderr: `telemetry source all-smi failed 3 consecutive scrapes (require-telemetry); stopping new requests and draining in-flight work`. all-smi was restarted afterwards (89 `all_smi_` lines). | `checks.txt` (#227), `llm/f227.exit`, `llm/f227.stderr`, `llm/f227.summary.json`, `llm/f227.ndjson.gz`, `llm/allsmi-restarted.txt` | #241 |
+| PASS (live abort on the RTX PRO 6000, plus a client-side rerun with a SIGINT during the drain). **(a) Live, RTX PRO 6000:** the `--require-telemetry` mid-run abort stopped new requests, drained in-flight work, wrote a full `summary.v3`, and ended the NDJSON with a `partial: true` summary row. **(b) Rerun, client-side:** one SIGINT that arrived while the process was alive and draining after the abort did not hard-exit. The process finished the drain and wrote both summaries. Two SIGINTs hard-exit with 130, as designed. | **(a)** Exit 1 (not 130). Data log ends with `summary.v3`, `partial: true`, 46/46 measured ok. NDJSON: 3 `scrape_error` rows at t0+8.00, 8.50 and 9.00 s, then `summary` with `partial: true`, `request_rows` 50, `dropped_telemetry_rows` 0. **(b) Run A:** abort line seen at 02:37:00.328Z. `kill -0` confirmed the process was alive, and one SIGINT followed at 02:37:00.833Z. stdout logs `Ctrl-C received; stopping new requests and draining in-flight work`, so the signal reached the handler. The drain ended with exit 1 at 02:37:09.312Z (8.5 s later, with a 6 s mock latency). The data log ends with `summary.v3`, `partial: true` (5/5 ok). The NDJSON ends with `summary`, `partial: true`, 3 `scrape_error` rows. **Run B:** SIGINTs at 02:37:13.853Z and 14.056Z, `Second Ctrl-C; exiting without waiting for drain`, exit 130 at 14.259Z, data log and NDJSON 0 bytes. | **(a)** `checks.txt` (#227), `llm/f227.exit`, `llm/f227.stderr`, `llm/f227.summary.json`, `llm/f227.ndjson.gz`, `llm/allsmi-restarted.txt`. **(b)** [`sigint227-rerun/`](sigint227-rerun/): `A.timeline`, `A.stdout`, `A.stderr`, `A.summary.json`, `A.jsonl.gz`, `A.ndjson.gz`, `B.timeline`, `B.stdout`, `B.stderr`, `B.jsonl.gz`, `B.ndjson.gz`, `sigint_rerun.sh`, `telemetry.yaml` | #241 |
 
-#### #227 timing: the SIGINT most likely missed the drain
+#### #227 rerun setup (`sigint227-rerun/`)
+
+`sigint227-rerun/sigint_rerun.sh` ran on the orchestrator workstation on 2026-10-06 at about 02:37Z, after the
+GPU instance was deleted. It used the same release binaries, built from `d43d9bc` (`--version` prints `1.5.3`; the
+path is redacted to `<HOME>`). The target was `metrum-ai-bench-cli-mock-server` with `--latency-ms 6000`, so each
+in-flight request keeps the drain open for about 6 s. The single telemetry source was a local `http.server`
+that the script kills to cause the abort (`--require-telemetry-failures 3`, 500 ms scrape interval). The
+script sends SIGINT only after `kill -0` confirms the process is alive, and it records `rc=$?` right after
+`wait`. This tests the client-side signal path that #227 changed. No GPU or engine is involved, so the
+rerun is not a measurement of the SUT. `debug.txt` and `error.txt` are the log files the binary writes to its
+working directory. They hold run B's lines only, because run B overwrote run A's. `mock.txt` is the mock
+server's startup line.
+
+#### Note: original PARTIAL analysis of the live run (kept for the record)
+
+Before the rerun, the live run alone was reported as PARTIAL, for these reasons.
 
 `scripts/verify_fixes.sh` kills all-smi 8 s after launch and sends SIGINT 6 s later (about 14 s after
 launch). The NDJSON gives `t0_wall` 02:10:08.206Z. The third failed scrape, which triggers the abort, came at
@@ -135,9 +153,8 @@ and the process most likely exited before the signal arrived. The exit code cann
 1 is what the fixed code returns when a signal comes during the drain, and also what a run that never saw
 the signal returns. The pre-fix bug showed up only as exit 130 with no summary, and that did not happen.
 The console line from `kill` was not kept, so this bundle cannot confirm whether the signal was delivered.
-**Recommended follow-up:** rerun with a long drain (for example `--max-tokens 2048` with thinking on) and
-send SIGINT about 0.5 s after the abort line. Then check that the exit is not 130 and that `summary.v3` is
-present. PR #241's unit and e2e tests remain the evidence for that half.
+The recommended follow-up was a rerun with a long drain and a SIGINT about 0.5 s after the abort line. It
+was done as described above: in run A the SIGINT came 0.505 s after the abort line was seen.
 
 ### #230 preflight streaming probe on thinking models (PR #244, `2c010ca`)
 
@@ -169,8 +186,13 @@ present. PR #241's unit and e2e tests remain the evidence for that half.
 I found that its #224 block matches CSV rows to sweep points with `r.get("load") or r.get("stage_load")`.
 The strategic CSV names that column `stage` (see the header of `llm/llm-sweep.csv`). Every point therefore
 matched zero rows and was skipped, and `worst` stayed at its initial 0.0. The `#224 ... 0.00e+00 over 7
-stages` PASS line is real output, but it tested nothing. `scripts/recompute_224.py` does the same recompute
-keyed on `stage`, also applies it to the three modality sweeps, and passes (`recompute_224.txt`, max 4.35e-15).
+stages` PASS line is real output, but it tested nothing: the lookup matches 0 of the 1,008 CSV rows,
+because neither `load` nor `stage_load` exists. `check_verify.py` and `checks.txt` stay as run. Next to them,
+`scripts/check_verify_fixed.py` is the same checker with only the #224 block corrected. It keys on `stage`,
+fails unless every point is compared, prints the stage and row counts, and also runs on the three modality
+sweep CSVs. Its output is in `checks_fixed.txt`: 14 PASS, 0 FAIL, with #224 compared on 22/22 stages and a
+max mismatch of 4.35e-15. `scripts/recompute_224.py` is an independent per-stage cross-check, and its
+output (`recompute_224.txt`) agrees.
 The other `check_verify.py` checks read real fields. The four modality sweep lines always print PASS,
 because they record the `knee_detection` and points for review rather than assert on them. Their
 assertions are in the #232 table above.
@@ -188,14 +210,17 @@ Proof: `llm/llm-sweep.stdout.json`, `vlm/sweep.stdout.json`, `asr/sweep.stdout.j
 
 ## Operator notes and caveats
 
-1. **The VLM and ASR SUT `notes` say "H100".** `scripts/live_modalities.sh` was reused from the H100 run
-   with its `SUT_NOTES_OVERRIDE` strings unchanged. As a result, `vlm/sut.json` and `asr/sut.json` (and the
+1. **The VLM and ASR SUT `notes` say "H100" because of an operator copy error. The `gpu`, driver and OS
+   fields are correct.** `scripts/live_modalities.sh` was copied from the H100 run with its
+   `SUT_NOTES_OVERRIDE` strings unchanged. As a result, `vlm/sut.json` and `asr/sut.json` (and the
    SUT copies in their `run.summary.json` and `run.ndjson.gz` run rows) end with "epic #184 live validation
    on 1x H100 PCIe". Their `gpu`, `driver_version` and `host_os` fields are correct (RTX PRO 6000, 580.126.09,
    6.8.0-90). The evidence is committed as recorded and not rewritten. Read the hardware from `gpu`, not
    `notes`. The `epic184-*` scenario names in those runs come from the same reuse. The LLM lane SUT is
    correct.
-2. **#227 SIGINT timing.** See [#227 timing](#227-timing-the-sigint-most-likely-missed-the-drain).
+2. **#227 SIGINT timing.** In the live run the SIGINT most likely missed the drain. The client-side rerun
+   in `sigint227-rerun/` covers that half. See
+   [#227](#227-telemetry-follow-ups-signal-handling-after-a-telemetry-abort-pr-241-7b4686d).
 3. **#224 checker.** See [Checker note](#checker-note-the-224-check-in-check_verifypy-is-vacuous).
 4. **Unrecorded provenance.** The build commit `d43d9bc` and all-smi `v0.26.3-metrum.4` come from the
    operator's record. No file in this bundle stamps them. Tip builds print `1.5.3`.
@@ -219,11 +244,13 @@ H100 bundle could not get became available at 01:54:23Z and is the GPU in this b
 | Path | Content |
 |------|---------|
 | `REPORT.md` | This report |
-| `checks.txt` | `check_verify.py` output as run (11 PASS, 0 FAIL); reproduces byte for byte on this bundle |
+| `checks.txt` | `check_verify.py` output as run (11 PASS, 0 FAIL); reproduces byte for byte on this bundle. Its #224 line is vacuous. |
+| `checks_fixed.txt` | `check_verify_fixed.py` output on this bundle (14 PASS, 0 FAIL), after a 3-line header |
 | `recompute_224.txt` | `recompute_224.py` output on all four sweeps (corrected #224 check) |
 | `availability.txt` | Shadeform availability checks for RTX PRO 6000 and H200 |
 | `instance.json`, `instance-deleted.json` | Shadeform instance record (IP omitted) and the API deletion record |
-| `scripts/` | `verify_fixes.sh`, `live_modalities.sh` (exact commands run on the GPU host), `check_verify.py` (as run), `recompute_224.py` (added for this bundle) |
+| `scripts/` | `verify_fixes.sh`, `live_modalities.sh` (exact commands run on the GPU host), `check_verify.py` (as run), `check_verify_fixed.py` (#224 keyed on `stage`), `recompute_224.py` (added for this bundle) |
+| `sigint227-rerun/` | #227 client-side rerun: `sigint_rerun.sh`, `telemetry.yaml`, and for runs A (one SIGINT) and B (two SIGINTs) `.timeline`, `.stdout`, `.stderr`, `.jsonl.gz`, `.ndjson.gz` (B's are empty), `A.summary.json`, plus `debug.txt`, `error.txt`, `mock.txt` (renamed from `.log`) |
 | `llm/` | `binary.txt`, `dispatcher-version.txt`, `serve-sut.json` (launcher SUT), `sut.json`, `telemetry.yaml`, `prompts-report.json`, `prompts.jsonl.gz`; `f230-*.txt`; `f226` and `f227` `.stdout`, `.stderr`, `.summary.json` (final `summary.v3` line), `.jsonl.gz` (data log), `.ndjson.gz`; `f227.exit`, `allsmi-restarted.txt`; `llm-sweep.stdout.json`, `.stderr`, `.csv`, `.ndjson.gz`; `analyze.txt`, `analyze.json`; `f216.txt` |
 | `vlm/`, `asr/`, `imagegen/` | `sut.json`, `models.json`, `telemetry.yaml`, `serve.txt` (launcher output, renamed from `serve.log`, which `.gitignore` excludes), `run.stdout`, `run.stderr`, `run.summary.json`, `run.jsonl.gz`, `run.ndjson.gz`, `sweep.stdout.json`, `sweep.stderr`, `sweep.csv`, `sweep.ndjson.gz` |
 | `vlm/big.*` | #242 run: `big-prompts.jsonl`, `big.stdout`, `big.stderr`, `big.summary.json`, `big.jsonl.gz`, `big.ndjson.gz`, `big.png.sha256` |
@@ -243,7 +270,8 @@ pass `--api-key dummy`, and the Shadeform key was never written to any file. The
 kept. Redaction only replaces strings, so every JSON and NDJSON line still parses, and the checker reproduces
 its output exactly. A grep for `GPU-` followed by hex, the original host name, the instance IP, `/home/`, `/tmp/`, `KEY`,
 `Bearer`, `sk-` and `hf_` tokens over the plain and decompressed files finds nothing. The only `--api-key`
-value is `dummy`.
+value is `dummy`. In `sigint227-rerun/sigint_rerun.sh`, the workstation binary directory and the scratch
+output directory are rewritten to `<HOME>/...` and `<SCRATCH>/...`. No other rerun file contained a path.
 
 ## Reproduce the checks
 
@@ -252,6 +280,7 @@ B=artifacts/live/verify233-rtxpro6000-20261006
 T=$(mktemp -d); cp -r $B/llm $B/vlm $B/asr $B/imagegen $T/
 find $T -name '*.gz' -exec gunzip {} +
 python3 $B/scripts/check_verify.py $T/llm $T/vlm $T/asr $T/imagegen | cmp - $B/checks.txt && echo identical
+python3 $B/scripts/check_verify_fixed.py $T/llm $T/vlm $T/asr $T/imagegen | cmp - <(tail -n +4 $B/checks_fixed.txt) && echo fixed-identical
 python3 $B/scripts/recompute_224.py $T/llm $T/llm/llm-sweep.stdout.json $T/llm/llm-sweep.csv
 for m in vlm asr imagegen; do python3 $B/scripts/recompute_224.py $T/$m; done
 python3 docs/queries/analyze.py $T/llm/llm-sweep.ndjson $T/llm/llm-sweep.stdout.json
