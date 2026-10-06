@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for analyze.py. Run: python3 -m unittest discover -s docs/queries
 
-fixtures/sweep{5,3}.ndjson are recorded runs of metrum-ai-bench-cli-strategic
-against metrum-ai-bench-cli-mock-server --telemetry-fixture (fixtures/record.sh).
-Assertions on them hold for both stdout shapes: with `knee_detection` (#190)
-and without it (older builds, legacy `knee` fallback).
+fixtures/sweep5, sweep5_no_bend and sweep3 are recorded runs of
+metrum-ai-bench-cli-strategic against metrum-ai-bench-cli-mock-server
+--telemetry-fixture (fixtures/record.sh). sweep5 goes through
+fixtures/capacity_proxy.py (4 requests at a time), so p95 bends past c=4 and
+the recorded knee_detection has a real knee (#232, #240); sweep5_no_bend is
+the same sweep straight to the fixed-latency mock. Legacy-shape tests delete
+`knee_detection` to exercise the `knee` fallback for builds before #190.
 """
 
 from __future__ import annotations
@@ -26,6 +29,9 @@ FIXTURES = os.path.join(HERE, "fixtures")
 ALL_SMI_PAGE = os.path.join(
     HERE, "..", "..", "scripts", "parity", "fixtures", "all-smi-fork-h100.prom"
 )
+
+
+RECORDED = ("sweep5", "sweep5_no_bend", "sweep3")
 
 
 def load_fixture(name):
@@ -241,26 +247,63 @@ class RecordedSweeps(unittest.TestCase):
         self.assertGreaterEqual(len(stdout["points"]), analyze.KNEE_MIN_POINTS)
         self.assertEqual(len(stages), len(stdout["points"]))
 
+    def test_sweep5_no_bend_has_at_least_five_points(self):
+        rows, stdout = load_fixture("sweep5_no_bend")
+        stages = [r for r in rows if r.get("kind") == "stage" and r.get("phase") == "measure"]
+        self.assertGreaterEqual(len(stdout["points"]), analyze.KNEE_MIN_POINTS)
+        self.assertEqual(len(stages), len(stdout["points"]))
+
     def test_recorded_stdout_has_knee_detection(self):
-        _, s5 = load_fixture("sweep5")
-        _, s3 = load_fixture("sweep3")
-        for stdout in (s5, s3):
+        loaded = [load_fixture(name)[1] for name in RECORDED]
+        self.assertEqual(len(loaded), 3)
+        for stdout in loaded:
             self.assertIn("knee_detection", stdout)
             self.assertEqual(stdout["knee_detection"]["min_points"], analyze.KNEE_MIN_POINTS)
+        s5, nb, s3 = loaded
+        # The capacity gate holds p95 flat to c=4, then it roughly doubles.
         det = s5["knee_detection"]
-        self.assertTrue(det["index"] is not None or det["reason"])
+        self.assertEqual(det["index"], 2)
+        self.assertIsNone(det["reason"])
+        self.assertGreaterEqual(det["p95_rise"], det["min_p95_rise"])
+        self.assertEqual(s5["points"][2]["load"], 4)
+        det = nb["knee_detection"]
+        self.assertIsNone(det["index"])
+        self.assertEqual(det["reason"], "no_bend")
+        self.assertLess(det["p95_rise"], det["min_p95_rise"])
+        self.assertIsNone(nb["knee"])
         self.assertEqual(s3["knee_detection"]["index"], None)
         self.assertEqual(s3["knee_detection"]["reason"], "insufficient_points")
         self.assertIsNone(s3["knee"])
 
+    def test_every_recorded_stage_spans_two_scrapes(self):
+        # record.sh sizes stages so none falls between scrapes; a stage with
+        # no samples would read power_mean_w and preemptions_delta as None.
+        checked = 0
+        for name in RECORDED:
+            rows, _ = load_fixture(name)
+            stages = [r for r in rows if r.get("kind") == "stage" and r.get("phase") == "measure"]
+            self.assertTrue(stages, name)
+            for st in stages:
+                for metric in ("all_smi_gpu_power_consumption_watts",
+                               "vllm:num_preemptions_total"):
+                    n = sum(1 for r in rows if r.get("metric") == metric
+                            and st["t_start_ns"] <= r["t_ns"] <= st["t_end_ns"])
+                    self.assertGreaterEqual(n, 2, (name, st["load"], metric))
+                    checked += 1
+        self.assertEqual(checked, 2 * (5 + 5 + 3))
+
     def test_sweep5_power_is_one_gpu(self):
         # The mock serves the same 200..249 W on DCGM and all-smi; summing both
         # exporters would read 400+ W.
-        rows, stdout = load_fixture("sweep5")
-        for s in analyze.analyze(rows, stdout)["stages"]:
-            self.assertGreaterEqual(s["power_mean_w"], 200.0)
-            self.assertLess(s["power_mean_w"], 250.0)
-            self.assertEqual(s["sources"]["power"], "all_smi_gpu_power_consumption_watts")
+        checked = 0
+        for name in ("sweep5", "sweep5_no_bend"):
+            rows, stdout = load_fixture(name)
+            for s in analyze.analyze(rows, stdout)["stages"]:
+                self.assertGreaterEqual(s["power_mean_w"], 200.0)
+                self.assertLess(s["power_mean_w"], 250.0)
+                self.assertEqual(s["sources"]["power"], "all_smi_gpu_power_consumption_watts")
+                checked += 1
+        self.assertEqual(checked, 10)
 
     def test_knee_index_out_of_range(self):
         rows, stdout = load_fixture("sweep5")
@@ -284,37 +327,38 @@ class RecordedSweeps(unittest.TestCase):
         self.assertEqual(res["kv_cache_util_at_knee_reason"], "insufficient_points")
 
     def test_sweep5_stage_metrics(self):
-        rows, stdout = load_fixture("sweep5")
-        res = analyze.analyze(rows, stdout)
-        self.assertEqual(len(res["stages"]), 5)
-        final = max(r["value"] for r in rows if r.get("metric") == "vllm:num_preemptions_total")
-        self.assertLessEqual(sum(s["preemptions_delta"] for s in res["stages"]), final)
-        for s in res["stages"]:
-            self.assertEqual(s["sources"]["sm_active_p50"], "DCGM_FI_PROF_SM_ACTIVE")
-            self.assertAlmostEqual(s["sm_active_p50"], 0.55)
-            self.assertAlmostEqual(s["kv_cache_util_mean"], 0.25)
-            self.assertTrue(0.0 <= s["gpu_util_mean"] <= 1.0)
-            # The mock page has no GPM gauges: reported absent, not 0.
-            self.assertIsNone(s["sm_occupancy_p50"])
-            self.assertIsNone(s["tensor_active_p50"])
-            self.assertIsNone(s["hollow_util_mean"])
+        for name in ("sweep5", "sweep5_no_bend"):
+            rows, stdout = load_fixture(name)
+            res = analyze.analyze(rows, stdout)
+            self.assertEqual(len(res["stages"]), 5)
+            final = max(r["value"] for r in rows
+                        if r.get("metric") == "vllm:num_preemptions_total")
+            self.assertGreater(final, 0)
+            self.assertLessEqual(sum(s["preemptions_delta"] for s in res["stages"]), final)
+            for s in res["stages"]:
+                self.assertEqual(s["sources"]["sm_active_p50"], "DCGM_FI_PROF_SM_ACTIVE")
+                self.assertAlmostEqual(s["sm_active_p50"], 0.55)
+                self.assertAlmostEqual(s["kv_cache_util_mean"], 0.25)
+                self.assertTrue(0.0 <= s["gpu_util_mean"] <= 1.0)
+                # The mock page has no GPM gauges: reported absent, not 0.
+                self.assertIsNone(s["sm_occupancy_p50"])
+                self.assertIsNone(s["tensor_active_p50"])
+                self.assertIsNone(s["hollow_util_mean"])
 
     def test_sweep5_kv_at_knee_as_recorded(self):
         rows, stdout = load_fixture("sweep5")
         res = analyze.analyze(rows, stdout)
-        det = stdout.get("knee_detection")
-        if det is None:
-            expected = stdout["knee"]["load"]
-            self.assertEqual(res["knee"]["source"], "legacy_knee")
-            self.assertIn("predates #190", res["knee"]["note"])
-        else:
-            expected = None if det["index"] is None else stdout["points"][det["index"]]["load"]
-            self.assertEqual(res["knee"]["source"], "knee_detection")
-        self.assertEqual(res["knee"]["load"], expected)
-        if expected is None:
-            self.assertIsNone(res["kv_cache_util_at_knee"])
-        else:
-            self.assertAlmostEqual(res["kv_cache_util_at_knee"], 0.25)
+        self.assertEqual(res["knee"]["source"], "knee_detection")
+        self.assertEqual(res["knee"]["load"], 4)
+        self.assertAlmostEqual(res["kv_cache_util_at_knee"], 0.25)
+        self.assertIsNone(res["kv_cache_util_at_knee_reason"])
+        legacy = copy.deepcopy(stdout)
+        del legacy["knee_detection"]
+        res = analyze.analyze(rows, legacy)
+        self.assertEqual(res["knee"]["source"], "legacy_knee")
+        self.assertIn("predates #190", res["knee"]["note"])
+        self.assertEqual(res["knee"]["load"], 4)
+        self.assertAlmostEqual(res["kv_cache_util_at_knee"], 0.25)
 
     def test_sweep5_with_knee_detection_index(self):
         rows, stdout = load_fixture("sweep5")
@@ -337,12 +381,9 @@ class RecordedSweeps(unittest.TestCase):
         self.assertEqual(res["kv_cache_util_at_knee_reason"], "flat_curve")
 
     def test_sweep5_no_bend_is_null_with_reason(self):
-        # #232: p95 rose less than 20% across the sweep.
-        rows, stdout = load_fixture("sweep5")
-        stdout = copy.deepcopy(stdout)
-        stdout["knee"] = None
-        stdout["knee_detection"] = {"index": None, "reason": "no_bend",
-                                    "points": 5, "min_points": 5}
+        # #232: recorded against the fixed-latency mock, p95 rose less than 20%.
+        rows, stdout = load_fixture("sweep5_no_bend")
+        self.assertEqual(stdout["knee_detection"]["reason"], "no_bend")
         res = analyze.analyze(rows, stdout)
         self.assertIsNone(res["kv_cache_util_at_knee"])
         self.assertEqual(res["kv_cache_util_at_knee_reason"], "no_bend")
