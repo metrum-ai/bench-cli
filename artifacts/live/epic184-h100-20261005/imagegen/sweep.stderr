@@ -1,0 +1,3 @@
+sut: not provided; result is not self-describing (see README.md#publishing-a-result)
+telemetry probe all-smi: matched_series=65 scrape_ms=1.0 clock_offset_ms=Some(-795)
+telemetry probe engine: matched_series=78 scrape_ms=52.0 clock_offset_ms=Some(-1847)

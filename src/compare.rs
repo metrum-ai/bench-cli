@@ -3,7 +3,7 @@
 
 //! Compare two or more strategic sweep summaries or request CSVs.
 
-use crate::strategic::{summarize_stage, BenchRecord, SweepPoint};
+use crate::strategic::{stage_window_seconds, summarize_stage, BenchRecord, SweepPoint};
 use crate::summary::SloConfig;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -158,11 +158,10 @@ fn points_from_csv(path: &Path) -> Result<Vec<ComparePoint>> {
     let mut points = Vec::new();
     for group in by_stage.values() {
         let load = group.first().map(|r| r.stage).unwrap_or(0.0);
-        let measured: Vec<&BenchRecord> = group.iter().filter(|r| !r.warmup).collect();
-        if measured.is_empty() {
+        // Same stage window as the live strategic run (#224).
+        let Some(window) = stage_window_seconds(group) else {
             continue;
-        }
-        let window = stage_window_seconds(&measured);
+        };
         let sweep = summarize_stage(load, group, window, &slos, None);
         points.push(compare_point_from_sweep(&sweep));
     }
@@ -173,20 +172,6 @@ fn points_from_csv(path: &Path) -> Result<Vec<ComparePoint>> {
         );
     }
     Ok(points)
-}
-
-fn stage_window_seconds(records: &[&BenchRecord]) -> f64 {
-    let mut min_ns = u128::MAX;
-    let mut max_end = 0u128;
-    for record in records {
-        min_ns = min_ns.min(record.sent_unix_ns);
-        let end = record.sent_unix_ns + ((record.service_latency_s.max(0.0) * 1e9) as u128);
-        max_end = max_end.max(end);
-    }
-    if max_end <= min_ns {
-        return f64::EPSILON;
-    }
-    (max_end - min_ns) as f64 / 1e9
 }
 
 fn compare_point_from_sweep(point: &SweepPoint) -> ComparePoint {
@@ -492,11 +477,111 @@ mod tests {
                 receive_s: None,
                 bytes_received: None,
                 chunks_received: None,
+                send_offset_s: None,
             };
             w.serialize(&record).unwrap();
         }
         w.flush().unwrap();
         let run = load_run(&csv_path, "csv").unwrap();
         assert_eq!(run.points.len(), 2);
+    }
+
+    /// #224: `compare` recomputes a CSV stage on the live strategic window,
+    /// so a failure that ends after the last success and a warmup row do not
+    /// stretch it. Successes end at 1.0 s and 2.0 s after the first send, so
+    /// throughput is 2 / 2.0, not 2 / 3.0 (the failure's end).
+    #[test]
+    fn csv_compare_uses_strategic_stage_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("requests.csv");
+        let mut w = csv::Writer::from_path(&csv_path).unwrap();
+        let base_ns = 1_000_000_000u128;
+        let rows = [
+            // (seq, send s, latency s, success, warmup)
+            (0u64, 0.0, 10.0, true, true),
+            (1, 1.0, 2.0, true, false),
+            (2, 1.5, 2.5, false, false),
+            (3, 2.0, 0.0, true, false),
+        ];
+        let mut records = Vec::new();
+        for (seq, send_s, latency, success, warmup) in rows {
+            let record = BenchRecord {
+                seq,
+                stage: 2.0,
+                endpoint: "http://x".into(),
+                scheduled_unix_ns: base_ns + (send_s * 1e9) as u128,
+                sent_unix_ns: base_ns + (send_s * 1e9) as u128,
+                latency_s: latency,
+                queue_delay_s: 0.0,
+                service_latency_s: latency,
+                first_byte_s: None,
+                connect_s: None,
+                ttft_s: None,
+                ttft_source: None,
+                prefill_s: None,
+                decode_s: None,
+                decode_tok_s: None,
+                itl_s: vec![],
+                in_flight_at_send: None,
+                success,
+                valid: None,
+                input_tokens: 8,
+                output_tokens: 16,
+                session_id: None,
+                turn: None,
+                error: None,
+                warmup,
+                first_reasoning_s: None,
+                reasoning_tokens: None,
+                connection_reused: None,
+                dns_s: None,
+                bytes_sent: None,
+                receive_s: None,
+                bytes_received: None,
+                chunks_received: None,
+                send_offset_s: None,
+            };
+            w.serialize(&record).unwrap();
+            records.push(record);
+        }
+        w.flush().unwrap();
+        let run = load_run(&csv_path, "csv").unwrap();
+        assert_eq!(run.points.len(), 1);
+        let window = stage_window_seconds(&records).unwrap();
+        assert!((window - 2.0).abs() < 1e-9, "{window}");
+        let live = summarize_stage(2.0, &records, window, &SloConfig::default(), None);
+        assert!((run.points[0].throughput - live.throughput).abs() < 1e-12);
+        assert!((live.throughput - 1.0).abs() < 1e-9);
+    }
+
+    /// #224: a CSV with `send_offset_s` recomputes the stage on the monotonic
+    /// clock; a 60 s wall-clock step between the sends does not stretch it.
+    #[test]
+    fn csv_compare_uses_monotonic_send_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("requests.csv");
+        let mut w = csv::Writer::from_path(&csv_path).unwrap();
+        let base_ns = 1_790_000_000_000_000_000u128;
+        for (seq, wall_s, mono_s) in [(0u64, 0.0, 5.0), (1, 61.0, 6.0)] {
+            let record = BenchRecord {
+                seq,
+                stage: 2.0,
+                endpoint: "http://x".into(),
+                scheduled_unix_ns: base_ns + (wall_s * 1e9) as u128,
+                sent_unix_ns: base_ns + (wall_s * 1e9) as u128,
+                latency_s: 1.0,
+                service_latency_s: 1.0,
+                success: true,
+                output_tokens: 16,
+                send_offset_s: Some(mono_s),
+                ..Default::default()
+            };
+            w.serialize(&record).unwrap();
+        }
+        w.flush().unwrap();
+        let run = load_run(&csv_path, "csv").unwrap();
+        assert_eq!(run.points.len(), 1);
+        // Window 0 s to 2 s on the monotonic clock, not 62 s on wall clock.
+        assert!((run.points[0].throughput - 1.0).abs() < 1e-9);
     }
 }

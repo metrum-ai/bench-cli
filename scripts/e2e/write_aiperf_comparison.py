@@ -47,6 +47,8 @@ def _no_knee_reason(stdout: Any) -> str:
     det = stdout.get("knee_detection") if isinstance(stdout, dict) else None
     if not isinstance(det, dict) or not det.get("reason"):
         return ""
+    if det["reason"] == "no_bend":
+        return " (`no_bend`: p95 rose less than 20% above its running minimum and no stage was saturated)"
     if det["reason"] != "insufficient_points":
         return f" (`{det['reason']}`)"
     return (

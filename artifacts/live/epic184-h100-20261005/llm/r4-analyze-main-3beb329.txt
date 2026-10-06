@@ -1,0 +1,87 @@
+## row counts
+request	1008
+run	1
+stage	14
+summary	1
+telemetry	46799
+
+## stage power / energy
+stage	load	power_n	power_mean_w	power_p95_w	energy_counter_j	energy_trap_j	out_tokens	j_per_output_token
+1	1	144	303.884	305.78	21875.3	21727.7	7271	3.00857
+2	2	73	309.498	310.414	11139.6	11142	7227	1.54139
+4	4	36	310.736	311.142	5592.52	5438.03	7137	0.783595
+8	8	19	313.399	314.215	2665.82	2820.78	7115	0.374677
+16	16	11	321.834	326.586	1714.8	1609.2	7119	0.240877
+32	32	6	337.146	346.704	761.052	842.814	7184	0.105937
+64	64	3	327.241	341.971	376.89	327.093	7152	0.0526971
+
+## stage utilization / KV (ratios 0-1)
+stage	load	gpu_util_mean	sm_active_p50	sm_occupancy_p50	tensor_active_p50	hollow_util_mean	kv_cache_util_mean	preemptions_delta
+1	1	0.996644	0.642426	0.0899672	0.0171206	0.350288	0.000719186	0
+2	2	1	0.653087	0.0915003	0.0178154	0.345891	0.00142792	0
+4	4	1	0.664207	0.0931322	0.0191636	0.335136	0.00291355	0
+8	8	1	0.668224	0.0940095	0.022362	0.330744	0.00579821	0
+16	16	0.974517	0.674255	0.0964201	0.0426405	0.324399	0.0108354	0
+32	32	0.915994	0.688469	0.102274	0.0808174	0.307856	0.0112984	0
+64	64	1	0.66786	0.0963378	0.049922	0.310113	0.0187477	0
+
+## sources
+power	all_smi_gpu_power_consumption_watts
+energy_counter	all_smi_gpu_energy_hw_millijoules_total
+gpu_util_mean	all_smi_gpu_utilization
+sm_active_p50	all_smi_gpu_sm_active_ratio
+sm_occupancy_p50	all_smi_gpu_sm_occupancy
+tensor_active_p50	all_smi_gpu_tensor_active_ratio
+hollow_util_mean	all_smi_gpu_hollow_utilization_ratio
+kv_cache_util_mean	vllm:kv_cache_usage_perc
+preemptions_delta	vllm:num_preemptions_total
+
+## engine histograms (bucket deltas, seconds)
+stage	load	metric	p50	p95
+1	1	vllm:e2e_request_latency_seconds	0.596774	0.779677
+1	1	vllm:inter_token_latency_seconds	<=0.01	<=0.01
+1	1	vllm:request_decode_time_seconds	0.582759	0.778276
+1	1	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+1	1	vllm:request_queue_time_seconds	<=0.3	<=0.3
+1	1	vllm:time_to_first_token_seconds	0.015	0.0195
+2	2	vllm:e2e_request_latency_seconds	0.603125	0.780312
+2	2	vllm:inter_token_latency_seconds	<=0.01	<=0.01
+2	2	vllm:request_decode_time_seconds	0.585227	0.778523
+2	2	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+2	2	vllm:request_queue_time_seconds	<=0.3	<=0.3
+2	2	vllm:time_to_first_token_seconds	0.0298387	0.0389839
+4	4	vllm:e2e_request_latency_seconds	0.610526	0.781053
+4	4	vllm:inter_token_latency_seconds	<=0.01	<=0.01
+4	4	vllm:request_decode_time_seconds	0.575	0.7775
+4	4	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+4	4	vllm:request_queue_time_seconds	<=0.3	<=0.3
+4	4	vllm:time_to_first_token_seconds	0.03	0.039
+8	8	vllm:e2e_request_latency_seconds	0.616667	0.781667
+8	8	vllm:inter_token_latency_seconds	0.0157881	0.0240788
+8	8	vllm:request_decode_time_seconds	0.570833	0.777083
+8	8	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+8	8	vllm:request_queue_time_seconds	<=0.3	<=0.3
+8	8	vllm:time_to_first_token_seconds	0.03	0.039
+16	16	vllm:e2e_request_latency_seconds	0.617033	0.781703
+16	16	vllm:inter_token_latency_seconds	0.017487	0.0242487
+16	16	vllm:request_decode_time_seconds	0.601786	0.780179
+16	16	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+16	16	vllm:request_queue_time_seconds	<=0.3	<=0.3
+16	16	vllm:time_to_first_token_seconds	0.03	0.039
+32	32	vllm:e2e_request_latency_seconds	0.641667	0.784167
+32	32	vllm:inter_token_latency_seconds	0.0173698	0.024237
+32	32	vllm:request_decode_time_seconds	0.621875	0.782188
+32	32	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+32	32	vllm:request_queue_time_seconds	<=0.3	<=0.3
+32	32	vllm:time_to_first_token_seconds	0.03	0.039
+64	64	vllm:e2e_request_latency_seconds	0.753846	0.975714
+64	64	vllm:inter_token_latency_seconds	0.0173463	0.0242346
+64	64	vllm:request_decode_time_seconds	0.643077	0.784308
+64	64	vllm:request_prefill_time_seconds	<=0.3	<=0.3
+64	64	vllm:request_queue_time_seconds	<=0.3	<=0.3
+64	64	vllm:time_to_first_token_seconds	0.033617	0.0562353
+
+## knee
+knee_load	32
+knee_source	knee_detection
+kv_cache_util_at_knee	0.0112984

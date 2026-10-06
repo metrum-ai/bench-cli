@@ -342,7 +342,10 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   `0.0` (not `null`) for those stages, so it can be `0.0` while this total is
   `null`.
 - `input_tokens_per_second` (tokens/second) - `prompt_tokens_total` divided by
-  the stage window; `null` when that total is `null`.
+  the stage window (earliest measured send of any outcome to the latest
+  successful completion, or the latest completion of any outcome when the
+  stage has no success; warmup excluded, #224); `null` when that total is
+  `null`.
 - `total_tokens_per_second` (tokens/second) -
   `(prompt_tokens_total + completion_tokens_total)` divided by the stage
   window; `null` unless both totals are non-null.
@@ -361,10 +364,13 @@ Time-weighted blocks (additive, #195): `effective_concurrency`,
 `{n, avg, active_avg, max, active_s}` object as on `summary.v3`, always
 present, with the same `null` rules. Differences from the summary:
 
-- Intervals are `[sent_unix_ns, sent_unix_ns + service_latency_s]`, so
+- Intervals are `[send, send + service_latency_s]`, where `send` is the
+  monotonic CSV `send_offset_s` (wall-clock `sent_unix_ns` for older CSVs
+  without it), so
   client queue delay is excluded. The window runs from the first measured
-  send of the stage to the latest successful `sent + service_latency_s`, so
-  it can differ slightly from the stage window behind `throughput`.
+  send of the stage to the latest successful `sent + service_latency_s`,
+  the same stage window behind `throughput` and the stage token rates
+  (#224).
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
   reporting neither are skipped. `--kind embeddings`, `--kind rerank`, and
   `--kind imagegen` stages have no output, so `tokens_in_flight` and
@@ -375,13 +381,19 @@ trailing optional columns, in this order: `first_reasoning_s` (seconds),
 `reasoning_tokens` (integer tokens, #192), then the HTTP phase trace columns
 (#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
 `receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
-(count). The `first_reasoning_s` cell is empty when the request streamed no
+(count), then `send_offset_s` (seconds, #224): the monotonic send time from
+the run start, the same origin as the NDJSON `t_sent_ns`. The
+`first_reasoning_s` cell is empty when the request streamed no
 reasoning delta; the `reasoning_tokens` cell is empty when the server did not
 report reasoning. A trace cell is empty when the value is absent;
 `receive_s`, `bytes_received`, and `chunks_received` are empty for failed
 requests.
 Existing columns keep their order, and CSVs written before these columns
-existed still load (missing cells read as empty).
+existed still load (missing cells read as empty). Stage windows and
+time-weighted intervals use `send_offset_s` when every measured row of the
+stage has it. `compare` falls back to wall-clock `sent_unix_ns` only for
+older CSVs without the column, where an NTP step during a stage can still
+stretch the window.
 
 ### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
 
@@ -440,20 +452,46 @@ settings; chat, embeddings, and rerank `run` rows are unchanged.
 The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v1`) carries the
 knee result in two fields (`knee_detection` is additive, #190):
 
-- `knee` (object or null) - the `SweepPoint` at the unit-normalized Kneedle
-  knee (p95 latency against achieved throughput). Null when there is no knee.
+- `knee` (object or null) - the `SweepPoint` at `knee_detection.index`: the
+  unit-normalized Kneedle knee (p95 latency against achieved throughput) or,
+  since #232, the saturation knee (see `method`). Null when there is no knee.
 - `knee_detection` (object, always present):
   - `index` (integer or null) - index of the knee in `points`; null when there
     is no knee.
   - `reason` (string or null) - why there is no knee: `insufficient_points`
     (fewer than `min_points` measured stages, that is stages with a p95),
     `missing_latency` (the first or last stage has no p95, for example no
-    successes), or `flat_curve` (throughput or
-    p95 does not change from the first to the last stage). Null exactly when
-    `index` is set.
+    successes; since #232 only when neither a p95 bend nor a saturated stage
+    gives a knee), `flat_curve` (throughput or p95 does not change across the
+    measured stages, or p95 bends over flat throughput), or `no_bend`
+    (additive, #232: p95 rises less than `min_p95_rise` above its running
+    minimum and no stage is saturated). Null exactly when `index` is set.
   - `points` (integer) - number of measured stages (stages with a p95).
   - `min_points` (integer) - minimum measured stages for a knee, always 5
     (both endpoints plus 3 interior candidates).
+  - Additive (#232):
+    - `method` (string or null) - `kneedle` (Kneedle on the measured stages
+      from the baseline to the peak of `p95_rise`, or the baseline stage
+      itself when the peak is the next measured stage) or `saturation` (the
+      stage before `saturated_index`). When both apply, the earlier stage
+      wins. Null when there is no knee.
+    - `p95_rise` (number or null) - largest p95 rise over the running
+      minimum, `max_j (p95_j / min_{i<=j} p95_i - 1)` over measured stages
+      (0.41 = +41%). Null below `min_points` or when no p95 is positive.
+    - `saturated_index` (integer or null) - first stage flagged saturated.
+      Concurrency sweeps: relative throughput gain below `min_marginal_gain`
+      times the relative load gain,
+      `(X_i - X_{i-1}) / X_{i-1} < 0.5 * (load_i - load_{i-1}) / load_{i-1}`
+      (`X` is success throughput; skipped when both stages run all `n`
+      requests in one wave, `load >= n`). Any sweep: an error rate at least
+      `max_error_rate_rise` above the lowest earlier stage. Rate sweeps use
+      the error rate only, because their stage window ends at the latest
+      completion (#224). Never the first stage. Null when no stage is
+      saturated or below `min_points`.
+    - `min_p95_rise` (number) - p95 rise threshold, 0.2 (provisional).
+    - `min_marginal_gain` (number or null) - 0.5 on concurrency sweeps;
+      null on `--sweep-by rate`, where the throughput check does not run.
+    - `max_error_rate_rise` (number) - error-rate rise threshold, 0.05.
 
 Sweeps with fewer than 5 measured stages (stages with a p95) report `"knee": null`. 3- and
 4-stage sweeps from earlier versions reported an interior stage as the knee;

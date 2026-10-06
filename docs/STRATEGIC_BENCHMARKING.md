@@ -49,8 +49,12 @@ self-describing notice as the modality binaries.
 Each load stage is measured independently. `--warmup-requests` are issued and
 fully completed at the start of every stage, then the measurement epoch resets.
 Warmup rows are written to the CSV with `warmup=true` and excluded from stage
-`n`, latency percentiles, throughput, goodput, and knee detection. Measured
-prompt indexing restarts at zero after warmup so the mix is not shifted.
+`n`, latency percentiles, throughput, goodput, and knee detection. Stage
+throughput, goodput, and token rates divide by the stage window: earliest
+measured send (any outcome) to the latest successful completion, or the
+latest completion of any outcome when the stage has no success (#224).
+Measured prompt indexing restarts at zero after warmup so the mix is not
+shifted.
 Prefer a warmup count at least as large as stage concurrency on GPU endpoints
 so cold model-load and CUDA graph capture do not inflate the baseline stage.
 `--warmup-requests 0` is for mock/determinism only.
@@ -102,12 +106,59 @@ why:
 
 - `insufficient_points`: fewer than `knee_detection.min_points` (5) measured
   stages (stages with a p95).
-- `missing_latency`: the first or last stage has no p95 (no successes).
-- `flat_curve`: throughput or p95 does not change from the first to the last
-  stage.
+- `missing_latency`: the first or last stage has no p95 (no successes), and
+  neither a p95 bend nor a saturated stage gives a knee.
+- `flat_curve`: throughput or p95 does not change across the measured
+  stages, or p95 bends over flat throughput.
+- `no_bend`: p95 rises less than 20% above its running minimum and no stage
+  is saturated, so the curve has no meaningful bend (#232).
+
+A knee has two candidates, and the earlier stage wins
+(`knee_detection.method` says which):
+
+- `kneedle`: the p95 rise is the largest rise over the running minimum,
+  `max_j (p95_j / min_{i<=j} p95_i - 1)` (`knee_detection.p95_rise`). When it
+  is at least 20%, Kneedle runs on the measured stages from that baseline
+  `i` to that peak `j`, normalized by the data range. An inflated cold first
+  stage, a mid-sweep bend that recovers by the last stage, or a last stage
+  that drops below the first cannot hide the bend. A p95 that only falls has
+  no rise.
+- `saturation`: the stage before the first saturated stage
+  (`knee_detection.saturated_index`). On a concurrency sweep a stage is
+  saturated when its relative throughput gain is under half its relative
+  load gain, `(X_i - X_{i-1}) / X_{i-1} < 0.5 * (load_i - load_{i-1}) /
+  load_{i-1}` (`X` is success throughput; on 2x steps, a throughput ratio
+  below 1.5). Stages that both run all requests in one wave
+  (`load >= requests_per_stage`) are skipped. On any sweep a stage is also
+  saturated when its error rate is 5 points or more above the lowest earlier
+  stage. Rate sweeps use only the error rate: their stage window ends at the
+  latest completion (#224), so latency spread, not saturation, moves
+  achieved throughput. Load shedding (fast 429/503, admission control) keeps
+  success p95 flat while throughput plateaus or failures rise, so p95 alone
+  misses it. Earlier wins, so shedding ahead of a later p95 bend is reported
+  where it starts, and a later all-failure stage does not override an
+  earlier bend.
+
+Kneedle always returns the interior stage farthest from the chord, so a
+nearly linear sweep would still report a knee. The 20% minimum p95 rise
+(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) is provisional: it is set from
+two live curves. It separates the live H100 sweeps
+from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
+scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
+11% (1.200 to 1.333 s), and each 2x step gained 1.87x to 1.97x throughput,
+so it reports `no_bend`. The LLM sweep's smallest step gain is 1.77x. A fixed-latency mock
+sweep also reports `no_bend` (the analyze.py `sweep5` fixture, recorded
+before #232, rises 8% and still carries its old knee). The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
+knee at c=32. A threshold on the normalized chord distance cannot make this
+split: the LLM curve peaks at 0.095, below the VLM curve's 0.164. At 20%, the
+threshold sits about 2x above the bend-free rises and about 2x below the
+smallest real bend. A sweep with less than 20% p95 rise usually has not
+reached saturation; check the error rate and throughput scaling per stage,
+then extend the sweep to higher loads to find the knee.
 
 `knee_detection` is always present:
-`{"index": <stage index or null>, "reason": <string or null>, "points": <measured stages>, "min_points": 5}`.
+`{"index", "reason", "points", "min_points", "method", "p95_rise", "saturated_index", "min_p95_rise", "min_marginal_gain", "max_error_rate_rise"}`.
+See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md) for each field.
 `reason` is null exactly when `index` is set. The CLI also prints
 `note: no knee: ...` on stderr (only for runs with 2 or more stages, so
 single-stage and sessions runs stay quiet) and the HTML report shows the same sentence.

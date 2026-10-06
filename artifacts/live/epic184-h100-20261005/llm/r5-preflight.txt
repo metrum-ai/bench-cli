@@ -1,0 +1,11 @@
+preflight: http://127.0.0.1:8000/v1/chat/completions  model=Qwen/Qwen3-8B
+CHECK                    STATUS DETAIL
+------------------------ ------ ----------------------------------------
+reachability             PASS   HTTP 405 Method Not Allowed in 1 ms
+chat_probe               PASS   unary chat OK in 45 ms
+streaming_first_token    FAIL   stream smoke failed: no output token
+  remediation: Streaming may be broken or gateways may synthesize SSE; check engine flags. Prefer vendor Docker for vLLM/SGLang rather than bare-metal pip; see https://docs.metrum.ai/metrum-ai-bench-cli/latest/docs/platforms/#serving-stacks-docker-first
+latency_sample           PASS   n=3 median=43 ms (min=43 max=44)
+
+limits: Client HTTP probes only. Cannot observe CUDA toolkit, compiler, SM vs wheel, or remote GPU inventory. Prefer vendor Docker images on the serving host.
+preflight: FAILED

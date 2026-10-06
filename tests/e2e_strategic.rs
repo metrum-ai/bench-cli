@@ -79,7 +79,13 @@ fn strategic_sweep_exports_all_formats() {
             "index": null,
             "reason": "insufficient_points",
             "points": 3,
-            "min_points": 5
+            "min_points": 5,
+            "method": null,
+            "p95_rise": null,
+            "saturated_index": null,
+            "min_p95_rise": 0.2,
+            "min_marginal_gain": null,
+            "max_error_rate_rise": 0.05
         })
     );
     assert!(String::from_utf8_lossy(&output.stderr)
@@ -185,6 +191,10 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
     assert_eq!(records.len(), 6);
     assert_eq!(records.iter().filter(|r| r.warmup).count(), 2);
     assert_eq!(records.iter().filter(|r| !r.warmup).count(), 4);
+    // Every row carries the monotonic send offset behind the stage window (#224).
+    assert!(records
+        .iter()
+        .all(|r| r.send_offset_s.is_some_and(|s| s.is_finite() && s >= 0.0)));
     let max_warmup_sent = records
         .iter()
         .filter(|r| r.warmup)
@@ -201,6 +211,64 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
         max_warmup_sent <= min_measured_sent,
         "warmup must finish before measurement epoch: warmup_max={max_warmup_sent} measured_min={min_measured_sent}"
     );
+}
+
+/// #232: a 5-stage sweep against a fixed-latency mock has no p95 bend and
+/// scales throughput with load, so it reports no knee with `no_bend` instead
+/// of the stage farthest from the chord. The 500 ms latency keeps CI jitter
+/// far below the 20% p95 margin.
+#[test]
+fn strategic_flat_sweep_reports_no_bend() {
+    let server = common::spawn_mock(&["--latency-ms", "500"]);
+    let address = server.address;
+
+    let directory = tempfile::tempdir().expect("temporary output directory");
+    let html = directory.path().join("report.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{address}/v1/chat/completions"),
+            "--model",
+            "mock",
+            "--api-key",
+            "dummy",
+            "--max-tokens",
+            "16",
+            "--requests-per-stage",
+            "16",
+            "--warmup-requests",
+            "0",
+            "--sweep",
+            "1,2,4,8,16",
+            "--sweep-by",
+            "concurrency",
+            "--html",
+            html.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("run strategic");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    assert!(summary["knee"].is_null(), "{summary}");
+    let detection = &summary["knee_detection"];
+    assert_eq!(detection["index"], Value::Null);
+    assert_eq!(detection["reason"], "no_bend");
+    assert_eq!(detection["points"], 5);
+    assert_eq!(detection["min_points"], 5);
+    assert_eq!(detection["method"], Value::Null);
+    assert_eq!(detection["saturated_index"], Value::Null);
+    assert_eq!(detection["min_p95_rise"], 0.2);
+    assert_eq!(detection["min_marginal_gain"], 0.5);
+    assert_eq!(detection["max_error_rate_rise"], 0.05);
+    let rise = detection["p95_rise"].as_f64().expect("p95_rise");
+    assert!((0.0..0.2).contains(&rise), "p95_rise {rise}");
+    let note =
+        "no knee: p95 latency rises less than 20% above its running minimum and no stage is saturated";
+    assert!(stderr.contains(note), "stderr: {stderr}");
+    assert!(fs::read_to_string(&html)
+        .expect("HTML report")
+        .contains(note));
 }
 
 #[test]

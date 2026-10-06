@@ -336,6 +336,18 @@ class RecordedSweeps(unittest.TestCase):
         self.assertIsNone(res["kv_cache_util_at_knee"])
         self.assertEqual(res["kv_cache_util_at_knee_reason"], "flat_curve")
 
+    def test_sweep5_no_bend_is_null_with_reason(self):
+        # #232: p95 rose less than 20% across the sweep.
+        rows, stdout = load_fixture("sweep5")
+        stdout = copy.deepcopy(stdout)
+        stdout["knee"] = None
+        stdout["knee_detection"] = {"index": None, "reason": "no_bend",
+                                    "points": 5, "min_points": 5}
+        res = analyze.analyze(rows, stdout)
+        self.assertIsNone(res["kv_cache_util_at_knee"])
+        self.assertEqual(res["kv_cache_util_at_knee_reason"], "no_bend")
+        self.assertIsNone(res["knee"]["load"])
+
     def test_sweep3_no_knee_either_shape(self):
         rows, stdout = load_fixture("sweep3")
         self.assertLess(len(stdout["points"]), analyze.KNEE_MIN_POINTS)
