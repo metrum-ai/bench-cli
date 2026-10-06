@@ -7,7 +7,8 @@ Run: python3 -m unittest discover -s scripts/parity
 
 Issue #245: a distribution statistic that is null for small n (std for
 n < 2) must count the same as a numeric one, on the Bench and AIPerf sides,
-so the values column does not jitter between identical runs.
+so the values column does not jitter between identical runs. An empty
+distribution (n == 0) must not credit its undefined statistics as values.
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ import unittest
 from pathlib import Path
 
 import count_points as cp
+
+
+def empty_dist() -> dict:
+    """A Bench DistSummary with no samples: every statistic but n is null."""
+    d = {k: None for k in ("min", "max", "avg", "std", "mad", "p50", "p90", "p95", "p99")}
+    return {"n": 0, **d, "percentile_method": "type7", "p99_unreliable": True}
 
 
 def dist(n: int, std: float | None) -> dict:
@@ -43,6 +50,7 @@ def bench_log(tmp: Path, std: float | None, name: str) -> Path:
         "optional_scalar": None,
         "latency_s": dist(2, 0.1),
         "throughput_bins_rps": dist(1, std),
+        "queue_delay_s": empty_dist(),
         "goodput": {"rate": 1.0, "thresholds_s": {"ttft": 0.2, "e2e": None}},
         "config": {"concurrency": 4},
     })
@@ -58,6 +66,9 @@ AIPERF_SUMMARY = {
                         "count": 2, "sum": 1000.0},
     "request_throughput": {"unit": "requests/sec", "avg": 4.0},
     "empty_block": {"unit": "ms", "avg": None},
+    "reasoning_token_count": {"unit": "tokens", "avg": None, "p50": None, "p99": None,
+                              "min": None, "max": None, "std": None, "count": 0,
+                              "sum": None},
     "input_config": {"unit": "n/a", "x": 1},
 }
 
@@ -94,14 +105,25 @@ class NullableStatisticTest(unittest.TestCase):
 
     def test_bench_values_breakdown(self) -> None:
         out = cp.count_bench(bench_log(self.tmp, None, "a.jsonl"), 0.9)
-        # attempted (1) + two DistSummary with 10 slots each (strings and
-        # booleans excluded) + goodput leftovers rate and thresholds_s.ttft
+        # attempted (1) + two non-empty DistSummary with 10 slots each
+        # (strings and booleans excluded) + the empty queue_delay_s, which
+        # keeps only its n (1) + goodput leftovers rate and thresholds_s.ttft
         # (2; a null outside a distribution never counts). optional_scalar
         # is null and config is metadata.
-        self.assertEqual(out["quantities"], 4)
-        self.assertEqual(out["dists"], 2)
+        self.assertEqual(out["quantities"], 5)
+        self.assertEqual(out["dists"], 3)
         self.assertEqual(out["blocks"], 1)
-        self.assertEqual(out["values"], 1 + 10 + 10 + 2)
+        self.assertEqual(out["values"], 1 + 10 + 10 + 1 + 2)
+        self.assertEqual(out["null_values"], 1)
+        self.assertEqual(out["empty_dists"], 1)
+        self.assertEqual(out["empty_dist_names"], ["queue_delay_s"])
+
+    def test_empty_dist_counts_only_n(self) -> None:
+        self.assertEqual(cp.dist_slots(empty_dist(), "n"), [0.0])
+        self.assertEqual(len(cp.dist_slots(dist(1, None), "n")), 10)
+        self.assertEqual(len(cp.dist_slots(dist(1, 0.5), "n")), 10)
+        # A block without the size key (an AIPerf scalar) is never empty.
+        self.assertEqual(cp.dist_slots({"avg": 1.0, "std": None}, "count"), [1.0, None])
 
     def test_aiperf_null_std_counts_same_as_numeric(self) -> None:
         numeric = cp.count_aiperf(aiperf_dir(self.tmp, 5.0, "a"), 0.9)
@@ -109,10 +131,12 @@ class NullableStatisticTest(unittest.TestCase):
         self.assertGreater(numeric["values"], 0)
         for key in ("quantities", "values", "dists", "blocks", "per_request"):
             self.assertEqual(numeric[key], null[key], key)
-        # request_latency 9 slots + request_throughput 1; empty_block holds
-        # no number at all and input_config is metadata.
-        self.assertEqual(numeric["quantities"], 2)
-        self.assertEqual(numeric["values"], 10)
+        # request_latency 9 slots + request_throughput 1 + the empty
+        # reasoning_token_count, which keeps only its count (1); empty_block
+        # holds no number at all and input_config is metadata.
+        self.assertEqual(numeric["quantities"], 3)
+        self.assertEqual(numeric["values"], 11)
+        self.assertEqual(numeric["empty_dists"], 1)
         self.assertEqual(numeric["null_values"], 0)
         self.assertEqual(null["null_values"], 1)
 
