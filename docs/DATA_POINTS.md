@@ -107,8 +107,9 @@ plus the llm `modality_metrics` keys).
 asserts both numbers, and that every fired field is in the schema count.
 They match the `plain` row of the parity harness (`scripts/parity/`), which
 counts quantities and per-request fields with the same rules. The harness
-`values` column is lower than the schema `values` here by definition: it
-counts the non-null numbers one run produced, while this page counts every
+`values` column counts every slot of each distribution a run reports, null
+or not (#245), but outside distributions only the numbers one run produced.
+It can therefore be lower than the schema `values` here, which counts every
 numeric slot.
 
 ## `summary.v3` quantities
