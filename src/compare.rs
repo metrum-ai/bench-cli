@@ -477,6 +477,7 @@ mod tests {
                 receive_s: None,
                 bytes_received: None,
                 chunks_received: None,
+                send_offset_s: None,
             };
             w.serialize(&record).unwrap();
         }
@@ -538,6 +539,7 @@ mod tests {
                 receive_s: None,
                 bytes_received: None,
                 chunks_received: None,
+                send_offset_s: None,
             };
             w.serialize(&record).unwrap();
             records.push(record);
@@ -550,5 +552,36 @@ mod tests {
         let live = summarize_stage(2.0, &records, window, &SloConfig::default(), None);
         assert!((run.points[0].throughput - live.throughput).abs() < 1e-12);
         assert!((live.throughput - 1.0).abs() < 1e-9);
+    }
+
+    /// #224: a CSV with `send_offset_s` recomputes the stage on the monotonic
+    /// clock; a 60 s wall-clock step between the sends does not stretch it.
+    #[test]
+    fn csv_compare_uses_monotonic_send_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("requests.csv");
+        let mut w = csv::Writer::from_path(&csv_path).unwrap();
+        let base_ns = 1_790_000_000_000_000_000u128;
+        for (seq, wall_s, mono_s) in [(0u64, 0.0, 5.0), (1, 61.0, 6.0)] {
+            let record = BenchRecord {
+                seq,
+                stage: 2.0,
+                endpoint: "http://x".into(),
+                scheduled_unix_ns: base_ns + (wall_s * 1e9) as u128,
+                sent_unix_ns: base_ns + (wall_s * 1e9) as u128,
+                latency_s: 1.0,
+                service_latency_s: 1.0,
+                success: true,
+                output_tokens: 16,
+                send_offset_s: Some(mono_s),
+                ..Default::default()
+            };
+            w.serialize(&record).unwrap();
+        }
+        w.flush().unwrap();
+        let run = load_run(&csv_path, "csv").unwrap();
+        assert_eq!(run.points.len(), 1);
+        // Window 0 s to 2 s on the monotonic clock, not 62 s on wall clock.
+        assert!((run.points[0].throughput - 1.0).abs() < 1e-9);
     }
 }

@@ -107,8 +107,9 @@ Workload section. This page focuses on measured fields.
   flight.
   - **Intervals**: one per measured success (failures and warmup excluded,
     like every rate in the summary): `[send, send + latency_s]`, where `send`
-    is the monotonic `send_offset_s`. Strategic uses `sent_unix_ns` and
-    `service_latency_s`, so client queue delay is excluded. The window starts
+    is the monotonic `send_offset_s`. Strategic uses its own monotonic
+    `send_offset_s` (#224; `compare` falls back to wall-clock `sent_unix_ns`
+    for older CSVs without it) and `service_latency_s`, so client queue delay is excluded. The window starts
     at the first measured send of any outcome (the same start as
     `window_seconds`) and lasts `window_seconds`, which ends at the latest
     successful completion, so no success is clipped. Strategic uses the same
@@ -246,11 +247,14 @@ Workload section. This page focuses on measured fields.
   The window excludes warmup and includes drain for requests issued during
   measurement. Strategic stages use the same rule over the stage rows (#224):
   the stage window runs from the earliest measured send of any outcome
-  (`sent_unix_ns`) to the latest successful `sent + service_latency_s`
+  (the monotonic CSV `send_offset_s`) to the latest successful
+  `send + service_latency_s`
   (the latest completion of any outcome when the stage has no success).
   Stage `throughput`, `goodput`, token rates,
   `cost_per_million_output_tokens`, the time-weighted blocks, and `compare`
-  all share this window.
+  all share this window. `compare` reads CSVs written before
+  `send_offset_s` existed on wall-clock `sent_unix_ns`, which an NTP step
+  can inflate.
 - **Throughput bins**: fixed-width bins over send offsets (open-loop:
   `scheduled_offset_s`; closed-loop: `send_offset_s`). Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.

@@ -95,6 +95,12 @@ pub struct BenchRecord {
     /// Response body chunks yielded by the HTTP client; successes only.
     #[serde(default)]
     pub chunks_received: Option<u64>,
+    /// Monotonic send time in seconds from the run start (the telemetry
+    /// `t_sent_ns` origin). Stage windows use it, so a wall-clock (NTP) step
+    /// cannot stretch them; empty in CSVs written before #224. Last column so
+    /// older CSV readers keep their positions.
+    #[serde(default)]
+    pub send_offset_s: Option<f64>,
 }
 
 fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -316,8 +322,8 @@ fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) 
     true
 }
 
-/// Time-weighted blocks for one stage. Times are nanoseconds from the first
-/// measured send, so `u128` epoch nanoseconds never lose precision in `f64`.
+/// Time-weighted blocks for one stage. Times are seconds from the first
+/// measured send on the [`SendClock`] (monotonic when recorded).
 /// The window runs from the first measured send (any outcome) to the latest
 /// successful completion, the same rule as `runner::window_seconds_from_records`,
 /// so no success is clipped. Token rules match the stage `isl_tokens` /
@@ -327,7 +333,7 @@ fn stage_time_weighted(
     successes: &[&BenchRecord],
     generates_output: bool,
 ) -> crate::time_weighted::TimeWeightedMetrics {
-    let Some(first) = measured.iter().map(|r| r.sent_unix_ns).min() else {
+    let Some(clock) = SendClock::new(measured) else {
         return crate::time_weighted::TimeWeightedMetrics::default();
     };
     let spans: Vec<crate::time_weighted::RequestSpan> = successes
@@ -335,7 +341,7 @@ fn stage_time_weighted(
         .map(|r| {
             let has_tokens = r.input_tokens > 0 || r.output_tokens > 0;
             crate::time_weighted::RequestSpan {
-                start_s: r.sent_unix_ns.saturating_sub(first) as f64 / 1e9,
+                start_s: clock.send_s(r),
                 latency_s: r.service_latency_s,
                 prefill_end_s: crate::summary::phase_split_s(
                     r.ttft_s,
@@ -366,7 +372,7 @@ fn stage_time_weighted(
 /// has no measured rows.
 pub fn stage_window_seconds<'a>(records: impl IntoIterator<Item = &'a BenchRecord>) -> Option<f64> {
     let measured: Vec<&BenchRecord> = records.into_iter().filter(|r| !r.warmup).collect();
-    let start = measured.iter().map(|r| r.sent_unix_ns).min()?;
+    let clock = SendClock::new(&measured)?;
     // Non-finite or negative latency (a hand-edited `compare` CSV) counts as 0.
     let end_of = |r: &&BenchRecord| {
         let latency = r.service_latency_s;
@@ -375,15 +381,48 @@ pub fn stage_window_seconds<'a>(records: impl IntoIterator<Item = &'a BenchRecor
         } else {
             0.0
         };
-        r.sent_unix_ns.saturating_add((latency * 1e9) as u128)
+        clock.send_s(r) + latency
     };
     let end = measured
         .iter()
         .filter(|r| r.success)
         .map(end_of)
-        .max()
-        .or_else(|| measured.iter().map(end_of).max())?;
-    Some((end.saturating_sub(start) as f64 / 1e9).max(f64::EPSILON))
+        .max_by(f64::total_cmp)
+        .or_else(|| measured.iter().map(end_of).max_by(f64::total_cmp))?;
+    Some(end.max(f64::EPSILON))
+}
+
+/// Send times for one stage, in seconds from its earliest measured send.
+/// Uses the monotonic `send_offset_s` when every measured row has a finite
+/// one, so a wall-clock (NTP) step inside a stage cannot stretch the window.
+/// CSVs written before #224 lack the column and fall back to wall-clock
+/// `sent_unix_ns`, subtracted in `u128` so epoch nanoseconds keep precision.
+struct SendClock {
+    monotonic_origin: Option<f64>,
+    wall_origin: u128,
+}
+
+impl SendClock {
+    /// `None` when there are no rows.
+    fn new(measured: &[&BenchRecord]) -> Option<Self> {
+        let wall_origin = measured.iter().map(|r| r.sent_unix_ns).min()?;
+        let monotonic_origin = measured
+            .iter()
+            .map(|r| r.send_offset_s.filter(|offset| offset.is_finite()))
+            .collect::<Option<Vec<f64>>>()
+            .and_then(|offsets| offsets.into_iter().min_by(f64::total_cmp));
+        Some(Self {
+            monotonic_origin,
+            wall_origin,
+        })
+    }
+
+    fn send_s(&self, record: &BenchRecord) -> f64 {
+        match (self.monotonic_origin, record.send_offset_s) {
+            (Some(origin), Some(offset)) => (offset - origin).max(0.0),
+            _ => record.sent_unix_ns.saturating_sub(self.wall_origin) as f64 / 1e9,
+        }
+    }
 }
 
 pub fn summarize_stage(
@@ -1791,6 +1830,7 @@ mod tests {
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let slos = crate::summary::SloConfig::default();
         // Closed loop: scheduled == sent on every row, queue delay not applicable.
@@ -1875,6 +1915,7 @@ mod tests {
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let point = summarize_stage_with_options(
             1.0,
@@ -1934,6 +1975,7 @@ mod tests {
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let mut second = base.clone();
         second.seq = 1;
@@ -2060,6 +2102,7 @@ mod tests {
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let mut other = row.clone();
         other.reasoning_tokens = Some(7);
@@ -2132,6 +2175,7 @@ mod tests {
             receive_s: Some(0.25),
             bytes_received: Some(900),
             chunks_received: Some(9),
+            send_offset_s: Some(1.25),
         };
         let mut untraced = row.clone();
         untraced.connection_reused = None;
@@ -2150,7 +2194,7 @@ mod tests {
             .lines()
             .next()
             .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received"));
+            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s"));
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
@@ -2185,6 +2229,7 @@ true,,64,16,,,,false\n";
         assert_eq!(records.len(), 1);
         assert!(records[0].first_reasoning_s.is_none());
         assert!(records[0].reasoning_tokens.is_none());
+        assert!(records[0].send_offset_s.is_none());
         let point = summarize_stage(
             1.0,
             &records,
@@ -2232,6 +2277,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let mut cold = measured.clone();
         cold.seq = 0;
@@ -2286,6 +2332,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -2364,6 +2411,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
         assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
@@ -2435,6 +2483,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -2520,6 +2569,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         export_otlp(
             &reqwest::Client::new(),
@@ -2590,6 +2640,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         // Spawn order: row 0 (sent 1.5 s, ends 6.5 s), a failure (sent 1 s,
         // ends 10.5 s), row 1 (sent 2.5 s, ends 3.5 s). The window starts at
@@ -2639,6 +2690,46 @@ true,,64,16,,,,false\n";
         assert_eq!(stage_window_seconds(&[]), None);
     }
 
+    /// #224: a wall-clock step inside a stage does not stretch the window.
+    /// The second send is 1 s after the first on the monotonic clock, but an
+    /// NTP step moved the wall clock forward 60 s in between.
+    #[test]
+    fn stage_window_follows_monotonic_send_offset_over_wall_clock_step() {
+        let epoch: u128 = 1_790_000_000_000_000_000;
+        let row = |seq, wall_s: f64, mono_s: Option<f64>| BenchRecord {
+            seq,
+            stage: 2.0,
+            endpoint: "http://example.test".to_string(),
+            scheduled_unix_ns: epoch + (wall_s * 1e9) as u128,
+            sent_unix_ns: epoch + (wall_s * 1e9) as u128,
+            latency_s: 2.0,
+            service_latency_s: 2.0,
+            success: true,
+            output_tokens: 10,
+            send_offset_s: mono_s,
+            ..Default::default()
+        };
+        let stepped = [row(0, 0.0, Some(10.0)), row(1, 61.0, Some(11.0))];
+        let window = stage_window_seconds(&stepped).expect("window");
+        assert!((window - 3.0).abs() < 1e-9, "{window}");
+        let point = summarize_stage(
+            2.0,
+            &stepped,
+            window,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert!((point.throughput - 2.0 / 3.0).abs() < 1e-9);
+        // Spans are on the same clock: 4 s of work over a 3 s window.
+        let avg = point.time_weighted.effective_concurrency.avg.expect("avg");
+        assert!((avg - 4.0 / 3.0).abs() < 1e-9, "{avg}");
+
+        // A row without the column (older CSV) puts the stage on wall clock.
+        let mixed = [row(0, 0.0, Some(10.0)), row(1, 61.0, None)];
+        let window = stage_window_seconds(&mixed).expect("window");
+        assert!((window - 63.0).abs() < 1e-9, "{window}");
+    }
+
     /// #195: sweep points carry the same time-weighted blocks as `summary.v3`
     /// (synthetic intervals from `time_weighted::tests`, epoch nanoseconds).
     #[test]
@@ -2678,6 +2769,7 @@ true,,64,16,,,,false\n";
             receive_s: None,
             bytes_received: None,
             chunks_received: None,
+            send_offset_s: None,
         };
         let mut warmup = row(9, 0.0, 3.0, 0.1, 999, 999);
         warmup.warmup = true;

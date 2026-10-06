@@ -357,7 +357,9 @@ Time-weighted blocks (additive, #195): `effective_concurrency`,
 `{n, avg, active_avg, max, active_s}` object as on `summary.v3`, always
 present, with the same `null` rules. Differences from the summary:
 
-- Intervals are `[sent_unix_ns, sent_unix_ns + service_latency_s]`, so
+- Intervals are `[send, send + service_latency_s]`, where `send` is the
+  monotonic CSV `send_offset_s` (wall-clock `sent_unix_ns` for older CSVs
+  without it), so
   client queue delay is excluded. The window runs from the first measured
   send of the stage to the latest successful `sent + service_latency_s`,
   the same stage window behind `throughput` and the stage token rates
@@ -372,13 +374,19 @@ trailing optional columns, in this order: `first_reasoning_s` (seconds),
 `reasoning_tokens` (integer tokens, #192), then the HTTP phase trace columns
 (#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
 `receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
-(count). The `first_reasoning_s` cell is empty when the request streamed no
+(count), then `send_offset_s` (seconds, #224): the monotonic send time from
+the run start, the same origin as the NDJSON `t_sent_ns`. The
+`first_reasoning_s` cell is empty when the request streamed no
 reasoning delta; the `reasoning_tokens` cell is empty when the server did not
 report reasoning. A trace cell is empty when the value is absent;
 `receive_s`, `bytes_received`, and `chunks_received` are empty for failed
 requests.
 Existing columns keep their order, and CSVs written before these columns
-existed still load (missing cells read as empty).
+existed still load (missing cells read as empty). Stage windows and
+time-weighted intervals use `send_offset_s` when every measured row of the
+stage has it. `compare` falls back to wall-clock `sent_unix_ns` only for
+older CSVs without the column, where an NTP step during a stage can still
+stretch the window.
 
 ### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
 

@@ -1181,6 +1181,8 @@ fn spawn_one_request(
             receive_s: http_trace.receive_s.filter(|_| success),
             bytes_received: http_trace.bytes_received.filter(|_| success),
             chunks_received: http_trace.chunks_received.filter(|_| success),
+            // Same origin as the NDJSON `t_sent_ns`; monotonic (#224).
+            send_offset_s: Some(t_sent_ns as f64 / 1e9),
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {

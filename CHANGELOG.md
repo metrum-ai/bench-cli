@@ -328,13 +328,18 @@
   last-started request often finished well before the stage ended and the
   window was cut short. Strategic stage `throughput`, `goodput`, token rates
   and `cost_per_million_output_tokens` therefore read lower than earlier
-  versions, by little at low concurrency and by up to about 20% at
-  concurrency 16 on a 64-request stage. A stage whose last-finishing request
-  failed can read slightly higher. The time-weighted blocks and `compare`
+  versions, by little at low concurrency: -21% at concurrency 16 in one
+  64-request mock run (-2% in another); the old error depended on task
+  scheduling and could be larger at other concurrency or request counts. A
+  stage whose last-finishing request failed can read slightly higher. The time-weighted blocks and `compare`
   now take this same window, so numbers recomputed from the CSV match the
   live strategic output (before, `compare` ended at the latest completion of
-  any outcome). Compare strategic rates across versions with care. No schema
-  change.
+  any outcome). The window is measured on a monotonic clock: the strategic
+  CSV gains a trailing `send_offset_s` column (seconds from the run start,
+  the NDJSON `t_sent_ns` origin; additive), so an NTP step cannot stretch a
+  stage. `compare` falls back to wall-clock `sent_unix_ns` only for older
+  CSVs without the column. Compare strategic rates across versions with
+  care.
 - `docs/queries/analyze.py` engine histogram p50/p95 no longer invent values
   at the bucket edges (#231). A rank in the first finite bucket used to be
   interpolated from 0, and a rank in `+Inf` used to return the highest finite
