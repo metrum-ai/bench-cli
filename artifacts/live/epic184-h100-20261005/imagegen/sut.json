@@ -1,0 +1,29 @@
+{
+  "provenance": "declared",
+  "name": "local GPU / imagegen live smoke",
+  "vendor": "NVIDIA",
+  "gpu": {
+    "model": "NVIDIA H100 PCIe",
+    "count": 1,
+    "memory_gb": 79
+  },
+  "driver_version": "NVIDIA 580.126.20",
+  "runtime": {
+    "name": "vllm-omni",
+    "version": "v0.30.0",
+    "config": "docker run -d --name metrum-live-imagegen --gpus device=0 --ipc=host -p 8000:8000 -v ~/.cache/huggingface:/root/.cache/huggingface vllm/vllm-omni:v0.30.0 vllm serve Tongyi-MAI/Z-Image-Turbo --omni --port 8000 "
+  },
+  "model": {
+    "id": "Tongyi-MAI/Z-Image-Turbo",
+    "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+    "quantization": null
+  },
+  "host_os": "Linux 6.8.0-106-generic",
+  "notes": "vllm-omni 0.30.0 Z-Image-Turbo via /v1/images/generations; requests send num_inference_steps=9 guidance_scale=0.0 size=1024x1024 per the model card (server default is 50 steps; researched 2026-10-02)",
+  "extra": {
+    "launcher_sources": "https://github.com/vllm-project/vllm-omni/blob/v0.30.0/docs/getting_started/installation/gpu/cuda.inc.md https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/image_generation_api/ https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+    "recorded_at_utc": "2026-10-05T21:30:07Z",
+    "image": "vllm/vllm-omni:v0.30.0",
+    "quantization_source": "none"
+  }
+}
