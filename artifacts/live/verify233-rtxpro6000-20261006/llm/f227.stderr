@@ -1,0 +1,8 @@
+sut: not provided; result is not self-describing (see README.md#publishing-a-result)
+telemetry probe all-smi: matched_series=65 scrape_ms=1.0 clock_offset_ms=Some(-202)
+telemetry probe vllm: matched_series=154 scrape_ms=3.8 clock_offset_ms=Some(-205)
+02:10:17 [ERROR] telemetry source all-smi failed 3 consecutive scrapes (require-telemetry); stopping new requests and draining in-flight work
+Error: telemetry required (--require-telemetry)
+
+Caused by:
+    telemetry source all-smi failed 3 consecutive scrapes (require-telemetry)

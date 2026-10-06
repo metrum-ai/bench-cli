@@ -1,0 +1,11 @@
+preflight: http://127.0.0.1:8000/v1/chat/completions  model=Qwen/Qwen3-8B
+CHECK                    STATUS DETAIL
+------------------------ ------ ----------------------------------------
+reachability             PASS   HTTP 405 Method Not Allowed in 3 ms
+chat_probe               PASS   unary chat OK in 54 ms
+streaming_first_token    PASS   first visible token in 16 ms
+latency_sample           PASS   n=3 median=50 ms (min=50 max=50)
+
+limits: Client HTTP probes only. Cannot observe CUDA toolkit, compiler, SM vs wheel, or remote GPU inventory. Prefer vendor Docker images on the serving host.
+preflight: ok
+exit=0

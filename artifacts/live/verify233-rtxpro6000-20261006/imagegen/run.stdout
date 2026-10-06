@@ -1,0 +1,21 @@
+Metrum AI Bench metrum-ai-bench-cli-imagegen 1.5.3
+
+=== Run summary (metrum-ai-bench-cli.summary.v3) ===
+  Attempted: 8  Successes: 8  Errors: 0  Error rate: 0.000
+  Window: 13.349s  Requests/sec: 0.599
+  Latency: n=8 avg=1.658s p50=1.624s p90=1.713s p95=1.810s p99=1.889s [p90*,p95*,p99*]
+  CO-corrected latency: n=8 avg=1.658s p50=1.624s p90=1.713s p95=1.810s p99=1.889s [p90*,p95*,p99*]
+  TTFT: n=0
+  TPOT: n=0
+  ITL: n=0
+  Connect: n=8 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p90*,p95*,p99*]
+  First byte: n=8 avg=1.657s p50=1.623s p90=1.711s p95=1.809s p99=1.887s [p90*,p95*,p99*]
+  Receive: n=8 avg=0.001s p50=0.002s p90=0.002s p95=0.002s p99=0.002s [p90*,p95*,p99*]
+  DNS: n=8 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p90*,p95*,p99*]
+  Bytes sent: n=8 avg=196.000 p50=196.000 p90=196.000 p95=196.000 p99=196.000 [p90*,p95*,p99*]
+  Bytes received: n=8 avg=4197415.250 p50=4197415.500 p90=4197416.000 p95=4197416.000 p99=4197416.000 [p90*,p95*,p99*]
+  Chunks received: n=8 avg=15.375 p50=16.000 p90=16.900 p95=17.950 p99=18.790 [p90*,p95*,p99*]
+  Connections reused: 7 (87.5%)
+  Observed concurrency: mean=1.00 p50=1.00 max=1.00 cap=1 engagement=0.875
+  Effective concurrency: n=8 avg=0.994 active_avg=1.000 max=1.000 active=13.267s
+  Goodput: 0.599 req/s (8/8 attempted; thresholds={})

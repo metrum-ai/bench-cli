@@ -1,0 +1,2 @@
+binary: /opt/metrum-bench/bin
+metrum-ai-bench-cli 1.5.3
