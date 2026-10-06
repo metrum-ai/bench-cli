@@ -435,22 +435,52 @@ settings; chat, embeddings, and rerank `run` rows are unchanged.
 The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v1`) carries the
 knee result in two fields (`knee_detection` is additive, #190):
 
-- `knee` (object or null) - the `SweepPoint` at the unit-normalized Kneedle
-  knee (p95 latency against achieved throughput). Null when there is no knee.
+- `knee` (object or null) - the `SweepPoint` at `knee_detection.index`: the
+  unit-normalized Kneedle knee (p95 latency against achieved throughput) or,
+  since #232, the saturation knee (see `method`). Null when there is no knee.
 - `knee_detection` (object, always present):
   - `index` (integer or null) - index of the knee in `points`; null when there
     is no knee.
   - `reason` (string or null) - why there is no knee: `insufficient_points`
     (fewer than `min_points` measured stages, that is stages with a p95),
     `missing_latency` (the first or last stage has no p95, for example no
-    successes), `flat_curve` (throughput or p95 does not change from the
-    first to the last stage), or `no_bend`
-    (additive, #232: p95 rises less than 20% from the first to the last
-    stage, so the curve has no meaningful bend). Null exactly when `index` is
-    set.
+    successes), `flat_curve` (throughput or p95 does not change across the
+    measured stages, or p95 bends over flat throughput), `no_bend`
+    (additive, #232: p95 rises less than `min_p95_rise` above its sweep
+    minimum and no saturation check fires), or `saturated_at_first_stage`
+    (additive, #232: the first stage is already saturated, so no stage is
+    unsaturated; lower the starting load). Since #232, `missing_latency` and
+    `flat_curve` are also reported only when no saturation check fires, and
+    a p95 bend is ignored when the first or last stage has no p95. Null
+    exactly when `index` is set.
   - `points` (integer) - number of measured stages (stages with a p95).
   - `min_points` (integer) - minimum measured stages for a knee, always 5
     (both endpoints plus 3 interior candidates).
+  - Additive (#232):
+    - `method` (string or null) - `kneedle` (p95 bend; Kneedle on the
+      measured stages from the lowest p95 to the highest p95 after it, or
+      that baseline stage itself when the peak is the next measured stage)
+      or `saturation` (the stage before `saturated_index`, used when p95 has
+      no bend, when the first or last stage has no p95, or when it comes
+      before the Kneedle knee). Null when there is no knee.
+    - `p95_rise` (number or null) - relative rise from the lowest measured
+      p95 to the highest p95 at or after it (0.41 = +41%). Null below
+      `min_points` or when the lowest p95 is not positive.
+    - `saturated_index` (integer or null) - first stage flagged saturated:
+      segment efficiency `(X_i / X_{i-1}) / (load_i / load_{i-1})` below
+      `min_segment_efficiency` (skipped on concurrency segments where both
+      stages run all `n` requests in one wave, `load >= n`), achieved
+      throughput below `min_achieved_ratio` of the expected unsaturated
+      throughput `successes / ((n - 1) / load + p50_s)` (rate sweeps; the
+      stage window includes the drain of the last send), or an error rate
+      at least `max_error_rate_rise` above the lowest earlier stage. Null
+      when no stage is saturated or below `min_points`.
+    - `min_p95_rise` (number) - p95 rise threshold, 0.2 (provisional).
+    - `min_segment_efficiency` (number) - segment efficiency threshold, 0.5.
+    - `min_achieved_ratio` (number or null) - 0.9 of expected throughput on
+      `--sweep-by rate`;
+      null on concurrency sweeps, where it does not apply.
+    - `max_error_rate_rise` (number) - error-rate rise threshold, 0.05.
 
 Sweeps with fewer than 5 measured stages (stages with a p95) report `"knee": null`. 3- and
 4-stage sweeps from earlier versions reported an interior stage as the knee;

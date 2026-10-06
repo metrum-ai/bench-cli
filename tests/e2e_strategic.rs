@@ -79,7 +79,14 @@ fn strategic_sweep_exports_all_formats() {
             "index": null,
             "reason": "insufficient_points",
             "points": 3,
-            "min_points": 5
+            "min_points": 5,
+            "method": null,
+            "p95_rise": null,
+            "saturated_index": null,
+            "min_p95_rise": 0.2,
+            "min_segment_efficiency": 0.5,
+            "min_achieved_ratio": 0.9,
+            "max_error_rate_rise": 0.05
         })
     );
     assert!(String::from_utf8_lossy(&output.stderr)
@@ -203,11 +210,13 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
     );
 }
 
-/// #232: a 5-stage sweep against a fixed-latency mock has no p95 bend, so it
-/// reports no knee with `no_bend` instead of the stage farthest from the chord.
+/// #232: a 5-stage sweep against a fixed-latency mock has no p95 bend and
+/// scales throughput with load, so it reports no knee with `no_bend` instead
+/// of the stage farthest from the chord. The 500 ms latency keeps CI jitter
+/// far below the 20% p95 margin.
 #[test]
 fn strategic_flat_sweep_reports_no_bend() {
-    let server = common::spawn_mock(&["--latency-ms", "100"]);
+    let server = common::spawn_mock(&["--latency-ms", "500"]);
     let address = server.address;
 
     let directory = tempfile::tempdir().expect("temporary output directory");
@@ -239,16 +248,21 @@ fn strategic_flat_sweep_reports_no_bend() {
     assert!(output.status.success(), "stderr: {stderr}");
     let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
     assert!(summary["knee"].is_null(), "{summary}");
-    assert_eq!(
-        summary["knee_detection"],
-        serde_json::json!({
-            "index": null,
-            "reason": "no_bend",
-            "points": 5,
-            "min_points": 5
-        })
-    );
-    let note = "no knee: p95 latency rises less than 20% from the first to the last sweep stage";
+    let detection = &summary["knee_detection"];
+    assert_eq!(detection["index"], Value::Null);
+    assert_eq!(detection["reason"], "no_bend");
+    assert_eq!(detection["points"], 5);
+    assert_eq!(detection["min_points"], 5);
+    assert_eq!(detection["method"], Value::Null);
+    assert_eq!(detection["saturated_index"], Value::Null);
+    assert_eq!(detection["min_p95_rise"], 0.2);
+    assert_eq!(detection["min_segment_efficiency"], 0.5);
+    assert_eq!(detection["min_achieved_ratio"], Value::Null);
+    assert_eq!(detection["max_error_rate_rise"], 0.05);
+    let rise = detection["p95_rise"].as_f64().expect("p95_rise");
+    assert!((0.0..0.2).contains(&rise), "p95_rise {rise}");
+    let note =
+        "no knee: p95 latency rises less than 20% above its sweep minimum and throughput keeps scaling";
     assert!(stderr.contains(note), "stderr: {stderr}");
     assert!(fs::read_to_string(&html)
         .expect("HTML report")

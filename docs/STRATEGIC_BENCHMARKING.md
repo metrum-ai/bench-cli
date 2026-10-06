@@ -103,27 +103,59 @@ why:
 - `insufficient_points`: fewer than `knee_detection.min_points` (5) measured
   stages (stages with a p95).
 - `missing_latency`: the first or last stage has no p95 (no successes).
-- `flat_curve`: throughput or p95 does not change from the first to the last
-  stage.
-- `no_bend`: p95 rises less than 20% from the first to the last stage
-  (including a p95 that falls), so the curve has no meaningful bend (#232).
+- `flat_curve`: throughput or p95 does not change across the measured
+  stages.
+- `no_bend`: p95 rises less than 20% above its sweep minimum and no
+  saturation check fires, so the curve has no meaningful bend (#232).
+- `saturated_at_first_stage`: the first stage is already saturated, so no
+  stage is unsaturated; lower the starting load (#232).
+
+A knee comes from one of two methods (`knee_detection.method`):
+
+- `kneedle`: p95 rises at least 20% from its baseline, the lowest measured
+  p95, to the highest p95 at or after that stage. Kneedle then runs from the
+  baseline stage to that peak, normalized by the data range. Using the
+  minimum and the later maximum, not the first and last stage, keeps an inflated cold first
+  stage or a mid-sweep bend that recovers by the last stage from hiding the
+  knee. A p95 that only falls has no rise.
+- `saturation`: the sweep is saturated. The knee is the stage before the
+  first saturated stage (`knee_detection.saturated_index`). It is used when
+  p95 has no bend, and also when it comes before the Kneedle knee, so load
+  shedding ahead of a later p95 bend is reported where it starts. A stage is
+  saturated when its segment efficiency
+  `(X_i / X_{i-1}) / (load_i / load_{i-1})` is below 0.5 (`X` is success
+  throughput), when achieved throughput is below 0.9 of the expected
+  unsaturated `successes / ((n - 1) / load + p50_s)` on a `--sweep-by rate`
+  sweep (the stage window includes the drain of the last send, so a healthy
+  LLM stage achieves well under its offered rate), or when its error rate is
+  5 points or more above the lowest earlier stage. Load shedding (fast
+  429/503, admission control) keeps success p95 flat while throughput
+  plateaus, so p95 alone misses it. The efficiency gate assumes geometric
+  sweeps such as `1,2,4,8,16`; on linear steps it needs a larger throughput
+  drop. Concurrency segments where both stages fit all requests in one wave
+  (`load >= requests_per_stage`) are skipped. A first stage that is already
+  saturated reports `saturated_at_first_stage` instead of a knee.
 
 Kneedle always returns the interior stage farthest from the chord, so a
 nearly linear sweep would still report a knee. The 20% minimum p95 rise
-(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) separates the live H100 sweeps
+(`KNEE_MIN_P95_RISE` in `src/strategic.rs`) is provisional: it is set from
+two live curves. It separates the live H100 sweeps
 from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
 scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
-11% (1.200 to 1.333 s), so it reports `no_bend`. A fixed-latency mock
+11% (1.200 to 1.333 s), and every segment efficiency was about 0.93 to
+0.98, so it reports `no_bend`. A fixed-latency mock
 sweep also reports `no_bend` (the analyze.py `sweep5` fixture, recorded
 before #232, rises 8% and still carries its old knee). The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
 knee at c=32. A threshold on the normalized chord distance cannot make this
 split: the LLM curve peaks at 0.095, below the VLM curve's 0.164. At 20%, the
 threshold sits about 2x above the bend-free rises and about 2x below the
-smallest real bend. A sweep that ends with less than 20% p95 headroom has not
-reached saturation: extend the sweep to higher loads to find the knee.
+smallest real bend. A sweep with less than 20% p95 rise usually has not
+reached saturation; check the error rate and throughput scaling per stage,
+then extend the sweep to higher loads to find the knee.
 
 `knee_detection` is always present:
-`{"index": <stage index or null>, "reason": <string or null>, "points": <measured stages>, "min_points": 5}`.
+`{"index", "reason", "points", "min_points", "method", "p95_rise", "saturated_index", "min_p95_rise", "min_segment_efficiency", "min_achieved_ratio", "max_error_rate_rise"}`.
+See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md) for each field.
 `reason` is null exactly when `index` is set. The CLI also prints
 `note: no knee: ...` on stderr (only for runs with 2 or more stages, so
 single-stage and sessions runs stay quiet) and the HTML report shows the same sentence.
