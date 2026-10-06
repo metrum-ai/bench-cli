@@ -373,14 +373,18 @@ enum SweepBy {
 
 #[derive(Clone, Debug, Default)]
 struct Input {
-    /// JSON request body (`Null` for ASR multipart uploads). Shared so large
-    /// VLM bodies are not copied per request.
+    /// JSON request body (`Null` for ASR multipart uploads and for VLM,
+    /// which sends `json` instead).
     body: Arc<Value>,
+    /// `--kind vlm`: the body serialized once at setup and shared by every
+    /// request, so a large base64 body is never encoded or copied inside
+    /// the send window (#242).
+    json: Option<bytes::Bytes>,
     session_id: Option<String>,
     turn: Option<usize>,
     /// `--kind asr`: the audio upload sent as multipart instead of `body`.
     upload: Option<Arc<AudioUpload>>,
-    /// `--kind vlm`: image count and payload bytes in `body`.
+    /// `--kind vlm`: image count and payload bytes in `json`.
     images: Option<(usize, u64)>,
     /// `--kind imagegen`: images asked for and whether `b64_json` images are
     /// decoded, read from the body actually sent (after `--extra-body-json`).
@@ -800,7 +804,7 @@ async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
                 })?;
             images.push(image);
         }
-        let body = metrum_ai_bench::vlm::build_request_body(
+        let json = metrum_ai_bench::vlm::build_request_bytes(
             model,
             max_tokens,
             args.temperature.unwrap_or(0.1),
@@ -816,7 +820,7 @@ async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
         )
         .map_err(|err| anyhow::anyhow!("vlm body: {err}"))?;
         inputs.push(Input {
-            body: Arc::new(body),
+            json: Some(json),
             images: Some((
                 images.len(),
                 images.iter().map(|image| image.size_bytes).sum(),
@@ -1019,9 +1023,17 @@ fn spawn_one_request(
         let in_flight_at_send = request_slot.as_ref().map_or(0, |slot| slot.in_flight());
         // An ASR form (and its request) is assembled here, after the permit
         // (only in-flight requests hold one) and before the send clock; the
-        // audio bytes are shared. JSON requests are built after the clock
+        // audio bytes are shared. A VLM body was serialized at setup and is
+        // shared too (#242). Other JSON requests are built after the clock
         // starts and serialize inside the send call, as before #197, so
         // chat, embeddings and rerank `service_latency_s` is unchanged.
+        let prebuilt_json = input.json.clone().map(|json| {
+            Ok(client
+                .post(&url)
+                .bearer_auth(&api_key)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(json))
+        });
         let upload_request = input.upload.as_ref().map(|upload| {
             metrum_ai_bench::asr::transcription_form(
                 &modality.model,
@@ -1052,6 +1064,7 @@ fn spawn_one_request(
             .unwrap_or(t_sent_ns);
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
         let request = upload_request
+            .or(prebuilt_json)
             .unwrap_or_else(|| Ok(client.post(&url).bearer_auth(&api_key).json(&*input.body)));
         let result = match request {
             Ok(request) => metrum_ai_bench::connect_timing::with_connect_slot(
