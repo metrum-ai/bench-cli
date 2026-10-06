@@ -1640,8 +1640,11 @@ mod tests {
             detect_knee_with_reason(&below).reason,
             Some(KneeReason::NoBend)
         );
-        let at = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (4.2, 1.21)]);
+        // Exactly +20% is not "less than 20%", so it keeps the knee.
+        let at = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (4.2, 1.2)]);
         assert_eq!(detect_knee_with_reason(&at).index, Some(3));
+        let above = knee_points(&[(1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (4.2, 1.21)]);
+        assert_eq!(detect_knee_with_reason(&above).index, Some(3));
         let falling = knee_points(&[(1.0, 2.0), (2.0, 1.8), (3.0, 1.6), (4.0, 1.2), (5.0, 1.0)]);
         assert_eq!(
             detect_knee_with_reason(&falling).reason,

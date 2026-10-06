@@ -203,6 +203,58 @@ fn strategic_prompts_and_warmup_exclude_from_aggregates() {
     );
 }
 
+/// #232: a 5-stage sweep against a fixed-latency mock has no p95 bend, so it
+/// reports no knee with `no_bend` instead of the stage farthest from the chord.
+#[test]
+fn strategic_flat_sweep_reports_no_bend() {
+    let server = common::spawn_mock(&["--latency-ms", "100"]);
+    let address = server.address;
+
+    let directory = tempfile::tempdir().expect("temporary output directory");
+    let html = directory.path().join("report.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{address}/v1/chat/completions"),
+            "--model",
+            "mock",
+            "--api-key",
+            "dummy",
+            "--max-tokens",
+            "16",
+            "--requests-per-stage",
+            "16",
+            "--warmup-requests",
+            "0",
+            "--sweep",
+            "1,2,4,8,16",
+            "--sweep-by",
+            "concurrency",
+            "--html",
+            html.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("run strategic");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
+    assert!(summary["knee"].is_null(), "{summary}");
+    assert_eq!(
+        summary["knee_detection"],
+        serde_json::json!({
+            "index": null,
+            "reason": "no_bend",
+            "points": 5,
+            "min_points": 5
+        })
+    );
+    let note = "no knee: p95 latency rises less than 20% from the first to the last sweep stage";
+    assert!(stderr.contains(note), "stderr: {stderr}");
+    assert!(fs::read_to_string(&html)
+        .expect("HTML report")
+        .contains(note));
+}
+
 #[test]
 fn strategic_ignore_eos_stamped_in_config() {
     let server = common::spawn_mock(&["--latency-ms", "5"]);

@@ -113,8 +113,9 @@ nearly linear sweep would still report a knee. The 20% minimum p95 rise
 (`KNEE_MIN_P95_RISE` in `src/strategic.rs`) separates the live H100 sweeps
 from the #184 validation (vLLM 0.31.0). The Qwen3-VL-8B sweep at c=1..16
 scaled throughput almost linearly (0.94 to 12.37 req/s) while p95 rose only
-11% (1.200 to 1.333 s), and the mock-server fixture rises 8%. Both report
-`no_bend`. The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
+11% (1.200 to 1.333 s), so it reports `no_bend`. A fixed-latency mock
+sweep also reports `no_bend` (the analyze.py `sweep5` fixture, recorded
+before #232, rises 8% and still carries its old knee). The LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its
 knee at c=32. A threshold on the normalized chord distance cannot make this
 split: the LLM curve peaks at 0.095, below the VLM curve's 0.164. At 20%, the
 threshold sits about 2x above the bend-free rises and about 2x below the
