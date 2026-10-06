@@ -59,13 +59,21 @@ record() {
     --max-tokens 16 --warmup-requests 0 \
     --ndjson "$name.ndjson" --telemetry telemetry.yaml \
     --metrics-url "$url/metrics" >"$name.stdout.json")
-  # The ports vary per run; pin them so re-records diff cleanly. The
-  # trailing slash keeps one port from matching a prefix of the other.
+  # The ports, run_id and t0_wall vary per run; pin them so re-records diff
+  # cleanly. analyze.py only compares run_id for equality and never reads
+  # t0_wall. The trailing slash keeps one port from matching a prefix of
+  # the other.
+  local run_id
+  run_id="$(head -1 "$work/$name.ndjson" | python3 -c 'import json, sys; print(json.load(sys.stdin)["run_id"])')"
   sed -e "s#$url/#http://127.0.0.1:MOCK_PORT/#g" -e "s#$gate_url/#http://127.0.0.1:GATE_PORT/#g" \
+    -e "s#$run_id#RUN_ID#g" \
+    -e 's#"t0_wall":"[^"]*"#"t0_wall":"T0_WALL"#' \
     "$work/$name.ndjson" \
     >"$here/$name.ndjson"
   # Keep only the stdout keys analyze.py reads. environment carries the
   # hostname and strategic has no working --redact-hostname, so it is omitted.
+  # Points keep load and p95_s (read by analyze.py) plus throughput and
+  # error_rate (the knee rule's other inputs); the legacy knee keeps its load.
   python3 - "$work/$name.stdout.json" "$here/$name.stdout.json" "$url" "$gate_url" <<'PY'
 import json, sys
 keep = ("schema_version", "tool_version", "partial", "points", "knee", "knee_detection")
@@ -74,6 +82,10 @@ with open(sys.argv[1], encoding="utf-8") as f:
     text = text.replace(sys.argv[4] + "/", "http://127.0.0.1:GATE_PORT/")
 src = json.loads(text)
 out = {k: src[k] for k in keep if k in src}
+point_keys = ("load", "p95_s", "throughput", "error_rate")
+out["points"] = [{k: p.get(k) for k in point_keys} for p in out.get("points") or []]
+if out.get("knee") is not None:
+    out["knee"] = {"load": out["knee"].get("load")}
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     json.dump(out, f, indent=2, sort_keys=True)
     f.write("\n")

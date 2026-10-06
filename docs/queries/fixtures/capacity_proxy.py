@@ -27,6 +27,9 @@ def main(argv):
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        # Headers and body go out as separate writes; with Nagle on, delayed
+        # ACK would add a fixed ~40 ms to every gated request.
+        disable_nagle_algorithm = True
 
         def forward(self, method):
             length = int(self.headers.get("Content-Length") or 0)

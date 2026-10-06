@@ -148,8 +148,8 @@ live curves. It separates the live H100 sweeps from the #184 validation (vLLM
 step gained 1.87x to 1.97x throughput, so it reports `no_bend`. A
 fixed-latency mock sweep also reports `no_bend` (the analyze.py
 `sweep5_no_bend` fixture). The `sweep5` fixture puts a 4-request capacity gate
-in front of the same mock, so p95 roughly doubles past c=4 and the knee is
-c=4 (#240). The
+in front of the same mock, so p95 stays at 0.203 to 0.204 s up to c=4, then
+reaches 0.409 s at c=8 and 1.419 s at c=16, and the knee is c=4 (#240). The
 LLM sweep at c=1..64 rose 41% (0.632 to 0.892 s) and keeps its knee at c=32.
 The LLM sweep's smallest step gain is 1.77x. A threshold on the normalized
 chord distance cannot make this split: the LLM curve peaks at 0.095, below the

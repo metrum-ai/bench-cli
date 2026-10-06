@@ -224,7 +224,7 @@ latency; do not mix it with client-side type 7 percentiles.
 | [stage_power.sql](../queries/stage_power.sql) | Power samples and crude means per measure stage |
 | [energy_crosscheck.sql](../queries/energy_crosscheck.sql) | Counter Δ vs trapezoid power |
 | [analyze.py](../queries/analyze.py) | Stdlib-only Python: every derived metric above. Pass the strategic stdout JSON as the second argument for `kv_cache_util_at_knee`; `--json` for machine output |
-| [fixtures/](../queries/fixtures/) | Recorded mock sweeps for `test_analyze.py`: `sweep5` (5 stages through `capacity_proxy.py`, a real knee at c=4), `sweep5_no_bend` (5 stages, `no_bend`), `sweep3` (3 stages, `insufficient_points`); `record.sh` re-records them |
+| [fixtures/](../queries/fixtures/) | Recorded mock sweeps for `test_analyze.py`: `sweep5` (5 stages through `capacity_proxy.py`, p95 0.203 s at c=1 to 1.419 s at c=16, a real knee at c=4), `sweep5_no_bend` (5 stages, `no_bend`), `sweep3` (3 stages, `insufficient_points`); `record.sh` re-records them |
 
 Do not invent metric names that are not in the NDJSON or in
 [exporters.md](exporters.md).

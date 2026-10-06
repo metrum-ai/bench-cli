@@ -346,6 +346,8 @@ class RecordedSweeps(unittest.TestCase):
                 self.assertIsNone(s["hollow_util_mean"])
 
     def test_sweep5_kv_at_knee_as_recorded(self):
+        # The mock KV gauge is constant (0.25), so the kv-at-knee value alone
+        # cannot tell stages apart; the knee load asserts pin the stage index.
         rows, stdout = load_fixture("sweep5")
         res = analyze.analyze(rows, stdout)
         self.assertEqual(res["knee"]["source"], "knee_detection")
