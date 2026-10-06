@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
-/// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after /
+/// Shared flag: stop issuing new requests (SIGINT / SIGTERM /
 /// `--require-telemetry` abort).
 ///
 /// A real signal is tracked apart from the stop itself (#227), so an internal
@@ -56,7 +56,7 @@ impl StopFlag {
 
     /// Record a real SIGINT/SIGTERM and stop the run. Returns `HardExit`
     /// only when an earlier real signal was already recorded; a stop from
-    /// any other source (telemetry abort, stop-after) still drains.
+    /// the `--require-telemetry` abort still drains.
     pub fn on_signal(&self) -> SignalAction {
         let already = self.signaled.swap(true, Ordering::SeqCst);
         self.stop();

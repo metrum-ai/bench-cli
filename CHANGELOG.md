@@ -403,9 +403,8 @@
   stage. The tracker resets at the warmup barrier, so `acquire_count` equals
   the measured requests dispatched; before, warmup acquires and occupancy
   were included. No schema change (#226).
-- A mid-run `--require-telemetry` abort (or any other internal stop, such
-  as a stop-after timeout) no longer turns the next Ctrl-C or SIGTERM into a
-  hard exit (130 / 143) that skipped `summary.v3` and the NDJSON `summary`
+- A mid-run `--require-telemetry` abort no longer turns the next Ctrl-C or
+  SIGTERM into a hard exit (130 / 143) that skipped `summary.v3` and the NDJSON `summary`
   row. `runner::StopFlag` now
   tracks real signals apart from the stop itself, so the first real signal
   always drains and writes the summary and only a second real signal exits

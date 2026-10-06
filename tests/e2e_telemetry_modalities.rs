@@ -20,11 +20,12 @@ use std::process::{Command, Output};
 const REQUESTS: u64 = 4;
 const WARMUP: u64 = 1;
 /// Allowed gap between `run.t0_wall + t_sent_ns` and `started_at`. The
-/// wall/monotonic pairs are sampled separately and `t0_wall` has ms
-/// precision, so allow for preemption on a busy CI host; the bugs this
-/// guards against (wrong origin, file read inside the window) are hundreds
-/// of ms or more.
-const WALL_JOIN_TOLERANCE_MS: f64 = 50.0;
+/// wall/monotonic pairs are sampled separately and `t0_wall` is truncated to
+/// the millisecond, so allow a little preemption on a busy CI host. This
+/// check catches a wrong origin only: `send_offset_s` and `started_at` are
+/// stamped together, so a file read inside the request window cannot show
+/// up here (`asr_request_window_excludes_audio_read` covers that).
+const WALL_JOIN_TOLERANCE_MS: f64 = 15.0;
 
 /// Two sources on the fixture page, scraped every 100 ms.
 fn telemetry_yaml(dir: &Path, metrics: SocketAddr) -> PathBuf {
@@ -183,8 +184,8 @@ fn assert_joined(run: &Run, binary: &str) {
             "send_offset_s * 1e9 must equal t_sent_ns: {row} vs {record}"
         );
         // Wall-clock join (#227): run.t0_wall + t_sent_ns lands on the
-        // record's independently stamped started_at. t0_wall has ms
-        // precision; see WALL_JOIN_TOLERANCE_MS.
+        // record's started_at, which catches a wrong origin (not a read
+        // inside the window). See WALL_JOIN_TOLERANCE_MS.
         let started_at = chrono::DateTime::parse_from_rfc3339(
             record["started_at"].as_str().expect("started_at"),
         )
