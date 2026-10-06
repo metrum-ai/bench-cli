@@ -337,7 +337,10 @@ Token totals, rates, and per-user latency fields (additive, #193). Server
   `0.0` (not `null`) for those stages, so it can be `0.0` while this total is
   `null`.
 - `input_tokens_per_second` (tokens/second) - `prompt_tokens_total` divided by
-  the stage window; `null` when that total is `null`.
+  the stage window (earliest measured send of any outcome to the latest
+  successful completion, or the latest completion of any outcome when the
+  stage has no success; warmup excluded, #224); `null` when that total is
+  `null`.
 - `total_tokens_per_second` (tokens/second) -
   `(prompt_tokens_total + completion_tokens_total)` divided by the stage
   window; `null` unless both totals are non-null.
@@ -356,10 +359,13 @@ Time-weighted blocks (additive, #195): `effective_concurrency`,
 `{n, avg, active_avg, max, active_s}` object as on `summary.v3`, always
 present, with the same `null` rules. Differences from the summary:
 
-- Intervals are `[sent_unix_ns, sent_unix_ns + service_latency_s]`, so
+- Intervals are `[send, send + service_latency_s]`, where `send` is the
+  monotonic CSV `send_offset_s` (wall-clock `sent_unix_ns` for older CSVs
+  without it), so
   client queue delay is excluded. The window runs from the first measured
-  send of the stage to the latest successful `sent + service_latency_s`, so
-  it can differ slightly from the stage window behind `throughput`.
+  send of the stage to the latest successful `sent + service_latency_s`,
+  the same stage window behind `throughput` and the stage token rates
+  (#224).
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
   reporting neither are skipped. `--kind embeddings`, `--kind rerank`, and
   `--kind imagegen` stages have no output, so `tokens_in_flight` and
@@ -370,13 +376,19 @@ trailing optional columns, in this order: `first_reasoning_s` (seconds),
 `reasoning_tokens` (integer tokens, #192), then the HTTP phase trace columns
 (#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
 `receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
-(count). The `first_reasoning_s` cell is empty when the request streamed no
+(count), then `send_offset_s` (seconds, #224): the monotonic send time from
+the run start, the same origin as the NDJSON `t_sent_ns`. The
+`first_reasoning_s` cell is empty when the request streamed no
 reasoning delta; the `reasoning_tokens` cell is empty when the server did not
 report reasoning. A trace cell is empty when the value is absent;
 `receive_s`, `bytes_received`, and `chunks_received` are empty for failed
 requests.
 Existing columns keep their order, and CSVs written before these columns
-existed still load (missing cells read as empty).
+existed still load (missing cells read as empty). Stage windows and
+time-weighted intervals use `send_offset_s` when every measured row of the
+stage has it. `compare` falls back to wall-clock `sent_unix_ns` only for
+older CSVs without the column, where an NTP step during a stage can still
+stretch the window.
 
 ### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
 

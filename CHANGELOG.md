@@ -319,6 +319,27 @@
   binary instead; the sidecar stays for binaries built before #196.
 
 ### Fixed
+- The strategic stage window now ends at the latest successful completion
+  instead of the completion of the last-started request (#224). It runs from
+  the earliest measured send (any outcome) to the latest successful
+  completion, or the latest completion of any outcome when the stage has no
+  success; warmup is excluded. In `--sweep-by concurrency` sends are stamped
+  after the semaphore, which does not release in spawn order, so the
+  last-started request often finished well before the stage ended and the
+  window was cut short. Strategic stage `throughput`, `goodput`, token rates
+  and `cost_per_million_output_tokens` therefore read lower than earlier
+  versions: slightly lower at low concurrency; -21% at concurrency 16 in one
+  64-request mock run (-2% in another); the old error depended on task
+  scheduling and could be larger at other concurrency or request counts. A
+  stage whose last-finishing request failed can read slightly higher. The
+  time-weighted blocks and `compare` now take this same window, so numbers
+  recomputed from the CSV match the live strategic output (before, `compare`
+  ended at the latest completion of any outcome). The window is measured on a
+  monotonic clock: the strategic CSV gains a trailing `send_offset_s` column
+  (seconds from the run start, the NDJSON `t_sent_ns` origin; additive), so an
+  NTP step cannot stretch a stage. `compare` falls back to wall-clock
+  `sent_unix_ns` only for older CSVs without the column. Compare strategic
+  rates across versions with care.
 - `--warmup-requests` is now a barrier in `metrum-ai-bench-cli-llm`, `-vlm`,
   `-asr`, and `-imagegen` (`metrum_ai_bench::runner::WarmupBarrier`).
   Measured requests start only after every warmup request completes (success
