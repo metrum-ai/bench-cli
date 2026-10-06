@@ -47,6 +47,8 @@ jobs:
         run: bash scripts/tests/serve_sut_test.sh
       - name: analyze.py recipe tests
         run: python3 -m unittest discover -s docs/queries
+      - name: parity count_points.py tests
+        run: python3 -m unittest discover -s scripts/parity
       - name: zero unsafe in src/
         run: |
           set -euo pipefail
