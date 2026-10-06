@@ -1,0 +1,18 @@
+# Metrum AI Bench: Shadeform availability for the #233 live verification
+# Copyright (c) 2026 Metrum AI, Inc.  SPDX-License-Identifier: Apache-2.0
+#
+# Requested SKUs: RTX PRO 6000 Blackwell Server Edition (Shadeform gpu_type RTXPro6000) and H200.
+# Query: GET https://api.shadeform.ai/v1/instances/types (API credential sent as a request header; never printed or stored),
+# filtered to entries of those gpu_types whose availability[] has available=true.
+#
+# Earlier checks (H100 bundle artifacts/live/epic184-h100-20261005/availability.txt):
+#   2026-10-05T21:08:39Z and 2026-10-06T00:02:01Z: no available offer for RTXPro6000 or H200.
+#
+# This run, as recorded by the orchestrator (verbatim line below):
+preferred-check 2026-10-06T01:54:23Z; RTXPro6000 x1 massedcompute/beltsville-usa-1 $2.19/h available at that time; earlier checks 2026-10-06T01:43Z: none
+#
+## Result
+# 2026-10-06T01:43Z: no RTXPro6000 or H200 offer.
+# 2026-10-06T01:54:23Z: RTXPro6000 x1 available on massedcompute beltsville-usa-1 at $2.19/h; instance created 01:54:36Z.
+# H200: no available offer at 01:43Z or 01:54Z per the orchestrator's record (the verbatim line above names only the
+# RTXPro6000 offer), and none at the two earlier checks. H200 was not run.

@@ -1,0 +1,580 @@
+{
+  "knee": {
+    "index": 4,
+    "load": 16.0,
+    "note": null,
+    "reason": null,
+    "source": "knee_detection"
+  },
+  "kv_cache_util_at_knee": 0.007263955321345586,
+  "kv_cache_util_at_knee_reason": null,
+  "row_counts": {
+    "request": 1008,
+    "run": 1,
+    "stage": 14,
+    "summary": 1,
+    "telemetry": 56167
+  },
+  "stages": [
+    {
+      "energy_counter_j": 28723.68499999999,
+      "energy_trap_j": 28757.535856659517,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.6438524590163934,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7843852459016394,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.64125,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7841250000000001,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.02540229885057471,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.03854022988505747,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 0.9955557742468996,
+      "hollow_util_mean": 0.13943049272767016,
+      "j_per_output_token": 4.02236171404565,
+      "kv_cache_util_mean": 0.0005755814424917856,
+      "load": 1.0,
+      "out_tokens": 7141,
+      "power_mean_w": 336.3467362810253,
+      "power_n": 172,
+      "power_p95_w": 339.199,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.85490376,
+      "sm_occupancy_p50": 0.11968805499999999,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 1.0,
+      "tensor_active_p50": 0.017083036
+    },
+    {
+      "energy_counter_j": 13877.294999999998,
+      "energy_trap_j": 13942.635333747881,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.65,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.785,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.6450819672131147,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7845081967213114,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.03,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.03899999999999999,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 0.9996555229408645,
+      "hollow_util_mean": 0.14660473616099817,
+      "j_per_output_token": 1.962842291371994,
+      "kv_cache_util_mean": 0.001089644081078813,
+      "load": 2.0,
+      "out_tokens": 7070,
+      "power_mean_w": 320.52645623736265,
+      "power_n": 88,
+      "power_p95_w": 322.4101,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.8490525250000001,
+      "sm_occupancy_p50": 0.127336845,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 2.0,
+      "tensor_active_p50": 0.061408819
+    },
+    {
+      "energy_counter_j": 6863.739000000001,
+      "energy_trap_j": 6993.779984732151,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.6475,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7847500000000001,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.6449152542372881,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7844915254237288,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.03,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.039,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 1.0,
+      "hollow_util_mean": 0.14126695540372713,
+      "j_per_output_token": 0.9574193053424468,
+      "kv_cache_util_mean": 0.0022936293686123726,
+      "load": 4.0,
+      "out_tokens": 7169,
+      "power_mean_w": 325.2847387750232,
+      "power_n": 44,
+      "power_p95_w": 326.14,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.855828135,
+      "sm_occupancy_p50": 0.08307914,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 4.0,
+      "tensor_active_p50": 0.062484275
+    },
+    {
+      "energy_counter_j": 3551.6089999999967,
+      "energy_trap_j": 3692.8099796841907,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.6475806451612903,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7847580645161291,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.6425000000000001,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.78425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.03,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.03900000000000001,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 1.0,
+      "hollow_util_mean": 0.13874582916637307,
+      "j_per_output_token": 0.4934846463804358,
+      "kv_cache_util_mean": 0.004358571258561175,
+      "load": 8.0,
+      "out_tokens": 7197,
+      "power_mean_w": 335.7193819981536,
+      "power_n": 23,
+      "power_p95_w": 337.5435,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.85835004,
+      "sm_occupancy_p50": 0.08320633,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 8.0,
+      "tensor_active_p50": 0.07038702
+    },
+    {
+      "energy_counter_j": 2244.997000000003,
+      "energy_trap_j": 2094.132303497034,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.7060439560439561,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.9637142857142856,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.6463709677419355,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.7846370967741936,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.03,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.03899999999999999,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 0.973328177904387,
+      "hollow_util_mean": 0.14312073113743215,
+      "j_per_output_token": 0.316285855170471,
+      "kv_cache_util_mean": 0.007263955321345586,
+      "load": 16.0,
+      "out_tokens": 7098,
+      "power_mean_w": 349.016187227232,
+      "power_n": 13,
+      "power_p95_w": 353.849,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.8530272,
+      "sm_occupancy_p50": 0.08281379,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 16.0,
+      "tensor_active_p50": 0.091044374
+    },
+    {
+      "energy_counter_j": 1180.0270000000019,
+      "energy_trap_j": 1085.7027322245453,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.7945454545454547,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.9796226415094339,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.737313432835821,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.973,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.03156626506024096,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.0526153846153846,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 0.9958336003974742,
+      "hollow_util_mean": 0.1609227083115643,
+      "j_per_output_token": 0.16620098591549323,
+      "kv_cache_util_mean": 0.011247807393839761,
+      "load": 32.0,
+      "out_tokens": 7100,
+      "power_mean_w": 361.95395871370414,
+      "power_n": 7,
+      "power_p95_w": 377.95,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.8265289,
+      "sm_occupancy_p50": 0.081119865,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 32.0,
+      "tensor_active_p50": 0.122592285
+    },
+    {
+      "energy_counter_j": 788.2780000000057,
+      "energy_trap_j": 542.6742471607649,
+      "engine_histograms": {
+        "vllm:e2e_request_latency_seconds": {
+          "p50": 0.8772727272727273,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 1.3824999999999998,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:inter_token_latency_seconds": {
+          "p50": 0.0175,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.02425,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_decode_time_seconds": {
+          "p50": 0.8321428571428572,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.9832142857142857,
+          "p95_bound": null,
+          "p95_reason": null
+        },
+        "vllm:request_prefill_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:request_queue_time_seconds": {
+          "p50": null,
+          "p50_bound": 0.3,
+          "p50_reason": "below_first_bucket",
+          "p95": null,
+          "p95_bound": 0.3,
+          "p95_reason": "below_first_bucket"
+        },
+        "vllm:time_to_first_token_seconds": {
+          "p50": 0.04914285714285714,
+          "p50_bound": null,
+          "p50_reason": null,
+          "p95": 0.05891428571428571,
+          "p95_bound": null,
+          "p95_reason": null
+        }
+      },
+      "gpu_util_mean": 1.0,
+      "hollow_util_mean": 0.1849662510502301,
+      "j_per_output_token": 0.11086891701828491,
+      "kv_cache_util_mean": 0.008340968689772799,
+      "load": 64.0,
+      "out_tokens": 7110,
+      "power_mean_w": 361.8737095089255,
+      "power_n": 4,
+      "power_p95_w": 383.29670000000004,
+      "preemptions_delta": 0.0,
+      "run_id": "2fb4f71d-79b3-49eb-b535-b50aba6270c0",
+      "sm_active_p50": 0.79334795,
+      "sm_occupancy_p50": 0.07236536,
+      "sources": {
+        "energy_counter": "all_smi_gpu_energy_hw_millijoules_total",
+        "gpu_util_mean": "all_smi_gpu_utilization",
+        "hollow_util_mean": "all_smi_gpu_hollow_utilization_ratio",
+        "kv_cache_util_mean": "vllm:kv_cache_usage_perc",
+        "power": "all_smi_gpu_power_consumption_watts",
+        "preemptions_delta": "vllm:num_preemptions_total",
+        "sm_active_p50": "all_smi_gpu_sm_active_ratio",
+        "sm_occupancy_p50": "all_smi_gpu_sm_occupancy",
+        "tensor_active_p50": "all_smi_gpu_tensor_active_ratio"
+      },
+      "stage": 64.0,
+      "tensor_active_p50": 0.13497363
+    }
+  ]
+}

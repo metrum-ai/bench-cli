@@ -258,3 +258,45 @@ percentiles below the first bucket; fixed by #234), #232 (knee on the nearly lin
 Three operator errors (duplicate telemetry source, base URL instead of endpoint, `--guidance`
 instead of `--guidance-scale`) were fixed and rerun on the same instance; see the report.
 Instance deleted and verified via `GET /instances/<id>/info`.
+
+---
+
+# Smoke results - campaign `verify233-rtxpro6000-20261006`
+
+> Live re-verification of the #233 fixes (#226, #224, #232, #227, #230, #231, #216, #242) on Shadeform
+> 1x RTX PRO 6000 Blackwell Server Edition, all four modalities, with strategic sweeps and `--csv` for
+> every modality. A validation run, not a publication under
+> [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Committed, redacted bundle with
+> per-fix results, check outputs and exact commands:
+> [`artifacts/live/verify233-rtxpro6000-20261006/REPORT.md`](../artifacts/live/verify233-rtxpro6000-20261006/REPORT.md).
+
+| Field | Value |
+|-------|-------|
+| Campaign ID | `verify233-rtxpro6000-20261006` |
+| Bench package | built from `main` at `d43d9bc` (tip build; `--version` prints `1.5.3`) |
+| Date (UTC) | 2026-10-06 (instance 01:54Z to 02:26Z, about $1.17 at $2.19/h) |
+| System | Shadeform, massedcompute `beltsville-usa-1`, 1x RTX PRO 6000 Blackwell Server Edition (96 GB, 600 W), driver 580.126.09, Ubuntu 22.04 (dispatcher run in an `ubuntu:24.04` container for glibc 2.39) |
+| Engines | LLM/VLM/ASR: `vllm/vllm-openai:v0.31.0`; ImageGen: `vllm/vllm-omni:v0.30.0` |
+| Telemetry | all-smi `v0.26.3-metrum.4` `/metrics` plus engine `/metrics`, in-binary |
+| Modalities | llm, vlm, asr, imagegen |
+| Not run | H200: no Shadeform availability at 2026-10-05 21:08Z, 2026-10-06 00:02Z, 01:43Z or 01:54Z |
+
+## Headline
+
+| Modality | Model | Cell | Result | Proof (in the bundle) |
+|---|---|---|---|---|
+| LLM | `Qwen/Qwen3-8B` | c=16, 4 warmup, thinking off | 252/252 ok; 21.325 req/s; warmup-to-measured gap 0.154 ms (#226) | `llm/f226.stdout`, `checks.txt` |
+| LLM | `Qwen/Qwen3-8B` | sweep c=1..64 | 0 errors; 1.495 to 65.351 req/s; knee c=16 (`kneedle`) | `llm/llm-sweep.stdout.json` |
+| VLM | `Qwen/Qwen3-VL-8B-Instruct` | c=8 / 2048x2048 c=4 / sweep c=1..16 | 56/56 ok / 14/14 ok (#242) / 0 errors, no knee (`no_bend`, p95 +10.8%) | `vlm/run.stdout`, `vlm/big.stdout`, `vlm/sweep.stdout.json` |
+| ASR | `openai/whisper-large-v3-turbo` | c=8 / sweep c=1..16 | 96/96 ok, WER/CER 0.0 / 0 errors, knee c=2 (saturation) | `asr/run.stdout`, `asr/sweep.stdout.json` |
+| ImageGen | `Tongyi-MAI/Z-Image-Turbo` | c=1 / sweep c=1..5 | 8/8 ok, 8 distinct PNG sha256 / 0 errors, flat 0.615 to 0.632 req/s, knee c=1 (saturation) | `imagegen/run.stdout`, `imagegen/sweep.stdout.json` |
+
+`checks.txt`: 11 PASS, 0 FAIL as run. Seven fixes (#226, #224, #232, #227, #230, #231, #216) are verified
+with a proving number. #224: the as-run checker's #224 test compared 0 stages (it keyed on a missing CSV
+column). The corrected `check_verify_fixed.py` compares 22/22 stages, with a max mismatch of 4.35e-15
+(`checks_fixed.txt`, 14 PASS). The imagegen c=5 point that read 0.999 req/s on H100 now reads 0.628. #227:
+the live telemetry abort wrote `summary.v3` and a `partial=true` NDJSON summary. A client-side rerun
+(`sigint227-rerun/`, mock server, same binaries) showed that one SIGINT during the drain still writes the
+summary (exit 1) and two SIGINTs hard-exit 130. #242 works live with a 2.2 MB image body. Because of an
+operator copy error, the VLM and ASR SUT `notes` say "H100"; their `gpu` fields are correct.
+Instance deleted and verified via `GET /instances/<id>/info`.

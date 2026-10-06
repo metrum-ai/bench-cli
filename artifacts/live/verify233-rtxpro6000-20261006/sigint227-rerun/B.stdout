@@ -1,0 +1,3 @@
+Metrum AI Bench metrum-ai-bench-cli-llm 1.5.3
+02:37:13 [0m[33m[WARN] [0mCtrl-C received; stopping new requests and draining in-flight work
+02:37:14 [0m[33m[WARN] [0mSecond Ctrl-C; exiting without waiting for drain

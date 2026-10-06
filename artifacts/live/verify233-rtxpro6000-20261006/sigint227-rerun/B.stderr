@@ -1,0 +1,3 @@
+sut: not provided; result is not self-describing (see README.md#publishing-a-result)
+telemetry probe demo: matched_series=1 scrape_ms=3.4 clock_offset_ms=Some(-320)
+02:37:13 [0m[31m[ERROR] [0mtelemetry source demo failed 3 consecutive scrapes (require-telemetry); stopping new requests and draining in-flight work

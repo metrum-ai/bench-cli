@@ -1,0 +1,31 @@
+Metrum AI Bench metrum-ai-bench-cli-llm 1.5.3
+02:37:00 [0m[33m[WARN] [0mCtrl-C received; stopping new requests and draining in-flight work
+
+=== Run summary (metrum-ai-bench-cli.summary.v3) ===
+  (partial - interrupted)
+  Attempted: 5  Successes: 5  Errors: 0  Error rate: 0.000
+  Window: 12.003s  Requests/sec: 0.417
+  Completion tokens/sec: 1.666 (server_usage)
+  Prompt tokens: 40  Input tokens/sec: 3.332
+  Completion tokens: 20
+  Total tokens/sec: 4.999
+  Latency: n=5 avg=6.002s p50=6.002s p90=6.002s p95=6.002s p99=6.002s [p90*,p95*,p99*]
+  CO-corrected latency: n=5 avg=6.002s p50=6.002s p90=6.002s p95=6.002s p99=6.002s [p90*,p95*,p99*]
+  TTFT: n=0
+  TTFT warning: TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte
+  TPOT: n=0
+  ITL: n=0
+  Connect: n=5 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p90*,p95*,p99*]
+  User tok/s: n=5 avg=0.666 p50=0.666 p90=0.667 p95=0.667 p99=0.667 [p90*,p95*,p99*]
+  First byte: n=5 avg=6.002s p50=6.002s p90=6.002s p95=6.002s p99=6.002s [p90*,p95*,p99*]
+  Receive: n=5 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p90*,p95*,p99*]
+  DNS: n=5 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p90*,p95*,p99*]
+  Bytes sent: n=5 avg=128.000 p50=128.000 p90=128.000 p95=128.000 p99=128.000 [p90*,p95*,p99*]
+  Bytes received: n=5 avg=251.000 p50=251.000 p90=251.000 p95=251.000 p99=251.000 [p90*,p95*,p99*]
+  Chunks received: n=5 avg=1.000 p50=1.000 p90=1.000 p95=1.000 p99=1.000 [p90*,p95*,p99*]
+  Connections reused: 1 (20.0%)
+  ISL tokens (server_usage): n=5 avg=8.000 p50=8.000 p90=8.000 p95=8.000 p99=8.000 [p90*,p95*,p99*]
+  OSL tokens (server_usage): n=5 avg=4.000 p50=4.000 p90=4.000 p95=4.000 p99=4.000 [p90*,p95*,p99*]
+  Observed concurrency: mean=2.80 p50=3.00 max=4.00 cap=4 engagement=0.200
+  Effective concurrency: n=5 avg=2.500 active_avg=2.500 max=4.000 active=12.003s
+  Goodput: 0.417 req/s (5/5 attempted; thresholds={})

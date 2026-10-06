@@ -1,0 +1,17 @@
+# docker run -d --name metrum-live-asr --gpus device=0 --ipc=host -p 8000:8000 -v <HOME>/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.31.0 openai/whisper-large-v3-turbo --max-model-len 448 
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+ready asr openai/whisper-large-v3-turbo on port 8000; SUT at /opt/metrum-bench/live-results/serve-asr/sut.json
