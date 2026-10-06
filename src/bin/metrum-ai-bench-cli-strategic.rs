@@ -272,7 +272,7 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
-        help = "Abort after N consecutive scrape failures on any source (default N=3)"
+        help = "Abort mid-run after N consecutive scrape failures on any source (default N=3); a failed startup probe fails the run with or without this flag"
     )]
     require_telemetry: bool,
     #[arg(

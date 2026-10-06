@@ -11,7 +11,10 @@ in the live docs
 Workload section. This page focuses on measured fields.
 
 - **E2E latency**: response body completion minus actual send. Successful
-  measure-phase requests only.
+  measure-phase requests only. ASR reads the audio file before it takes the
+  send time, so `send_offset_s`, `started_at`, `latency_s` (failures
+  included) and the NDJSON `t_sent_ns` / `t_done_ns` exclude the file read
+  (#227).
 - **Coordinated-omission latency**: E2E latency plus delay between scheduled
   arrival and actual send. This is the headline open-loop latency.
 - **First byte**: response headers received minus send (`first_byte_s`).

@@ -16,10 +16,25 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
-/// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after).
+/// Shared flag: stop issuing new requests (SIGINT / SIGTERM / stop-after /
+/// `--require-telemetry` abort).
+///
+/// A real signal is tracked apart from the stop itself (#227), so an internal
+/// stop such as a telemetry abort never turns the next Ctrl-C into a hard
+/// exit: only a second real signal skips the drain and the summary writes.
 #[derive(Clone, Default)]
 pub struct StopFlag {
     inner: Arc<AtomicBool>,
+    signaled: Arc<AtomicBool>,
+}
+
+/// What a received SIGINT or SIGTERM should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalAction {
+    /// First real signal: stop new requests, drain, write the summary.
+    Drain,
+    /// Second real signal: exit now without waiting for drain.
+    HardExit,
 }
 
 impl StopFlag {
@@ -38,10 +53,25 @@ impl StopFlag {
     pub fn as_atomic(&self) -> Arc<AtomicBool> {
         self.inner.clone()
     }
+
+    /// Record a real SIGINT/SIGTERM and stop the run. Returns `HardExit`
+    /// only when an earlier real signal was already recorded; a stop from
+    /// any other source (telemetry abort, stop-after) still drains.
+    pub fn on_signal(&self) -> SignalAction {
+        let already = self.signaled.swap(true, Ordering::SeqCst);
+        self.stop();
+        if already {
+            SignalAction::HardExit
+        } else {
+            SignalAction::Drain
+        }
+    }
 }
 
 /// Install SIGINT and (on Unix) SIGTERM handlers that set `flag`.
-/// A second signal after stop is already set exits the process immediately.
+/// A second real signal exits the process immediately; a first signal after
+/// an internal stop (for example a `--require-telemetry` abort) still drains
+/// so `summary.v3` and the NDJSON summary row are written (#227).
 pub fn install_stop_handlers(flag: StopFlag) {
     let flag_ctrl = flag.clone();
     tokio::spawn(async move {
@@ -49,12 +79,11 @@ pub fn install_stop_handlers(flag: StopFlag) {
             if tokio::signal::ctrl_c().await.is_err() {
                 break;
             }
-            if flag_ctrl.is_stopped() {
+            if flag_ctrl.on_signal() == SignalAction::HardExit {
                 warn!("Second Ctrl-C; exiting without waiting for drain");
                 std::process::exit(130);
             }
             warn!("Ctrl-C received; stopping new requests and draining in-flight work");
-            flag_ctrl.stop();
         }
     });
 
@@ -70,12 +99,11 @@ pub fn install_stop_handlers(flag: StopFlag) {
                 if sigterm.recv().await.is_none() {
                     break;
                 }
-                if flag_term.is_stopped() {
+                if flag_term.on_signal() == SignalAction::HardExit {
                     warn!("Second SIGTERM; exiting without waiting for drain");
                     std::process::exit(143);
                 }
                 warn!("SIGTERM received; stopping new requests and draining in-flight work");
-                flag_term.stop();
             }
         });
     }
@@ -226,6 +254,25 @@ mod tests {
             seq,
             scheduled_delay: Duration::from_millis(ms),
         }
+    }
+
+    #[test]
+    fn first_signal_after_internal_stop_drains() {
+        // #227: a telemetry abort stops the run without a signal.
+        let flag = StopFlag::new();
+        flag.clone().stop();
+        assert!(flag.is_stopped());
+        assert_eq!(flag.on_signal(), SignalAction::Drain);
+        assert_eq!(flag.on_signal(), SignalAction::HardExit);
+    }
+
+    #[test]
+    fn second_real_signal_hard_exits_across_clones() {
+        let flag = StopFlag::new();
+        let other = flag.clone();
+        assert_eq!(flag.on_signal(), SignalAction::Drain);
+        assert!(other.is_stopped());
+        assert_eq!(other.on_signal(), SignalAction::HardExit);
     }
 
     #[tokio::test]
