@@ -1,0 +1,38 @@
+Metrum AI Bench metrum-ai-bench-cli-vlm 1.5.3
+
+=== Run summary (metrum-ai-bench-cli.summary.v3) ===
+  Attempted: 56  Successes: 56  Errors: 0  Error rate: 0.000
+  Window: 8.516s  Requests/sec: 6.576
+  Completion tokens/sec: 750.446 (server_usage)
+  Prompt tokens: 16520  Input tokens/sec: 1939.818
+  Completion tokens: 6391
+  Total tokens/sec: 2690.264
+  Latency: n=56 avg=1.197s p50=1.202s p90=1.224s p95=1.234s p99=1.254s [p99*]
+  CO-corrected latency: n=56 avg=1.197s p50=1.202s p90=1.224s p95=1.234s p99=1.254s [p99*]
+  TTFT: n=56 avg=0.044s p50=0.041s p90=0.053s p95=0.062s p99=0.064s [p99*]
+  TPOT: n=56 avg=0.010s p50=0.010s p90=0.010s p95=0.010s p99=0.010s [p99*]
+  ITL: n=6279 avg=0.010s p50=0.010s p90=0.010s p95=0.010s p99=0.011s
+  Connect: n=56 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p99*]
+  Prefill (proxy): n=56 avg=0.044s p50=0.041s p90=0.053s p95=0.062s p99=0.064s [p99*]
+  Decode: n=56 avg=1.152s p50=1.161s p90=1.166s p95=1.188s p99=1.219s [p99*]
+  Decode tok/s: n=56 avg=99.026 p50=99.030
+  Time to second token: n=56 avg=0.054s p50=0.051s p90=0.062s p95=0.065s p99=0.073s [p99*]
+  Prefill tok/s per user: n=56 avg=6822.342 p50=7199.414 p90=7301.582 p95=7394.390 p99=8453.858 [p99*]
+  User tok/s: n=56 avg=95.374 p50=95.658 p90=95.868 p95=95.977 p99=96.507 [p99*]
+  First byte: n=56 avg=0.013s p50=0.009s p90=0.024s p95=0.030s p99=0.040s [p99*]
+  Receive: n=56 avg=1.184s p50=1.193s p90=1.197s p95=1.220s p99=1.246s [p99*]
+  DNS: n=56 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p99*]
+  Bytes sent: n=56 avg=4579.000 p50=4579.000 p90=4579.000 p95=4579.000 p99=4579.000 [p99*]
+  Bytes received: n=56 avg=27638.393 p50=27853.000 p90=27853.000 p95=28374.000 p99=29256.000 [p99*]
+  Chunks received: n=56 avg=117.125 p50=118.000 p90=118.000 p95=120.250 p99=124.000 [p99*]
+  Connections reused: 56 (100.0%)
+  ISL tokens (server_usage): n=56 avg=295.000 p50=295.000 p90=295.000 p95=295.000 p99=295.000 [p99*]
+  OSL tokens (server_usage): n=56 avg=114.125 p50=115.000 p90=115.000 p95=117.250 p99=121.000 [p99*]
+  Observed concurrency: mean=7.56 p50=8.00 max=8.00 cap=8 engagement=0.875
+  Effective concurrency: n=56 avg=7.869 active_avg=7.869 max=8.000 active=8.516s
+  Effective prefill concurrency: n=56 avg=0.290 active_avg=2.069 max=8.000 active=1.195s
+  Effective decode concurrency: n=56 avg=7.578 active_avg=7.615 max=8.000 active=8.475s
+  Tokens in flight: n=56 avg=2754.041 active_avg=2754.041 max=3196.700 active=8.516s
+  Effective prefill tok/s: n=56 avg=1939.818 active_avg=13821.920 max=44173.628 active=1.195s
+  Effective decode tok/s: n=56 avg=750.446 active_avg=754.137 max=794.439 active=8.475s
+  Goodput: 6.576 req/s (56/56 attempted; thresholds={})

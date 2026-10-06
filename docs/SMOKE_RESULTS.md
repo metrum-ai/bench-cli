@@ -219,3 +219,42 @@ As-run note: `--prompt` + `--seed` under default `--seed-mode increment` sent a 
 | ImageGen | 1x L40S | `Tongyi-MAI/Z-Image-Turbo` | c2 / c1 | 10/8 ok; unique increment seeds; 0.315 / 0.331 req/s |
 
 LLM strategic sweep not claimed (remote `--extra-body-json` quoting failure after G5/MB). All instances deleted.
+
+---
+
+# Smoke results - campaign `epic184-h100-20261005`
+
+> Live validation of epic #184 (issues #189 to #199) on Shadeform 1x H100 PCIe,
+> all four modalities, with in-binary `--telemetry` / `--ndjson` and strategic
+> sweeps for every modality. A validation run, not a publication under
+> [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Committed,
+> redacted bundle with per-issue results, check outputs and exact commands:
+> [`artifacts/live/epic184-h100-20261005/REPORT.md`](../artifacts/live/epic184-h100-20261005/REPORT.md).
+
+| Field | Value |
+|-------|-------|
+| Campaign ID | `epic184-h100-20261005` |
+| Bench package | built from `main` at `6f150f3` (tip build; `--version` prints `1.5.3`) |
+| Date (UTC) | 2026-10-05 (instance 21:10Z to 21:35Z) |
+| System | Shadeform, Scaleway `paris-france-1`, 1x H100 PCIe, driver 580.126.20, Ubuntu 24.04 |
+| Engines | LLM/VLM/ASR: `vllm/vllm-openai:v0.31.0`; ImageGen: `vllm/vllm-omni:v0.30.0` |
+| Telemetry | all-smi `v0.26.3-metrum.4` `/metrics` plus engine `/metrics`, in-binary |
+| Modalities | llm, vlm, asr, imagegen |
+| Not run | RTX PRO 6000 Blackwell Server Edition and H200: no Shadeform availability at 2026-10-05 21:08Z or 2026-10-06 00:02Z |
+
+## Headline
+
+| Modality | Model | Cell | Result | Proof (in the bundle) |
+|---|---|---|---|---|
+| LLM | `Qwen/Qwen3-8B` | R1 c=16, thinking off | 480/480 ok; 1450.471 completion tok/s; TTFT p50 0.031 s | `llm/r1-plain.stdout` |
+| LLM | `Qwen/Qwen3-8B` | R2 c=8, thinking on, max 2048 | 51/56 ok (5 `no_output_token` at the cap); 22460 reasoning tokens | `llm/r2-reasoning.stdout` |
+| LLM | `Qwen/Qwen3-8B` | sweep c=1..64 | 0 errors; 101.3 to 4948.1 completion tok/s; knee c=32 | `llm/r3-sweep.stdout.json` |
+| VLM | `Qwen/Qwen3-VL-8B-Instruct` | c=8 / sweep c=1..16 | 56/56 ok, 750.446 completion tok/s / 0 errors, 0.94 to 12.37 req/s | `vlm/run.stdout`, `vlm/sweep.stdout.json` |
+| ASR | `openai/whisper-large-v3-turbo` | c=8 / sweep c=1..16 | 96/96 ok, WER/CER 0.0 / 0 errors, 19.5 to 63.1 req/s | `asr/run.stdout`, `asr/sweep.stdout.json` |
+| ImageGen | `Tongyi-MAI/Z-Image-Turbo` | c=1 / sweep c=1..5 | 8/8 ok, 8 distinct PNG sha256 / 0 errors, 6 distinct digests per stage | `imagegen/run.stdout`, `imagegen/images.sha256` |
+
+Findings: #230 (preflight streaming probe on thinking models), #231 (analyze.py histogram
+percentiles below the first bucket; fixed by #234), #232 (knee on the nearly linear VLM sweep).
+Three operator errors (duplicate telemetry source, base URL instead of endpoint, `--guidance`
+instead of `--guidance-scale`) were fixed and rerun on the same instance; see the report.
+Instance deleted and verified via `GET /instances/<id>/info`.

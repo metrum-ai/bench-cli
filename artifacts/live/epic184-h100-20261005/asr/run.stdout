@@ -1,0 +1,44 @@
+Metrum AI Bench metrum-ai-bench-cli-asr 1.5.3
+21:29:56 [INFO] Starting audio transcription benchmark with 96 requests at 8 concurrency
+21:29:56 [INFO] Loaded 3 audio samples from 'test-data/asr/input.jsonl'
+21:29:56 [INFO] Preparing audio files...
+21:29:56 [INFO] Using local audio file for sample 1089-134686-0030: test-data/asr/1089-134686-0030.wav (size: 86924 bytes)
+21:29:56 [INFO] Using local audio file for sample 2961-961-0016: test-data/asr/2961-961-0016.wav (size: 250124 bytes)
+21:29:56 [INFO] Using local audio file for sample 6930-81414-0005: test-data/asr/6930-81414-0005.wav (size: 58124 bytes)
+21:29:56 [INFO] All audio files ready (3 samples)
+21:29:56 [INFO] Loading ground truth transcriptions from 'test-data/asr/truth.jsonl'
+21:29:56 [INFO] Loaded 3 ground truth transcriptions
+21:29:58 [INFO] All requests launched. Waiting for completion...
+21:29:58 [INFO] 10% complete (10/96 requests)
+21:29:58 [INFO] 20% complete (20/96 requests)
+21:29:58 [INFO] 30% complete (29/96 requests)
+21:29:58 [INFO] 40% complete (39/96 requests)
+21:29:58 [INFO] 50% complete (48/96 requests)
+21:29:58 [INFO] 60% complete (58/96 requests)
+21:29:58 [INFO] 70% complete (68/96 requests)
+21:29:58 [INFO] 80% complete (77/96 requests)
+21:29:58 [INFO] 90% complete (87/96 requests)
+21:29:58 [INFO] 100% complete (96/96 requests)
+21:29:58 [INFO] Completed 96 out of 96 requests (0 errors)
+
+=== Run summary (metrum-ai-bench-cli.summary.v3) ===
+  Attempted: 96  Successes: 96  Errors: 0  Error rate: 0.000
+  Window: 1.889s  Requests/sec: 50.820
+  Latency: n=96 avg=0.155s p50=0.146s p90=0.214s p95=0.220s p99=0.246s [p99*]
+  CO-corrected latency: n=96 avg=0.155s p50=0.146s p90=0.214s p95=0.220s p99=0.246s [p99*]
+  TTFT: n=0
+  TPOT: n=0
+  ITL: n=0
+  Connect: n=96 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p99*]
+  First byte: n=96 avg=0.155s p50=0.146s p90=0.214s p95=0.220s p99=0.246s [p99*]
+  Receive: n=96 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p99*]
+  DNS: n=96 avg=0.000s p50=0.000s p90=0.000s p95=0.000s p99=0.000s [p99*]
+  Bytes sent: n=96 avg=132537.667 p50=87739.000 p90=250936.000 p95=250936.000 p99=250936.000 [p99*]
+  Bytes received: n=96 avg=401.823 p50=338.000 p90=577.000 p95=577.000 p99=577.000 [p99*]
+  Chunks received: n=96 avg=1.000 p50=1.000 p90=1.000 p95=1.000 p99=1.000 [p99*]
+  Connections reused: 88 (91.7%)
+  Observed concurrency: mean=7.71 p50=8.00 max=8.00 cap=8 engagement=0.917
+  Effective concurrency: n=96 avg=7.863 active_avg=7.863 max=8.000 active=1.889s
+  Goodput: 50.820 req/s (96/96 attempted; thresholds={})
+21:29:58 [INFO] Cleaning up temporary audio files...
+21:29:58 [INFO] Audio files kept in the audio directory for future testing

@@ -1,0 +1,15 @@
+{
+  "id": "98ca72ce-d075-49df-8afb-73dd972f6381",
+  "name": "metrum-widen-20261005-211000",
+  "provider": "shadeform",
+  "cloud": "scaleway",
+  "region": "paris-france-1",
+  "type": "H100",
+  "gpu": "1x NVIDIA H100 PCIe",
+  "hourly_price_usd": 3.30,
+  "os": "Ubuntu 24.04 (kernel 6.8.0-106-generic per the SUT host_os)",
+  "created_at_utc": "2026-10-05T21:10:01Z",
+  "deleted_at_utc": "2026-10-05T21:35:21Z",
+  "delete_verified": "GET /instances/98ca72ce-d075-49df-8afb-73dd972f6381/info at 2026-10-05T21:38Z returned status=deleted, deleted_at=2026-10-05T21:35:21.15922Z",
+  "note": "Fields copied from the orchestrator's widen-state instance.done.json and the /info response. The public IP and SSH host key are omitted."
+}
