@@ -74,12 +74,13 @@ The output is byte-identical on the raw source directories and on this redacted 
 | #195 | Time-weighted concurrency and throughput | PASS. R1 `effective_concurrency.avg` 15.587 and max 16. Little's law check: sum(latency)/window = 15.5867. R2: 5.330 both ways. | `checks.txt` (#195), `llm/r1-plain.stdout` |
 | #196 | `--telemetry` and `--ndjson` in llm, vlm, asr, imagegen | PASS. All four binaries wrote `run`, `telemetry`, `request`, `stage` and `summary` rows with 0 scrape errors and 0 dropped rows. Data-log `send_offset_s` joins NDJSON `t_sent_ns` within 4e-6 ns on every row. Engine series: VLM 100, ASR 100, imagegen 60 (`vllm_omni:`). | `checks.txt` (#196), `*/run.summary.json` (`telemetry`), `*/run.ndjson.gz` |
 | #197 | Strategic sweeps for VLM, ASR, image generation | PASS. `config.kind` is `vlm`, `asr` and `imagegen`; each sweep has 5 points with error rate 0, and each NDJSON ends with `summary`, `partial=false`. ASR stages carry WER/CER/RTFx; imagegen stages carry image digests (6 distinct of 6). | `checks.txt` (#197), `*/sweep.stdout.json`, `*/sweep.ndjson.gz` |
-| #198 | Default telemetry YAML includes | PASS. Probes matched all-smi 65 and vLLM 154 series. The LLM NDJSON holds 6 vLLM histograms (TTFT, ITL, E2E, queue, prefill, decode) and 4 prefix-cache counters. It has no per-core CPU rows and no `all_smi_process_*` rows, since process rows are off by default. | `llm/r1-plain.stderr` (probe), `checks.txt` (supplement), `llm/telemetry.yaml` |
+| #198 | Default telemetry YAML includes | PASS. Probes matched all-smi 65 and vLLM 154 series. The LLM NDJSON holds 6 vLLM histograms (TTFT, ITL, E2E, queue, prefill, decode) and 4 prefix-cache counters. It has no per-core CPU rows and no `all_smi_process_*` rows, since process rows are off by default. | `llm/r1-plain.stderr` (probe), `checks.txt` (#198 lines), `llm/r1-plain.ndjson.gz` (prefix-cache counters), `llm/telemetry.yaml` |
 | #199 | analyze.py reads what we store | PASS with finding. R4 computed per-stage power, energy, J/output token, `gpu_util_mean`, `sm_active_p50`, `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`, `kv_cache_util_mean`, `preemptions_delta`, engine histogram p50/p95, and `kv_cache_util_at_knee` 0.0113 at knee c=32. Prefill and queue time read exactly 0.15 / 0.285 s in every stage, which led to finding #231. | `llm/r4-analyze.txt` |
 
-Note on `checks.txt`: the `#196 ... series_names=1` and empty `#198` lines printed by `check_llm.py` come
-from that script reading the series name from `name`, while `telemetry.v1` rows store it in `metric`
-(`check_mod.py` reads `metric`). The supplement at the end of `checks.txt` recounts with `metric`.
+Note on `checks.txt`: the orchestrator's original `check_llm.py` read the telemetry series name from `name`,
+but `telemetry.v1` rows store it in `metric`, so its #196 `series_names` and #198 lines came out empty. The
+bundled `scripts/check_llm.py` is fixed to read `metric`, and it no longer counts `all_smi_cpu_core_count` (a
+host count gauge) as a per-core series. No other check logic changed.
 
 ## Findings filed
 
@@ -133,10 +134,10 @@ could be created, so this bundle has no results for either SKU. Proof: `availabi
 | Path | Content |
 |------|---------|
 | `REPORT.md` | This report |
-| `checks.txt` | `check_llm.py` and `check_mod.py` output, plus the `metric`-key supplement |
+| `checks.txt` | `check_llm.py` (fixed, see note above) and `check_mod.py` output |
 | `instance.json` | Shadeform instance record (IP and SSH host key omitted) |
 | `availability.txt` | RTX PRO 6000 / H200 availability checks |
-| `scripts/` | `live_llm.sh`, `live_modalities.sh`, `imagegen-rerun.sh` (exact commands run on the GPU host) and `check_llm.py`, `check_mod.py` |
+| `scripts/` | `live_llm.sh`, `live_modalities.sh`, `imagegen-rerun.sh` (exact commands run on the GPU host) and `check_llm.py` (series-key fix applied), `check_mod.py` |
 | `llm/` | `binary.txt`, `serve-sut.json` (launcher SUT), `sut.json` (with prompt stamp), `telemetry.yaml`, `prompts-report.json`, `prompts.jsonl.gz`; for R1 and R2: `.stdout`, `.stderr`, `.summary.json` (final `summary.v3` line), `.jsonl.gz` (data log), `.ndjson.gz`; R3 `r3-sweep.stdout.json`, `.stderr`, `.ndjson.gz`; R4 analyze outputs; R5 selftest and preflight |
 | `vlm/`, `asr/`, `imagegen/` | `sut.json`, `models.json`, `telemetry.yaml`, `serve.txt` (launcher output; renamed from `serve.log`, which `.gitignore` excludes), `run.stdout`, `run.stderr`, `run.summary.json`, `run.jsonl.gz`, `run.ndjson.gz`, `sweep.stdout.json`, `sweep.stderr`, `sweep.ndjson.gz` |
 | `imagegen/images.sha256` | sha256 and size of the 8 generated PNGs. The PNGs are not committed. |

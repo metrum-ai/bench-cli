@@ -1,6 +1,10 @@
 # Metrum AI Bench: epic #184 live H100 checks (regenerated 2026-10-06)
 # Copyright (c) 2026 Metrum AI, Inc.  SPDX-License-Identifier: Apache-2.0
 #
+# check_llm.py: the bundled copy reads telemetry series from "metric" (the orchestrator original
+# read "name", which telemetry.v1 rows do not have) and excludes all_smi_cpu_core_count from the
+# per-core check. Fixed 2026-10-06; no other logic changed.
+#
 # Commands (run locally on the fetched lane directories, no network):
 #   python3 -I scripts/check_llm.py <live>/epic184-llm
 #   python3 -I scripts/check_mod.py <live>
@@ -23,8 +27,8 @@
 #196 summary.telemetry: {'schema_version': 'metrum-ai-bench-cli.telemetry.v1', 'ndjson': 'r1-plain.ndjson', 'sources': 2, 'request_rows': 512, 'stage_rows': 2, 'telemetry_rows': 5682, 'scrape_error_rows': 0, 'dropped_telemetry_rows': 0}
 #196 ndjson kinds: {'run': 1, 'telemetry': 5682, 'request': 512, 'stage': 2, 'summary': 1}; first row kind=run
 #196 data-log send_offset_s vs ndjson t_sent_ns: max |diff| = 1.9073486328125e-06 ns over 512 rows: PASS
-#196 telemetry samples=5682 series_names=1 t_ns range=[1397244,19501420014] request window=[33490,19754391184]
-#198 vllm histogram names present: []
+#196 telemetry samples=5682 series_names=93 t_ns range=[1397244,19501420014] request window=[33490,19754391184]
+#198 vllm histogram names present: ['vllm:e2e_request_latency_seconds_bucket', 'vllm:inter_token_latency_seconds_bucket', 'vllm:request_decode_time_seconds_bucket', 'vllm:request_prefill_time_seconds_bucket', 'vllm:request_queue_time_seconds_bucket', 'vllm:time_to_first_token_seconds_bucket']
 #198 per-core cpu series present: []; process series: []
 
 === r2-reasoning: 56 measured, 51 ok
@@ -40,8 +44,8 @@
 #196 summary.telemetry: {'schema_version': 'metrum-ai-bench-cli.telemetry.v1', 'ndjson': 'r2-reasoning.ndjson', 'sources': 2, 'request_rows': 64, 'stage_rows': 2, 'telemetry_rows': 19247, 'scrape_error_rows': 0, 'dropped_telemetry_rows': 0}
 #196 ndjson kinds: {'run': 1, 'telemetry': 19247, 'request': 64, 'stage': 2, 'summary': 1}; first row kind=run
 #196 data-log send_offset_s vs ndjson t_sent_ns: max |diff| = 3.814697265625e-06 ns over 64 rows: PASS
-#196 telemetry samples=19247 series_names=1 t_ns range=[1335036,67001215985] request window=[41462,67296850226]
-#198 vllm histogram names present: []
+#196 telemetry samples=19247 series_names=92 t_ns range=[1335036,67001215985] request window=[41462,67296850226]
+#198 vllm histogram names present: ['vllm:e2e_request_latency_seconds_bucket', 'vllm:inter_token_latency_seconds_bucket', 'vllm:request_decode_time_seconds_bucket', 'vllm:request_prefill_time_seconds_bucket', 'vllm:request_queue_time_seconds_bucket', 'vllm:time_to_first_token_seconds_bucket']
 #198 per-core cpu series present: []; process series: []
 #193 reasoning prefill_tps_per_user p50=5957.372640126644 first_reasoning_s p50=0.041301746 ttft p50=3.401230664
 
@@ -95,20 +99,3 @@
     load=4.0 n=6 err=0.0 thr=0.6734496984223782 p95=5.94278812875 mm={'images_requested': 1.0, 'images_returned': 1.0} digests={'distinct': 6, 'images': 6}
     load=5.0 n=6 err=0.0 thr=0.99862298046415 p95=7.46488619275 mm={'images_requested': 1.0, 'images_returned': 1.0} digests={'distinct': 6, 'images': 6}
   #197 sweep ndjson kinds={'run': 1, 'telemetry': 18203, 'request': 35, 'stage': 10, 'summary': 1} last=summary partial=False run.config.kind=imagegen modality keys in run row=['modality']
-
-######## Supplement: telemetry series by the "metric" key (LLM lane)
-# check_llm.py reads telemetry series names from r.get("name"), but telemetry.v1 rows carry the
-# series in "metric" (check_mod.py uses "metric"). That is why the check_llm.py lines above print
-# "series_names=1" and empty #198 lists. Recounted with the correct key:
-r1-plain: telemetry rows=5682 distinct series=93 (all_smi=64, vllm=29)
-  #198 vllm histogram _bucket series (6): ['vllm:e2e_request_latency_seconds_bucket', 'vllm:inter_token_latency_seconds_bucket', 'vllm:request_decode_time_seconds_bucket', 'vllm:request_prefill_time_seconds_bucket', 'vllm:request_queue_time_seconds_bucket', 'vllm:time_to_first_token_seconds_bucket']
-  #198 prefix-cache counters: ['vllm:external_prefix_cache_hits_total', 'vllm:external_prefix_cache_queries_total', 'vllm:prefix_cache_hits_total', 'vllm:prefix_cache_queries_total']
-  #198 per-core cpu series: []; process series: []
-r2-reasoning: telemetry rows=19247 distinct series=92 (all_smi=63, vllm=29)
-  #198 vllm histogram _bucket series (6): ['vllm:e2e_request_latency_seconds_bucket', 'vllm:inter_token_latency_seconds_bucket', 'vllm:request_decode_time_seconds_bucket', 'vllm:request_prefill_time_seconds_bucket', 'vllm:request_queue_time_seconds_bucket', 'vllm:time_to_first_token_seconds_bucket']
-  #198 prefix-cache counters: ['vllm:external_prefix_cache_hits_total', 'vllm:external_prefix_cache_queries_total', 'vllm:prefix_cache_hits_total', 'vllm:prefix_cache_queries_total']
-  #198 per-core cpu series: []; process series: []
-r3-sweep: telemetry rows=46799 distinct series=93 (all_smi=64, vllm=29)
-  #198 vllm histogram _bucket series (6): ['vllm:e2e_request_latency_seconds_bucket', 'vllm:inter_token_latency_seconds_bucket', 'vllm:request_decode_time_seconds_bucket', 'vllm:request_prefill_time_seconds_bucket', 'vllm:request_queue_time_seconds_bucket', 'vllm:time_to_first_token_seconds_bucket']
-  #198 prefix-cache counters: ['vllm:external_prefix_cache_hits_total', 'vllm:external_prefix_cache_queries_total', 'vllm:prefix_cache_hits_total', 'vllm:prefix_cache_queries_total']
-  #198 per-core cpu series: []; process series: []
