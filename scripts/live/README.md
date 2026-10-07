@@ -67,8 +67,10 @@ pitfalls that change results are in the guides, not here:
 For a Shadeform VM that serves each modality in turn over SSH, with all-smi
 telemetry, use `widen_oss_modalities.sh` (`up` holds the VM with a delete
 trap), `widen_cell.sh` (one cell plus telemetry sidecars on the GPU host),
-and `telemetry_sidecar.py` (Prometheus poller for the modality binaries,
-which have no `--telemetry` flag).
+and `telemetry_sidecar.py` (Prometheus poller for the modality binaries when a
+sidecar is preferred). The modality binaries already accept `--ndjson` and
+`--telemetry`; the sidecar remains useful when the GPU series must be scraped
+outside the benchmark process.
 
 | Modality | Launcher | Stack (researched 2026-10-02; sources in each script) | Smoke input |
 |---|---|---|---|

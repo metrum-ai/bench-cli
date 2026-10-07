@@ -21,7 +21,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
     name = "metrum-ai-bench-cli-prompts",
     author,
     version,
-    about = "Select ISL/OSL mixes from metrum-ai/prompt-library for metrum-ai-bench-cli-llm"
+    about = "Select ISL/OSL mixes from metrum-ai/prompt-library for metrum-ai-bench-cli-llm",
+    override_usage = "metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]"
 )]
 struct Args {
     #[arg(long, help = "Print version information and exit")]

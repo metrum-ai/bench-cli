@@ -29,8 +29,8 @@ and image-generation still use those local fixtures; they are not on the Hub.
 
 ## Before you benchmark (agents and operators)
 
-Read this before any run against a real model server. It applies equally to
-human engineers and to AI coding agents driving the CLI.
+Read [AGENTS.md](AGENTS.md) before any run against a real model server. It is
+the agent and operator entry point; the rules below are a short checklist.
 
 1. **This CLI is a client.** It does not serve models. Choose a compatible
    serving stack and start it yourself. [docs/SERVING.md](docs/SERVING.md)
@@ -54,24 +54,21 @@ human engineers and to AI coding agents driving the CLI.
 3. **Link out; do not copy.** Upstream recipes change. This repository keeps
    only version pins we tested, our CLI flags, SUT fields, and pitfalls
    unique to this client.
-4. **Prompts.** For LLM runs, extract a mix from Hugging Face
+4. **Prompts.** For publishable LLM runs, extract a mix from Hugging Face
    [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-   with `metrum-ai-bench-cli-prompts`. When nothing else is specified, use
-   its defaults (config `sample`, profile `chat-short`) rather than a
-   handmade prompt. See [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md).
-   VLM, ASR, and ImageGen use the fixtures in `test-data/`.
-5. **Use prebuilt binaries** unless a from-source build is wanted. Check, in
-   order:
-   1. an unpacked release tarball's `ROOT/bin/`
-   2. an existing `target/release/` (or `target/rel-user/release/`) build
-      in this checkout
-   3. only then one `cargo build --release --bins` in the single primary
-      checkout
-
-   Building is right when the operator asks for it or when a needed fix
-   exists only in the working tree. Record the binary path and commit in the
-   SUT notes, since a build from an untagged commit prints the last release
-   version. Details: [docs/SERVING.md](docs/SERVING.md#use-prebuilt-binaries).
+   with `--config full --profile chat-medium`. For a smoke test, use
+   `--config sample --profile chat-short`. Do not substitute a handmade
+   prompt. See [docs/PROMPT_LIBRARY.md](docs/PROMPT_LIBRARY.md). VLM, ASR,
+   and ImageGen use the fixtures in `test-data/`.
+5. **Download a prebuilt release on the GPU host.** Run the load generator on
+   the same GPU host as the server and download the matching GitHub Release
+   tarball there. Use its `bin/` directory and record the binary path,
+   `--version`, and commit in SUT notes. Building from this checkout is for
+   contributors testing an uncommitted fix, not the benchmark default. If a
+   contributor build is required, reuse an existing `target/release/` or
+   `target/rel-user/release/` build before running one
+   `cargo build --release --bins` in the primary checkout. Details:
+   [docs/SERVING.md](docs/SERVING.md#use-prebuilt-binaries).
 6. **Publishable runs** pass `--sut <file> --require-sut`
    ([examples/sut.example.json](examples/sut.example.json)). Thinking models
    need [docs/REASONING_MODELS.md](docs/REASONING_MODELS.md) before you

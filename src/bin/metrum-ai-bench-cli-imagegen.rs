@@ -152,10 +152,18 @@ struct Args {
     )]
     warmup_requests: u32,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        long_help = "Base RNG seed. With the default --seed-mode increment, request N uses --seed + N. Set --seed once. Do not also set a per-row seed in --prompts or a seed field in --extra-body-json/--extra-body-file: the row seed pins that request and the extra body overrides the computed seed."
+    )]
     seed: Option<i64>,
 
-    #[arg(long, value_enum, default_value_t = SeedMode::Increment)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SeedMode::Increment,
+        long_help = "Seed policy. increment (default): request N uses --seed + N unless the prompt row sets seed. fixed: every request uses --seed. prompt: use the row seed, falling back to --seed. A duplicate --seed on the command line does not error; the last value wins."
+    )]
     seed_mode: SeedMode,
 
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..), default_value_t = 1)]

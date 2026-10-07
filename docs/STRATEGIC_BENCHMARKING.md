@@ -59,12 +59,16 @@ Prefer a warmup count at least as large as stage concurrency on GPU endpoints
 so cold model-load and CUDA graph capture do not inflate the baseline stage.
 `--warmup-requests 0` is for mock/determinism only.
 
-For fixed-length throughput studies on engines that honor them, pass
-`--ignore-eos` and optionally `--min-tokens` with `--max-tokens` (engine
-extensions, not portable OpenAI fields). Prefer `--extra-body-json` when a
-gateway needs a different nesting. These controls are chat-only and are
-stamped into stage `config`. Do not use them as defaults for natural-EOS,
-tool-call, JSON-schema, or reasoning workloads.
+For fixed-length throughput studies on engines that honor them, define the OSL
+window with `--min-tokens` and `--max-tokens`, then pass `--ignore-eos` so a
+natural EOS cannot stop generation below that window. `--min-tokens` and
+`--ignore-eos` are engine extensions, not portable OpenAI fields; verify their
+behavior against the chosen server. The upper bound is `--max-tokens`; choose
+both bounds around the intended target and keep `--osl-tolerance` consistent
+with that window. Prefer `--extra-body-json` when a gateway needs a different
+nesting. These controls are chat-only and are stamped into stage `config`. Do
+not use them as defaults for natural-EOS, tool-call, JSON-schema, or reasoning
+workloads.
 
 Stdout JSON includes additive publication fields (`schema_version`,
 `tool_version`, `environment`, `config`, `sut`) while retaining `points` for
@@ -92,8 +96,12 @@ and token throughput is not comparable across configs. Stage `config` stamps
 `max_tokens`, `ignore_eos`, `min_tokens`, `prompts`, `prompt_pool_size`, and
 `warmup_requests`.
 
-The report plots achieved
-throughput against p95 latency and marks the unit-normalized Kneedle result.
+The report plots achieved throughput against p95 latency and marks the
+unit-normalized Kneedle result. In each point, `load` is the selected sweep
+axis and `throughput` is successful requests per second. There is no
+`knee_rps` field. `knee` is null when no index is selected; otherwise use
+`knee.load`, with the diagnostic details in `knee_detection`. Modality
+`summary.v3` output does not contain a knee.
 
 Knee detection needs at least 5 measured stages (stages with a p95): both
 endpoints plus 3 interior candidates. Stages with no successes have no p95
@@ -202,6 +210,19 @@ summary never prints a bare `Result is : VALID` without that disclaimer.
 This export is parser-oriented interoperability and is not an audited or
 submitted MLPerf result; official submissions must execute the MLPerf LoadGen
 and compliance suite.
+
+`--fail-on-osl-mismatch` is a publication gate, not an early-abort switch. A
+successful request mismatches when
+`abs(measured_output_tokens - target_output_tokens) > osl_tolerance`. For a
+strategic sweep it checks only the last stage, writes the summary, CSV, and
+HTML first, then exits with status 1 if any compared success mismatched. A
+nonzero exit from this gate therefore differs from a crash, and the written
+artifacts remain valid diagnostics. The CLI counts ISL mismatches but has no
+`--fail-on-isl-mismatch`; inspect strategic NDJSON request `input_tokens` in
+the campaign runner when ISL is a hard gate. Pass `--isl-tolerance` and
+`--osl-tolerance` explicitly. Their clap default is `0.0`: without a mix
+report that means exact matching, while `--prompt-mix-report` treats zero as a
+sentinel and takes the report's tolerance.
 
 ## Multi-turn and structured output
 

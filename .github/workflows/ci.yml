@@ -67,6 +67,14 @@ jobs:
         run: cargo test --all-targets --all-features
         env:
           METRUM_BENCH_REQUIRE_DUMMY: "1"
+      - name: cargo build (bins for documentation checks)
+        run: cargo build --bins
+      - name: generated CLI help is current
+        run: bash scripts/render_cli_help.sh --check
+      - name: documentation command blocks
+        run: bash scripts/check_doc_commands.sh
+      - name: documentation relative links
+        run: bash scripts/check_doc_links.sh
       - name: package dry run
         run: cargo package --allow-dirty
 

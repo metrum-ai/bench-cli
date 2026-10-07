@@ -322,13 +322,13 @@ struct Args {
     #[arg(
         long,
         default_value_t = 0.0,
-        help = "Allowed absolute deviation from --isl-target (tokens)"
+        long_help = "Allowed absolute deviation from --isl-target (tokens). Clap default 0.0. Without --prompt-mix-report, 0.0 means exact match. With --prompt-mix-report, 0.0 is a sentinel that uses the report's ISL tolerance. Pass an explicit value for publishable runs."
     )]
     isl_tolerance: f64,
     #[arg(
         long,
         default_value_t = 0.0,
-        help = "Allowed absolute deviation from --osl-target (tokens)"
+        long_help = "Allowed absolute deviation from --osl-target (tokens). Clap default 0.0. Without --prompt-mix-report, 0.0 means exact match. With --prompt-mix-report, 0.0 is a sentinel that uses the report's OSL tolerance. Required for a meaningful --fail-on-osl-mismatch gate."
     )]
     osl_tolerance: f64,
     #[arg(
