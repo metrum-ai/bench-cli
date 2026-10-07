@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHADEFORM="${REPO_ROOT}/scripts/live/shadeform.sh"
-ART="${REPO_ROOT}/artifacts/e2e"
+export ART="${REPO_ROOT}/artifacts/scratch"
 RESULTS_REMOTE="/tmp/metrum-e2e"
 MODEL="${MODEL:-Qwen/Qwen3.8-27B}"
 BUDGET_HOURS="${BUDGET_HOURS:-3}"

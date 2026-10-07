@@ -110,7 +110,7 @@ Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3`
 > **Coverage:** Shadeform parallel widen across LLM, VLM, ASR, and ImageGen on
 > 1x H100 PCIe (massedcompute / Scaleway). Not a publication under
 > [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Raw logs live
-> under gitignored `artifacts/live/`. Combined operator report:
+> as GitHub `evidence-*` release assets (#253). Combined operator report:
 > `/tmp/bench-cli-shadeform-smoke-report.md` (plus per-lane
 > `/tmp/bench-cli-{vlm,asr,imagegen}-smoke-report.md`).
 
@@ -140,7 +140,7 @@ TTFT is always `ttft_s` (first visible streamed token), never `first_byte_s`.
 
 ### LLM
 
-Artifacts: `artifacts/live/widen-20261002T144347Z/`.
+Evidence: [`widen-20261002T144347Z`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-widen-20261002T144347Z/evidence-widen-20261002T144347Z.tar.zst) (sha256 `cb602006e67c0e7f266d52e8eafa00c54dd8c570de0e080db0ba35cae7e5bc84`).
 
 | Cell | n | err | Output tok/s | TTFT p50 (s) | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -155,7 +155,7 @@ Prompts from `metrum-ai/prompt-library` (`sample`, ISL 256 / OSL 128).
 
 ### VLM
 
-Artifacts: `artifacts/live/widen-parallel-vlm-20261002T153627Z/`.
+Evidence: [`widen-parallel-vlm-20261002T153627Z`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-widen-parallel-vlm-20261002T153627Z/evidence-widen-parallel-vlm-20261002T153627Z.tar.zst) (sha256 `129a1d26f1345e7dc0ed283f6013b4b5cdc1090f3ac7feea1abe9e9a209865bb`).
 
 | Cell | n | err | Completion tok/s | Req/s | TTFT p50 / p95 (s) | E2E p50 / p95 (s) |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -165,7 +165,7 @@ Artifacts: `artifacts/live/widen-parallel-vlm-20261002T153627Z/`.
 
 ### ASR
 
-Artifacts: `artifacts/live/widen-parallel-asr-20261002T153555Z/`. Fixtures: `test-data/asr/`.
+Evidence: [`widen-parallel-asr-20261002T153555Z`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-widen-parallel-asr-20261002T153555Z/evidence-widen-parallel-asr-20261002T153555Z.tar.zst) (sha256 `51b1e1778aca8aa0ad623429d476432107580c9de66b97727c16418cf6fdd922`). Fixtures: `test-data/asr/`.
 
 | Cell | n | err | Req/s | Latency p50 (s) | Mean WER / CER |
 | --- | --- | --- | --- | --- | --- |
@@ -176,7 +176,7 @@ Independent verbose_json probe also scored WER 0.0000.
 
 ### Image generation
 
-Artifacts: `artifacts/live/widen-parallel-imagegen-20261002T153737Z/`. Smoke-scale only (not a performance claim).
+Evidence: [`widen-parallel-imagegen-20261002T153737Z`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-widen-parallel-imagegen-20261002T153737Z/evidence-widen-parallel-imagegen-20261002T153737Z.tar.zst) (sha256 `aad0ac1694659beed95e665397db2599ed835ab6957cb148a19f192cb82c7ec7`). Smoke-scale only (not a performance claim).
 
 | Cell | n | err | Latency p50 (s) | Req/s | Decoded artifacts |
 | --- | --- | --- | --- | --- | --- |
@@ -198,7 +198,7 @@ As-run note: `--prompt` + `--seed` under default `--seed-mode increment` sent a 
 
 > Four-modality Shadeform publish widen run from the operator host after the
 > modality-gap stack landed on `main` (`ca51dd5`). Full narrative:
-> `artifacts/live/publish-20261002T162512Z/REPORT.md`.
+> [`publish-20261002T162512Z REPORT`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-publish-20261002T162512Z/evidence-publish-20261002T162512Z.tar.zst) (sha256 `6fbd4a5fe31d7881815e66511ab1b28f84fc3375420b49bdff43639bedf7f991`).
 
 | Field | Value |
 |-------|-------|
@@ -229,7 +229,7 @@ LLM strategic sweep not claimed (remote `--extra-body-json` quoting failure afte
 > sweeps for every modality. A validation run, not a publication under
 > [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Committed,
 > redacted bundle with per-issue results, check outputs and exact commands:
-> [`artifacts/live/epic184-h100-20261005/REPORT.md`](../artifacts/live/epic184-h100-20261005/REPORT.md).
+> [`epic184-h100-20261005 REPORT`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-epic184-h100-20261005/evidence-epic184-h100-20261005.tar.zst) (sha256 `103649bce01765f8e8d84485d16a44ede2d147236eb1d5206f002232f44d192a`).
 
 | Field | Value |
 |-------|-------|
@@ -268,7 +268,7 @@ Instance deleted and verified via `GET /instances/<id>/info`.
 > every modality. A validation run, not a publication under
 > [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Committed, redacted bundle with
 > per-fix results, check outputs and exact commands:
-> [`artifacts/live/verify233-rtxpro6000-20261006/REPORT.md`](../artifacts/live/verify233-rtxpro6000-20261006/REPORT.md).
+> [`verify233-rtxpro6000-20261006 REPORT`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-verify233-rtxpro6000-20261006/evidence-verify233-rtxpro6000-20261006.tar.zst) (sha256 `2960fc3d51a8a20f0ad0a4ba285e475949427ae9d943177424522e826a7b8c33`).
 
 | Field | Value |
 |-------|-------|

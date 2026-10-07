@@ -6,7 +6,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ART="${REPO_ROOT}/artifacts/e2e"
+export ART="${REPO_ROOT}/artifacts/scratch"
 RESULTS_REMOTE="/tmp/metrum-e2e"
 PROMPTFOO_BUDGET_SEC="${PROMPTFOO_BUDGET_SEC:-1800}"
 DRIVER_PID="$(cat "${ART}/e2e-driver.pid")"

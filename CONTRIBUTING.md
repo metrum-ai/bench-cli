@@ -61,3 +61,27 @@ Track measurement and packaging gaps via GitHub issues labeled `measurement`, `o
 Open a GitHub issue with: the exact command line, the tool version
 (`--version-only`), the server type and version, the relevant lines from the
 data log and debug log, and what you expected instead.
+
+## Campaign evidence (#253)
+
+Do not commit run evidence under `artifacts/`. That directory is gitignored
+scratch for local e2e and live scripts.
+
+Publish a campaign bundle as a GitHub pre-release:
+
+1. Redact GPU UUIDs, hostnames (`--redact-hostname`), IPs, and local paths.
+   Do not include generated images; list their sha256 instead.
+2. Pack `evidence-<campaign>.tar.zst` (or `.zip`) plus a sibling `.sha256sum`.
+3. Create the release against the commit under test:
+
+```bash
+gh release create evidence-<campaign> \
+  --prerelease --latest=false --target <sha> \
+  --title "Evidence: <campaign>" \
+  evidence-<campaign>.tar.zst evidence-<campaign>.tar.zst.sha256sum
+```
+
+The tag must not match `v*` so `release.yml` and `deploy-docs.yml` do not run.
+Keep the latest binary release as `Latest`. Link the asset URL and sha256 from
+the PR or issue that the run backs, and from `docs/SMOKE_RESULTS.md` /
+`docs/CLAIMS_LEDGER.md`.

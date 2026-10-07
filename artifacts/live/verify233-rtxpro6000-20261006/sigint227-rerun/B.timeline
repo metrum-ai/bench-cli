@@ -1,5 +1,0 @@
-02:37:12.316 telemetry source stopped
-02:37:13.348 abort line seen: 02:37:13 [0m[31m[ERROR] [0mtelemetry source demo failed 3 consecutive scrapes (require-telemetry); stopping new reque
-02:37:13.853 process alive, sending SIGINT #1
-02:37:14.056 process alive, sending SIGINT #2
-02:37:14.259 exit=130

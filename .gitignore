@@ -17,3 +17,4 @@ metrumbench-imagegen-artifacts/
 audio/
 !dummy-model-server/internal/audio/
 !dummy-model-server/internal/audio/**
+artifacts/

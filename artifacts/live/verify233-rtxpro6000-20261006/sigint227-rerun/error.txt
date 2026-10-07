@@ -1,1 +1,0 @@
-02:37:13 [ERROR] telemetry source demo failed 3 consecutive scrapes (require-telemetry); stopping new requests and draining in-flight work

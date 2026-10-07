@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ART="${REPO_ROOT}/artifacts/e2e"
+export ART="${REPO_ROOT}/artifacts/scratch"
 RESULTS_REMOTE="/tmp/metrum-e2e"
 PROMPTFOO_BUDGET_SEC="${PROMPTFOO_BUDGET_SEC:-1800}"
 DRIVER_PID="$(cat "${ART}/e2e-driver.pid")"
@@ -200,10 +200,10 @@ done
 cp -a "${ART}/raw/aiperf/." "${ART}/aiperf/" 2>/dev/null || true
 
 # Fill metrum timings from log stamps when missing numbers
-python3 - <<'PY'
-import json, re
+python3 - <<PY
+import json, re, os
 from pathlib import Path
-art = Path("/home/cgadgil/src/bench-cli/artifacts/e2e")
+art = Path(os.environ["ART"])
 log = (art / "e2e-driver.log").read_text(errors="replace")
 def ts(pat):
     m = re.search(pat, log)

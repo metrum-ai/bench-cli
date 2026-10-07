@@ -1,3 +1,0 @@
-IMAGE override without notes: exit=1 (expect non-zero)
-IMAGE override with notes+sources: exit=0 (expect 0)
-default: exit=0 (expect 0)

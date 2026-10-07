@@ -1,4 +1,0 @@
-sut: not provided; result is not self-describing (see README.md#publishing-a-result)
-telemetry probe all-smi: matched_series=65 scrape_ms=1.1 clock_offset_ms=Some(-812)
-telemetry probe engine: matched_series=385 scrape_ms=4.2 clock_offset_ms=Some(-816)
-note: no knee: p95 latency rises less than 20% above its running minimum and no stage is saturated

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Build artifacts/e2e/COMPARISON_AIPERF.md from metrum + AIPerf bake-off outputs."""
+"""Build COMPARISON_AIPERF.md from metrum + AIPerf bake-off outputs (local ART dir)."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def _parse_aiperf_stage(stage_dir: Path) -> dict[str, Any]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--art", type=Path, required=True, help="artifacts/e2e directory")
+    ap.add_argument("--art", type=Path, required=True, help="local ART directory (gitignored artifacts/scratch by default)")
     ap.add_argument(
         "--aiperf",
         type=Path,

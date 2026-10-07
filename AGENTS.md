@@ -19,6 +19,10 @@ and the operator's.
 - Generated flag reference: [docs/CLI.md](docs/CLI.md)
 - What is actually verified, per modality: [docs/CLAIMS_LEDGER.md](docs/CLAIMS_LEDGER.md)
 
+## Campaign evidence
+
+Do not commit campaign output under `artifacts/`. Publish redacted bundles as GitHub `evidence-<campaign>` pre-releases (`--prerelease --latest=false --target <sha>`). Link the asset URL and sha256 from the PR or issue and from `docs/SMOKE_RESULTS.md` / `docs/CLAIMS_LEDGER.md`. See CONTRIBUTING.md.
+
 ## Default campaign
 
 Run these steps in order for any multi-host or publishable measurement. Each
