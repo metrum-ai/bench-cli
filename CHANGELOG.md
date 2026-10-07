@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Documentation
+- Live campaign evidence moves to GitHub `evidence-*` pre-release assets (#253). Historical `artifacts/live/...` and `artifacts/e2e/...` paths in older CHANGELOG entries stay as written; download the matching `evidence-<campaign>` release instead.
 - Agent-facing benchmark guidance now points to `AGENTS.md`, uses prebuilt
   binaries on the GPU host, documents publishable prompt and length gates,
   and records six follow-up designs in `PROPOSALS.md`. Clap help documents

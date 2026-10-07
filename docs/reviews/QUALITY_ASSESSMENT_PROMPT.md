@@ -115,7 +115,7 @@ Read all of:
   reproducible count harness with the current per-scenario data-point counts.
   Open parity gaps are tracked in epic
   [#184](https://github.com/metrum-ai/bench-cli/issues/184). Treat
-  `artifacts/e2e/COMPARISON_AIPERF.md` as dated history, not current evidence.
+  the bake-off comparison inside [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`) as dated history, not current evidence.
 - `live-results/**` if present. It is gitignored and may hold real GPU runs
   from the campaign described in `scripts/live/README.md`. Use it as evidence of how
   the tool behaves against real vLLM and SGLang, and cross-check

@@ -257,3 +257,7 @@ Day-to-day concepts: [User Guide](./user-guide). Publishing rules:
 [Publishing-oriented runs](./user-guide#publishing-oriented-runs). Sweeps:
 [Strategic benchmarking](./strategic-benchmarking). Serving hosts:
 [Platforms](./platforms).
+
+## Campaign evidence
+
+Do not commit live-run evidence under `artifacts/`. Publish a redacted `evidence-<campaign>` GitHub pre-release (`--prerelease --latest=false --target <sha>`) and link the asset URL plus sha256 from the PR and from SMOKE_RESULTS / CLAIMS_LEDGER. See CONTRIBUTING.md in the repo.

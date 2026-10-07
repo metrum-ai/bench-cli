@@ -1,2 +1,0 @@
-telemetry probe all-smi: matched_series=65 scrape_ms=1.0 clock_offset_ms=Some(-747)
-telemetry probe engine: matched_series=345 scrape_ms=41.8 clock_offset_ms=Some(-789)

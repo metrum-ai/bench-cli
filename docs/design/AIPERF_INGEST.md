@@ -91,7 +91,7 @@ All counts below come from real files.
 | Source | AIPerf | What it holds |
 |--------|--------|---------------|
 | #204 parity harness, `plain`, `reasoning`, `slo` (2026-10-05) | 0.13.0, JSON export schema `1.4` | Paced mock, c=4, 64 measured + 4 warmup requests. `profile_export.jsonl`, `profile_export_aiperf.json`, `server_metrics_export.json`, `phase_manifest.json` |
-| Bake-off `artifacts/e2e/raw/aiperf/c4/` (untracked, read-only) | 0.11.0, JSON export schema `1.3` | A real vLLM-served model, c=4, 16 requests, streaming chat. Same three files plus CSVs |
+| Bake-off evidence [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`), `raw/aiperf/c4/` inside the zip | 0.11.0, JSON export schema `1.3` | A real vLLM-served model, c=4, 16 requests, streaming chat. Same three files plus CSVs |
 | Upstream docs at tag `v0.13.0` | 0.13.0 | [Profile exports](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/working-with-profile-exports.md), [JSON export schema](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/json-export-schema.md), [metrics reference](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/metrics-reference.md), [server metrics](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md) |
 
 Bench targets: `request.v3` and `summary.v3` in
