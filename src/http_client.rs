@@ -27,6 +27,11 @@ pub struct HttpClientOptions<'a> {
 /// Installs [`ConnectTimingLayer`] and [`TimedResolver`] so a per-request
 /// [`crate::connect_timing::ConnectSlot`] can observe connect and DNS time and
 /// connection reuse (pool hits report `0.0`).
+///
+/// When `opts.insecure` is true, certificate validation is disabled. That sink
+/// is intentional: it backs the operator `--insecure` flag (stamped into
+/// config), not a default path. CodeQL `rust/disabled-certificate-check` is
+/// expected here and dismissed as wont_fix.
 pub fn build_http_client(opts: HttpClientOptions<'_>) -> anyhow::Result<Client> {
     let mut builder = Client::builder()
         .connect_timeout(opts.connect_timeout)
@@ -40,6 +45,7 @@ pub fn build_http_client(opts: HttpClientOptions<'_>) -> anyhow::Result<Client> 
         builder = builder.timeout(timeout);
     }
 
+    // Intentional: only when opts.insecure (--insecure). See module docs above.
     if opts.insecure {
         builder = builder.danger_accept_invalid_certs(true);
     }

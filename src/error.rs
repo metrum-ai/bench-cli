@@ -144,7 +144,7 @@ mod tests {
             .expect("client");
         // TEST-NET-1 is typically unroutable; short timeouts yield timeout or connect.
         let err = client
-            .get("http://192.0.2.1:81/")
+            .get("https://192.0.2.1:81/")
             .send()
             .await
             .expect_err("expected network failure");
