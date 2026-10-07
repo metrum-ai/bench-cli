@@ -215,7 +215,22 @@ chmod +x "${SHIMBIN}/cosign"
 MIRROR="file://${FIXTURE}"
 PREFIX="${TMP}/prefix"
 VERSION="fixture"
-export BENCH_BIN_DIR MOCK_URL MOCK_PORT MIRROR PREFIX VERSION
+REPO_ROOT="${ROOT}"
+
+# Fixture campaign for length_check / validity blocks (mock chat usage is 8/4).
+CAMPAIGN="${TMP}/campaign"
+mkdir -p "${CAMPAIGN}"
+cat >"${CAMPAIGN}/run.ndjson" <<'NDJSON'
+{"schema_version":"telemetry.v1","kind":"request","stage":"c1","warmup":false,"success":true,"input_tokens":8,"output_tokens":4}
+{"schema_version":"telemetry.v1","kind":"request","stage":"c1","warmup":false,"success":true,"input_tokens":8,"output_tokens":4}
+NDJSON
+ISL_TARGET=8
+ISL_TOLERANCE=0
+OSL_TARGET=4
+OSL_TOLERANCE=0
+
+export BENCH_BIN_DIR MOCK_URL MOCK_PORT MIRROR PREFIX VERSION REPO_ROOT CAMPAIGN
+export ISL_TARGET ISL_TOLERANCE OSL_TARGET OSL_TOLERANCE
 export PATH="${SHIMBIN}:${PATH}"
 
 # --- run blocks ------------------------------------------------------------
@@ -229,7 +244,7 @@ while IFS=$'\t' read -r bid src line kind reason; do
     continue
   fi
   echo "check_doc_commands: run ${src}:${line} (block ${bid})"
-  if ! ( cd "${TMP}" && bash "${TMP}/blocks/${bid}.sh" ); then
+  if ! ( cd "${REPO_ROOT}" && bash "${TMP}/blocks/${bid}.sh" ); then
     echo "check_doc_commands: FAILED ${src}:${line}" >&2
     status=1
   fi

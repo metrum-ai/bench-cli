@@ -194,11 +194,13 @@ Read the per-request windows from the NDJSON request rows (`input_tokens` and `o
 
 <!-- doc-check -->
 ```bash
-python3 examples/agent/length_check.py \
+# CI provides CAMPAIGN with a fixture NDJSON; a live cell uses the sweep output.
+python3 "${REPO_ROOT}/examples/agent/length_check.py" \
   --ndjson "${CAMPAIGN}/run.ndjson" \
-  --isl-target "<isl-target>" --isl-tolerance "<isl-tolerance>" \
-  --osl-target "<osl-target>" --osl-tolerance "<osl-tolerance>" \
+  --isl-target "${ISL_TARGET}" --isl-tolerance "${ISL_TOLERANCE}" \
+  --osl-target "${OSL_TARGET}" --osl-tolerance "${OSL_TOLERANCE}" \
   --out "${CAMPAIGN}/length_check.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pass"])' "${CAMPAIGN}/length_check.json")" = "True"
 ```
 
 Files produced: `length_check.json` per LLM run, and `status.json` per lane.
