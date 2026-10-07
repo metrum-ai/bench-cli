@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Documentation
+- The campaign skill is `.claude/skills/campaign/SKILL.md` (issue 262), with modalities chosen at intake and LLM chat as the default.
 - Telemetry docs state that Prometheus series are selected at runtime from
   `--telemetry` YAML. The binary does not embed a metric catalog. Agents curl
   the live `/metrics` page (all-smi, the serving engine, and any other
