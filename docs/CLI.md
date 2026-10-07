@@ -1100,7 +1100,7 @@ Options:
 
 
       --api-key <API_KEY>
-          [env: OPENAI_API_KEY=]
+          [env: OPENAI_API_KEY]
           [default: ""]
 
       --model <MODEL>
