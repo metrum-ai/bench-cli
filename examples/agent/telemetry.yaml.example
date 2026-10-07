@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Starting point only. Curl both live /metrics pages and adjust include patterns
+# before a run. YAML has no exclude key. Per-process all-smi rows are excluded
+# because no include pattern below can match all_smi_process_.
+
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: all-smi
+    url: http://127.0.0.1:9090/metrics
+    interval_ms: 500
+    include:
+      - "^all_smi_gpu_"
+      - "^all_smi_memory_"
+      - "^all_smi_cpu_(utilization|info|frequency_mhz|power_consumption_watts|temperature_celsius)$"
+      - "^all_smi_chassis_"
+      - "^all_smi_energy_consumed_joules_total$"
+      - "^all_smi_nvlink_remote_device_type$"
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: engine
+    url: http://127.0.0.1:<engine-port>/metrics
+    interval_ms: 1000
+    include:
+      # Replace or extend these from the live engine page. These starting
+      # patterns cover common vLLM and SGLang scheduling and token series.
+      - "^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$"
+      - "^sglang:(token_usage|num_running_reqs|num_queue_reqs|gen_throughput|cache_hit_rate)$"
