@@ -18,7 +18,7 @@ is required to land both axes.
 | Item | Value |
 |------|-------|
 | Repository | `metrum-ai/prompt-library` |
-| Configs | `sample` (smoke; default in docs) or `full` |
+| Configs | `sample` (smoke; clap default) or `full` (publishable default) |
 | Split | `train` |
 | Default revision | `main` (latest Hub commit; resolved SHA is written to `--report`) |
 | Pin (optional) | Pass a 40-character commit SHA via `--revision`, or `--require-pinned-revision` |
@@ -47,8 +47,16 @@ semantics). The rendered prompt is:
 Please aim for approximately {target_output_length} words in your response.
 ```
 
-Supplied token ISL does **not** include the hint text; word ISL does. Report
-`isl.counting_scope` records this.
+Supplied token ISL does **not** include the hint text or the server's chat
+template; word ISL does include the hint. `--isl-token-basis` currently accepts
+only `supplied-target`, which reads `target_input_tokens`. Report
+`isl.counting_scope` records this. Because the server tokenizer and template
+define runtime ISL, calibrate the selected prompts with the server's
+`/tokenize` endpoint when it provides one, then compare several real request
+`usage.prompt_tokens` values. Record the tokenizer, template, and observed
+offset. If the endpoint has no compatible `/tokenize`, use measured usage from
+a low-concurrency calibration run. Do not describe supplied-target ISL as a
+server token count.
 
 ## Named workload profiles
 
@@ -65,13 +73,19 @@ with `--profile`. Zero CLI tolerances fall back to the profile defaults.
 | `summarize-long` | 1 | 4096 | 512 | 256 / 64 |
 | `code-medium` | 1 | 1024 | 512 | 128 / 64 |
 
+For a publishable mix, use the full config and a named profile, and pass both
+tolerances explicitly so the command records the intended windows:
+
 ```bash
 metrum-ai-bench-cli-prompts \
-  --config sample \
+  --config full \
   --count 64 --seed 42 \
   --profile chat-medium \
+  --isl-tolerance 64 --osl-tolerance 32 \
   --output /tmp/mix.jsonl --report /tmp/mix-report.json
 ```
+
+Use `--config sample --profile chat-short` only for smoke tests.
 
 The mix report includes the **resolved** Hub commit SHA under `revision`, plus
 `profile.name` and `profile.version` when a profile was used.
@@ -147,6 +161,51 @@ target/release/metrum-ai-bench-cli-prompts \
   --isl-target 256 --isl-unit tokens --isl-stat mean --isl-tolerance 32 \
   --osl-target 128 --osl-unit tokens --osl-stat mean --osl-tolerance 16 \
   --output /tmp/mix-mean.jsonl --report /tmp/mix-mean-report.json
+```
+
+## Complete gated sweep
+
+This example selects a publishable prompt mix, preserves every selected row in
+each strategic stage, constrains the output-token window, and enables the
+runtime OSL gate. Replace the endpoint, model, SUT, and revision with values
+for the system under test. Calibrate server-token ISL as described above and
+gate each strategic NDJSON request row's `input_tokens` in the campaign runner;
+the CLI counts ISL mismatches but has no `--fail-on-isl-mismatch` flag.
+
+```bash
+set -euo pipefail
+REPORT=/tmp/chat-medium-report.json
+PROMPTS=/tmp/chat-medium.jsonl
+metrum-ai-bench-cli-prompts \
+  --config full --revision REVISION_SHA --require-pinned-revision \
+  --count 128 --seed 7 --profile chat-medium \
+  --isl-tolerance 64 --osl-tolerance 32 \
+  --output "$PROMPTS" --report "$REPORT"
+selected_count="$(jq -r .selected_count "$REPORT")"
+max_tokens="$(jq -r .recommended_max_tokens "$REPORT")"
+min_tokens=$((max_tokens > 32 ? max_tokens - 32 : 1))
+metrum-ai-bench-cli-strategic \
+  --url https://SERVER/v1/chat/completions --api-key "$API_KEY" \
+  --model MODEL --streaming --prompts "$PROMPTS" \
+  --prompt-mix-report "$REPORT" \
+  --isl-tolerance 64 --osl-tolerance 32 --fail-on-osl-mismatch \
+  --min-tokens "$min_tokens" --max-tokens "$max_tokens" --ignore-eos \
+  --warmup-requests 0 --requests-per-stage "$selected_count" \
+  --sweep 1,2,4,8,16 --sut sut.json --require-sut \
+  --ndjson run.ndjson --csv requests.csv --html report.html
+```
+
+`--fail-on-osl-mismatch` checks successful requests in the last strategic
+stage and exits nonzero after writing the summary, CSV, and HTML if any
+measured output differs from its target by more than the tolerance. It does
+not gate ISL.
+
+The following small tagged block is the CI fixture for the documentation
+command checker. It uses the mock server that the checker starts.
+
+<!-- doc-check -->
+```bash
+curl --fail --silent "$MOCK_URL/v1/models" | grep -q 'metrum-ai-bench-cli-mock'
 ```
 
 ## Failures

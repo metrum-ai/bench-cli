@@ -1,0 +1,107 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Filled template with placeholders only. Replace every <...> value, then reply
+# `go` or edit this file. Never put credential values here.
+
+hosts:
+  - alias: <host-alias>
+    ownership: <owned-or-confirmed-cloud>
+    architecture: <uname-m>
+    credentials_location: <ssh-agent-or-secret-reference>
+
+gpus_per_host:
+  <host-alias>:
+    count: <count>
+    indices: [<gpu-index>]
+
+workloads: [llm]
+
+lane_placement:
+  - lane: <lane-name>
+    workload: llm
+    host: <host-alias>
+    gpu_indices: [<gpu-index>]
+    port: <loopback-port>
+
+models:
+  - lane: <lane-name>
+    id: <model-id>
+    revision: <40-char-model-revision>
+    quantization_or_dtype: <value>
+
+engine:
+  lane: <lane-name>
+  name: <engine-name>
+  version: <engine-version>
+  image: <image-name>@sha256:<image-digest>
+  config: <exact-launch-command-after-search>
+  sources: [<model-card-url>, <engine-doc-url>]
+
+bench_cli:
+  tag: <release-tag>
+  target: <target-triple>
+  archive_sha256: <sha256>
+  sigstore_bundle: <bundle-url-or-mirror-path>
+
+telemetry:
+  recorder: <all-smi-release>
+  api_url: http://127.0.0.1:9090/metrics
+  engine_url: http://127.0.0.1:<engine-port>/metrics
+  record_interval_seconds: 1
+
+prompt:
+  dataset: metrum-ai/prompt-library
+  config: full
+  revision: <40-char-dataset-revision>
+  profiles: [chat-medium]
+  seed: 42
+
+length_windows:
+  chat-medium:
+    isl: {target: 512, tolerance: 64, lower: 448, upper: 576}
+    osl: {target: 128, tolerance: 32, lower: 96, upper: 160}
+
+concurrency_sweeps:
+  <lane-name>: [<concurrency-1>, <concurrency-2>, <concurrency-3>]
+
+requests_per_stage:
+  <lane-name>: <count>
+
+open_loop:
+  enabled: <true-or-false>
+  rates: <explicit-rates-or-knee-multipliers>
+  max_in_flight: <count>
+
+slos:
+  - ttft=<seconds>
+  - tpot=<seconds>
+  - e2e=<seconds>
+
+repetitions: 3
+seeds:
+  request: 7
+  shuffle: 7
+  prompt: 42
+  bootstrap: 7
+
+budget_caps:
+  wall_clock_hours: <hours>
+  monetary_amount: <amount-or-null>
+  currency: <currency-or-null>
+  action: <stop-runners-or-delete-confirmed-instances>
+
+price_per_hour:
+  amount: <amount-or-null>
+  currency: <currency-or-null>
+
+binary_download_location: <official-release-url-or-air-gapped-mirror>
+
+deliverables:
+  root: <campaign-root>
+  retain:
+    - raw request logs
+    - telemetry logs
+    - manifests and checksums
+    - status and heartbeat files
+    - SUT declaration
+    - tables and report

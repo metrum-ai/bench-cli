@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Documentation
+- Agent-facing benchmark guidance now points to `AGENTS.md`, uses prebuilt
+  binaries on the GPU host, documents publishable prompt and length gates,
+  and records six follow-up designs in `PROPOSALS.md`. Clap help documents
+  tolerance and image seed edge cases, while CI checks generated CLI help,
+  tagged documentation commands, and relative documentation links.
 - The campaign skill is `.claude/skills/campaign/SKILL.md` (issue 262), with modalities chosen at intake and LLM chat as the default.
 - Telemetry docs state that Prometheus series are selected at runtime from
   `--telemetry` YAML. The binary does not embed a metric catalog. Agents curl
