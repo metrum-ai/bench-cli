@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/live/matrix_smoke.sh (ASR_CONCS, WARMUP, NREQ_MULT, SEED, CAMPAIGN_MAX_HOURS)
+# Fixtures: test-data/asr/ (LibriSpeech).
+
+workloads:
+  - asr
+concurrency: [32, 64, 128]
+warmup: 8
+requests: "2 * concurrency"
+seed: 7
+budget: 6
+asr_fixtures: test-data/asr/

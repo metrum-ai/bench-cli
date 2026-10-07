@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/live/matrix_smoke.sh (IMAGEGEN_CONCS, WARMUP, NREQ_MULT, SEED, CAMPAIGN_MAX_HOURS)
+# Size: matrix_smoke attempts 8K with step-down if unsupported.
+
+workloads:
+  - imagegen
+concurrency: [2, 4, 8]
+warmup: 8
+requests: "2 * concurrency"
+seed: 7
+budget: 6
+imagegen_size: "8K with step-down if unsupported"

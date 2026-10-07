@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/e2e/run-shadeform.sh (concurrency 1..64, BUDGET_HOURS, PROMPT_LIBRARY_*, PROMPTFOO_BUDGET_SEC),
+#   scripts/e2e/sut-setup.sh (ALL_SMI_RELEASE)
+
+workloads:
+  - llm
+concurrency: [1, 2, 4, 8, 16, 32, 64]
+prompt_dataset: metrum-ai/prompt-library
+prompt_config: sample
+prompt_profile: rag-medium
+prompt_revision: main
+budget: 3
+promptfoo_budget_s: 1800
+all_smi_release: v0.26.3-metrum.4

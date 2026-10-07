@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/live/local_smoke.sh (CONCURRENCY, WARMUP, MAX_TOKENS, SEED, LLM_EXTRA_BODY, IMAGEGEN_SIZE, IMAGEGEN_STEPS, IMAGEGEN_GUIDANCE, READY_TIMEOUT_S)
+
+concurrency: [2]
+warmup: 1
+max_tokens: "64 or preflight recommended_max_tokens"
+seed: 7
+llm_extra_body: '{"chat_template_kwargs":{"enable_thinking":false}}'
+imagegen_size: "1024x1024"
+imagegen_steps: 9
+imagegen_guidance: 0.0
+ready_timeout_s: 600
+gates:
+  min_success_ratio: 1.0
