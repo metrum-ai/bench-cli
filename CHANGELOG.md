@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- CodeQL Analyze uses Rust `build-mode: none` for the workspace; the timeout
+  mapping test uses HTTPS to TEST-NET instead of HTTP (#254 leftover).
+
 ### Changed
 - CI and release gates move to `cargo xtask` (#254); ported header/DCO/gitleaks-fixture/CLI help/data-points/assert-headline checks and deleted the matching `scripts/` drivers.
 
