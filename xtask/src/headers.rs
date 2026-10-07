@@ -175,8 +175,7 @@ fn check_naming(root: &Path) -> Result<()> {
             !matches!(
                 *f,
                 "CHANGELOG.md" | "docs/HISTORY_REWRITE.md" | "HISTORY_REWRITE.md" | ".naming-allow"
-            ) && *f != "cargo xtask check-headers"
-                && *f != "cargo test -p xtask naming_rejects_metrum_bench_and_accepts_transition"
+            ) && *f != "xtask/src/headers.rs"
                 && !f.starts_with("scripts/tests/gitleaks/")
                 && *f != "docs/reviews/QUALITY_ASSESSMENT_REPORT.md"
                 && *f != "docs/reviews/QUALITY_ASSESSMENT_PROMPT.md"
