@@ -13,7 +13,7 @@ build, test and submit changes.
   Certificate of Origin (https://developercertificate.org). Sign off each
   commit with `git commit -s`.
 - Every authored source file carries a copyright and SPDX identifier in any
-  comment style accepted by `scripts/check_headers.sh` (the check requires the
+  comment style accepted by `cargo xtask check-headers` (the check requires the
   strings `Copyright (c) 2026 Metrum AI, Inc.` and
   `SPDX-License-Identifier: Apache-2.0`).
 - Follow the Code of Conduct (CODE_OF_CONDUCT.md).

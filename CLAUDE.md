@@ -11,6 +11,12 @@
 - Run a specific test: `cargo test <test_name>`
 - Test with output: `cargo test -- --nocapture`
 
+## Xtask gates
+- Headers/naming: `cargo xtask check-headers`
+- CLI help doc: `cargo xtask render-cli-help` (after clap changes)
+- Data points doc: `cargo xtask render-data-points`
+- Headline gate: `cargo xtask assert-headline <modality> <data_log.jsonl>`
+
 ## Dummy Server Commands
 - Run: `cd dummy-model-server && go run ./cmd/dummy-model-server`
 - Test: `cd dummy-model-server && go test ./...`

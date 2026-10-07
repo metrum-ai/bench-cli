@@ -26,7 +26,7 @@ metrum-ai-bench-cli-imagegen --url http://127.0.0.1:8000/v1 --api-key dummy \
   --num-requests 8 --concurrency 1 --warmup-requests 1 \
   --artifact-dir imagegen-artifacts --data-log imagegen.jsonl \
   --sut live-results/serve-imagegen/sut.json --require-sut
-scripts/live/assert_headline.sh imagegen imagegen.jsonl --artifact-dir imagegen-artifacts
+cargo xtask assert-headline imagegen imagegen.jsonl --artifact-dir imagegen-artifacts
 ```
 
 `scripts/live/local_smoke.sh --local --modality imagegen` runs the same cell end to end.

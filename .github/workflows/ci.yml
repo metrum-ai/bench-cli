@@ -38,11 +38,11 @@ jobs:
           go-version: "1.26.6"
           cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
-        run: bash scripts/check_headers.sh
+        run: cargo xtask check-headers
       - name: naming rule negative test
-        run: bash scripts/tests/check_naming_test.sh
+        run: cargo test -p xtask naming_rejects_metrum_bench_and_accepts_transition -- --exact
       - name: live headline gate self-test
-        run: bash scripts/tests/assert_headline_test.sh
+        run: cargo test -p xtask assert_headline_pass_and_fail_cases -- --exact
       - name: serve launcher SUT self-test
         run: bash scripts/tests/serve_sut_test.sh
       - name: analyze.py recipe tests
@@ -70,7 +70,7 @@ jobs:
       - name: cargo build (bins for documentation checks)
         run: cargo build --bins
       - name: generated CLI help is current
-        run: bash scripts/render_cli_help.sh --check
+        run: cargo xtask render-cli-help --check
       - name: documentation command blocks
         run: bash scripts/check_doc_commands.sh
       - name: documentation relative links
@@ -86,9 +86,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: DCO sign-off
         run: >-
-          bash scripts/check_dco.sh
+          cargo xtask check-dco
           ${{ github.event.pull_request.base.sha }}
           ${{ github.event.pull_request.head.sha }}
 
@@ -115,6 +117,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
@@ -127,7 +131,7 @@ jobs:
       - name: gitleaks custom-rule fixtures
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          bash scripts/tests/gitleaks/run.sh
+          cargo xtask gitleaks-fixtures
 
   coverage:
     name: core line coverage (80%)

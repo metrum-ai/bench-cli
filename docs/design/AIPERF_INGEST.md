@@ -432,7 +432,7 @@ Phase 1 tests confirm the exact count.
 |------|------|
 | Phase 1: serde model for the `profile_export.jsonl` record, unit-aware value reader, version gate on observed (`aiperf_version`, `schema_version`) pairs | 1 |
 | Phase 1: mapping to `RequestRecord` (TTFO, ITL rebuild, error and `no_output_token` rules, `in_flight_at_send`, `inputs.json` join) | 1 |
-| Phase 1: `import aiperf` clap subcommand, `--sut` / `--require-sut` / `--price-per-hour` / `--slo`, the `import` block and `source` field, plus `docs/OUTPUT_SCHEMA.md`, `docs/METRICS.md`, `CHANGELOG.md`, and `scripts/render_cli_help.sh` | 1 |
+| Phase 1: `import aiperf` clap subcommand, `--sut` / `--require-sut` / `--price-per-hour` / `--slo`, the `import` block and `source` field, plus `docs/OUTPUT_SCHEMA.md`, `docs/METRICS.md`, `CHANGELOG.md`, and `cargo xtask render-cli-help` | 1 |
 | Phase 1: fixtures and tests. Generate fresh exports with `scripts/parity/run_pair.sh` (`TOOLS=aiperf`), trim them into `tests/fixtures/`, and assert the evidence table above to 1e-9 s. Add an `import` row to `count_points.py`. | 1 |
 | **Phase 1 total** | **about 4** |
 | Phase 2: `.jsonl` scrape reader, `telemetry.v1` writer reuse, `_total` normalization, a GPU telemetry `.jsonl` reader, capture fixture, tests | 2 to 3 |

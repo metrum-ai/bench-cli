@@ -7,7 +7,7 @@
 `/v1/audio/transcriptions` endpoints. To start: pick a server under
 [Serving frameworks](#serving-frameworks), serve one of the real speech
 fixtures in `test-data/asr/` with `--ground-truth`, and gate the cell with
-`scripts/live/assert_headline.sh asr`. Before a real run, web-search the
+`cargo xtask assert-headline asr`. Before a real run, web-search the
 current vendor docs for your exact ASR model and engine version, and record
 the launch arguments and sources in the SUT (see [SERVING.md](SERVING.md)).
 
@@ -36,7 +36,7 @@ metrum-ai-bench-cli-asr --url http://127.0.0.1:8000/v1/audio/transcriptions --ap
   --input test-data/asr/input.jsonl --ground-truth test-data/asr/truth.jsonl \
   --num-requests 6 --concurrency 1 --data-log asr.jsonl \
   --sut live-results/serve-asr/sut.json --require-sut
-scripts/live/assert_headline.sh asr asr.jsonl
+cargo xtask assert-headline asr asr.jsonl
 ```
 
 [`scripts/live/serve/asr.sh`](../scripts/live/serve/asr.sh) writes a SUT with
@@ -163,7 +163,7 @@ Ground truth is JSONL with matching `id` and `transcript` fields, passed with
 `--ground-truth`. Every request record whose sample has a reference carries
 `modality_metrics.wer` and `modality_metrics.cer`. The summary line has no
 WER aggregate; average the request records, or use
-`scripts/live/assert_headline.sh asr <data_log>`, which prints the means and
+`cargo xtask assert-headline asr <data_log>`, which prints the means and
 fails if a successful record lacks WER or CER.
 
 ```bash

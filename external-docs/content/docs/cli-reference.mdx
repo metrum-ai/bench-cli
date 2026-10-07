@@ -9,7 +9,7 @@ sidebar_position: 4
 # CLI Reference
 
 Live `--help` on each binary is authoritative. The repository regenerates a
-modality/prompts dump with `scripts/render_cli_help.sh` into `docs/CLI.md`
+modality/prompts dump with `cargo xtask render-cli-help` into `docs/CLI.md`
 (llm/vlm/asr/imagegen/prompts only). If this page and `--help` ever disagree,
 trust `--help`. Strategic, mock-server, unified dispatcher, and selftest are
 **not** covered by that dump.
@@ -126,13 +126,13 @@ API-key pair patterns described in `--help`).
 
 Live `--help` on each binary is always authoritative.
 
-`scripts/render_cli_help.sh` regenerates `docs/CLI.md` for the unified
+`cargo xtask render-cli-help` regenerates `docs/CLI.md` for the unified
 dispatcher, modality binaries, prompts, strategic, and mock-server. Live
 `--help` on each binary remains authoritative.
 
 ```bash
 # from a checkout (after cargo build --bins)
-./scripts/render_cli_help.sh
+./cargo xtask render-cli-help
 ```
 
 Or inspect `docs/CLI.md` in the repository for the last generated dump.

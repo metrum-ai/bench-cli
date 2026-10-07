@@ -33,7 +33,7 @@ Every non-LLM test in CI runs against `dummy-model-server`, which cannot prove
 that a real server accepts the media we send. `.github/workflows/live-modality-smoke.yml`
 runs one smoke cell per modality (LLM, VLM, ASR, imagegen) on a real serving
 stack (`scripts/live/serve/*.sh`) and fails the cell through
-`scripts/live/assert_headline.sh`. It runs on `workflow_dispatch` and on `v*`
+`cargo xtask assert-headline`. It runs on `workflow_dispatch` and on `v*`
 tags (tags only when `LIVE_RUNNER_READY` is `true`), on the self-hosted runner label `gpu-h100`
 (`deploy/github-runners-bench-cli/MANUAL`, "GPU runner").
 
@@ -68,12 +68,12 @@ the example this rule exists for.
 
 Every release states how many data points it tracks.
 [DATA_POINTS.md](DATA_POINTS.md) is generated from the serde schemas by
-`tests/data_points.rs`. Regenerate it with `scripts/render_data_points.sh`
+`tests/data_points.rs`. Regenerate it with `cargo xtask render-data-points`
 after any change to `summary.v3`, `request.v3`, the strategic sweep point,
 or the `telemetry.v1` request row. `cargo test` (CI) and the release `verify`
-job (`scripts/render_data_points.sh --check`) fail when the committed file is
+job (`cargo xtask render-data-points --check`) fail when the committed file is
 stale. The `github-release` job builds the release body itself: GitHub's
-generated notes, then the output of `scripts/release_notes_data_points.sh`.
+generated notes, then the output of `cargo xtask release-notes-data-points`.
 Both jobs check out the tag, also on `workflow_dispatch`. Telemetry series are selected
 by YAML `include` at run time, so no release states a series count.
 

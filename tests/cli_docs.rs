@@ -51,7 +51,7 @@ fn cli_md_lists_shared_workload_flags_from_llm_help() {
         assert!(llm.contains(flag), "binary --help missing {flag}");
         assert!(
             md.contains(flag),
-            "docs/CLI.md missing {flag}; re-run scripts/render_cli_help.sh"
+            "docs/CLI.md missing {flag}; re-run cargo xtask render-cli-help"
         );
     }
 }
@@ -85,7 +85,7 @@ fn strategic_help_and_cli_md_document_chat_controls() {
         assert!(help.contains(flag), "strategic --help missing {flag}");
         assert!(
             md.contains(flag),
-            "docs/CLI.md missing {flag}; re-run scripts/render_cli_help.sh"
+            "docs/CLI.md missing {flag}; re-run cargo xtask render-cli-help"
         );
     }
 }

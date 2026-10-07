@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Metrum AI Bench CLI: one live smoke cell against a server on this host (no
-# Shadeform provisioning), followed by scripts/live/assert_headline.sh.
+# Shadeform provisioning), followed by cargo xtask assert-headline.
 #
 # Usage:
 #   local_smoke.sh --local --modality {llm,vlm,asr,imagegen}
@@ -25,7 +25,7 @@
 #   imagegen  1024x1024, 9 steps, guidance 0.0 (Z-Image-Turbo model card)
 # VLM, ASR, and imagegen have no Hub prompt dataset; local fixtures are used.
 #
-# Exit status is assert_headline.sh's: nonzero when the cell cannot back a
+# Exit status is cargo xtask assert-headline's: nonzero when the cell cannot back a
 # headline claim. Results land in live-results/ (gitignored).
 set -euo pipefail
 
@@ -138,6 +138,6 @@ set +e
 "${cmd[@]}" | tee "${out}/stdout.txt"
 echo "${PIPESTATUS[0]}" >"${out}/exit_code.txt"
 set -e
-"${SCRIPT_DIR}/assert_headline.sh" "${modality}" "${out}/results.jsonl" ${assert_args[@]+"${assert_args[@]}"} \
+cargo xtask assert-headline "${modality}" "${out}/results.jsonl" ${assert_args[@]+"${assert_args[@]}"} \
   | tee "${out}/assert.txt"
 exit "${PIPESTATUS[0]}"
