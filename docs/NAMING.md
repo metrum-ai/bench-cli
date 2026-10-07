@@ -32,7 +32,7 @@ As of **1.3.0**, only `metrum-ai-bench-cli*` binaries ship. Deprecated
 
 Naming enforcement lives in:
 
-- `scripts/check_headers.sh` - `check_naming`
+- `cargo xtask check-headers` - `check_naming`
 - `.naming-allow` - allowlist exceptions
 
 CI failures for naming should be fixed by aligning text to this table or, when

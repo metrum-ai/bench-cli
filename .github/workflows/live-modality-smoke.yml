@@ -3,7 +3,7 @@
 #
 # Metrum AI Bench CLI live modality gate: one smoke cell per modality on a
 # real serving stack (scripts/live/serve/*.sh), gated by
-# scripts/live/assert_headline.sh. Every other workflow runs against
+# cargo xtask assert-headline. Every other workflow runs against
 # dummy-model-server, which cannot prove media correctness.
 #
 # Runs on the self-hosted pool with the opt-in gpu-h100 label

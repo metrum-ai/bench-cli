@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all debug release test lint clean smoke-regen
+.PHONY: all debug release test lint clean smoke-regen check-headers render-cli-help render-data-points
 
 all: debug
 
@@ -27,3 +27,14 @@ smoke-regen:
 	else \
 		bash scripts/live/regen_smoke.sh; \
 	fi
+
+# CI gate helpers (see cargo xtask --help)
+check-headers:
+	cargo xtask check-headers
+
+render-cli-help:
+	cargo xtask render-cli-help
+
+render-data-points:
+	cargo xtask render-data-points
+

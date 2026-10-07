@@ -50,7 +50,7 @@ scripts/live/local_smoke.sh --local --modality <llm|vlm|asr|imagegen>
 scripts/live/serve/<modality>.sh stop
 ```
 
-Each cell ends in [`scripts/live/assert_headline.sh`](../scripts/live/assert_headline.sh).
+Each cell ends in `cargo xtask assert-headline`.
 
 To run against a server you started yourself, call the bench binary directly. Always pass `--sut <file> --require-sut` when the numbers will be shared:
 

@@ -44,7 +44,7 @@ kill "${side1}" "${side2}" 2>/dev/null; wait "${side1}" "${side2}" 2>/dev/null
 if [[ "${modality}" != strategic && -f "${out}/results.jsonl" ]]; then
   args=()
   [[ "${modality}" == imagegen ]] && args=(--artifact-dir "${out}/artifacts")
-  "${here}/assert_headline.sh" "${modality}" "${out}/results.jsonl" ${args[@]+"${args[@]}"} >"${out}/assert.txt" 2>&1
+  cargo xtask assert-headline "${modality}" "${out}/results.jsonl" ${args[@]+"${args[@]}"} >"${out}/assert.txt" 2>&1
   echo "assert_rc=$?" >>"${out}/assert.txt"
 fi
 echo "cell ${out##*/} rc=${rc} $(tail -n 2 "${out}/assert.txt" 2>/dev/null | head -1)"

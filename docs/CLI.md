@@ -4,7 +4,7 @@
 # CLI reference
 
 Generated from `metrum-ai-bench-cli*` `--help`. Re-run
-`scripts/render_cli_help.sh` after flag changes. Live `--help` is
+`cargo xtask render-cli-help` after flag changes. Live `--help` is
 authoritative if this file drifts.
 
 ## `metrum-ai-bench-cli`

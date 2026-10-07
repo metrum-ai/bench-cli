@@ -58,7 +58,7 @@ jobs:
       # (schema changed, file not regenerated) stops the release (#202).
       - name: Data-point counts are current
         shell: bash
-        run: bash scripts/render_data_points.sh --check
+        run: cargo xtask render-data-points --check
 
   dummy-binaries:
     needs: verify
@@ -419,7 +419,7 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
             -f tag_name="${RELEASE_TAG}" --jq .body > release-notes.md
           printf '\n' >> release-notes.md
-          bash scripts/release_notes_data_points.sh >> release-notes.md
+          cargo xtask release-notes-data-points >> release-notes.md
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}

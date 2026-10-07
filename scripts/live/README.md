@@ -89,11 +89,11 @@ The SUT they write records the exact docker command in `runtime.config`, the
 model revision SHA from the Hub, the GPU from `nvidia-smi`, and the source
 URLs in `extra.launcher_sources`.
 
-`scripts/live/assert_headline.sh <modality> <data_log> [--artifact-dir DIR]`
+`cargo xtask assert-headline <modality> <data_log> [--artifact-dir DIR]`
 fails the cell when successes are 0 or below `MIN_SUCCESS_RATIO` (default
 1.0), when `--require-sut` was not set, when ASR records lack WER/CER, when
 VLM records sent no image, or when imagegen produced no decodable PNG/JPEG.
-`scripts/tests/assert_headline_test.sh` is its offline self-test.
+`cargo test -p xtask assert_headline_pass_and_fail_cases` is its offline self-test.
 
 ### LLM prompts come from the Hub
 
