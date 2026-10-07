@@ -87,7 +87,12 @@ struct Args {
     version_only: bool,
     #[arg(long, required_unless_present = "version_only")]
     url: Option<String>,
-    #[arg(long, env = "OPENAI_API_KEY", default_value = "", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "OPENAI_API_KEY",
+        default_value = "",
+        hide_env_values = true
+    )]
     api_key: String,
     #[arg(long, required_unless_present = "version_only")]
     model: Option<String>,
