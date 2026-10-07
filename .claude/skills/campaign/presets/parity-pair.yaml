@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/parity/run_pair.sh (CONCURRENCY, REQUESTS, WARMUP)
+
+concurrency: [4]
+requests: 64
+warmup: 4
+mock: paced

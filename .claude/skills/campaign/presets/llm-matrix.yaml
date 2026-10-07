@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/live/matrix_smoke.sh (LLM_CONCS, ISL_TOKENS, MAX_TOKENS, WARMUP, NREQ_MULT, SEED, ENGINE, CAMPAIGN_MAX_HOURS)
+
+workloads:
+  - llm
+concurrency: [32, 64, 128]
+isl: 1024
+max_tokens: 1024
+warmup: 8
+requests: "2 * concurrency"
+seed: 7
+engine: vllm
+budget: 6

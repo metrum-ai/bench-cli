@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Provenance: scripts/e2e/aiperf-bakeoff.sh (SWEEP, REQS_PER_STAGE / AIPERF_REQUESTS_PER_STAGE, MAX_TOKENS / AIPERF_MAX_TOKENS)
+# Same Hub prompt mix is used on Bench and AIPerf. The campaign skill writes the comparison.
+
+workloads:
+  - llm
+concurrency: [1, 2, 4, 8, 16, 32, 64]
+requests: 16
+max_tokens: 256
