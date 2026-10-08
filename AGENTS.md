@@ -9,7 +9,7 @@ live in [CLAUDE.md](CLAUDE.md).
 
 ## What this repository is
 
-Metrum AI Bench CLI is a **client**. It measures the latency, throughput, and
+Metrum AI Bench CLI is a **benchmark harness**. It measures the latency, throughput, and
 quality of OpenAI-compatible endpoints for LLM, VLM, ASR, and image
 generation. It does not serve models, does not host GPUs, and does not install
 a serving engine for you. Choosing and running the serving stack is your job

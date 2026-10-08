@@ -8,7 +8,7 @@ Install one-liners and default scrape targets for YAML under
 freeze their metric names: curl the live endpoint and set `include` from that
 response. Vendors change tags and series between releases.
 
-Bind listeners to `127.0.0.1` when the exporter and the bench client share a
+Bind listeners to `127.0.0.1` when the exporter and the harness share a
 host. Paths are Prometheus text unless noted.
 
 ## all-smi (required default)

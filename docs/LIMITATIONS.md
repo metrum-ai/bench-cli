@@ -8,7 +8,7 @@ Honest scope for Metrum AI Bench at the 1.0 line. See also
 
 ## Client-side only
 
-Bench is a load-generation **client**. It measures what the client observes
+Bench is a load-generation **benchmark harness**. It measures what the harness observes
 (send, first byte, first visible token, body complete, errors). It cannot
 observe GPU utilization, KV-cache state, or scheduler internals on the server
 except when you optionally scrape Prometheus endpoints from the strategic
@@ -105,11 +105,11 @@ the dummy is meaningless. Live verification per modality is tracked in
 [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md) and produced by
 `.github/workflows/live-modality-smoke.yml`.
 
-## Single node / single client process
+## Single node / single harness process
 
 One Bench process drives one endpoint or one configured pool. Fleet-wide
 comparison, history, and attestation are Platform concerns, not this OSS
-client.
+harness.
 
 ## Published smoke matrix is NVIDIA-only
 

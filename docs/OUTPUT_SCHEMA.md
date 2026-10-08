@@ -95,7 +95,7 @@ Additional v3 fields:
 - `sut` - optional system-under-test block. Always present in JSON; `null` when
   `--sut` was not provided. Top-level `provenance` is usually `"declared"`;
   `sut init --probe` may write `"mixed"` with `field_provenance` marking local
-  observed fields. The client still does not verify the remote serving host.
+  observed fields. The harness still does not verify the remote serving host.
   Readers must treat `sut` as optional for historical summaries. Producers that
   pass `--require-sut` must supply `gpu.model`, `gpu.count` (>0),
   `driver_version`, `runtime.name`, `runtime.version`, `runtime.config`, and

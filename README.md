@@ -32,7 +32,7 @@ and image-generation still use those local fixtures; they are not on the Hub.
 Read [AGENTS.md](AGENTS.md) before any run against a real model server. It is
 the agent and operator entry point; the rules below are a short checklist.
 
-1. **This CLI is a client.** It does not serve models. Choose a compatible
+1. **This CLI is a benchmark harness.** It does not serve models. Choose a compatible
    serving stack and start it yourself. [docs/SERVING.md](docs/SERVING.md)
    maps each modality to its framework, launcher, and upstream docs:
    - LLM and VLM: regular vLLM
@@ -53,7 +53,7 @@ the agent and operator entry point; the rules below are a short checklist.
    choices and their source URLs in the SUT `runtime.config` and `notes`.
 3. **Link out; do not copy.** Upstream recipes change. This repository keeps
    only version pins we tested, our CLI flags, SUT fields, and pitfalls
-   unique to this client.
+   unique to this harness.
 4. **Prompts.** For publishable LLM runs, extract a mix from Hugging Face
    [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
    with `--config full --profile chat-medium`. For a smoke test, use
@@ -432,7 +432,7 @@ scanning runs in CI. Test fixture provenance is documented in
 `test-data/README.md`; dependencies and notices are in
 `THIRD_PARTY_LICENSES` and `NOTICE`.
 
-Run summaries may record client `environment.hostname`. Use
+Run summaries may record the harness `environment.hostname`. Use
 `--redact-hostname` when publishing or sharing logs so the hostname field is
 null; `--require-sut` implies redaction for publication-oriented runs. See
 [docs/OUTPUT_SCHEMA.md](docs/OUTPUT_SCHEMA.md) for the summary / environment

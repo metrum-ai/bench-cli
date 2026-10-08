@@ -3,7 +3,7 @@
 
 # Serving stacks for each modality
 
-Metrum AI Bench CLI is a client: it measures an OpenAI-compatible HTTP server that you start yourself. Use this page to pick the server for each modality, then follow the upstream links for recipes. This repository does not copy them.
+Metrum AI Bench CLI is a benchmark harness: it measures an OpenAI-compatible HTTP server that you start yourself. Use this page to pick the server for each modality, then follow the upstream links for recipes. This repository does not copy them.
 
 **Search first.** Before any real-backend run, web-search the current vendor docs for that exact model, engine, and engine version. Check:
 - the serving framework and image tag

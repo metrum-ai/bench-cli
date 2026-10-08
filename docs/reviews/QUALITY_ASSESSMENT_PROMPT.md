@@ -125,7 +125,7 @@ Build and test commands are in `CLAUDE.md`. The Go dummy server accepts
 `-port`, `-latency`, `-chunk-interval`, and `-mode` flags and models a
 known timing profile, which makes it an oracle: read its handlers and derive
 the expected TTFT, end-to-end, and inter-token intervals before running the
-client against it.
+harness against it.
 
 ## 4. Method, in order
 
