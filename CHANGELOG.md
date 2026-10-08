@@ -10,6 +10,9 @@
 - CI and release gates move to `cargo xtask` (#254); ported header/DCO/gitleaks-fixture/CLI help/data-points/assert-headline checks and deleted the matching `scripts/` drivers.
 
 ### Documentation
+- Product identity wording calls Metrum AI Bench CLI a benchmark harness
+  rather than a client. Measurement terms such as client-side latency and
+  HTTP client code are unchanged.
 - Live campaign evidence moves to GitHub `evidence-*` pre-release assets (#253). Historical `artifacts/live/...` and `artifacts/e2e/...` paths in older CHANGELOG entries stay as written; download the matching `evidence-<campaign>` release instead.
 - Agent-facing benchmark guidance now points to `AGENTS.md`, uses prebuilt
   binaries on the GPU host, documents publishable prompt and length gates,

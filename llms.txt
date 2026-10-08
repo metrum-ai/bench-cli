@@ -1,6 +1,6 @@
 # Metrum AI Bench CLI
 
-Metrum AI Bench CLI is an Apache-2.0 client that measures the latency,
+Metrum AI Bench CLI is an Apache-2.0 benchmark harness that measures the latency,
 throughput, and quality of OpenAI-compatible LLM, VLM, ASR, and image
 generation endpoints. It does not serve models. This file indexes the
 documents an AI agent needs to run a benchmark safely and reproducibly.
@@ -8,7 +8,7 @@ documents an AI agent needs to run a benchmark safely and reproducibly.
 - [AGENTS.md](AGENTS.md): Agent entry point with hard rules, the default campaign order, and the truth order.
 - [docs/INTAKE.md](docs/INTAKE.md): Intake form and default choices to confirm with the operator before spending money or starting load.
 - [docs/AGENT_RUNBOOK.md](docs/AGENT_RUNBOOK.md): Step-by-step campaign runbook from intake through cleanup.
-- [docs/PITFALLS.md](docs/PITFALLS.md): Known traps and failure modes specific to this client and its runs.
+- [docs/PITFALLS.md](docs/PITFALLS.md): Known traps and failure modes specific to this harness and its runs.
 - [docs/CLI.md](docs/CLI.md): Generated flag reference for every binary and subcommand.
 - [docs/OUTPUT_SCHEMA.md](docs/OUTPUT_SCHEMA.md): JSONL data-log and run-summary schema.
 - [docs/CLAIMS_LEDGER.md](docs/CLAIMS_LEDGER.md): What is supported in code versus verified live, per modality.

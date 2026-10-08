@@ -14,7 +14,7 @@ Every benchmark binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`,
 OpenMetrics exposition during a run and writes tagged NDJSON rows beside
 request and stage rows. All five share one writer and one lifecycle
 (`TelemetrySession` in `src/telemetry/session.rs`), so the YAML schema, the
-row kinds and `telemetry.v1` are the same everywhere. Hardware and engine signals reach the client only
+row kinds and `telemetry.v1` are the same everywhere. Hardware and engine signals reach the harness only
 through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
 source, not a crate dependency.

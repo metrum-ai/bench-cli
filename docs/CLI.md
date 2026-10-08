@@ -18,7 +18,7 @@ Commands:
   asr        Audio transcription benchmark
   imagegen   Image generation benchmark
   prompts    Select an ISL/OSL mix from metrum-ai/prompt-library
-  selftest   Print client environment JSON and `selftest: ok` (exit 0 on success)
+  selftest   Print harness environment JSON and `selftest: ok` (exit 0 on success)
   preflight  Probe an OpenAI-compatible serving endpoint before a long run
   sut        Write or probe a system-under-test declaration
   compare    Compare two or more strategic sweep summaries or request CSVs

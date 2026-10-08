@@ -49,7 +49,7 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
     },
-    /// Print client environment JSON and `selftest: ok` (exit 0 on success).
+    /// Print harness environment JSON and `selftest: ok` (exit 0 on success).
     Selftest,
     /// Probe an OpenAI-compatible serving endpoint before a long run.
     Preflight {

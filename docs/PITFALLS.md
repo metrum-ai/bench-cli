@@ -59,7 +59,7 @@ Symptom: `file not found` for prompts, images, audio, or schemas that exist in t
 
 Cause: relative fixture paths resolve against the process working directory.
 
-Fix: start bench clients with cwd `/opt/bench/repo` so `test-data/` resolves, or pass absolute paths. Record the cwd in the manifest.
+Fix: start the harness with cwd `/opt/bench/repo` so `test-data/` resolves, or pass absolute paths. Record the cwd in the manifest.
 
 ## 8. Imagegen seeds get overridden
 

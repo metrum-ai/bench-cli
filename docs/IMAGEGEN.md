@@ -52,11 +52,11 @@ Other OpenAI-compatible image servers work too, as long as they implement `/v1/i
 
 ## Request knobs that change the result
 
-The client sends what you pass and nothing else. Server defaults often differ from the model card, so set these explicitly on every run:
+The harness sends what you pass and nothing else. Server defaults often differ from the model card, so set these explicitly on every run:
 
 | Flag | Request field | Why it matters |
 |---|---|---|
-| `--size WxH` | `size` | Latency scales with pixel count. The client defaults to `1024x1024`. |
+| `--size WxH` | `size` | Latency scales with pixel count. The harness defaults to `1024x1024`. |
 | `--num-inference-steps N` | `num_inference_steps` | **vLLM-Omni's Z-Image pipeline uses 50 steps when the field is absent, while Turbo is designed for 9.** Omitting the flag makes the run roughly 5.5x slower and not comparable. |
 | `--guidance-scale G` | `guidance_scale` | Turbo models expect 0.0. |
 | `--seed S`, `--seed-mode fixed\|increment\|prompt` | `seed` | Without a seed the server picks a random one. The `increment` default gives each request seed `S + i`. |
@@ -64,7 +64,7 @@ The client sends what you pass and nothing else. Server defaults often differ fr
 | `--negative-prompt`, `--true-cfg-scale` | same | Model-specific. Leave them unset unless the model card uses them. |
 | `--response-format b64_json` | `response_format` | vLLM-Omni returns `b64_json` (the default) or raw file bytes, never URLs, so keep `b64_json` against it. |
 | `--extra-body-json` / `--extra-body-file` | merged into the body | For other fields such as `flow_shift`. The merged body is recorded in `config.body_template`. |
-| `--artifact-dir`, `--no-save-images` | none (client only) | Decoded images are written here and hashed. `assert_headline.sh --artifact-dir` fails the cell if none decode as PNG or JPEG. |
+| `--artifact-dir`, `--no-save-images` | none (harness only) | Decoded images are written here and hashed. `assert_headline.sh --artifact-dir` fails the cell if none decode as PNG or JPEG. |
 
 Prompts can come from `--prompt` (one string) or a `--prompts` JSONL file with per-row `prompt`, `negative_prompt`, and `size`. See [README](../README.md#input-formats). There is no Hub prompt dataset for image generation.
 
