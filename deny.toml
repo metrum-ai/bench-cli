@@ -17,6 +17,9 @@ yanked = "deny"
 # drop-in for `paste`; upstream issue tracked as RUSTSEC-2024-0436.
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; pulled in by tokenizers only" },
+    # Transitive via serde_yaml (telemetry and SUT YAML). No drop-in without
+    # migrating parsers; tracked as RUSTSEC-2024-0449.
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained; pulled in by serde_yaml" },
 ]
 
 [bans]

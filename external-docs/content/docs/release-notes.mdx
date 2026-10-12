@@ -17,6 +17,25 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.5.4
+
+| | |
+| --- | --- |
+| **Product** | Metrum AI Bench CLI |
+| **Version** | 1.5.4 |
+| **Previous version** | 1.5.3 |
+| **Release Date** | October 12, 2026 |
+
+- Every modality binary (`llm`, `vlm`, `asr`, `imagegen`) scrapes Prometheus
+  `/metrics` with `--ndjson` and `--telemetry`, the same way strategic does.
+  `--require-telemetry` aborts on mid-run scrape failures. Legacy
+  `--metrics-url` remains on strategic only.
+- The v1.5.3 GitHub release assets do not include those modality flags; use
+  1.5.4 (or later) when a modality cell must scrape `/metrics` in-process.
+- Full engineering detail: repository `CHANGELOG.md` under 1.5.4.
+
+---
+
 ## Metrum AI Bench CLI 1.5.3
 
 | | |

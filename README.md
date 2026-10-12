@@ -9,7 +9,7 @@
 
 Metrum AI Bench CLI provides Apache-2.0 licensed load and performance measurement
 for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints. Current
-release: **1.5.3** ([CHANGELOG](CHANGELOG.md)). All four modalities are
+release: **1.5.4** ([CHANGELOG](CHANGELOG.md)). All four modalities are
 supported in code; which of them have been verified against a real serving
 stack, and in which campaign, is tracked per modality in the
 [claims ledger](docs/CLAIMS_LEDGER.md).
@@ -356,15 +356,16 @@ Pass `--runs N` among the forwarded modality arguments to the unified entry
 point to execute sequential independent runs and append a seeded bootstrap
 cross-run aggregate to `--data-log`.
 
-The `metrum-ai-bench-cli-strategic` runner adds concurrency/rate sweeps
-(`--sweep`), knee detection, multi-turn sessions, validity rules,
-server-metrics correlation, tagged telemetry NDJSON (`--ndjson` with
-`--telemetry` Prometheus scrapes; the series list is the YAML, loaded at
+Every modality binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`)
+and `metrum-ai-bench-cli-strategic` write tagged telemetry NDJSON (`--ndjson`
+with `--telemetry` Prometheus scrapes; the series list is the YAML, loaded at
 startup, not a catalog in the binary; default smoke exporter is the Metrum
 [all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metrics` plus
-the serving engine's `/metrics`), and
-CSV, HTML (`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP
-exports. See [strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md) and
+the serving engine's `/metrics`). Strategic also adds concurrency/rate sweeps
+(`--sweep`), knee detection, multi-turn sessions, validity rules,
+server-metrics correlation via legacy `--metrics-url`, and CSV, HTML
+(`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP exports. See
+[strategic benchmarking](docs/STRATEGIC_BENCHMARKING.md) and
 [telemetry](docs/TELEMETRY.md).
 
 ## Dummy server

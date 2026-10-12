@@ -1,6 +1,6 @@
 ---
 title: Feature Reference
-description: Per-feature configuration lookup for Metrum AI Bench CLI 1.3.0.
+description: Per-feature configuration lookup for Metrum AI Bench CLI 1.5.4.
 sidebar_label: Feature Reference
 sidebar_position: 3
 ---
@@ -11,7 +11,7 @@ sidebar_position: 3
 # Feature Reference
 
 This page is a configuration reference for features shipping in Metrum AI Bench CLI
-**1.3.0**. Each section covers purpose, key parameters, and where to go
+**1.5.4**. Each section covers purpose, key parameters, and where to go
 next. Live `--help` remains authoritative for the full flag set.
 
 If you are new to a feature, the [User Guide](./user-guide) covers the workflow
@@ -57,7 +57,9 @@ were removed in **1.3.0**.
 Shared load parameters (non-exhaustive): `--url` / `--endpoints-file`,
 `--warmup-requests`, `--seed`, `--request-rate`, `--arrival`,
 `--max-concurrency`, `--slo`, `--streaming`, `--system-prompt`,
-`--insecure`, `--ca-cert`.
+`--insecure`, `--ca-cert`. Shared telemetry flags (same names as strategic):
+`--ndjson`, `--telemetry`, `--require-telemetry`,
+`--require-telemetry-failures`.
 
 `--tokenizer` requires a build with Cargo feature `tokenizer`. GitHub Release
 binaries are built with `--features otlp` only (not `tokenizer`). Local

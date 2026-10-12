@@ -76,6 +76,6 @@ LLM prompts come from Hugging Face [`metrum-ai/prompt-library`](https://huggingf
 
 ## Telemetry
 
-Run the Metrum all-smi fork (https://github.com/chetan-metrum-ai/all-smi) on the serving host with `all-smi api --port 9090`, and scrape it with the strategic binary's `--ndjson --telemetry`. See [TELEMETRY.md](TELEMETRY.md).
+Run the Metrum all-smi fork (https://github.com/chetan-metrum-ai/all-smi) on the serving host with `all-smi api --port 9090`, and scrape it with `--ndjson --telemetry` on `metrum-ai-bench-cli-strategic`, `-llm`, `-vlm`, `-asr`, or `-imagegen`. See [TELEMETRY.md](TELEMETRY.md).
 
 Check which path your installed binary serves before you rely on the example YAML. On 2026-10-02, v0.26.3-metrum.4 served `/metrics`, and `/metric` returned 404.
