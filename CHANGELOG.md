@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.5.4 (2026-10-12)
+
+First GitHub release whose modality binaries (`llm`, `vlm`, `asr`, `imagegen`)
+scrape Prometheus `/metrics` with `--ndjson` and `--telemetry`. The v1.5.3
+release assets ship those flags on strategic only.
+
 ### Fixed
 - CodeQL Analyze uses Rust `build-mode: none` for the workspace; the timeout
   mapping test uses HTTPS to TEST-NET instead of HTTP (#254 leftover).

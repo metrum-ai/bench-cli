@@ -121,11 +121,11 @@ audit but are excluded from summary distributions.
 
 ---
 
-## Strategic telemetry NDJSON
+## Telemetry NDJSON
 
-`metrum-ai-bench-cli-strategic --ndjson` writes a **separate** tagged file
-(`schema_version` `metrum-ai-bench-cli.telemetry.v1`) with kinds `run`,
-`stage`, `telemetry`, `request`, `scrape_error`, and `summary`. It is not the
+`metrum-ai-bench-cli-strategic`, `-llm`, `-vlm`, `-asr`, and `-imagegen` each
+write the same tagged `telemetry.v1` file with `--ndjson` (kinds `run`,
+`stage`, `telemetry`, `request`, `scrape_error`, and `summary`). It is not the
 modality `--data-log`. Join telemetry samples to measured stages by
 monotonic `t_ns`. Offline analysis only (Python/DuckDB recipes in the
 repository). Full field tables: repository `docs/OUTPUT_SCHEMA.md` and

@@ -81,6 +81,10 @@ API-key pair patterns described in `--help`).
 | `--tokenizer` | Path to `tokenizer.json` (**requires** Cargo feature `tokenizer`; not in GitHub Release builds) |
 | `--log-level` | `error`/`warn`/`info`/`debug`/`trace` on llm/vlm (default `warn`) and asr (default `info`); not on imagegen |
 | `--data-log` | JSONL output path |
+| `--ndjson` | Tagged telemetry NDJSON path (`telemetry.v1`) |
+| `--telemetry` | Prometheus scrape YAML; requires `--ndjson` |
+| `--require-telemetry` | Abort after consecutive scrape failures |
+| `--require-telemetry-failures` | Consecutive failures before `--require-telemetry` aborts (default 3) |
 | `--runs` | Sequential independent runs + bootstrap aggregate (unified entry) |
 | `--sut` / `--require-sut` / `--redact-hostname` | Publication and privacy controls |
 | `--ntp-check` | Opt-in NTP offset recording (does not hard-fail) |
