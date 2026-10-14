@@ -96,7 +96,7 @@ jobs:
         run: >-
           go build -trimpath -ldflags='-s -w'
           -o dummy-model-server ./cmd/dummy-model-server
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dummy-${{ matrix.target }}
           path: dummy-model-server/dummy-model-server
@@ -181,7 +181,7 @@ jobs:
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json
           mv metrum-ai-bench-cli.cdx.json "metrum-ai-bench-cli-${{ matrix.target }}.cdx.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -216,7 +216,7 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: metrum-ai-bench-cli-v*-${{ matrix.target }}.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-signed-${{ matrix.target }}
           path: |
@@ -360,7 +360,7 @@ jobs:
             DOCS_LATEST_VERSION="${latest}" \
             DOCS_RELEASE_VERSIONS="${all_tags}"
           ls -l dist/
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-docs
           path: |
