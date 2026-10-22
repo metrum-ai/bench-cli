@@ -156,22 +156,30 @@ pub fn spawn_dummy(extra_args: &[&str]) -> Option<Dummy> {
 /// Start the dummy server without `-strict-media`. Only for tests that
 /// deliberately send media a real server would reject.
 pub fn spawn_dummy_permissive(extra_args: &[&str]) -> Option<Dummy> {
-    if !go_available() {
+    let dummy_bin = std::env::var_os("METRUM_BENCH_DUMMY_BIN");
+    if dummy_bin.is_none() && !go_available() {
         assert!(
             !dummy_required(),
-            "METRUM_BENCH_REQUIRE_DUMMY is set but the go toolchain is missing"
+            "METRUM_BENCH_REQUIRE_DUMMY is set but neither METRUM_BENCH_DUMMY_BIN nor go is available"
         );
         return None;
     }
-    let mut args: Vec<String> = vec![
-        "run".into(),
-        "./cmd/dummy-model-server".into(),
-        "-port".into(),
-        "0".into(),
-    ];
+    let mut args: Vec<String> = if dummy_bin.is_some() {
+        vec!["-port".into(), "0".into()]
+    } else {
+        vec![
+            "run".into(),
+            "./cmd/dummy-model-server".into(),
+            "-port".into(),
+            "0".into(),
+        ]
+    };
     args.extend(extra_args.iter().map(|a| a.to_string()));
 
-    let spawned = Command::new("go")
+    let mut command = dummy_bin
+        .map(Command::new)
+        .unwrap_or_else(|| Command::new("go"));
+    let spawned = command
         .current_dir(dummy_dir())
         .args(&args)
         .stdout(Stdio::null())
@@ -185,7 +193,7 @@ pub fn spawn_dummy_permissive(extra_args: &[&str]) -> Option<Dummy> {
         }
     };
     // The startup log line (stderr) carries the port the server bound. The
-    // 60s budget covers `go run` compiling the server on a cold cache.
+    // 60s budget covers server startup and readiness polling.
     let start = Instant::now();
     let budget = Duration::from_secs(60);
     let stderr = child.stderr.take().expect("dummy stderr");
