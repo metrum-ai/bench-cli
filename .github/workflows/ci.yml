@@ -23,8 +23,10 @@ jobs:
     name: fmt, clippy, test (stable)
     runs-on: ubuntu-latest
     env:
-      # Serialize rustc/link to reduce peak memory on GitHub-hosted runners.
-      CARGO_BUILD_JOBS: "1"
+      # Two jobs use available cores while keeping memory bounded; one underutilized the runner.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -76,7 +78,7 @@ jobs:
       - name: documentation relative links
         run: bash scripts/check_doc_links.sh
       - name: package dry run
-        run: cargo package --allow-dirty
+        run: cargo package --allow-dirty --target-dir ${{ runner.temp }}/pkg
 
   dco:
     name: dco
