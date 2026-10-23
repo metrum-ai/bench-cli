@@ -13,6 +13,7 @@
 
 ## Xtask gates
 - Headers/naming: `cargo xtask check-headers`
+- Documentation links and tagged commands: `cargo xtask check-docs` (or `cargo xtask check-docs links|commands`)
 - CLI help doc: `cargo xtask render-cli-help` (after clap changes)
 - Data points doc: `cargo xtask render-data-points`
 - Headline gate: `cargo xtask assert-headline <modality> <data_log.jsonl>`

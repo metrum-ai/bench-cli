@@ -5,6 +5,7 @@
 
 mod analysis_contract;
 mod assert_headline;
+mod check_docs;
 #[path = "../../src/count_points.rs"]
 mod count_points;
 mod dco;
@@ -36,6 +37,11 @@ struct Cli {
 enum Cmd {
     /// Fail when authored sources lack Copyright / SPDX, or naming rules fail.
     CheckHeaders,
+    /// Check documentation links or tagged command blocks.
+    CheckDocs {
+        #[command(subcommand)]
+        command: Option<check_docs::CheckDocsCommand>,
+    },
     /// Fail when any commit in base..head lacks a Signed-off-by trailer.
     CheckDco { base: String, head: String },
     /// Count data points in one or more Bench data logs.
@@ -114,6 +120,24 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::CheckHeaders => headers::run(),
+        Cmd::CheckDocs { command } => {
+            let root = std::env::current_dir()?;
+            if let Some(command) = command {
+                check_docs::run(&root, command)
+            } else {
+                check_docs::run(
+                    &root,
+                    check_docs::CheckDocsCommand::Links {
+                        strict: false,
+                        files: Vec::new(),
+                    },
+                )?;
+                check_docs::run(
+                    &root,
+                    check_docs::CheckDocsCommand::Commands { files: Vec::new() },
+                )
+            }
+        }
         Cmd::CheckDco { base, head } => dco::run(&base, &head),
         Cmd::CountPoints {
             files,

@@ -43,7 +43,7 @@ jobs:
             merge_group) base="${EVENT_BASE}"; head="${EVENT_HEAD}" ;;
             push) base="${PUSH_BEFORE}"; head="${CURRENT_SHA}" ;;
           esac
-          bash scripts/ci/rust_changes.sh "${EVENT_NAME}" "${base}" "${head}"
+          bash .github/scripts/rust_changes.sh "${EVENT_NAME}" "${base}" "${head}"
 
   analyze:
     name: Analyze (rust)

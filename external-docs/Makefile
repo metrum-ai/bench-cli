@@ -31,7 +31,7 @@ build-latest:
 	npm run build -- --out-dir build-latest
 
 package:
-	python3 scripts/package-docs.py \
+	node scripts/package-docs.mjs \
 		--version $(VERSION) \
 		--latest-version $(DOCS_LATEST_VERSION) \
 		--release-versions "$(DOCS_RELEASE_VERSIONS)" \

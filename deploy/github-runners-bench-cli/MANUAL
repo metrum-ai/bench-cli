@@ -11,7 +11,7 @@
 #
 # First time (once .env has RUNNER_TOKEN or ACCESS_TOKEN):
 #   cd ~/github-runners-bench-cli-compose
-#   ./bootstrap.sh
+# Bootstrap is managed by the runner host configuration; no repository shell bootstrap is provided.
 #
 # Daily / manual:
 #   ./pool start              # up -d
