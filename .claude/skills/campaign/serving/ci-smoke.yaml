@@ -1,0 +1,49 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# CI smoke defaults only. Live campaigns must use the exact model's recorded serving
+# entry or engine defaults, and record current source URLs in the SUT.
+
+llm:
+  image: vllm/vllm-openai:v0.30.0
+  model: Qwen/Qwen3-8B
+  args: [--reasoning-parser, qwen3, --max-model-len, "32768"]
+  env: []
+  entrypoint: []
+  sources:
+    - https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    - https://docs.vllm.ai/en/latest/features/reasoning_outputs.html
+    - https://huggingface.co/Qwen/Qwen3-8B
+  notes: "vLLM 0.30.0 Qwen3-8B; reasoning parser and max model length from recorded CI smoke config."
+vlm:
+  image: vllm/vllm-openai:v0.30.0
+  model: Qwen/Qwen3-VL-8B-Instruct
+  args: [--max-model-len, "128000", --limit-mm-per-prompt.video, "0", --async-scheduling, --mm-processor-cache-gb, "0"]
+  env: [OMP_NUM_THREADS=1]
+  entrypoint: []
+  sources:
+    - https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    - https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3-VL.html
+    - https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct
+  notes: "vLLM 0.30.0 Qwen3-VL-8B-Instruct; recorded CI smoke defaults."
+asr:
+  image: vllm/vllm-openai:v0.30.0
+  model: openai/whisper-large-v3-turbo
+  args: [--max-model-len, "448"]
+  env: []
+  entrypoint: []
+  sources:
+    - https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    - https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/
+    - https://huggingface.co/openai/whisper-large-v3-turbo
+  notes: "vLLM 0.30.0 Whisper speech-to-text; max model length 448 follows decoder positions."
+imagegen:
+  image: vllm/vllm-omni:v0.30.0
+  model: Tongyi-MAI/Z-Image-Turbo
+  args: [--omni, --port, "8000"]
+  env: []
+  entrypoint: [vllm, serve]
+  sources:
+    - https://github.com/vllm-project/vllm-omni/blob/v0.30.0/docs/getting_started/installation/gpu/cuda.inc.md
+    - https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/image_generation_api/
+    - https://huggingface.co/Tongyi-MAI/Z-Image-Turbo
+  notes: "vLLM-Omni 0.30.0 Z-Image-Turbo recorded CI smoke defaults."
