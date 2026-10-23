@@ -3,12 +3,10 @@
 
 //! Internal CI and release gate tasks. Run via `cargo xtask <cmd>`.
 
-mod analysis_contract;
 mod assert_headline;
 #[path = "../../src/count_points.rs"]
 mod count_points;
 mod dco;
-mod fixtures;
 mod gitleaks;
 mod headers;
 mod local_smoke;
@@ -18,7 +16,6 @@ mod render_cli;
 mod render_data_points;
 mod serve;
 mod shadeform;
-mod telemetry_analysis;
 mod util;
 
 use anyhow::Result;
@@ -66,19 +63,6 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
-    /// Analyze a completed telemetry NDJSON file offline.
-    TelemetryAnalysis {
-        ndjson: PathBuf,
-        #[arg(long)]
-        summary: Option<PathBuf>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Generate and validate checked-in test fixtures.
-    Fixtures {
-        #[command(subcommand)]
-        command: fixtures::FixturesCommand,
-    },
     /// Copy a validated campaign manifest into docs/smoke/<campaign-id>/.
     CampaignManifest(campaign_manifest::ManifestArgs),
     /// Run one local modality smoke using prebuilt binaries and campaign fixtures.
@@ -171,12 +155,6 @@ fn main() -> Result<()> {
         Cmd::RenderCliHelp { check } => render_cli::run(check),
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
-        Cmd::Fixtures { command } => fixtures::run(command),
-        Cmd::TelemetryAnalysis {
-            ndjson,
-            summary,
-            json,
-        } => telemetry_analysis::run(&ndjson, summary.as_deref(), json),
         Cmd::CampaignManifest(args) => campaign_manifest::run(args),
         Cmd::LocalSmoke(args) => local_smoke::run(args),
         Cmd::CheckPresets { root } => presets::run(&root),

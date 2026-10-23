@@ -81,8 +81,8 @@ jobs:
         run: cargo --locked test -p xtask assert_headline_pass_and_fail_cases -- --exact
       - name: serve configuration and SUT tests
         run: cargo --locked test -p xtask serving_defaults_generate_valid_sut_for_all_modalities_offline -- --exact
-      - name: offline telemetry analysis contracts
-        run: cargo --locked test -p xtask
+      - name: analyze.py recipe tests
+        run: python3 -m unittest discover -s docs/queries
       - name: zero unsafe in src/
         run: |
           set -euo pipefail
