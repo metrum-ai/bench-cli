@@ -23,8 +23,10 @@ jobs:
     name: fmt, clippy, test (stable)
     runs-on: ubuntu-latest
     env:
-      # Serialize rustc/link to reduce peak memory on GitHub-hosted runners.
-      CARGO_BUILD_JOBS: "1"
+      # Two jobs use available cores while keeping memory bounded; one underutilized the runner.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -38,11 +40,11 @@ jobs:
           go-version: "1.26.6"
           cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
-        run: cargo xtask check-headers
+        run: cargo --locked xtask check-headers
       - name: naming rule negative test
-        run: cargo test -p xtask naming_rejects_metrum_bench_and_accepts_transition -- --exact
+        run: cargo --locked test -p xtask naming_rejects_metrum_bench_and_accepts_transition -- --exact
       - name: live headline gate self-test
-        run: cargo test -p xtask assert_headline_pass_and_fail_cases -- --exact
+        run: cargo --locked test -p xtask assert_headline_pass_and_fail_cases -- --exact
       - name: serve launcher SUT self-test
         run: bash scripts/tests/serve_sut_test.sh
       - name: analyze.py recipe tests
@@ -60,23 +62,27 @@ jobs:
           fi
           echo "unsafe check: ok"
       - name: cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo --locked fmt --all -- --check
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo --locked clippy --all-targets --all-features -- -D warnings
+      - name: build dummy model server
+        working-directory: dummy-model-server
+        run: go build -o ${{ runner.temp }}/dummy-model-server ./cmd/dummy-model-server
       - name: cargo test
-        run: cargo test --all-targets --all-features
+        run: cargo --locked test --all-targets --all-features
         env:
           METRUM_BENCH_REQUIRE_DUMMY: "1"
+          METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
       - name: cargo build (bins for documentation checks)
-        run: cargo build --bins
+        run: cargo --locked build --bins
       - name: generated CLI help is current
-        run: cargo xtask render-cli-help --check
+        run: cargo --locked xtask render-cli-help --check
       - name: documentation command blocks
         run: bash scripts/check_doc_commands.sh
       - name: documentation relative links
         run: bash scripts/check_doc_links.sh
       - name: package dry run
-        run: cargo package --allow-dirty
+        run: cargo --locked package --allow-dirty --target-dir ${{ runner.temp }}/pkg
 
   dco:
     name: dco
@@ -90,7 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: DCO sign-off
         run: >-
-          cargo xtask check-dco
+          cargo --locked xtask check-dco
           ${{ github.event.pull_request.base.sha }}
           ${{ github.event.pull_request.head.sha }}
 
@@ -106,9 +112,9 @@ jobs:
           toolchain: "1.85.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo check (MSRV)
-        run: cargo check --all-targets --all-features
+        run: cargo --locked check --all-targets --all-features
       - name: cargo test (MSRV lib)
-        run: cargo test --lib --all-features
+        run: cargo --locked test --lib --all-features
 
   secrets:
     name: secret scanning (gitleaks)
@@ -131,7 +137,7 @@ jobs:
       - name: gitleaks custom-rule fixtures
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          cargo xtask gitleaks-fixtures
+          cargo --locked xtask gitleaks-fixtures
 
   coverage:
     name: core line coverage (80%)
@@ -146,7 +152,7 @@ jobs:
           tool: cargo-llvm-cov
       - name: enforce core coverage
         run: >-
-          cargo llvm-cov --lib --all-features --fail-under-lines 80
+          cargo --locked llvm-cov --lib --all-features --fail-under-lines 80
           --ignore-filename-regex
           'src/(args_common|endpoints|error|jsonl|lib|prompt_inputs|prompt_library)\.rs'
 
@@ -173,7 +179,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo install cargo-geiger --locked
-          cargo geiger --all-features > cargo-geiger-report.txt 2>&1 || true
+          cargo --locked geiger --all-features > cargo-geiger-report.txt 2>&1 || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -185,8 +191,8 @@ jobs:
         run: |
           set -euo pipefail
           cargo install cargo-outdated --locked
-          cargo outdated --workspace --format json > cargo-outdated.json || true
-          cargo outdated --workspace > cargo-outdated.txt || true
+          cargo --locked outdated --workspace --format json > cargo-outdated.json || true
+          cargo --locked outdated --workspace > cargo-outdated.txt || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -203,7 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo +nightly install cargo-udeps --locked
-          cargo +nightly udeps --all-targets --all-features \
+          cargo +nightly --locked udeps --all-targets --all-features \
             > cargo-udeps-report.txt 2>&1 || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -222,31 +228,40 @@ jobs:
     if: >
       github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login != 'dependabot[bot]'))
     runs-on: [self-hosted, linux, x64, bench-cli]
     timeout-minutes: 45
     concurrency:
-      group: bench-cli-ci-${{ github.repository }}-${{ github.ref }}
-      cancel-in-progress: true
+      # The runner serializes different refs in its queue. Only superseded PR
+      # runs on the same ref are cancelled; main is never cancelled.
+      group: bench-cli-self-hosted-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: configure persistent cargo directories
+        run: |
+          echo "CARGO_HOME=${{ runner.tool_cache }}/bench-cli/cargo-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=${{ runner.tool_cache }}/bench-cli/target" >> "$GITHUB_ENV"
+          echo "${{ runner.tool_cache }}/bench-cli/cargo-home/bin" >> "$GITHUB_PATH"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.6"
           cache-dependency-path: dummy-model-server/go.sum
+      - name: build dummy model server
+        working-directory: dummy-model-server
+        run: go build -o ${{ runner.temp }}/dummy-model-server ./cmd/dummy-model-server
       - name: cargo test
-        run: cargo test --all-targets --all-features
+        run: cargo --locked test --all-targets --all-features
         env:
           METRUM_BENCH_REQUIRE_DUMMY: "1"
+          METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: external-docs/package-lock.json
       # Validates the same Makefile package path release.yml docs-bundle uses.
       - name: package docs bundle
         working-directory: external-docs
