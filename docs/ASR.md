@@ -7,9 +7,10 @@
 `/v1/audio/transcriptions` endpoints. To start: pick a server under
 [Serving frameworks](#serving-frameworks), serve one of the real speech
 fixtures in `test-data/asr/` with `--ground-truth`, and gate the cell with
-`cargo xtask assert-headline asr`. Before a real run, web-search the
-current vendor docs for your exact ASR model and engine version, and record
-the launch arguments and sources in the SUT (see [SERVING.md](SERVING.md)).
+`cargo xtask assert-headline asr`. For an exact model with a recorded serving
+entry, use that entry and its sources. Otherwise search current vendor docs and
+the model card, then record launch arguments and sources in the SUT (see
+[SERVING.md](SERVING.md)).
 
 Its input is JSONL:
 
@@ -25,12 +26,12 @@ Run the bench against any server that implements OpenAI-compatible
 
 | Stack | Status for this CLI (checked 2026-10-02) | Launcher |
 |---|---|---|
-| **vLLM-Omni** | Intended ASR stack. **Blocked in v0.30.0**: with `--omni` the engine reports only the `generate` and `speech` tasks, so the server never mounts `/v1/audio/transcriptions` ([vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722), open). Use it only to re-validate once that issue is closed. | `ASR_STACK=omni scripts/live/serve/asr.sh start` (`vllm/vllm-omni:v0.30.0`) |
-| **Regular vLLM speech-to-text** | Works today and is the launcher default. vLLM documents Whisper on this endpoint ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)). The 2026-10-02 widen ASR cells ran on it. | `scripts/live/serve/asr.sh start` (`vllm/vllm-openai:v0.30.0`) |
+| **vLLM-Omni** | Intended ASR stack. **Blocked in v0.30.0**: with `--omni` the engine reports only the `generate` and `speech` tasks, so the server never mounts `/v1/audio/transcriptions` ([vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722), open). Use it only to re-validate once that issue is closed. | `cargo xtask serve asr start` with a researched entrypoint/image/args override and SUT notes/sources when that path is revalidated. |
+| **Regular vLLM speech-to-text** | Works today and is the checked-in CI default. vLLM documents Whisper on this endpoint ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)). The 2026-10-02 widen ASR cells ran on it. | `cargo xtask serve asr start` (`vllm/vllm-openai:v0.30.0`) |
 | Other OpenAI-compatible servers | Possible; not run by us. | none |
 
 ```bash
-scripts/live/serve/asr.sh start      # ASR_STACK=vllm: vllm/vllm-openai:v0.30.0, whisper-large-v3-turbo, --max-model-len 448
+cargo xtask serve asr start          # CI smoke defaults: vllm/vllm-openai:v0.30.0, whisper-large-v3-turbo, --max-model-len 448
 metrum-ai-bench-cli-asr --url http://127.0.0.1:8000/v1/audio/transcriptions --api-key dummy \
   --model openai/whisper-large-v3-turbo --scenario asr-smoke \
   --input test-data/asr/input.jsonl --ground-truth test-data/asr/truth.jsonl \
@@ -39,8 +40,10 @@ metrum-ai-bench-cli-asr --url http://127.0.0.1:8000/v1/audio/transcriptions --ap
 cargo xtask assert-headline asr asr.jsonl
 ```
 
-[`scripts/live/serve/asr.sh`](../scripts/live/serve/asr.sh) writes a SUT with
-the exact launch command and the stack's sources. Results from different
+`cargo xtask serve asr` writes a SUT with the exact launch command and the
+configured sources. The checked-in file contains CI defaults only. For live
+model/engine changes, use a freshly researched override and record notes and
+source URLs. Results from different
 stacks compare serving stacks, not models: record the stack in the SUT and do
 not mix them in one comparison. Upstream references:
 
@@ -67,7 +70,7 @@ vllm serve openai/whisper-large-v3-turbo --max-model-len 448
 records the value in the launch command and rules out a larger value. Sources:
 [vLLM speech-to-text docs](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)
 and `examples/generate/multimodal/audio_language_offline.py` in vLLM v0.30.0.
-`scripts/live/serve/asr.sh` uses this configuration.
+The checked-in CI serving data uses this configuration.
 
 #### Troubleshooting audio decoding
 

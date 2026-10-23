@@ -50,7 +50,6 @@ fn should_scan_headers(rel: &str) -> bool {
     if rel.starts_with("target/")
         || rel.starts_with("target-e2e/")
         || rel.starts_with(".git/")
-        || rel.starts_with("scripts/live/")
         || rel.starts_with("dummy-model-server/")
     {
         return false;

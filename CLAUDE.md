@@ -33,9 +33,11 @@
 - **Testing**: Write unit tests for all public functions; use integration tests for tools
 
 ## Running a benchmark (agent notes)
-All benchmark-running guidance for agents lives in [AGENTS.md](AGENTS.md): the
-default campaign order, hard rules, defaults, and truth order. Start there
-before any run against a real model server.
+Start with [AGENTS.md](AGENTS.md) for the default campaign order, hard rules,
+defaults, and truth order. Use
+[the campaign skill](.claude/skills/campaign/SKILL.md) for the multi-host
+campaign workflow; deterministic lifecycle and smoke operations use `cargo xtask`
+commands rather than shell workflows.
 
 ## Offline Telemetry and Fixtures
 - Analyze completed NDJSON runs with the

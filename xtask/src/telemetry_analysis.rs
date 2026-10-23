@@ -981,8 +981,7 @@ mod tests {
     #[test]
     fn all_smi_names_are_on_recorded_fork_page() {
         let page =
-            fs::read_to_string(root().join("scripts/parity/fixtures/all-smi-fork-h100.prom"))
-                .unwrap();
+            fs::read_to_string(root().join("test-data/telemetry/all-smi-fork-h100.prom")).unwrap();
         let names = [
             "all_smi_gpu_utilization",
             "all_smi_gpu_sm_active_ratio",

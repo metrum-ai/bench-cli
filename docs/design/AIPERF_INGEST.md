@@ -65,7 +65,7 @@ distinction visible in every summary.
 
 | Option | Verdict | Reason |
 |--------|---------|--------|
-| A. No ingest; run both tools and compare with `scripts/parity/` | Rejected as the end state | It stays the way to compare *counts*. It gives AIPerf users no cost or SUT provenance. |
+| A. No ingest; run both tools and compare with `cargo xtask count-points` | Rejected as the end state | It remains a manual way to compare counts. It gives AIPerf users no cost or SUT provenance. |
 | B. Python adapter under `scripts/` that writes `request.v3` and a Python-computed summary | Rejected | It would duplicate the type-7 percentiles, `*_unreliable` flags, throughput bins, goodput and cost in a second language, and the two would drift. The summary math stays single-sourced in `src/summary.rs`. |
 | C. Rust `import aiperf` subcommand that maps records and reuses the summarizer | **Chosen** | One summarizer. Output works with `compare`, the offline telemetry-analysis skill, and every existing JSONL reader. |
 | D. Import `profile_export_aiperf.json` aggregates directly into `summary.v3` | Rejected | AIPerf aggregates use different percentile sets (p1 to p99, no MAD) and different windows, so the result would be a hybrid summary. Without records, goodput, bins, and cost cannot be recomputed under Bench rules. |
@@ -374,7 +374,7 @@ monotonic epoch, but it is enough for the per-request joins in
 the offline telemetry-analysis skill. Neither the harness runs nor the bake-off wrote
 `.jsonl` (both used the `json csv` formats), so this mapping follows the
 upstream docs only. Phase 2 starts by capturing a real `.jsonl` with
-`scripts/parity/run_tele.sh` and AIPerf `--server-metrics-formats json csv jsonl`.
+the manual parity instructions in the campaign skill and AIPerf `--server-metrics-formats json csv jsonl`.
 That capture settles the `_total` question and the label shape.
 
 The #184 telemetry counts (Bench 1,904 values over 112 series, AIPerf 1,258
@@ -407,7 +407,7 @@ request_start_ns`, which trap 3 rules out. None of its figures remain here.
 | 0.11.0 `c4` | `$/M` at $2/h (`tokenizer_fallback`) | 6.3788 | 6.3788 | 0 |
 
 Field coverage comes from the same prototype run, counted with the per-request rule from
-[scripts/parity/README.md](../../scripts/parity/README.md) (non-null numeric
+[campaign skill parity instructions](../../.claude/skills/campaign/SKILL.md) (non-null numeric
 fields on measured `request.v3` lines, excluding `seq` and `error`):
 
 | Run | Bench native per-request fields | Imported per-request fields | Missing vs native | Extra vs native |
@@ -422,7 +422,7 @@ native fields plus the two tokenized counts, and only
 `modality_metrics.completion_words` stays empty. Summary quantities follow
 from the records, so an imported run should count close to the 25 to 27
 quantities of a native Bench run on `main` after #191 under
-`count_points.py bench` (`plain` and `reasoning` 25, `slo` 27, per #213).
+`cargo xtask count-points` (`plain` and `reasoning` 25, `slo` 27, per #213).
 The exception is `observed_concurrency`, which loses its semaphore fields.
 Phase 1 tests confirm the exact count.
 
@@ -433,7 +433,7 @@ Phase 1 tests confirm the exact count.
 | Phase 1: serde model for the `profile_export.jsonl` record, unit-aware value reader, version gate on observed (`aiperf_version`, `schema_version`) pairs | 1 |
 | Phase 1: mapping to `RequestRecord` (TTFO, ITL rebuild, error and `no_output_token` rules, `in_flight_at_send`, `inputs.json` join) | 1 |
 | Phase 1: `import aiperf` clap subcommand, `--sut` / `--require-sut` / `--price-per-hour` / `--slo`, the `import` block and `source` field, plus `docs/OUTPUT_SCHEMA.md`, `docs/METRICS.md`, `CHANGELOG.md`, and `cargo xtask render-cli-help` | 1 |
-| Phase 1: fixtures and tests. Generate fresh exports with `scripts/parity/run_pair.sh` (`TOOLS=aiperf`), trim them into `tests/fixtures/`, and assert the evidence table above to 1e-9 s. Add an `import` row to `count_points.py`. | 1 |
+| Phase 1: fixtures and tests. Generate fresh exports with the manual AIPerf parity procedure in the campaign skill, trim them into `tests/fixtures/`, and assert the evidence table above to 1e-9 s. | 1 |
 | **Phase 1 total** | **about 4** |
 | Phase 2: `.jsonl` scrape reader, `telemetry.v1` writer reuse, `_total` normalization, a GPU telemetry `.jsonl` reader, capture fixture, tests | 2 to 3 |
 | Upkeep per AIPerf minor release: refresh fixtures with the harness and widen the version gate | about 0.5 |

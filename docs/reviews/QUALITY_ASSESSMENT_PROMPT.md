@@ -60,8 +60,8 @@ that a parity-checklist review would reach.
    when the operator asks. Do not treat the controlled case as the default
    truth.
 3. **Comparison tools are context, not the standard.** NVIDIA AIPerf (the
-   maintained NVIDIA load generator; `scripts/parity/README.md` counts the data
-   points it reports against this tool's for the same workload), vLLM
+   maintained NVIDIA load generator; the campaign skill's AIPerf parity section
+   counts the data points it reports against this tool's for the same workload), vLLM
    `benchmark_serving.py`, guidellm, LLMPerf, MLPerf LoadGen, and InferenceX
    are references for what a metric name conventionally means. A missing
    feature relative to them is a finding only when one of the three personas
@@ -111,13 +111,13 @@ Read all of:
   `SMOKE_RESULTS.md`, `REPRODUCING.md`, `METRICS.md`,
   `OUTPUT_SCHEMA.md`, `CLI.md`, `STRATEGIC_BENCHMARKING.md`,
   `HISTORY_REWRITE.md`.
-- `scripts/parity/README.md`, the living comparison against AIPerf: a
-  reproducible count harness with the current per-scenario data-point counts.
+- `.claude/skills/campaign/SKILL.md`, the manual AIPerf parity procedure, and
+  `cargo xtask count-points` for the Rust counter.
   Open parity gaps are tracked in epic
   [#184](https://github.com/metrum-ai/bench-cli/issues/184). Treat
   the bake-off comparison inside [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`) as dated history, not current evidence.
 - `live-results/**` if present. It is gitignored and may hold real GPU runs
-  from the campaign described in `scripts/live/README.md`. Use it as evidence of how
+  from the campaign described in `.claude/skills/campaign/SKILL.md`. Use it as evidence of how
   the tool behaves against real vLLM and SGLang, and cross-check
   `docs/SMOKE_RESULTS.md` against the raw files it claims to summarize.
 

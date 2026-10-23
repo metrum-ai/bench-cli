@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Metrum AI Bench CLI live modality gate: one smoke cell per modality on a
-# real serving stack (scripts/live/serve/*.sh), gated by
+# real serving stack (`cargo xtask serve`), gated by
 # cargo xtask assert-headline. Every other workflow runs against
 # dummy-model-server, which cannot prove media correctness.
 #
@@ -72,21 +72,21 @@ jobs:
       - name: build bench binaries
         run: cargo build --release --bins
       - name: start ${{ matrix.modality }} server
-        run: bash scripts/live/serve/${{ matrix.modality }}.sh start
+        run: cargo xtask serve "${{ matrix.modality }}" start --root .
       - name: smoke and assert headline
         env:
           BENCH_BIN_DIR: ${{ github.workspace }}/target/release
         run: |
-          bash scripts/live/local_smoke.sh --local --modality "${{ matrix.modality }}" \
-            --sut "${SERVE_OUT}/sut.json" --out "${OUT}"
+          cargo xtask local-smoke "${{ matrix.modality }}" \
+            --sut "${SERVE_OUT}/sut.json" --out "${OUT}" --root .
       - name: server log
         if: always()
         run: |
-          mkdir -p "${SERVE_OUT}"
-          docker logs "metrum-live-${{ matrix.modality }}" >"${SERVE_OUT}/server.log" 2>&1 || true
+          cargo xtask serve "${{ matrix.modality }}" logs \
+            --logs-output "${SERVE_OUT}/server.log" --root . || true
       - name: stop server
         if: always()
-        run: bash scripts/live/serve/${{ matrix.modality }}.sh stop
+        run: cargo xtask serve "${{ matrix.modality }}" stop --root .
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

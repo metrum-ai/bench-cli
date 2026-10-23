@@ -36,8 +36,9 @@ step links to its section in [docs/AGENT_RUNBOOK.md](docs/AGENT_RUNBOOK.md)
    record their identity. [docs/AGENT_RUNBOOK.md#provision-or-verify-hosts](docs/AGENT_RUNBOOK.md#provision-or-verify-hosts)
 3. **Bootstrap** - install the runtime, drivers, and prebuilt binaries on the
    host. [docs/AGENT_RUNBOOK.md#bootstrap](docs/AGENT_RUNBOOK.md#bootstrap)
-4. **Serve** - search upstream docs, then start the engine with recorded
-   flags. [docs/AGENT_RUNBOOK.md#serve](docs/AGENT_RUNBOOK.md#serve)
+4. **Serve** - for an exact model ID with a recorded serving entry, use it;
+   otherwise search the model card and engine docs before launch. Record flags
+   and sources. [docs/AGENT_RUNBOOK.md#serve](docs/AGENT_RUNBOOK.md#serve)
 5. **Telemetry** - start exporters and scrape them; set the YAML series list
    from the live response. [docs/AGENT_RUNBOOK.md#telemetry](docs/AGENT_RUNBOOK.md#telemetry)
 6. **Prompt pool** - extract a publishable prompt mix from the prompt library.
@@ -89,7 +90,8 @@ When sources disagree, resolve in this order:
 3. Upstream engine docs and model cards beat this repository for serving
    flags and model settings.
 
-Search online for the current vendor documentation for the exact model,
-engine, and engine version before every real run. Do not reuse memorized
-launch flags. Record sources and chosen arguments in the SUT
-`runtime.config` and `notes`.
+For an exact model ID with a recorded serving entry, use that entry and its
+sources without repeating web search. If the model is under-specified or has
+no entry, search current vendor docs and the model card, then record the pinned
+model, image, launch flags, and source URLs in SUT `runtime.config` and `notes`.
+Do not reuse memorized launch flags.

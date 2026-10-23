@@ -32,7 +32,7 @@ the README quickstart). The dummy is a static Go binary cross-compiled with
 Every non-LLM test in CI runs against `dummy-model-server`, which cannot prove
 that a real server accepts the media we send. `.github/workflows/live-modality-smoke.yml`
 runs one smoke cell per modality (LLM, VLM, ASR, imagegen) on a real serving
-stack (`scripts/live/serve/*.sh`) and fails the cell through
+stack (`cargo xtask serve`) and fails the cell through
 `cargo xtask assert-headline`. It runs on `workflow_dispatch` and on `v*`
 tags (tags only when `LIVE_RUNNER_READY` is `true`), on the self-hosted runner label `gpu-h100`
 (`deploy/github-runners-bench-cli/MANUAL`, "GPU runner").
@@ -54,8 +54,8 @@ enforced by review, not by the workflow.
 
 ## Zero-success smoke cells block a release
 
-Any smoke cell (live gate, `matrix_smoke.sh`, `campaign.sh`, or a manual
-smoke cited in release notes) with 0 successful requests is a release
+Any smoke cell (live gate, `cargo xtask local-smoke`, campaign skill sweep,
+or a manual smoke cited in release notes) with 0 successful requests is a release
 blocker until it is triaged in a GitHub issue. The issue must state the
 cause (client bug, fixture, server configuration, or server bug) and either
 link the fix or record a decision, signed off in the issue, to ship with the

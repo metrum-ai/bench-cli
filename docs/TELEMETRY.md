@@ -174,14 +174,12 @@ A modality run is one stage. Its NDJSON holds:
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 
-### Replacing `scripts/live/telemetry_sidecar.py`
+### Scraping live telemetry
 
-The sidecar is deprecated. It stamped wall-clock time, applied no units and
-wrote no stage windows. Live cells should pass `--ndjson` and `--telemetry`
-to the bench binary instead, with one YAML listing both the all-smi fork
-(500 ms) and the engine `/metrics` (1 s) sources that
-`scripts/live/widen_cell.sh` starts sidecars for today. The sidecar stays
-for binaries built before this change.
+Do not use a sidecar. Live cells pass `--ndjson` and `--telemetry` to the
+bench binary with one YAML listing the all-smi fork and engine `/metrics`
+sources. Build the `include` series list from a live `/metrics` response for
+the exact server, as directed by the campaign skill.
 
 ## Default source
 
@@ -315,11 +313,10 @@ Durable `kind: telemetry` rows plus stage windows preserve the full series so
 offline recipes (DuckDB or the telemetry-analysis skill) can recompute power,
 energy, J/token, and KV at the knee without inventing samples.
 
-## Shadeform e2e prompts
+## Campaign prompts
 
-`scripts/e2e/run-shadeform.sh` must extract prompts from Hugging Face
+The campaign skill extracts prompts from Hugging Face
 [`metrum-ai/prompt-library`](https://huggingface.co/datasets/metrum-ai/prompt-library)
-(default revision `main` = latest; resolved SHA is recorded in
-`mix-report.json`). Use `--config sample` and a named `--profile` (default
-`rag-medium`). It fails closed on extract errors: do not add a synthetic
-prompt fallback. See `docs/PROMPT_LIBRARY.md`.
+with `metrum-ai-bench-cli-prompts`, records the resolved revision, and fails
+closed on extraction errors. Use `--config sample` and a named profile, then
+record the prompt mix in the campaign evidence. See `docs/PROMPT_LIBRARY.md`.

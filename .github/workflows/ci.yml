@@ -79,12 +79,10 @@ jobs:
         run: cargo --locked test -p xtask naming_rejects_metrum_bench_and_accepts_transition -- --exact
       - name: live headline gate self-test
         run: cargo --locked test -p xtask assert_headline_pass_and_fail_cases -- --exact
-      - name: serve launcher SUT self-test
-        run: bash scripts/tests/serve_sut_test.sh
+      - name: serve configuration and SUT tests
+        run: cargo --locked test -p xtask serving_defaults_generate_valid_sut_for_all_modalities_offline -- --exact
       - name: offline telemetry analysis contracts
         run: cargo --locked test -p xtask
-      - name: parity count_points.py tests
-        run: python3 -m unittest discover -s scripts/parity
       - name: zero unsafe in src/
         run: |
           set -euo pipefail
@@ -109,6 +107,8 @@ jobs:
           METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
       - name: cargo build (bins for documentation checks)
         run: cargo --locked build --bins
+      - name: campaign preset commands against mock
+        run: cargo --locked xtask check-presets
       - name: generated CLI help is current
         run: cargo --locked xtask render-cli-help --check
       - name: documentation command blocks

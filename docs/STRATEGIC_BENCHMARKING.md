@@ -3,12 +3,12 @@
 
 # Strategic benchmarking
 
-**Search first.** Before a sweep against a real server, web-search the
-current vendor docs for the model and engine version. Check the launch
-arguments (max sequences, context length, memory), the sampling and thinking
-parameters, and the concurrency range the engine supports, then pick
-`--sweep` and the request counts from that. Record sources in the SUT. The
-engine map is in [SERVING.md](SERVING.md).
+For an exactly specified model with a recorded serving entry, use that entry
+and its sources. If the model is not exact or has no entry, search current
+vendor docs and the model card for launch arguments, context/memory settings,
+sampling/thinking parameters, and supported concurrency, then choose the sweep
+and request counts. Record sources and choices in the SUT. See
+[SERVING.md](SERVING.md).
 
 For agent-bench, start from the streaming LLM/chat path so TTFT measures visible
 output as it arrives. The unary strategic path cannot measure TTFT. Strategic

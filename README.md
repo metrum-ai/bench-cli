@@ -34,23 +34,17 @@ the agent and operator entry point; the rules below are a short checklist.
 
 1. **This CLI is a benchmark harness.** It does not serve models. Choose a compatible
    serving stack and start it yourself. [docs/SERVING.md](docs/SERVING.md)
-   maps each modality to its framework, launcher, and upstream docs:
+   maps each modality to its framework, Rust command, and upstream docs:
    - LLM and VLM: regular vLLM
    - ASR: vLLM-Omni is intended; regular vLLM speech-to-text until
      vllm-omni#5722 lands
    - ImageGen: vLLM-Omni
-2. **Search first, every time.** Before a real-backend run, web-search the
-   current vendor documentation for the exact model, engine, and engine
-   version, and check:
-   - that the workload is compatible with that model and endpoint
-   - the serving framework and image tag
-   - the model card's recommended settings
-   - the engine launch arguments
-   - the request parameters (thinking toggles, diffusion steps, audio limits)
-   - a reasonable concurrency and ISL/OSL sweep
-
-   Do not reuse memorized flags or an older run's command line. Record the
-   choices and their source URLs in the SUT `runtime.config` and `notes`.
+2. **Use recorded serving data for exact models.** If the operator provides an
+   exact model ID with a serving entry, use that entry and its sources. If the
+   model is under-specified or has no entry, search current vendor docs and the
+   model card for compatibility, image tag, launch arguments, request settings,
+   and a reasonable concurrency and ISL/OSL sweep. Record choices and sources in
+   the SUT `runtime.config` and `notes`; do not reuse memorized flags.
 3. **Link out; do not copy.** Upstream recipes change. This repository keeps
    only version pins we tested, our CLI flags, SUT fields, and pitfalls
    unique to this harness.
