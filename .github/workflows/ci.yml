@@ -239,12 +239,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - name: configure persistent cargo directories
+      - name: configure persistent Rust directories
         run: |
-          echo "CARGO_HOME=${{ runner.tool_cache }}/bench-cli/cargo-home" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=${{ runner.tool_cache }}/bench-cli/target" >> "$GITHUB_ENV"
-          echo "${{ runner.tool_cache }}/bench-cli/cargo-home/bin" >> "$GITHUB_PATH"
+          root="${{ runner.tool_cache }}/bench-cli"
+          mkdir -p "${root}/rustup" "${root}/cargo-home" "${root}/target"
+          echo "RUSTUP_HOME=${root}/rustup" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=${root}/cargo-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=${root}/target" >> "$GITHUB_ENV"
+          echo "${root}/cargo-home/bin" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.6"
