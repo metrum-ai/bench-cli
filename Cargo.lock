@@ -3208,8 +3208,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crc32fast",
  "flate2",
+ "png",
  "regex",
+ "reqwest",
  "serde_json",
  "tempfile",
 ]

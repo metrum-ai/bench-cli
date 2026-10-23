@@ -81,8 +81,8 @@ jobs:
         run: cargo --locked test -p xtask assert_headline_pass_and_fail_cases -- --exact
       - name: serve launcher SUT self-test
         run: bash scripts/tests/serve_sut_test.sh
-      - name: analyze.py recipe tests
-        run: python3 -m unittest discover -s docs/queries
+      - name: offline telemetry analysis contracts
+        run: cargo --locked test -p xtask analysis_contract
       - name: parity count_points.py tests
         run: python3 -m unittest discover -s scripts/parity
       - name: zero unsafe in src/

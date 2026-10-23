@@ -3,8 +3,10 @@
 
 //! Internal CI and release gate tasks. Run via `cargo xtask <cmd>`.
 
+mod analysis_contract;
 mod assert_headline;
 mod dco;
+mod fixtures;
 mod gitleaks;
 mod headers;
 mod release_notes;
@@ -43,6 +45,11 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
+    /// Generate and validate checked-in test fixtures.
+    Fixtures {
+        #[command(subcommand)]
+        command: fixtures::FixturesCommand,
+    },
     /// Fail a smoke cell whose data log cannot back a headline claim.
     AssertHeadline {
         modality: String,
@@ -61,6 +68,7 @@ fn main() -> Result<()> {
         Cmd::RenderCliHelp { check } => render_cli::run(check),
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
+        Cmd::Fixtures { command } => fixtures::run(command),
         Cmd::AssertHeadline {
             modality,
             data_log,

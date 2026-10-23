@@ -37,6 +37,14 @@ All benchmark-running guidance for agents lives in [AGENTS.md](AGENTS.md): the
 default campaign order, hard rules, defaults, and truth order. Start there
 before any run against a real model server.
 
+## Offline Telemetry and Fixtures
+- Analyze completed NDJSON runs with the
+  [telemetry-analysis skill](.claude/skills/telemetry-analysis/SKILL.md), not a
+  benchmark subcommand. SQL recipes are in `docs/telemetry/analysis/`.
+- Regenerate test data with `cargo xtask fixtures asr`,
+  `cargo xtask fixtures vlm`, and `cargo xtask fixtures analyze`.
+  Analysis fixture recording requires prebuilt release binaries.
+
 ## Available Tools
 - `metrum-ai-bench-cli`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`,
   `prompts`, `selftest`, `preflight`, `sut`, and `compare`.

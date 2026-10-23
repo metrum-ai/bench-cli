@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
 -- DuckDB sketch: energy counter first/last vs stage duration.
--- Full trapezoid and multi-GPU handling: docs/queries/analyze.py
+-- Full trapezoid and multi-GPU handling: telemetry-analysis skill.
 
 WITH stages AS (
   SELECT run_id, stage, load, t_start_ns, t_end_ns
@@ -14,6 +14,7 @@ energy AS (
   FROM read_ndjson_auto('/tmp/run.ndjson')
   WHERE kind = 'telemetry'
     AND metric IN (
+      'all_smi_gpu_energy_hw_millijoules_total',
       'DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION',
       'nvidia_smi_energy_joules_total',
       'gpu_energy_consumed',

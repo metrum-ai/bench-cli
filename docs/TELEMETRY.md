@@ -246,12 +246,13 @@ Optional `request.telemetry_at_done` is last-seen sugar for debugging. It is
 not the source of truth for power, energy, or KV math. Schema details:
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md). Analysis formulas and agent joins:
 [telemetry/ANALYSIS.md](telemetry/ANALYSIS.md). Recipes:
-[queries/](queries/).
+[telemetry/analysis/](telemetry/analysis/) and the
+[offline telemetry-analysis skill](../.claude/skills/telemetry-analysis/SKILL.md).
 
 ## Worked DuckDB queries
 
-Optional DuckDB CLI (`read_ndjson_auto`). Equivalent stdlib Python:
-`docs/queries/analyze.py`.
+Optional DuckDB CLI (`read_ndjson_auto`) or the offline
+[telemetry-analysis skill](../.claude/skills/telemetry-analysis/SKILL.md).
 
 Row counts by kind:
 
@@ -262,7 +263,7 @@ GROUP BY 1
 ORDER BY 1;
 ```
 
-Power samples in measure windows (see also `docs/queries/stage_power.sql`):
+Power samples in measure windows (see also `docs/telemetry/analysis/stage_power.sql`):
 
 ```sql
 WITH stages AS (
@@ -291,8 +292,8 @@ ORDER BY 1;
 Energy cross-check (counter Δ vs trapezoid ∫ power):
 
 ```sql
--- Prefer docs/queries/energy_crosscheck.sql for the full recipe.
-SELECT 'see docs/queries/energy_crosscheck.sql' AS recipe;
+-- Prefer docs/telemetry/analysis/energy_crosscheck.sql for the full recipe.
+SELECT 'see docs/telemetry/analysis/energy_crosscheck.sql' AS recipe;
 ```
 
 ## Why only `/metrics`
@@ -311,8 +312,8 @@ Exporter cadences (often 500 ms to 2 s) do not align with request completion
 events. Stamping a single last-seen gauge onto each request breaks
 time-weighted means, trapezoid energy, and counter deltas over a stage window.
 Durable `kind: telemetry` rows plus stage windows preserve the full series so
-offline recipes (DuckDB, `analyze.py`, or an agent) can recompute power, energy,
-J/token, and KV at the knee without inventing samples.
+offline recipes (DuckDB or the telemetry-analysis skill) can recompute power,
+energy, J/token, and KV at the knee without inventing samples.
 
 ## Shadeform e2e prompts
 
