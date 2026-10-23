@@ -299,11 +299,9 @@ jobs:
           path: cargo-udeps-report.txt
           if-no-files-found: warn
 
-  # Runs cargo test and docs packaging on the org self-hosted runner labelled
-  # bench-cli. Fork pull requests are skipped: untrusted code must not execute
-  # on a machine that also holds org credentials. Do not add this job as a
-  # required status check until that runner is confirmed online; a missing
-  # self-hosted runner queues indefinitely.
+  # Runs cargo test and docs packaging on the org ARC runner scale set.
+  # Fork pull requests are skipped: untrusted code must not execute on an
+  # org runner. Keep the job name stable because it is a required status check.
   self-hosted:
     name: test (self-hosted bench-cli)
     needs: changes
@@ -313,7 +311,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.user.login != 'dependabot[bot]'))
-    runs-on: [self-hosted, linux, x64, bench-cli]
+    runs-on: bench-cli-arc
     timeout-minutes: 45
     concurrency:
       # The runner serializes different refs in its queue. Only superseded PR
@@ -324,15 +322,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: configure persistent Rust directories
+      - name: install native build dependencies
         run: |
-          root="${{ runner.tool_cache }}/bench-cli"
-          mkdir -p "${root}/rustup" "${root}/cargo-home" "${root}/target"
-          echo "RUSTUP_HOME=${root}/rustup" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=${root}/cargo-home" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=${root}/target" >> "$GITHUB_ENV"
-          echo "${root}/cargo-home/bin" >> "$GITHUB_PATH"
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            make \
+            pkg-config \
+            unzip \
+            xz-utils
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.6"
@@ -348,6 +347,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: external-docs/package-lock.json
       # Validates the same Makefile package path release.yml docs-bundle uses.
       - name: package docs bundle
         working-directory: external-docs
