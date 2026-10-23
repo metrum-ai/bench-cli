@@ -104,7 +104,7 @@ first one with samples in the window and report which one it was. A metric
 with no source in the window is absent (null), never 0.
 
 The all-smi names are from the Metrum fork (v0.26.3-metrum.4) as recorded in
-[`all-smi-fork-h100.prom`](../../test-data/telemetry/analysis/all-smi-fork-h100.prom).
+[`all-smi-fork-h100.prom`](../../scripts/parity/fixtures/all-smi-fork-h100.prom).
 The four GPM gauges (`sm_active_ratio`, `sm_occupancy`, `tensor_active_ratio`,
 `hollow_utilization_ratio`) need Hopper or later; older GPUs omit them. The
 DCGM fallbacks are dcgm-exporter PROF fields and need profiling metrics

@@ -16,10 +16,15 @@ Analysis is offline: do not start a benchmark or contact the serving endpoint.
 2. Confirm there is a `kind: run` row with schema version
    `metrum-ai-bench-cli.telemetry.v1`. Decompress `.zst` or `.gz` inputs to a
    temporary path; never rewrite the source log.
-3. Prefer DuckDB with `read_ndjson_auto` and the SQL recipes in
-   [`docs/telemetry/analysis/`](../../../docs/telemetry/analysis/). A different
-   offline tool is fine if its joins and formulas are shown and reproducible.
-   There is no `analyze.py` script or telemetry-analysis CLI.
+3. Run the tested Rust analysis module on the source log and strategic summary:
+   `cargo xtask telemetry-analysis RUN.ndjson --summary SUMMARY.json --json`.
+   It emits source choices, stage power/energy checks, engine histogram
+   quantiles, knee resolution, and KV-at-knee in JSON. Use
+   `--json` without formatting changes when saving machine-readable output.
+   For additional derived metrics, prefer DuckDB with `read_ndjson_auto` and
+   the SQL recipes in [`docs/telemetry/analysis/`](../../../docs/telemetry/analysis/);
+   show joins and formulas so the result is reproducible. There is no Python
+   `analyze.py` script.
 4. Join telemetry to a `phase = 'measure'` stage by `run_id`, with the half-open
    window `t_ns >= t_start_ns AND t_ns < t_end_ns`. Report the number of
    contributing samples/series (`N`) for every derived result. If `N = 0`, say
@@ -56,11 +61,11 @@ state that no knee is supported. Do not project a knee beyond tested loads.
 
 ## Regression fixtures
 
-The regression contract lives in `xtask` Rust tests and checked-in fixtures at
-`test-data/telemetry/analysis/`. It covers power-limit exclusion, raw and
-pre-scaled millijoule counters, a five-point sweep with a real p95 bend, a flat
-sweep, and a three-point insufficient sweep. Run
-`cargo test -p xtask analysis_contract` to check those contracts. Re-record the
+The analysis implementation and regression contract live in the tested Rust
+module `xtask/src/telemetry_analysis.rs`; checked-in fixtures are at
+`test-data/telemetry/analysis/`. Run `cargo test -p xtask telemetry_analysis`
+to check quantiles, bucket/reset behavior, source selection, counter scaling,
+recorded knee cases, and text/JSON rendering. Re-record the
 mock fixtures only with prebuilt release binaries using
 `cargo xtask fixtures analyze --bin-dir target/release`; the mock data is not
 GPU or performance evidence.

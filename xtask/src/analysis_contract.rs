@@ -51,7 +51,7 @@ mod tests {
     #[test]
     fn gpu_power_limits_are_not_power_draw_and_preferred_gauge_is_present() {
         let text =
-            fs::read_to_string(root().join("test-data/telemetry/analysis/all-smi-fork-h100.prom"))
+            fs::read_to_string(root().join("scripts/parity/fixtures/all-smi-fork-h100.prom"))
                 .unwrap();
         let typed: Vec<_> = text
             .lines()
@@ -66,7 +66,7 @@ mod tests {
         assert!(draw.contains(&"all_smi_gpu_power_consumption_watts"));
         assert!(typed.iter().any(|metric| metric.contains("power_limit")));
         assert!(!power_draw("all_smi_gpu_power_limit_current_watts", "W"));
-        assert!(draw.len() > 0, "N>0 power sources must be checked");
+        assert!(!draw.is_empty(), "N>0 power sources must be checked");
     }
 
     #[test]

@@ -5,6 +5,6 @@
 
 The active agent workflow is the
 [telemetry-analysis skill](../../.claude/skills/telemetry-analysis/SKILL.md).
-It uses the NDJSON schema and SQL recipes in this directory; there is no
-`analyze.py` script or telemetry-analysis CLI. See [ANALYSIS.md](ANALYSIS.md)
-for formulas and [analysis/](analysis/) for DuckDB recipes.
+It uses the Rust `cargo xtask telemetry-analysis` module plus the SQL recipes
+in this directory. See [ANALYSIS.md](ANALYSIS.md) for formulas and
+[analysis/](analysis/) for DuckDB recipes.

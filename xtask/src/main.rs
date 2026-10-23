@@ -12,6 +12,7 @@ mod headers;
 mod release_notes;
 mod render_cli;
 mod render_data_points;
+mod telemetry_analysis;
 mod util;
 
 use anyhow::Result;
@@ -45,6 +46,14 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
+    /// Analyze a completed telemetry NDJSON file offline.
+    TelemetryAnalysis {
+        ndjson: PathBuf,
+        #[arg(long)]
+        summary: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate and validate checked-in test fixtures.
     Fixtures {
         #[command(subcommand)]
@@ -69,6 +78,11 @@ fn main() -> Result<()> {
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
         Cmd::Fixtures { command } => fixtures::run(command),
+        Cmd::TelemetryAnalysis {
+            ndjson,
+            summary,
+            json,
+        } => telemetry_analysis::run(&ndjson, summary.as_deref(), json),
         Cmd::AssertHeadline {
             modality,
             data_log,

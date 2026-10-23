@@ -154,8 +154,12 @@ fn fetch_asr(args: AsrArgs) -> Result<()> {
     let mut members = Vec::new();
     for id in UTTERANCES {
         let mut parts = id.split('-');
-        let speaker = parts.next().unwrap();
-        let chapter = parts.next().unwrap();
+        let speaker = parts
+            .next()
+            .context("invalid static LibriSpeech utterance id")?;
+        let chapter = parts
+            .next()
+            .context("invalid static LibriSpeech utterance id")?;
         let base = format!("LibriSpeech/test-clean/{speaker}/{chapter}");
         members.push(format!("{base}/{id}.flac"));
         members.push(format!("{base}/{speaker}-{chapter}.trans.txt"));
@@ -178,8 +182,12 @@ fn fetch_asr(args: AsrArgs) -> Result<()> {
     let mut input = fs::File::create(out.join("input.jsonl"))?;
     for id in UTTERANCES {
         let mut parts = id.split('-');
-        let speaker = parts.next().unwrap();
-        let chapter = parts.next().unwrap();
+        let speaker = parts
+            .next()
+            .context("invalid static LibriSpeech utterance id")?;
+        let chapter = parts
+            .next()
+            .context("invalid static LibriSpeech utterance id")?;
         let folder = work
             .path()
             .join(format!("LibriSpeech/test-clean/{speaker}/{chapter}"));
@@ -328,7 +336,7 @@ fn vlm_png() -> Result<Vec<u8>> {
         let rows = &GLYPHS
             .iter()
             .find(|(letter, _)| letter.starts_with(ch))
-            .unwrap()
+            .context("missing VLM fixture glyph")?
             .1;
         for (gy, row) in rows.iter().enumerate() {
             for (gx, byte) in row.bytes().enumerate() {
@@ -458,18 +466,27 @@ fn normalize_value(value: &mut Value, run_id: &str, mock_url: &str, gate_url: Op
     }
 }
 
+struct RecordConfig<'a> {
+    binary: &'a Path,
+    telemetry: &'a Path,
+    requests: u32,
+    work: &'a Path,
+    output_dir: &'a Path,
+}
+
 fn record_one(
     name: &str,
     sweep: &str,
     target_url: &str,
     mock_url: &str,
     gate_url: Option<&str>,
-    binary: &Path,
-    telemetry: &Path,
-    requests: u32,
-    work: &Path,
-    output_dir: &Path,
+    config: &RecordConfig<'_>,
 ) -> Result<()> {
+    let binary = config.binary;
+    let telemetry = config.telemetry;
+    let requests = config.requests;
+    let work = config.work;
+    let output_dir = config.output_dir;
     let ndjson = work.join(format!("{name}.ndjson"));
     let stdout = work.join(format!("{name}.stdout.json"));
     let output = Command::new(binary)
@@ -529,8 +546,7 @@ fn record_one(
     fs::write(output_dir.join(format!("{name}.ndjson")), &normalized_rows)?;
     let mut summary: Value =
         serde_json::from_slice(&output.stdout).context("parse strategic summary JSON")?;
-    let mut normalized_summary = Value::Object(serde_json::Map::new());
-    let object = normalized_summary.as_object_mut().unwrap();
+    let mut normalized_summary = serde_json::Map::new();
     let source = summary
         .as_object_mut()
         .context("strategic summary is not an object")?;
@@ -543,9 +559,10 @@ fn record_one(
         "knee_detection",
     ] {
         if let Some(value) = source.remove(key) {
-            object.insert(key.to_owned(), value);
+            normalized_summary.insert(key.to_owned(), value);
         }
     }
+    let mut normalized_summary = Value::Object(normalized_summary);
     normalize_value(&mut normalized_summary, &run_id, mock_url, gate_url);
     if let Some(points) = normalized_summary["points"].as_array_mut() {
         for point in points {
@@ -652,17 +669,20 @@ fn record_analysis(args: AnalyzeArgs) -> Result<()> {
         fs::read_to_string(root.join("test-data/telemetry/analysis/mock-telemetry.yaml"))?;
     let telemetry = work.path().join("telemetry.yaml");
     fs::write(&telemetry, template.replace("MOCK_URL", &mock_url))?;
+    let config = RecordConfig {
+        binary: &strategic,
+        telemetry: &telemetry,
+        requests: args.requests_per_stage,
+        work: work.path(),
+        output_dir: &output_dir,
+    };
     record_one(
         "sweep5",
         "1,2,4,8,16",
         &gate_url,
         &mock_url,
         Some(&gate_url),
-        &strategic,
-        &telemetry,
-        args.requests_per_stage,
-        work.path(),
-        &output_dir,
+        &config,
     )?;
     record_one(
         "sweep5_no_bend",
@@ -670,24 +690,9 @@ fn record_analysis(args: AnalyzeArgs) -> Result<()> {
         &mock_url,
         &mock_url,
         None,
-        &strategic,
-        &telemetry,
-        args.requests_per_stage,
-        work.path(),
-        &output_dir,
+        &config,
     )?;
-    record_one(
-        "sweep3",
-        "1,4,16",
-        &mock_url,
-        &mock_url,
-        None,
-        &strategic,
-        &telemetry,
-        args.requests_per_stage,
-        work.path(),
-        &output_dir,
-    )?;
+    record_one("sweep3", "1,4,16", &mock_url, &mock_url, None, &config)?;
     validate_analysis_recording(&output_dir)?;
     Ok(())
 }
