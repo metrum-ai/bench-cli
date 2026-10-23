@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 1.5.5 (2026-10-23)
+
+### Security
+- Update `rustls` to 0.23.46, `rustls-webpki` to 0.103.16, and
+  `webpki-roots` to 1.0.10 to address RUSTSEC-2026-0346, RUSTSEC-2026-0347,
+  RUSTSEC-2026-0348, RUSTSEC-2026-0349, RUSTSEC-2026-0381, and
+  RUSTSEC-2026-0382.
+- Update `tokio` to 1.53.3 to address RUSTSEC-2026-0386.
+
+### Changed
+- Move parity, live/e2e orchestration, telemetry analysis, and fixture tooling
+  into `cargo xtask` and the campaign skills (#288, #289, #290, #296).
+- Improve CI job filtering and merge-queue support, self-hosted Rust toolchain
+  setup, and build queue time (#284, #286, #287).
+
+### Documentation
+- Update contributor and agent guidance for the `cargo xtask` workflows and
+  self-hosted runner setup.
+- Full engineering detail for these changes is linked from the referenced
+  issues and pull requests; runtime user-visible changes in this release are
+  the security dependency updates above.
+
 ## 1.5.4 (2026-10-12)
 
 First GitHub release whose modality binaries (`llm`, `vlm`, `asr`, `imagegen`)
