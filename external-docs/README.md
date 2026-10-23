@@ -59,7 +59,7 @@ This is automated end to end by `Makefile` (`make build`, `make build-latest`,
 
 The `versions.json` manifest always lists every tagged version, not only the
 one just published, so earlier releases stay visible in the version picker.
-See `scripts/package-docs.py` and `docs/RELEASING.md`.
+See `scripts/package-docs.mjs` and `docs/RELEASING.md`.
 
 ## Brand
 

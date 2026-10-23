@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
-filter="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ci" && pwd)/rust_changes.sh"
+filter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rust_changes.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 git -C "$tmp" init -q
