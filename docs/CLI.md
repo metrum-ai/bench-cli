@@ -1349,6 +1349,8 @@ Options:
           Delay between streamed content chunks [default: 0]
       --fail-every <FAIL_EVERY>
           [default: 0]
+      --capacity <CAPACITY>
+          Maximum concurrent inference requests; 0 disables the capacity gate [default: 0]
       --telemetry-fixture
           Serve canned DCGM and all-smi Prometheus fixtures on /metrics and /metric
       --metrics-fixture <PATH>

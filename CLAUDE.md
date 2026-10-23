@@ -39,6 +39,15 @@ defaults, and truth order. Use
 campaign workflow; deterministic lifecycle and smoke operations use `cargo xtask`
 commands rather than shell workflows.
 
+## Offline Telemetry and Fixtures
+- Analyze completed NDJSON runs with the
+  [telemetry-analysis skill](.claude/skills/telemetry-analysis/SKILL.md) and
+  `cargo xtask telemetry-analysis`; this is an offline xtask, not a benchmark
+  subcommand. SQL recipes are in `docs/telemetry/analysis/`.
+- Regenerate test data with `cargo xtask fixtures asr`,
+  `cargo xtask fixtures vlm`, and `cargo xtask fixtures analyze`.
+  Analysis fixture recording requires prebuilt release binaries.
+
 ## Available Tools
 - `metrum-ai-bench-cli`: unified dispatcher for `llm`, `vlm`, `asr`, `imagegen`,
   `prompts`, `selftest`, `preflight`, `sut`, and `compare`.
