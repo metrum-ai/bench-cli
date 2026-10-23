@@ -7,6 +7,7 @@ pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;
 pub mod connect_timing;
+pub mod count_points;
 pub mod endpoints;
 pub mod environment;
 pub mod error;
