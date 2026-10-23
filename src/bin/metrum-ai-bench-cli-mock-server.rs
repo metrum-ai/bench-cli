@@ -4,13 +4,17 @@
 //! Deterministic OpenAI-compatible mock server for local and CI benchmarks.
 
 use anyhow::Result;
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use bytes::Bytes;
 use clap::Parser;
+use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +33,12 @@ struct Args {
     listen: String,
     #[arg(long, default_value_t = 0)]
     latency_ms: u64,
+    #[arg(
+        long,
+        default_value_t = 0,
+        help = "Delay between streamed content chunks"
+    )]
+    token_delay_ms: u64,
     #[arg(long, default_value_t = 0)]
     fail_every: usize,
     #[arg(
@@ -37,15 +47,23 @@ struct Args {
         help = "Serve canned DCGM and all-smi Prometheus fixtures on /metrics and /metric"
     )]
     telemetry_fixture: bool,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Serve this recorded Prometheus page from /metrics"
+    )]
+    metrics_fixture: Option<std::path::PathBuf>,
 }
 
 struct AppState {
     latency: Duration,
+    token_delay: Duration,
     fail_every: usize,
     requests: AtomicUsize,
     running: AtomicUsize,
     preemptions: AtomicU64,
     telemetry_fixture: bool,
+    metrics_fixture: Option<String>,
     scrapes: AtomicU64,
 }
 
@@ -120,7 +138,7 @@ async fn infer(
             .and_then(Value::as_str)
             .unwrap_or("ok");
         let id = format!("chatcmpl-{sequence}");
-        let mut body = String::new();
+        let mut chunks = Vec::new();
         for (index, ch) in content.chars().enumerate() {
             let chunk = json!({
                 "id": id,
@@ -132,7 +150,7 @@ async fn infer(
                     "finish_reason": null
                 }]
             });
-            body.push_str(&format!("data: {chunk}\n\n"));
+            chunks.push(format!("data: {chunk}\n\n"));
             if index == 0 {
                 // Keep chunks tiny so TTFT is meaningful under latency_ms.
             }
@@ -148,12 +166,19 @@ async fn infer(
             }],
             "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
         });
-        body.push_str(&format!("data: {final_chunk}\n\n"));
-        body.push_str("data: [DONE]\n\n");
+        chunks.push(format!("data: {final_chunk}\n\n"));
+        chunks.push("data: [DONE]\n\n".to_string());
+        let delay = state.token_delay;
+        let stream = futures_util::stream::iter(chunks).then(move |chunk| async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            Ok::<Bytes, Infallible>(Bytes::from(chunk))
+        });
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/event-stream")
-            .body(body.into())
+            .body(Body::from_stream(stream))
             .expect("sse response"));
     }
     Ok(Json(json!({
@@ -199,6 +224,9 @@ fn mock_schema_value(schema: &Value) -> Value {
 
 async fn metrics(State(state): State<Arc<AppState>>) -> String {
     let scrape = state.scrapes.fetch_add(1, Ordering::Relaxed);
+    if let Some(page) = &state.metrics_fixture {
+        return page.clone();
+    }
     if state.telemetry_fixture {
         return telemetry_fixture_body(scrape, &state);
     }
@@ -266,13 +294,19 @@ async fn models() -> Json<Value> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let metrics_fixture = args
+        .metrics_fixture
+        .map(std::fs::read_to_string)
+        .transpose()?;
     let state = Arc::new(AppState {
         latency: Duration::from_millis(args.latency_ms),
+        token_delay: Duration::from_millis(args.token_delay_ms),
         fail_every: args.fail_every,
         requests: AtomicUsize::new(0),
         running: AtomicUsize::new(0),
         preemptions: AtomicU64::new(0),
         telemetry_fixture: args.telemetry_fixture,
+        metrics_fixture,
         scrapes: AtomicU64::new(0),
     });
     let app = Router::new()

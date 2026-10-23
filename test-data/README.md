@@ -7,6 +7,7 @@
   tests only; real VLM servers and `dummy-model-server -strict-media` reject
   images smaller than 2x2.
 - `llm-hi.jsonl` is a one-line LLM prompt fixture (`{"prompt":"Hi"}`).
+- `telemetry/all-smi-fork-h100.prom` is a redacted capture from a Shadeform H100 host running the Metrum all-smi fork v0.26.3-metrum.4. Hostname, instance, and GPU UUID are synthetic; the page is used only for parser and analysis fixtures.
 - `vlm/shapes-512.png` is a 512x512 RGB PNG (red circle, blue square, green
   triangle, and the word BENCH) written by `scripts/gen_vlm_fixture.py`. The
   script is deterministic; rerun it to reproduce the file byte for byte.

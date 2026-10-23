@@ -56,7 +56,7 @@ ENERGY_PREFERENCE = [
 
 # Derived-metric sources, in preference order: the first metric with samples in
 # the stage window wins. Value is the scale to a [0, 1] ratio. all-smi names
-# match the recorded Metrum fork page (scripts/parity/fixtures/
+# match the recorded Metrum fork page (test-data/telemetry/
 # all-smi-fork-h100.prom, v0.26.3-metrum.4); DCGM PROF fields are the fallback
 # when only dcgm-exporter is scraped.
 GPU_UTIL = [
