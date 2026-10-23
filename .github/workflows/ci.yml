@@ -6,6 +6,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   schedule:
     # Recurring advisory scan (new RUSTSEC entries after merge).
     - cron: "17 6 * * 1"
@@ -19,8 +21,51 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  changes:
+    name: detect Rust changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          EVENT_BASE: ${{ github.event.base_sha }}
+          EVENT_HEAD: ${{ github.event.head_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == schedule || "${EVENT_NAME}" == workflow_dispatch ]]; then
+            echo 'rust=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "${EVENT_NAME}" in
+            pull_request) base="${PR_BASE}"; head="${PR_HEAD}" ;;
+            merge_group) base="${EVENT_BASE}"; head="${EVENT_HEAD}" ;;
+            push) base="${PUSH_BEFORE}"; head="${CURRENT_SHA}" ;;
+            *) echo 'rust=true' >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          if [[ -z "${base}" || -z "${head}" || "${base}" =~ ^0+$ ]]; then
+            echo 'rust=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "${base}" "${head}" > changed-files.txt
+          if grep -Eq '^(Cargo\.toml|Cargo\.lock|build\.rs|rust-toolchain\.toml|\.cargo/|src/|tests/|benches/|xtask/)' changed-files.txt; then
+            echo 'rust=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'rust=false' >> "$GITHUB_OUTPUT"
+          fi
   check:
     name: fmt, clippy, test (stable)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       # Two jobs use available cores while keeping memory bounded; one underutilized the runner.
@@ -84,9 +129,18 @@ jobs:
       - name: package dry run
         run: cargo --locked package --allow-dirty --target-dir ${{ runner.temp }}/pkg
 
+  check_stub:
+    name: fmt, clippy, test (stable)
+    needs: changes
+    if: needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; required check intentionally passes.'
+
   dco:
     name: dco
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -100,8 +154,18 @@ jobs:
           ${{ github.event.pull_request.base.sha }}
           ${{ github.event.pull_request.head.sha }}
 
+  dco_stub:
+    name: dco
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; DCO required check intentionally passes.'
+
   msrv:
     name: MSRV 1.85
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       CARGO_BUILD_JOBS: "1"
@@ -116,15 +180,26 @@ jobs:
       - name: cargo test (MSRV lib)
         run: cargo --locked test --lib --all-features
 
+  msrv_stub:
+    name: MSRV 1.85
+    needs: changes
+    if: needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; required check intentionally passes.'
+
   secrets:
     name: secret scanning (gitleaks)
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: needs.changes.outputs.rust == 'true'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: needs.changes.outputs.rust == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
@@ -135,12 +210,15 @@ jobs:
           # fetched via fetch-depth: 0 and fails CI on unrelated work.
           gitleaks git --redact --verbose --config .gitleaks.toml --log-opts="HEAD"
       - name: gitleaks custom-rule fixtures
+        if: needs.changes.outputs.rust == 'true'
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
           cargo --locked xtask gitleaks-fixtures
 
   coverage:
     name: core line coverage (80%)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,8 +234,18 @@ jobs:
           --ignore-filename-regex
           'src/(args_common|endpoints|error|jsonl|lib|prompt_inputs|prompt_library)\.rs'
 
+  coverage_stub:
+    name: core line coverage (80%)
+    needs: changes
+    if: needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; required check intentionally passes.'
+
   deny:
     name: cargo deny check (all)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,6 +253,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
+
+  deny_stub:
+    name: cargo deny check (all)
+    needs: changes
+    if: needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; required check intentionally passes.'
 
   weekly-hygiene:
     name: weekly dep hygiene (report-only)
@@ -225,7 +321,9 @@ jobs:
   # self-hosted runner queues indefinitely.
   self-hosted:
     name: test (self-hosted bench-cli)
+    needs: changes
     if: >
+      needs.changes.outputs.rust == 'true' &&
       github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
