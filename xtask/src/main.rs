@@ -9,9 +9,13 @@ mod count_points;
 mod dco;
 mod gitleaks;
 mod headers;
+mod local_smoke;
+mod presets;
 mod release_notes;
 mod render_cli;
 mod render_data_points;
+mod serve;
+mod shadeform;
 mod util;
 
 use anyhow::Result;
@@ -59,6 +63,28 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
+    /// Copy a validated campaign manifest into docs/smoke/<campaign-id>/.
+    CampaignManifest(campaign_manifest::ManifestArgs),
+    /// Run one local modality smoke using prebuilt binaries and campaign fixtures.
+    LocalSmoke(local_smoke::LocalSmokeArgs),
+    /// Check the campaign preset catalog's required schema and provenance.
+    CheckPresets {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
+    /// Resolve a prebuilt benchmark binary; never compiles.
+    BenchBin {
+        name: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
+    /// Start, inspect, and stop a serving container using checked-in smoke data.
+    Serve(serve::ServeArgs),
+    /// Manage Shadeform GPU instance types and lifecycle.
+    Shadeform {
+        #[command(subcommand)]
+        command: shadeform::ShadeformCommand,
+    },
     /// Fail a smoke cell whose data log cannot back a headline claim.
     AssertHeadline {
         modality: String,
@@ -129,6 +155,15 @@ fn main() -> Result<()> {
         Cmd::RenderCliHelp { check } => render_cli::run(check),
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
+        Cmd::CampaignManifest(args) => campaign_manifest::run(args),
+        Cmd::LocalSmoke(args) => local_smoke::run(args),
+        Cmd::CheckPresets { root } => presets::run(&root),
+        Cmd::BenchBin { name, root } => {
+            println!("{}", bench_bin::resolve(&root, &name)?.display());
+            Ok(())
+        }
+        Cmd::Serve(args) => serve::run(args),
+        Cmd::Shadeform { command } => shadeform::run(command),
         Cmd::AssertHeadline {
             modality,
             data_log,
@@ -136,3 +171,6 @@ fn main() -> Result<()> {
         } => assert_headline::run(&modality, &data_log, artifact_dir.as_deref()),
     }
 }
+
+mod bench_bin;
+mod campaign_manifest;

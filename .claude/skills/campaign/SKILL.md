@@ -20,7 +20,7 @@ Ask once, in one table, with a proposed default on every row. The operator answe
 - `embeddings`
 - `rerank`
 
-Run sweep and report sections only for the selected set. `llm` uses the closed-loop strategic sweep and, when confirmed, the open-loop rate sweep. `vlm`, `asr`, and `imagegen` use the matching bench binary, with `--scenario` from that binary's `--help`, cwd `/opt/bench/repo`. `embeddings` and `rerank` use `metrum-ai-bench-cli-strategic --kind`. There is no `scripts/live/serve/` launcher for embeddings or rerank. A selected lane with no serving entry is `not_run`. Do not invent a server recipe to make it run.
+Run sweep and report sections only for the selected set. `llm` uses the closed-loop strategic sweep and, when confirmed, the open-loop rate sweep. `vlm`, `asr`, and `imagegen` use the matching bench binary, with `--scenario` from that binary's `--help`, cwd `/opt/bench/repo`. `embeddings` and `rerank` use `metrum-ai-bench-cli-strategic --kind`. `cargo xtask serve` has serving defaults only for llm, vlm, asr, and imagegen; embeddings and rerank have no serving entry. A selected lane with no serving entry is `not_run`. Do not invent a server recipe to make it run.
 
 ## Presets
 

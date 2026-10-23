@@ -5,11 +5,11 @@
 
 `metrum-ai-bench-cli-imagegen` measures OpenAI-compatible `POST /v1/images/generations` endpoints. It records latency, images per second, the bytes returned, and a hash for every saved artifact.
 
-**Search first.** Before a real run, web-search the current vLLM-Omni docs
-and the model card for the exact diffusion model. Check the supported
-models, the image tag, recommended steps, guidance, and resolution, and the
-request fields the server accepts. Record them in the SUT. Defaults here are
-for `Tongyi-MAI/Z-Image-Turbo` on vllm-omni v0.30.0 only.
+For an exact diffusion model with a recorded serving entry, use its image,
+arguments, and sources. If the model is not exactly specified or has no entry,
+search the current vLLM-Omni docs and model card for supported models, image
+tag, steps, guidance, resolution, and accepted request fields. Record choices
+and sources in the SUT. Checked-in defaults are for CI smoke only.
 
 **Status:** image generation is supported in code but has **not been verified against a real server**; see [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). Do not publish image-generation numbers until the live gate (`.github/workflows/live-modality-smoke.yml`, cell `imagegen`) passes and the ledger row is updated.
 
@@ -18,7 +18,7 @@ for `Tongyi-MAI/Z-Image-Turbo` on vllm-omni v0.30.0 only.
 Serve the model with **vLLM-Omni**, then point the bench at the server's `/v1` base URL. Plain `vllm/vllm-openai` does not serve diffusion models.
 
 ```bash
-scripts/live/serve/imagegen.sh start        # vllm/vllm-omni:v0.30.0, Tongyi-MAI/Z-Image-Turbo, writes a SUT
+cargo xtask serve imagegen start            # CI smoke defaults; writes a SUT
 metrum-ai-bench-cli-imagegen --url http://127.0.0.1:8000/v1 --api-key dummy \
   --model Tongyi-MAI/Z-Image-Turbo --scenario imagegen-smoke \
   --prompt "A red circle, a blue square, and a green triangle on a white background" \
@@ -29,11 +29,11 @@ metrum-ai-bench-cli-imagegen --url http://127.0.0.1:8000/v1 --api-key dummy \
 cargo xtask assert-headline imagegen imagegen.jsonl --artifact-dir imagegen-artifacts
 ```
 
-`scripts/live/local_smoke.sh --local --modality imagegen` runs the same cell end to end.
+`cargo xtask local-smoke imagegen` runs the same local cell end to end.
 
 ## Serving stack
 
-The launcher [`scripts/live/serve/imagegen.sh`](../scripts/live/serve/imagegen.sh) runs:
+The data-driven `cargo xtask serve imagegen` command runs:
 
 ```bash
 docker run --gpus device=0 --ipc=host -p 8000:8000 vllm/vllm-omni:v0.30.0 \

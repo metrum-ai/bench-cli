@@ -37,7 +37,8 @@ DEFAULT_FILES=(
   llms.txt
   PROPOSALS.md
   CHANGELOG.md
-  scripts/live/README.md
+  docs/SERVING.md
+  docs/TELEMETRY.md
   docs/INTAKE.md
   docs/AGENT_RUNBOOK.md
   docs/PITFALLS.md

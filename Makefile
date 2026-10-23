@@ -20,13 +20,10 @@ lint:
 clean:
 	cargo clean
 
-# Live GPU campaign. Dry-run by default; pass EXECUTE=1 to launch.
+# After the campaign skill completes a live run, publish its manifest without rerunning load.
+# Usage: make smoke-regen CAMPAIGN_ID=<id> MANIFEST=<path-to-run-manifest.json>
 smoke-regen:
-	@if [ "$(EXECUTE)" = "1" ]; then \
-		bash scripts/live/regen_smoke.sh --execute; \
-	else \
-		bash scripts/live/regen_smoke.sh; \
-	fi
+	cargo xtask campaign-manifest --campaign-id "$(CAMPAIGN_ID)" --source "$(MANIFEST)"
 
 # CI gate helpers (see cargo xtask --help)
 check-headers:

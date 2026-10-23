@@ -9,8 +9,9 @@ Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
 (PERFORMANCE TESTS). Measured with package **1.0.0-rc.1** (before
 `--require-sut`). This page is a smoke summary, not a publication under
 [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Raw JSONL is
-under gitignored `live-results/`. To re-run on a current release with
-`--sut --require-sut`, see `make smoke-regen` / `scripts/live/regen_smoke.sh`.
+under gitignored `live-results/`. To run a current campaign, use the campaign
+skill. After review, publish its generated manifest with `make smoke-regen
+CAMPAIGN_ID=<id> MANIFEST=<path-to-manifest.json>`.
 
 | Field | Value |
 |-------|-------|
@@ -99,7 +100,7 @@ Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3`
 
 - Hard TTL 6h in `ttl.json`.
 - Qwen pass: gemma LLM/VLM instances deleted; new L40Sx2 pair loaded `Qwen/Qwen3.8-27B-FP8`; ASR instance retained through Qwen sweep.
-- Script: `scripts/live/matrix_smoke.sh` (+ `shadeform.sh` model/extra-args).
+- Historical runner: the pre-Rust `matrix_smoke.sh` and `shadeform.sh` scripts (replaced by `cargo xtask` in #256).
 - Secrets: `env.json` never printed or committed.
 - N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
 

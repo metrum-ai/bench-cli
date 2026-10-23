@@ -3207,10 +3207,13 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "flate2",
  "regex",
+ "reqwest",
  "serde_json",
+ "serde_yaml",
  "tempfile",
 ]
 
