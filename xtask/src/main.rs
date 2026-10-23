@@ -4,8 +4,6 @@
 //! Internal CI and release gate tasks. Run via `cargo xtask <cmd>`.
 
 mod assert_headline;
-mod bench_bin;
-mod campaign_manifest;
 #[path = "../../src/count_points.rs"]
 mod count_points;
 mod dco;
@@ -173,3 +171,6 @@ fn main() -> Result<()> {
         } => assert_headline::run(&modality, &data_log, artifact_dir.as_deref()),
     }
 }
+
+mod bench_bin;
+mod campaign_manifest;

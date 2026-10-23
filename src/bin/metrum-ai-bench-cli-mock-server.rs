@@ -4,13 +4,13 @@
 //! Deterministic OpenAI-compatible mock server for local and CI benchmarks.
 
 use anyhow::Result;
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine as _;
+use bytes::Bytes;
 use clap::Parser;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -289,6 +289,8 @@ async fn transcribe(_body: Bytes) -> Json<Value> {
 }
 
 async fn generate_image() -> Json<Value> {
+    use base64::Engine as _;
+
     let image = base64::engine::general_purpose::STANDARD
         .encode(include_bytes!("../../test-data/vlm/shapes-512.png"));
     Json(json!({"data":[{"b64_json":image}]}))
