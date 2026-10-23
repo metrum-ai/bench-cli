@@ -56,8 +56,8 @@ and the release workflow publishes it in the release notes.
 
 ## Counting rules
 
-These are the rules of `scripts/parity/count_points.py`, so schema counts
-and harness counts agree on what a quantity is.
+These are the shared Rust parity-counting rules, so schema counts and
+harness counts agree on what a quantity is.
 
 - **Quantity:** each distribution at any depth (named by its dotted path),
   each top-level numeric scalar, and each
@@ -105,8 +105,8 @@ summary quantities and **21** per-request fields (schema fields
 plus the llm `modality_metrics` keys).
 `tests/data_points.rs` runs exactly that against dummy-model-server and
 asserts both numbers, and that every fired field is in the schema count.
-They match the `plain` row of the parity harness (`scripts/parity/`), which
-counts quantities and per-request fields with the same rules. The harness
+They match the `plain` row produced by the Rust `cargo xtask count-points`
+command, which counts quantities and per-request fields with the same rules. The harness
 `values` column counts every slot of each non-empty distribution a run
 reports, null or not (#245), only `n` of an empty one, and outside
 distributions only the numbers one run produced. It can therefore be lower

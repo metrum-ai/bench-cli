@@ -27,7 +27,7 @@ import analyze
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, "fixtures")
 ALL_SMI_PAGE = os.path.join(
-    HERE, "..", "..", "scripts", "parity", "fixtures", "all-smi-fork-h100.prom"
+    HERE, "..", "..", "test-data", "telemetry", "all-smi-fork-h100.prom"
 )
 
 

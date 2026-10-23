@@ -10,7 +10,7 @@
 //! compiler rejects a new field until both fixtures list it, and
 //! [`schema_fixtures_cover_every_field`] fails when a maximal fixture leaves a
 //! field out of the serialized JSON. Counting walks the serialized JSON with
-//! the rules of `scripts/parity/count_points.py`, so a schema count and a
+//! the shared Rust parity-counting rules, so a schema count and a
 //! harness count use one definition. Optional fields (in the maximal JSON but
 //! not the minimal one) must each have a documented [`Condition`].
 //!
@@ -22,6 +22,10 @@ mod common;
 
 use chrono::Utc;
 use metrum_ai_bench::concurrency::ObservedConcurrency;
+use metrum_ai_bench::count_points::{
+    is_num, numeric_leaves, schema_fields as fields, schema_quantities as quantities, Quantity,
+    Shape,
+};
 use metrum_ai_bench::error::RequestError;
 use metrum_ai_bench::isl_osl::IslOslValidation;
 use metrum_ai_bench::measurement::TtftSource;
@@ -38,11 +42,11 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Run-metadata keys never counted (as in `count_points.py`).
+/// Run-metadata keys never counted by the Rust parity counter.
 const SUMMARY_EXCLUDED: &[&str] = &["schema_version", "config", "environment", "sut"];
 /// Counted separately: per-endpoint copies and error-shaped data.
 const SUMMARY_SEPARATE: &[&str] = &["per_endpoint", "errors_by_type"];
-/// Top-level request keys never counted (as in `count_points.py`).
+/// Top-level request keys never counted by the Rust parity counter.
 const REQUEST_SKIP: &[&str] = &["seq", "error"];
 /// Open per-modality maps: keys are set by each binary, not by the schema.
 const REQUEST_OPEN_MAPS: &[&str] = &["modality_metrics", "modality_labels"];
@@ -805,134 +809,7 @@ fn to_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("serialize schema fixture")
 }
 
-// Counting (the rules of scripts/parity/count_points.py)
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Shape {
-    Distribution,
-    Block,
-    Scalar,
-}
-
-impl Shape {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Distribution => "distribution",
-            Self::Block => "block",
-            Self::Scalar => "scalar",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Quantity {
-    shape: Shape,
-    values: usize,
-}
-
-fn is_num(value: &Value) -> bool {
-    value.is_number()
-}
-
-fn numeric_leaves(value: &Value) -> usize {
-    match value {
-        Value::Number(_) => 1,
-        Value::Object(map) => map.values().map(numeric_leaves).sum(),
-        Value::Array(items) => items.iter().map(numeric_leaves).sum(),
-        _ => 0,
-    }
-}
-
-fn is_dist(map: &serde_json::Map<String, Value>) -> bool {
-    ["n", "p50", "p99"].iter().all(|k| map.contains_key(*k))
-}
-
-/// Record every distribution under `node` by dotted path; return the count
-/// of numeric leaves outside any distribution.
-fn split_dists(node: &Value, path: &str, found: &mut BTreeMap<String, Quantity>) -> usize {
-    match node {
-        Value::Number(_) => 1,
-        Value::Object(map) if is_dist(map) => {
-            found.insert(
-                path.to_string(),
-                Quantity {
-                    shape: Shape::Distribution,
-                    values: numeric_leaves(node),
-                },
-            );
-            0
-        }
-        Value::Object(map) => map
-            .iter()
-            .map(|(k, v)| split_dists(v, &format!("{path}.{k}"), found))
-            .sum(),
-        Value::Array(items) => items
-            .iter()
-            .enumerate()
-            .map(|(i, v)| split_dists(v, &format!("{path}[{i}]"), found))
-            .sum(),
-        _ => 0,
-    }
-}
-
-/// Quantities of one summary-shaped object: every distribution at any depth,
-/// each top-level numeric scalar, and each top-level block with numeric
-/// leaves outside its distributions. Nulls never count.
-fn quantities(summary: &Value, skip: &[&str]) -> BTreeMap<String, Quantity> {
-    let mut out = BTreeMap::new();
-    for (key, value) in summary.as_object().expect("summary object") {
-        if skip.contains(&key.as_str()) {
-            continue;
-        }
-        if is_num(value) {
-            out.insert(
-                key.clone(),
-                Quantity {
-                    shape: Shape::Scalar,
-                    values: 1,
-                },
-            );
-        } else if value.is_object() {
-            let leftover = split_dists(value, key, &mut out);
-            if leftover > 0 {
-                out.insert(
-                    key.clone(),
-                    Quantity {
-                        shape: Shape::Block,
-                        values: leftover,
-                    },
-                );
-            }
-        }
-    }
-    out
-}
-
-/// Distinct non-null numeric fields of one record, dotted for nested maps; a
-/// list of numbers counts once.
-fn fields(row: &Value, skip: &[&str]) -> BTreeSet<String> {
-    fn walk(value: &Value, prefix: &str, top: bool, skip: &[&str], out: &mut BTreeSet<String>) {
-        for (key, v) in value.as_object().expect("record object") {
-            if top && skip.contains(&key.as_str()) {
-                continue;
-            }
-            let name = format!("{prefix}{key}");
-            match v {
-                Value::Number(_) => {
-                    out.insert(name);
-                }
-                Value::Array(items) if !items.is_empty() && items.iter().all(is_num) => {
-                    out.insert(name);
-                }
-                Value::Object(_) => walk(v, &format!("{name}."), false, skip, out),
-                _ => {}
-            }
-        }
-    }
-    let mut out = BTreeSet::new();
-    walk(row, "", true, skip, &mut out);
-    out
-}
+// Schema fixture checks share the Rust parity counter implementation.
 
 fn without_prefixes(set: BTreeSet<String>, prefixes: &[&str]) -> BTreeSet<String> {
     set.into_iter()
@@ -1177,8 +1054,8 @@ and the release workflow publishes it in the release notes.
 
 ## Counting rules
 
-These are the rules of `scripts/parity/count_points.py`, so schema counts
-and harness counts agree on what a quantity is.
+These are the shared Rust parity-counting rules, so schema counts and
+harness counts agree on what a quantity is.
 
 - **Quantity:** each distribution at any depth (named by its dotted path),
   each top-level numeric scalar, and each
@@ -1274,8 +1151,8 @@ summary quantities and **{plain_fields}** per-request fields (schema fields
 plus the llm `modality_metrics` keys).
 `tests/data_points.rs` runs exactly that against dummy-model-server and
 asserts both numbers, and that every fired field is in the schema count.
-They match the `plain` row of the parity harness (`scripts/parity/`), which
-counts quantities and per-request fields with the same rules. The harness
+They match the `plain` row produced by the Rust `cargo xtask count-points`
+command, which counts quantities and per-request fields with the same rules. The harness
 `values` column counts every slot of each non-empty distribution a run
 reports, null or not (#245), only `n` of an empty one, and outside
 distributions only the numbers one run produced. It can therefore be lower

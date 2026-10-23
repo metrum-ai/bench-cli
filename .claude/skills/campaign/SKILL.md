@@ -38,6 +38,20 @@ The presets are:
 
 Serving entries for exact model ids live next to the presets. No web search when the operator named an exact Hugging Face id and an entry exists. Search only when the model is not exact or has no entry, then write the result back as a dated entry.
 
+## Manual AIPerf parity comparison
+
+For the `parity-pair` preset, run a Bench-only comparison from the Rust mock in CI with `cargo test --test e2e_mock_pacing bench_only_parity_scenario_compares_nonzero_data_points`. For a manual Bench-versus-AIPerf comparison, use the same c=4, 64 measured + 4 warmup workload from the preset and a fresh Rust mock per tool (`metrum-ai-bench-cli-mock-server --token-delay-ms 8`). Record the chosen AIPerf version, tokenizer, artifact path, Bench binary version, and SUT notes. Do not compare unpaced streams.
+
+Count Bench logs and AIPerf exports with the single Rust implementation, then render the table:
+
+```bash
+cargo xtask count-points --scenario plain --append counts.jsonl path/to/bench.jsonl
+cargo xtask count-points --scenario plain --aiperf-dir path/to/aiperf-artifacts --append counts.jsonl
+cargo xtask count-points --table counts.jsonl
+```
+
+The AIPerf invocation uses `aiperf profile --endpoint-type chat --streaming`, concurrency 4, request-count 64, warmup-request-count 4, the same prompt set and model/tokenizer, and an artifact directory outside the repository. Run separate `plain`, `reasoning`, and `slo` scenarios only when selected; preserve their workload knobs from `presets/parity-pair.yaml`. A comparison is valid only when both tools have nonzero measured requests, nonzero reported fields, complete TTFT/E2E pairs, and median TTFT/E2E at or below 0.9. The script-free parity workflow is not a performance campaign; never publish its synthetic latencies.
+
 ## Procedure
 
 This skill is instructions for an agent on the operator machine (the coordinator). Benchmarks run on GPU hosts the operator owns or rents. Binaries run on the host from `/opt/bench/bin`, never on the coordinator.
