@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Telemetry config used to record the analyze.py fixtures in this directory
-# against metrum-ai-bench-cli-mock-server --telemetry-fixture. Not for real runs:
-# start from docs/telemetry/examples/ and curl the live page instead.
-# MOCK_URL is substituted by record.sh.
+# Telemetry config used by `cargo xtask fixtures analyze` with
+# metrum-ai-bench-cli-mock-server --telemetry-fixture. Not for real runs:
+# start from docs/telemetry/examples/ and inspect the live page instead.
+# MOCK_URL is substituted by the Rust fixture recorder.
 
 default_interval_ms: 250
 timeout_ms: 200

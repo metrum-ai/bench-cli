@@ -2,7 +2,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
 -- DuckDB: power sample counts and unweighted mean per measure stage.
--- Replace the NDJSON path. Prefer analyze.py for time-weighted means.
+-- Replace the NDJSON path. This is a quick check, not the skill's
+-- time-weighted mean. The explicit allowlist excludes power limits/caps.
 
 WITH stages AS (
   SELECT run_id, stage, load, t_start_ns, t_end_ns
@@ -13,16 +14,12 @@ power AS (
   SELECT run_id, t_ns, value, metric, src
   FROM read_ndjson_auto('/tmp/run.ndjson')
   WHERE kind = 'telemetry'
-    AND (
-      metric LIKE '%power%'
-      OR metric IN (
-        'DCGM_FI_DEV_POWER_USAGE',
-        'all_smi_gpu_power_consumption_watts',
-        'nvidia_smi_power_draw_watts',
-        'gpu_power_usage',
-        'hw_power',
-        'ipmi_dcmi_power_consumption_current_watts'
-      )
+    AND metric IN (
+      'DCGM_FI_DEV_POWER_USAGE',
+      'all_smi_gpu_power_consumption_watts',
+      'nvidia_smi_power_draw_watts',
+      'gpu_power_usage',
+      'hw_power'
     )
     AND unit IN ('W', '1')
 )

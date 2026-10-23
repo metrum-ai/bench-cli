@@ -477,7 +477,8 @@ to a modality run's single `measure` stage as well.
 - **KV / queue**: `vllm:gpu_cache_usage_perc` (or kv alias),
   `vllm:num_requests_{running,waiting}`, `vllm:num_preemptions_total` (Δ).
 - **Derived GPU / KV metrics (offline)**: per measured stage,
-  `docs/queries/analyze.py` computes `gpu_util_mean`, `sm_active_p50`,
+  The [offline telemetry-analysis skill](../.claude/skills/telemetry-analysis/SKILL.md)
+computes `gpu_util_mean`, `sm_active_p50`,
   `sm_occupancy_p50`, `tensor_active_p50`, `hollow_util_mean`,
   `kv_cache_util_mean` (ratios in [0, 1]), `preemptions_delta` (count), and
   engine histogram p50/p95 (seconds, Prometheus `histogram_quantile`

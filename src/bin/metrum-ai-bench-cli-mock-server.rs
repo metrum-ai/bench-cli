@@ -18,6 +18,7 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -41,6 +42,9 @@ struct Args {
     token_delay_ms: u64,
     #[arg(long, default_value_t = 0)]
     fail_every: usize,
+    /// Maximum concurrent inference requests; 0 disables the capacity gate.
+    #[arg(long, default_value_t = 0)]
+    capacity: usize,
     #[arg(
         long,
         default_value_t = false,
@@ -65,6 +69,7 @@ struct AppState {
     telemetry_fixture: bool,
     metrics_fixture: Option<String>,
     scrapes: AtomicU64,
+    capacity: Arc<Semaphore>,
 }
 
 struct RunningGuard(Arc<AppState>);
@@ -79,6 +84,12 @@ async fn infer(
     State(state): State<Arc<AppState>>,
     Json(request): Json<Value>,
 ) -> Result<Response, StatusCode> {
+    let _capacity = state
+        .capacity
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let sequence = state.requests.fetch_add(1, Ordering::Relaxed) + 1;
     state.running.fetch_add(1, Ordering::Relaxed);
     let _guard = RunningGuard(state.clone());
@@ -320,6 +331,11 @@ async fn main() -> Result<()> {
         telemetry_fixture: args.telemetry_fixture,
         metrics_fixture,
         scrapes: AtomicU64::new(0),
+        capacity: Arc::new(Semaphore::new(if args.capacity == 0 {
+            10_000
+        } else {
+            args.capacity
+        })),
     });
     let app = Router::new()
         .route("/health", get(|| async { StatusCode::OK }))

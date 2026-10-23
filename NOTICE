@@ -20,4 +20,4 @@ Test fixtures with attribution requirements:
   domain audio books", ICASSP 2015), https://www.openslr.org/12, licensed
   CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Metrum AI
   converted the FLAC originals to 16 kHz mono 16-bit PCM WAV with
-  scripts/fetch_asr_fixtures.sh; the audio content is unchanged.
+  `cargo xtask fixtures asr`; the audio content is unchanged.

@@ -5,8 +5,9 @@
 
 Load this file with [OUTPUT_SCHEMA.md](../OUTPUT_SCHEMA.md) and
 [TELEMETRY.md](../TELEMETRY.md) before inventing metric names. Prefer recipes
-in [docs/queries/](../queries/). There is no `correlate` subcommand and no
-DuckDB feature in the crate.
+in [analysis/](analysis/) and follow the
+[offline telemetry-analysis skill](../../.claude/skills/telemetry-analysis/SKILL.md).
+There is no `correlate` subcommand or built-in DuckDB feature.
 
 ## Field dictionary (join surface)
 
@@ -87,7 +88,7 @@ Cross-check both when both series exist; they should agree to about 3
 significant figures on a stable load.
 
 The mock server's fixture page (`--telemetry-fixture`, used for
-`docs/queries/fixtures/`) advances its energy counter by a fixed step per
+`test-data/telemetry/analysis/`) advances its energy counter by a fixed step per
 scrape, unrelated to its power gauge. Counter energy and power × time do not
 agree there, so J/token from the mock fixtures is not meaningful; they test
 the joins, not the numbers.
@@ -189,7 +190,7 @@ are cumulative counters. For a stage:
    - A histogram with only a `+Inf` bucket, or with no observations, is null
      with no reason.
 
-`analyze.py --json` writes `p50`, `p50_reason` and `p50_bound` per
+Offline analysis reports `p50`, `p50_reason` and `p50_bound` per
 histogram, and the same three keys for `p95`. `p50_reason` and `p50_bound`
 are null when `p50` is an interpolated number. The text table prints
 `<=0.3` or `>60` in place of a number. To fix an edge result, use a server
@@ -220,11 +221,11 @@ latency; do not mix it with client-side type 7 percentiles.
 
 | File | Purpose |
 |------|---------|
-| [row_counts.sql](../queries/row_counts.sql) | Counts by `kind` |
-| [stage_power.sql](../queries/stage_power.sql) | Power samples and crude means per measure stage |
-| [energy_crosscheck.sql](../queries/energy_crosscheck.sql) | Counter Δ vs trapezoid power |
-| [analyze.py](../queries/analyze.py) | Stdlib-only Python: every derived metric above. Pass the strategic stdout JSON as the second argument for `kv_cache_util_at_knee`; `--json` for machine output |
-| [fixtures/](../queries/fixtures/) | Recorded mock sweeps for `test_analyze.py`: `sweep5` (5 stages through `capacity_proxy.py`, p95 0.203 s at c=1 to 1.419 s at c=16, a real knee at c=4), `sweep5_no_bend` (5 stages, `no_bend`), `sweep3` (3 stages, `insufficient_points`); `record.sh` re-records them |
+| [row_counts.sql](analysis/row_counts.sql) | Counts by `kind` |
+| [stage_power.sql](analysis/stage_power.sql) | Power samples and crude means per measure stage |
+| [energy_crosscheck.sql](analysis/energy_crosscheck.sql) | Counter Δ vs trapezoid power |
+| [offline telemetry-analysis skill](../../.claude/skills/telemetry-analysis/SKILL.md) | Reproducible offline analysis workflow and reporting boundaries |
+| [fixtures/](../../test-data/telemetry/analysis/) | Mock sweeps checked by Rust tests: `sweep5` (5 stages, real knee at c=4), `sweep5_no_bend` (5 stages, flat), `sweep3` (3 stages, insufficient points); `cargo xtask fixtures analyze` re-records them |
 
 Do not invent metric names that are not in the NDJSON or in
 [exporters.md](exporters.md).

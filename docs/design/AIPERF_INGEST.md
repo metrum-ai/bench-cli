@@ -67,7 +67,7 @@ distinction visible in every summary.
 |--------|---------|--------|
 | A. No ingest; run both tools and compare with `cargo xtask count-points` | Rejected as the end state | It remains a manual way to compare counts. It gives AIPerf users no cost or SUT provenance. |
 | B. Python adapter under `scripts/` that writes `request.v3` and a Python-computed summary | Rejected | It would duplicate the type-7 percentiles, `*_unreliable` flags, throughput bins, goodput and cost in a second language, and the two would drift. The summary math stays single-sourced in `src/summary.rs`. |
-| C. Rust `import aiperf` subcommand that maps records and reuses the summarizer | **Chosen** | One summarizer. Output works with `compare`, `docs/queries/analyze.py`, and every existing JSONL reader. |
+| C. Rust `import aiperf` subcommand that maps records and reuses the summarizer | **Chosen** | One summarizer. Output works with `compare`, the offline telemetry-analysis skill, and every existing JSONL reader. |
 | D. Import `profile_export_aiperf.json` aggregates directly into `summary.v3` | Rejected | AIPerf aggregates use different percentile sets (p1 to p99, no MAD) and different windows, so the result would be a hybrid summary. Without records, goodput, bins, and cost cannot be recomputed under Bench rules. |
 
 Design choices made in this note (recorded per the #184 protocol):
@@ -371,7 +371,7 @@ The mapping into `telemetry.v1` NDJSON:
 AIPerf request and scrape timestamps are both wall-clock nanoseconds from
 the same process, so they share one clock. That is weaker than Bench's
 monotonic epoch, but it is enough for the per-request joins in
-`docs/queries/analyze.py`. Neither the harness runs nor the bake-off wrote
+the offline telemetry-analysis skill. Neither the harness runs nor the bake-off wrote
 `.jsonl` (both used the `json csv` formats), so this mapping follows the
 upstream docs only. Phase 2 starts by capturing a real `.jsonl` with
 the manual parity instructions in the campaign skill and AIPerf `--server-metrics-formats json csv jsonl`.
