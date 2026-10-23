@@ -261,7 +261,7 @@ jobs:
           set -euo pipefail
           cargo install cargo-geiger --locked
           cargo --locked geiger --all-features > cargo-geiger-report.txt 2>&1 || true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cargo-geiger-report
@@ -274,7 +274,7 @@ jobs:
           cargo install cargo-outdated --locked
           cargo --locked outdated --workspace --format json > cargo-outdated.json || true
           cargo --locked outdated --workspace > cargo-outdated.txt || true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cargo-outdated-report
@@ -292,7 +292,7 @@ jobs:
           cargo +nightly install cargo-udeps --locked
           cargo +nightly --locked udeps --all-targets --all-features \
             > cargo-udeps-report.txt 2>&1 || true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cargo-udeps-report
