@@ -54,11 +54,11 @@ const PENDING: &[&str] = &[
 
 pub fn run(root: &Path, command: CheckDocsCommand) -> Result<()> {
     match command {
-        CheckDocsCommand::Links { strict, files } => links(root, strict, files),
-        CheckDocsCommand::Commands { files } => commands(root, files),
+        CheckDocsCommand::Links { strict, files } => links(root, strict, files).map(|_| ()),
+        CheckDocsCommand::Commands { files } => commands(root, files).map(|_| ()),
     }
 }
-fn links(root: &Path, strict: bool, files: Vec<PathBuf>) -> Result<()> {
+fn links(root: &Path, strict: bool, files: Vec<PathBuf>) -> Result<usize> {
     let files = if files.is_empty() {
         DOCS.iter().map(PathBuf::from).collect()
     } else {
@@ -92,13 +92,13 @@ fn links(root: &Path, strict: bool, files: Vec<PathBuf>) -> Result<()> {
             if clean.is_empty() {
                 continue;
             }
+            checked += 1;
             let resolved = if clean.starts_with('/') {
                 root.join(clean.trim_start_matches('/'))
             } else {
                 path.parent().unwrap_or(root).join(&clean)
             };
             if resolved.exists() {
-                checked += 1;
                 continue;
             }
             let rel = resolved
@@ -129,11 +129,11 @@ fn links(root: &Path, strict: bool, files: Vec<PathBuf>) -> Result<()> {
     }
     println!("check_doc_links: checked {checked}, pending {pending}");
     if status {
-        anyhow::bail!("broken documentation links");
+        anyhow::bail!("broken documentation links (checked {checked}, pending {pending})");
     }
-    Ok(())
+    Ok(checked)
 }
-fn commands(root: &Path, files: Vec<PathBuf>) -> Result<()> {
+fn commands(root: &Path, files: Vec<PathBuf>) -> Result<usize> {
     let names = if files.is_empty() {
         vec![
             "README.md",
@@ -290,17 +290,35 @@ fn commands(root: &Path, files: Vec<PathBuf>) -> Result<()> {
     if failed {
         anyhow::bail!("documentation command checks failed");
     }
-    Ok(())
+    Ok(count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    fn valid_fixture_link_passes_with_a_link_to_check() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("target.md"), "target").unwrap();
+        fs::write(d.path().join("doc.md"), "[valid](target.md)").unwrap();
+        assert_eq!(links(d.path(), false, vec!["doc.md".into()]).unwrap(), 1);
+    }
+    #[test]
     fn broken_fixture_link_fails() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("doc.md"), "[bad](missing.md)").unwrap();
-        assert!(links(d.path(), false, vec!["doc.md".into()]).is_err());
+        let error = links(d.path(), false, vec!["doc.md".into()]).unwrap_err();
+        assert!(error.to_string().contains("checked 1"));
+    }
+    #[test]
+    fn valid_fixture_command_passes() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("doc.md"),
+            "<!-- doc-check -->\n```bash\nprintf 'fixture passed'\n```\n",
+        )
+        .unwrap();
+        assert_eq!(commands(d.path(), vec!["doc.md".into()]).unwrap(), 1);
     }
     #[test]
     fn failing_fixture_command_fails() {
