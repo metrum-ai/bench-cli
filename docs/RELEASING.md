@@ -54,8 +54,8 @@ enforced by review, not by the workflow.
 
 ## Zero-success smoke cells block a release
 
-Any smoke cell (live gate, `matrix_smoke.sh`, `campaign.sh`, or a manual
-smoke cited in release notes) with 0 successful requests is a release
+Any smoke cell (live gate, `cargo xtask local-smoke`, campaign skill sweep,
+or a manual smoke cited in release notes) with 0 successful requests is a release
 blocker until it is triaged in a GitHub issue. The issue must state the
 cause (client bug, fixture, server configuration, or server bug) and either
 link the fix or record a decision, signed off in the issue, to ship with the

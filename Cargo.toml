@@ -26,7 +26,6 @@ exclude = [
     ".cargo/**",
     "xtask/**",
     "dummy-model-server/**",
-    "scripts/live/**",
     "docs/reviews/**",
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",

@@ -19,13 +19,12 @@ for that distinction.
 
 If you have not installed a binary yet, do the [Quickstart](./quickstart) first.
 
-## Always web-search model and server defaults
+## Search when the model is not exactly specified
 
-**Every time** a coding agent (Claude Code, Codex, OpenCode, or similar) prepares
-or runs a benchmark, it must **web search online** for the current best-known
-or vendor-default serving configuration for that exact model and stack. Do not
-reuse memorized flags from prior chats, training data, or an earlier run in the
-same session without refreshing.
+For an exact model ID with a recorded serving entry, use that config and its
+sources without repeating web search. If the ID is under-specified or no entry
+exists, search current vendor docs and the model card, then record the exact
+model, image, runtime flags, and sources. Do not reuse memorized flags.
 
 Search and record at least:
 
@@ -41,8 +40,8 @@ Put the chosen values into `sut.json` `runtime.config` / `notes` (and
 results conflict, prefer the **vendor engine docs** over third-party blog
 posts, and state the sources in the run notes.
 
-This rule applies to smoke runs and publishable runs alike. Skipping the search
-is a process failure even if the CLI command succeeds.
+For an exact model with a recorded entry, state that entry in the SUT. For
+other model choices, record the search results and selected settings.
 
 ## Default workload: Hugging Face prompt library
 
@@ -87,10 +86,10 @@ CLI on `PATH` and an OpenAI-compatible endpoint:
 
 - Prefer `metrum-ai-bench-cli <modality> -- <flags>` (unified entry).
 - Sweeps need the separate `metrum-ai-bench-cli-strategic` binary.
-- **Before every benchmark:** web search for the current best-known / vendor-default
-  serving config for this exact model + engine (vLLM/SGLang/etc.). Do not reuse
-  memorized launch flags. Record sources and chosen args in `sut.json` notes /
-  `runtime.config`.
+- For an exact model ID with a recorded serving entry, use it without a new
+  search. If the model is under-specified or has no entry, search current
+  vendor docs and the model card, then record source URLs and chosen args in
+  `sut.json` notes / `runtime.config`.
 - Default prompts: extract from Hugging Face `metrum-ai/prompt-library`
   (revision defaults to latest `main`; resolved SHA is in the mix report).
   For publishable numbers, re-run with that SHA. Do not invent a handmade
@@ -131,11 +130,9 @@ Run a publishable closed-loop LLM measure with Metrum AI Bench CLI using the
 Hugging Face prompt library (not a handmade prompt).
 
 Constraints:
-- FIRST: web search online for the current best-known / vendor-default serving
-  configuration for model <MODEL_ID> on the chosen engine (vLLM or SGLang).
-  Refresh even if you think you already know the flags. Record sources and the
-  chosen launch/runtime args in sut.json (runtime.config + notes). Prefer
-  vendor docs and the model card over third-party posts.
+- If <MODEL_ID> has a recorded serving entry, use it and record the entry in
+  sut.json. If the model is not exact or has no entry, search current vendor
+  docs and the model card. Record sources and launch/runtime args in sut.json.
 - Use `metrum-ai-bench-cli prompts --` then `metrum-ai-bench-cli llm --`.
 - Endpoint: $BENCH_URL (OpenAI-compatible chat completions). Prefer loopback on
   the GPU host.
@@ -192,8 +189,9 @@ Run a concurrency sweep with metrum-ai-bench-cli-strategic using the same
 prompt-library mix.
 
 Constraints:
-- FIRST: web search online for current best-known / vendor-default serving
-  flags for this model + engine; refresh every run; record in SUT notes.
+- For an exact model with a recorded entry, use it. Otherwise search current
+  vendor docs and the model card, then record the selected flags and sources
+  in SUT notes.
 - Reuse bench-out/mix.jsonl from the extract above (or re-extract with the same pin).
 - --prompts bench-out/mix.jsonl
 - --max-tokens "$(jq .recommended_max_tokens bench-out/mix-report.json)" (required with --prompts)

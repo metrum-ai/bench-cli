@@ -4,11 +4,13 @@
 //! Deterministic OpenAI-compatible mock server for local and CI benchmarks.
 
 use anyhow::Result;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine as _;
 use clap::Parser;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -256,6 +258,16 @@ fn telemetry_fixture_body(scrape: u64, state: &AppState) -> String {
     )
 }
 
+async fn transcribe(_body: Bytes) -> Json<Value> {
+    Json(json!({"text":"mock transcript"}))
+}
+
+async fn generate_image() -> Json<Value> {
+    let image = base64::engine::general_purpose::STANDARD
+        .encode(include_bytes!("../../test-data/vlm/shapes-512.png"));
+    Json(json!({"data":[{"b64_json":image}]}))
+}
+
 async fn models() -> Json<Value> {
     Json(json!({
         "object":"list",
@@ -288,6 +300,8 @@ async fn main() -> Result<()> {
         .route("/v1/completions", post(infer))
         .route("/v1/embeddings", post(infer))
         .route("/v1/rerank", post(infer))
+        .route("/v1/audio/transcriptions", post(transcribe))
+        .route("/v1/images/generations", post(generate_image))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     // Report the bound address, not the flag, so `--listen 127.0.0.1:0`

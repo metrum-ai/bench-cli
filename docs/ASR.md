@@ -7,9 +7,10 @@
 `/v1/audio/transcriptions` endpoints. To start: pick a server under
 [Serving frameworks](#serving-frameworks), serve one of the real speech
 fixtures in `test-data/asr/` with `--ground-truth`, and gate the cell with
-`cargo xtask assert-headline asr`. Before a real run, web-search the
-current vendor docs for your exact ASR model and engine version, and record
-the launch arguments and sources in the SUT (see [SERVING.md](SERVING.md)).
+`cargo xtask assert-headline asr`. For an exact model with a recorded serving
+entry, use that entry and its sources. Otherwise search current vendor docs and
+the model card, then record launch arguments and sources in the SUT (see
+[SERVING.md](SERVING.md)).
 
 Its input is JSONL:
 
@@ -25,7 +26,7 @@ Run the bench against any server that implements OpenAI-compatible
 
 | Stack | Status for this CLI (checked 2026-10-02) | Launcher |
 |---|---|---|
-| **vLLM-Omni** | Intended ASR stack. **Blocked in v0.30.0**: with `--omni` the engine reports only the `generate` and `speech` tasks, so the server never mounts `/v1/audio/transcriptions` ([vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722), open). Use it only to re-validate once that issue is closed. | `cargo xtask serve asr start --image vllm/vllm-omni:v0.30.0 --args "vllm serve --omni --max-model-len 448 --port 8000" --notes <researched-notes> --sources <source-urls>` |
+| **vLLM-Omni** | Intended ASR stack. **Blocked in v0.30.0**: with `--omni` the engine reports only the `generate` and `speech` tasks, so the server never mounts `/v1/audio/transcriptions` ([vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722), open). Use it only to re-validate once that issue is closed. | `cargo xtask serve asr start` with a researched entrypoint/image/args override and SUT notes/sources when that path is revalidated. |
 | **Regular vLLM speech-to-text** | Works today and is the checked-in CI default. vLLM documents Whisper on this endpoint ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)). The 2026-10-02 widen ASR cells ran on it. | `cargo xtask serve asr start` (`vllm/vllm-openai:v0.30.0`) |
 | Other OpenAI-compatible servers | Possible; not run by us. | none |
 

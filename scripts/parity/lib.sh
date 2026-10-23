@@ -8,8 +8,6 @@
 
 PARITY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARITY_ROOT="$(cd "${PARITY_DIR}/../.." && pwd)"
-# shellcheck source=../live/lib/bench_bin.sh
-source "${PARITY_ROOT}/scripts/live/lib/bench_bin.sh"
 
 # Knobs (env). Defaults are the epic #184 setup: c=4, 64 measured + 4 warmup.
 CONCURRENCY="${CONCURRENCY:-4}"
@@ -115,20 +113,17 @@ parity_start_fork() {
   parity_wait_http "http://127.0.0.1:${FORK_PORT}/metrics" "$!"
 }
 
-# parity_bench_bin NAME -> path. Default dir is the shared Rust lane build;
-# BENCH_BIN_DIR overrides. Never builds.
+# parity_bench_bin NAME -> prebuilt executable path. Never builds the bench.
 parity_bench_bin() {
-  local default_dir="${PARITY_ROOT}/../bench-cli-rust/target/release"
-  if [[ -z "${BENCH_BIN_DIR:-}" && -x "${default_dir}/$1" ]]; then
-    BENCH_BIN_DIR="$(cd "${default_dir}" && pwd)"
-  fi
-  bench_bin_resolve "${PARITY_ROOT}" "$1"
+  cargo xtask bench-bin "$1" --root "${PARITY_ROOT}"
 }
 
-# parity_bench_identity BIN -> bench_bin_identity against the checkout that
-# holds BIN (for example ../bench-cli-rust), not this worktree.
+# parity_bench_identity BIN -> version and source checkout identity.
 parity_bench_identity() {
-  bench_bin_identity "$1" "$(dirname "$1")"
+  local version checkout
+  version="$("$1" --version | head -n 1)"
+  checkout="$(git -C "${PARITY_ROOT}" describe --always --dirty --tags 2>/dev/null || echo 'not a git checkout')"
+  printf 'path=%s version=%s checkout=%s\n' "$1" "$version" "$checkout"
 }
 
 # parity_aiperf -> path to an aiperf CLI. AIPERF wins, then PATH, then

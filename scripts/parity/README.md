@@ -49,11 +49,11 @@ Every run uses the same prompts, concurrency 4, and 64 measured requests plus
 ## Requirements
 
 - `python3` (standard library only for the harness itself) and `curl`.
-- Bench binaries, found the same way the live scripts find them
-  (`scripts/live/lib/bench_bin.sh`). The order is `BENCH_BIN_DIR`, then
+- Bench binaries are resolved with `cargo xtask bench-bin` and never built by
+  the harness. The parity helper uses `BENCH_BIN_DIR`, then
   `../bench-cli-rust/target/release` (the shared Rust lane build), then
-  `bin/`, `target/release`, `target/rel-user/release`, then `PATH`. The
-  harness never builds. `run_pair.sh` needs `metrum-ai-bench-cli-llm`, and
+  `bin/`, `target/release`, `target/rel-user/release`, then `PATH`.
+  `run_pair.sh` needs `metrum-ai-bench-cli-llm`, and
   `run_tele.sh` needs `metrum-ai-bench-cli-strategic`. Each run logs the
   binary path, `--version`, and checkout into `OUT/sut.json` `notes`.
 - AIPerf 0.13.0. The harness uses `AIPERF=/path/to/aiperf`, else `aiperf` on

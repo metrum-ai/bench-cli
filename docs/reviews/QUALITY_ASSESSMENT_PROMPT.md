@@ -117,7 +117,7 @@ Read all of:
   [#184](https://github.com/metrum-ai/bench-cli/issues/184). Treat
   the bake-off comparison inside [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`) as dated history, not current evidence.
 - `live-results/**` if present. It is gitignored and may hold real GPU runs
-  from the campaign described in `scripts/live/README.md`. Use it as evidence of how
+  from the campaign described in `.claude/skills/campaign/SKILL.md`. Use it as evidence of how
   the tool behaves against real vLLM and SGLang, and cross-check
   `docs/SMOKE_RESULTS.md` against the raw files it claims to summarize.
 

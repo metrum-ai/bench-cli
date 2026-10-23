@@ -100,7 +100,7 @@ Independent window/rps recomputed from `request.v3` measure rows vs `summary.v3`
 
 - Hard TTL 6h in `ttl.json`.
 - Qwen pass: gemma LLM/VLM instances deleted; new L40Sx2 pair loaded `Qwen/Qwen3.8-27B-FP8`; ASR instance retained through Qwen sweep.
-- Script: `scripts/live/matrix_smoke.sh` (+ `shadeform.sh` model/extra-args).
+- Historical runner: the pre-Rust `matrix_smoke.sh` and `shadeform.sh` scripts (replaced by `cargo xtask` in #256).
 - Secrets: `env.json` never printed or committed.
 - N-01: never publish `first_byte_s` as TTFT; TTFT is always `ttft_s`.
 
