@@ -94,7 +94,12 @@ struct Shadeform {
 
 impl Shadeform {
     fn new() -> Result<Self> {
-        let (key, source) = resolve_api_key()?;
+        let source = if env::var("SHADEFORM_API_KEY").is_ok_and(|key| !key.is_empty()) {
+            "environment"
+        } else {
+            "ENV_JSON file"
+        };
+        let key = resolve_api_key()?;
         eprintln!("Using Shadeform API key from {source}");
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(30)).build()?,
@@ -155,19 +160,16 @@ impl Shadeform {
     }
 }
 
-fn resolve_api_key() -> Result<(ApiKey, &'static str)> {
+fn resolve_api_key() -> Result<ApiKey> {
     let env_path = env::var_os("ENV_JSON")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../env.json"));
     resolve_api_key_from(env::var("SHADEFORM_API_KEY").ok(), &env_path)
 }
 
-fn resolve_api_key_from(
-    env_key: Option<String>,
-    env_path: &Path,
-) -> Result<(ApiKey, &'static str)> {
+fn resolve_api_key_from(env_key: Option<String>, env_path: &Path) -> Result<ApiKey> {
     if let Some(key) = env_key.filter(|key| !key.is_empty()) {
-        return Ok((ApiKey(key), "environment"));
+        return Ok(ApiKey(key));
     }
     if env_path.is_file() {
         let value: Value = serde_json::from_slice(
@@ -177,7 +179,7 @@ fn resolve_api_key_from(
             .as_str()
             .filter(|key| !key.is_empty())
         {
-            return Ok((ApiKey(key.to_owned()), "ENV_JSON file"));
+            return Ok(ApiKey(key.to_owned()));
         }
     }
     bail!("Shadeform API key is unset in the environment and ENV_JSON source")
@@ -480,13 +482,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("env.json");
         fs::write(&path, r#"{"SHADEFORM_API_KEY":"file-test-key"}"#).unwrap();
-        let (key, source) =
-            resolve_api_key_from(Some("environment-test-key".into()), &path).unwrap();
+        let key = resolve_api_key_from(Some("environment-test-key".into()), &path).unwrap();
         assert_eq!(key, ApiKey("environment-test-key".into()));
-        assert_eq!(source, "environment");
-        let (key, source) = resolve_api_key_from(None, &path).unwrap();
+        let key = resolve_api_key_from(None, &path).unwrap();
         assert_eq!(key, ApiKey("file-test-key".into()));
-        assert_eq!(source, "ENV_JSON file");
     }
 
     #[test]
