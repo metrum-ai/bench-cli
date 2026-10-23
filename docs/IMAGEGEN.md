@@ -18,7 +18,7 @@ for `Tongyi-MAI/Z-Image-Turbo` on vllm-omni v0.30.0 only.
 Serve the model with **vLLM-Omni**, then point the bench at the server's `/v1` base URL. Plain `vllm/vllm-openai` does not serve diffusion models.
 
 ```bash
-scripts/live/serve/imagegen.sh start        # vllm/vllm-omni:v0.30.0, Tongyi-MAI/Z-Image-Turbo, writes a SUT
+cargo xtask serve imagegen start            # CI smoke defaults; writes a SUT
 metrum-ai-bench-cli-imagegen --url http://127.0.0.1:8000/v1 --api-key dummy \
   --model Tongyi-MAI/Z-Image-Turbo --scenario imagegen-smoke \
   --prompt "A red circle, a blue square, and a green triangle on a white background" \
@@ -29,11 +29,11 @@ metrum-ai-bench-cli-imagegen --url http://127.0.0.1:8000/v1 --api-key dummy \
 cargo xtask assert-headline imagegen imagegen.jsonl --artifact-dir imagegen-artifacts
 ```
 
-`scripts/live/local_smoke.sh --local --modality imagegen` runs the same cell end to end.
+`cargo xtask local-smoke imagegen` runs the same local cell end to end.
 
 ## Serving stack
 
-The launcher [`scripts/live/serve/imagegen.sh`](../scripts/live/serve/imagegen.sh) runs:
+The data-driven `cargo xtask serve imagegen` command runs:
 
 ```bash
 docker run --gpus device=0 --ipc=host -p 8000:8000 vllm/vllm-omni:v0.30.0 \

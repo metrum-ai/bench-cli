@@ -9,8 +9,9 @@ Shadeform smoke against the **Test Matrix for Metrum AI Bench CLI**
 (PERFORMANCE TESTS). Measured with package **1.0.0-rc.1** (before
 `--require-sut`). This page is a smoke summary, not a publication under
 [RESULTS_PUBLICATION_POLICY.md](RESULTS_PUBLICATION_POLICY.md). Raw JSONL is
-under gitignored `live-results/`. To re-run on a current release with
-`--sut --require-sut`, see `make smoke-regen` / `scripts/live/regen_smoke.sh`.
+under gitignored `live-results/`. To run a current campaign, use the campaign
+skill. After review, publish its generated manifest with `make smoke-regen
+CAMPAIGN_ID=<id> MANIFEST=<path-to-manifest.json>`.
 
 | Field | Value |
 |-------|-------|

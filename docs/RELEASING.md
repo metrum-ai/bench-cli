@@ -32,7 +32,7 @@ the README quickstart). The dummy is a static Go binary cross-compiled with
 Every non-LLM test in CI runs against `dummy-model-server`, which cannot prove
 that a real server accepts the media we send. `.github/workflows/live-modality-smoke.yml`
 runs one smoke cell per modality (LLM, VLM, ASR, imagegen) on a real serving
-stack (`scripts/live/serve/*.sh`) and fails the cell through
+stack (`cargo xtask serve`) and fails the cell through
 `cargo xtask assert-headline`. It runs on `workflow_dispatch` and on `v*`
 tags (tags only when `LIVE_RUNNER_READY` is `true`), on the self-hosted runner label `gpu-h100`
 (`deploy/github-runners-bench-cli/MANUAL`, "GPU runner").

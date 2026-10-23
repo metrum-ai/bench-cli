@@ -90,8 +90,7 @@ Preflight checks reachability, a unary chat probe, streaming first-token smoke,
 and a short latency sample. It cannot see CUDA toolchains or GPU inventory on a
 remote host; when the serve path is wrong, prefer the vendor containers above.
 
-Shadeform / cloud helpers in this repository already launch these images via
-`scripts/live/shadeform.sh` (`vllm/vllm-openai:latest`, `lmsysorg/sglang`).
+The campaign skill uses `cargo xtask shadeform` for the verified Shadeform lifecycle. Checked-in serving data is for CI smoke defaults only; for a live model, record its researched image and launch arguments in the SUT.
 
 ### Advanced: pip on bare metal
 

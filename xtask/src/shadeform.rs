@@ -8,7 +8,7 @@ use clap::{Args, Subcommand};
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::{
-    env, fs,
+    env, fmt, fs,
     path::{Path, PathBuf},
     thread,
     time::Duration,
@@ -65,10 +65,31 @@ pub struct CreateArgs {
     execute: bool,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct ApiKey(String);
+
+impl ApiKey {
+    fn as_header_value(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl fmt::Display for ApiKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
 struct Shadeform {
     client: Client,
     base: String,
-    key: String,
+    key: ApiKey,
 }
 
 impl Shadeform {
@@ -94,7 +115,7 @@ impl Shadeform {
                 method,
                 format!("{}{}", self.base.trim_end_matches('/'), path),
             )
-            .header("X-API-KEY", &self.key)
+            .header("X-API-KEY", self.key.as_header_value())
             .header("Accept", "application/json");
         if let Some(body) = body {
             request = request.json(body);
@@ -134,7 +155,7 @@ impl Shadeform {
     }
 }
 
-fn resolve_api_key() -> Result<(String, &'static str)> {
+fn resolve_api_key() -> Result<(ApiKey, &'static str)> {
     let env_path = env::var_os("ENV_JSON")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../env.json"));
@@ -144,9 +165,9 @@ fn resolve_api_key() -> Result<(String, &'static str)> {
 fn resolve_api_key_from(
     env_key: Option<String>,
     env_path: &Path,
-) -> Result<(String, &'static str)> {
+) -> Result<(ApiKey, &'static str)> {
     if let Some(key) = env_key.filter(|key| !key.is_empty()) {
-        return Ok((key, "environment"));
+        return Ok((ApiKey(key), "environment"));
     }
     if env_path.is_file() {
         let value: Value = serde_json::from_slice(
@@ -156,7 +177,7 @@ fn resolve_api_key_from(
             .as_str()
             .filter(|key| !key.is_empty())
         {
-            return Ok((key.to_owned(), "ENV_JSON file"));
+            return Ok((ApiKey(key.to_owned()), "ENV_JSON file"));
         }
     }
     bail!("Shadeform API key is unset in the environment and ENV_JSON source")
@@ -441,10 +462,17 @@ mod tests {
             Shadeform {
                 client: Client::new(),
                 base: format!("http://{address}"),
-                key: "test-key".to_owned(),
+                key: ApiKey("test-key".to_owned()),
             },
             server,
         )
+    }
+
+    #[test]
+    fn api_key_debug_and_display_are_redacted() {
+        let key = ApiKey("never-print-this-value".to_owned());
+        assert_eq!(format!("{key:?}"), "<redacted>");
+        assert_eq!(format!("{key}"), "<redacted>");
     }
 
     #[test]
@@ -454,10 +482,10 @@ mod tests {
         fs::write(&path, r#"{"SHADEFORM_API_KEY":"file-test-key"}"#).unwrap();
         let (key, source) =
             resolve_api_key_from(Some("environment-test-key".into()), &path).unwrap();
-        assert_eq!(key, "environment-test-key");
+        assert_eq!(key, ApiKey("environment-test-key".into()));
         assert_eq!(source, "environment");
         let (key, source) = resolve_api_key_from(None, &path).unwrap();
-        assert_eq!(key, "file-test-key");
+        assert_eq!(key, ApiKey("file-test-key".into()));
         assert_eq!(source, "ENV_JSON file");
     }
 

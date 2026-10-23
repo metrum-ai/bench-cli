@@ -5,29 +5,22 @@
 
 Metrum AI Bench CLI is a benchmark harness: it measures an OpenAI-compatible HTTP server that you start yourself. Use this page to pick the server for each modality, then follow the upstream links for recipes. This repository does not copy them.
 
-**Search first.** Before any real-backend run, web-search the current vendor docs for that exact model, engine, and engine version. Check:
-- the serving framework and image tag
-- the launch arguments
-- the context length and memory flags
-- the request parameters (for example thinking toggles and diffusion steps)
-- a sensible concurrency and ISL/OSL sweep
-
-Record what you chose, with source URLs, in the SUT `runtime.config` and `notes`. Do not reuse flags from memory or from an older run.
+**Search when the model is not exactly specified.** For an exact model ID with a recorded serving entry, use that entry and record its sources in SUT `runtime.config` and `notes`; if no entry exists, use engine defaults and state that choice. For an under-specified model, search current vendor docs and the model card, then record the pinned model, image tag, launch arguments, context/memory settings, request parameters, sources, and chosen sweep. CI smoke defaults in `.claude/skills/campaign/serving/ci-smoke.yaml` are for reproducible CI only, not live serving recommendations.
 
 ## Engine map
 
-| Modality | Bench binary and endpoint | Serving framework | Example model we stage | Live launcher | Upstream docs | Live verification |
+| Modality | Bench binary and endpoint | Serving framework | Example model we stage | Rust command | Upstream docs | Live verification |
 |---|---|---|---|---|---|---|
-| LLM | `metrum-ai-bench-cli-llm`, `/v1/chat/completions` | **Regular vLLM** (`vllm/vllm-openai`); SGLang also works | `Qwen/Qwen3-8B` | [`serve/llm.sh`](../scripts/live/serve/llm.sh) | [vLLM OpenAI server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html), [reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs.html), [vLLM recipes](https://docs.vllm.ai/projects/recipes/en/latest/), [SGLang](https://docs.sglang.ai/) | [Ledger](CLAIMS_LEDGER.md) |
-| VLM | `metrum-ai-bench-cli-vlm`, `/v1/chat/completions` with `image_url` parts | **Regular vLLM** multimodal | `Qwen/Qwen3-VL-8B-Instruct` | [`serve/vlm.sh`](../scripts/live/serve/vlm.sh) | [vLLM multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs.html), [Qwen3-VL recipe](https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3-VL.html) | [Ledger](CLAIMS_LEDGER.md) |
-| ASR | `metrum-ai-bench-cli-asr`, `/v1/audio/transcriptions` | **vLLM-Omni** is the intended stack. Until [vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722) lands, serve with regular vLLM speech-to-text (see [ASR.md](ASR.md#serving-frameworks)). | `openai/whisper-large-v3-turbo` | [`serve/asr.sh`](../scripts/live/serve/asr.sh) (`ASR_STACK=vllm` default, `ASR_STACK=omni`) | [vLLM speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/), [vLLM-Omni docs](https://docs.vllm.ai/projects/vllm-omni/en/latest/) | [Ledger](CLAIMS_LEDGER.md) |
-| ImageGen | `metrum-ai-bench-cli-imagegen`, `/v1/images/generations` | **vLLM-Omni** (`vllm serve <model> --omni`) | `Tongyi-MAI/Z-Image-Turbo` | [`serve/imagegen.sh`](../scripts/live/serve/imagegen.sh) | [vLLM-Omni image generation API](https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/image_generation_api/), [vLLM-Omni docs](https://docs.vllm.ai/projects/vllm-omni/en/latest/) | [Ledger](CLAIMS_LEDGER.md) |
+| LLM | `metrum-ai-bench-cli-llm`, `/v1/chat/completions` | **Regular vLLM** (`vllm/vllm-openai`); SGLang also works | `Qwen/Qwen3-8B` | `cargo xtask serve llm {start,stop,print,logs,sut}` | [vLLM OpenAI server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html), [reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs.html), [vLLM recipes](https://docs.vllm.ai/projects/recipes/en/latest/), [SGLang](https://docs.sglang.ai/) | [Ledger](CLAIMS_LEDGER.md) |
+| VLM | `metrum-ai-bench-cli-vlm`, `/v1/chat/completions` with `image_url` parts | **Regular vLLM** multimodal | `Qwen/Qwen3-VL-8B-Instruct` | `cargo xtask serve vlm {start,stop,print,logs,sut}` | [vLLM multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs.html), [Qwen3-VL recipe](https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3-VL.html) | [Ledger](CLAIMS_LEDGER.md) |
+| ASR | `metrum-ai-bench-cli-asr`, `/v1/audio/transcriptions` | **vLLM-Omni** is the intended stack. Until [vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722) lands, serve with regular vLLM speech-to-text (see [ASR.md](ASR.md#serving-frameworks)). | `openai/whisper-large-v3-turbo` | `cargo xtask serve asr {start,stop,print,logs,sut}` | [vLLM speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/), [vLLM-Omni docs](https://docs.vllm.ai/projects/vllm-omni/en/latest/) | [Ledger](CLAIMS_LEDGER.md) |
+| ImageGen | `metrum-ai-bench-cli-imagegen`, `/v1/images/generations` | **vLLM-Omni** (`vllm serve <model> --omni`) | `Tongyi-MAI/Z-Image-Turbo` | `cargo xtask serve imagegen {start,stop,print,logs,sut}` | [vLLM-Omni image generation API](https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/image_generation_api/), [vLLM-Omni docs](https://docs.vllm.ai/projects/vllm-omni/en/latest/) | [Ledger](CLAIMS_LEDGER.md) |
 
 The Live verification column always defers to [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). Supported in code is not the same as verified against a real server.
 
 **Why ASR is not on vLLM-Omni yet (checked 2026-10-02).** In vllm-omni v0.30.0, starting a server with `--omni` sets the engine's supported tasks to `generate` and `speech` only (`vllm_omni/engine/omni_engine_base.py`). The API server therefore never builds the transcription handler, and `/v1/audio/transcriptions` is unavailable under `--omni` for every model. Upstream tracks the fix in [vllm-omni#5722](https://github.com/vllm-project/vllm-omni/issues/5722).
 
-Regular vLLM documents Whisper on that endpoint today ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)), so `serve/asr.sh` defaults to it. `ASR_STACK=omni` exists to re-validate the intended path when the fix ships. Live ASR results so far (the 2026-10-02 widen) used regular vLLM 0.30.0. Re-validate on vLLM-Omni before calling ASR verified on it.
+Regular vLLM documents Whisper on that endpoint today ([speech-to-text](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)), so the checked-in CI serving data uses regular vLLM. Re-validate on vLLM-Omni before calling ASR verified on it.
 
 ## Use prebuilt binaries
 
@@ -39,15 +32,15 @@ Unless you want a from-source build, run binaries that already exist. Check thes
 
 Building is the right call in two cases: the operator asks for a from-source build, or the fix you need exists only in the working tree. Debug builds are fine for plumbing tests, but never for numbers you report.
 
-The live scripts resolve binaries in this order through [`scripts/live/lib/bench_bin.sh`](../scripts/live/lib/bench_bin.sh). `BENCH_BIN_DIR` overrides it. If nothing is found they fail with a clear message; they never compile. `local_smoke.sh` writes the binary path, the `--version` output, and the checkout's `git describe` into the SUT, because a build from an untagged commit still prints the last release version.
+`cargo xtask bench-bin <binary>` resolves prebuilt binaries in this order: `BENCH_BIN_DIR`, `ROOT/bin`, `target/release`, `target/rel-user/release`, then `PATH`. It never compiles or selects a debug build implicitly. `cargo xtask local-smoke` records the resolved binary path, `--version`, and checkout `git describe` in the SUT.
 
 ## One example per modality
 
 ```bash
 # Uses existing binaries; see "Use prebuilt binaries"
-scripts/live/serve/<llm|vlm|asr|imagegen>.sh start
-scripts/live/local_smoke.sh --local --modality <llm|vlm|asr|imagegen>
-scripts/live/serve/<modality>.sh stop
+cargo xtask serve <llm|vlm|asr|imagegen> start
+cargo xtask local-smoke <llm|vlm|asr|imagegen>
+cargo xtask serve <modality> stop
 ```
 
 Each cell ends in `cargo xtask assert-headline`.

@@ -5,6 +5,7 @@
 
 mod assert_headline;
 mod bench_bin;
+mod campaign_manifest;
 mod dco;
 mod gitleaks;
 mod headers;
@@ -48,6 +49,8 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
+    /// Copy a validated campaign manifest into docs/smoke/<campaign-id>/.
+    CampaignManifest(campaign_manifest::ManifestArgs),
     /// Run one local modality smoke using prebuilt binaries and campaign fixtures.
     LocalSmoke(local_smoke::LocalSmokeArgs),
     /// Check the campaign preset catalog's required schema and provenance.
@@ -86,6 +89,7 @@ fn main() -> Result<()> {
         Cmd::RenderCliHelp { check } => render_cli::run(check),
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
+        Cmd::CampaignManifest(args) => campaign_manifest::run(args),
         Cmd::LocalSmoke(args) => local_smoke::run(args),
         Cmd::CheckPresets { root } => presets::run(&root),
         Cmd::BenchBin { name, root } => {
