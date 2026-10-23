@@ -7,7 +7,12 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
-use std::{env, fs, path::PathBuf, thread, time::Duration};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    thread,
+    time::Duration,
+};
 
 const PREFERRED_GPU_TYPES: &[&str] = &["RTXPro6000", "B200", "H200", "H100", "H100_nvl", "L40S"];
 const DEFAULT_API_BASE: &str = "https://api.shadeform.ai/v1";
@@ -68,7 +73,8 @@ struct Shadeform {
 
 impl Shadeform {
     fn new() -> Result<Self> {
-        let key = resolve_api_key()?;
+        let (key, source) = resolve_api_key()?;
+        eprintln!("Using Shadeform API key from {source}");
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(30)).build()?,
             base: env::var("SHADEFORM_API_BASE").unwrap_or_else(|_| DEFAULT_API_BASE.to_owned()),
@@ -98,8 +104,7 @@ impl Shadeform {
             .with_context(|| format!("Shadeform request {path}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().unwrap_or_default();
-            bail!("Shadeform API {path} returned HTTP {status}: {text}");
+            bail!("Shadeform API {path} returned HTTP {status}");
         }
         Ok(response)
     }
@@ -129,39 +134,66 @@ impl Shadeform {
     }
 }
 
-fn resolve_api_key() -> Result<String> {
-    let env_key = env::var("SHADEFORM_API_KEY").unwrap_or_default();
+fn resolve_api_key() -> Result<(String, &'static str)> {
     let env_path = env::var_os("ENV_JSON")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../env.json"));
-    let file_key = if env_path.is_file() {
+    resolve_api_key_from(env::var("SHADEFORM_API_KEY").ok(), &env_path)
+}
+
+fn resolve_api_key_from(
+    env_key: Option<String>,
+    env_path: &Path,
+) -> Result<(String, &'static str)> {
+    if let Some(key) = env_key.filter(|key| !key.is_empty()) {
+        return Ok((key, "environment"));
+    }
+    if env_path.is_file() {
         let value: Value = serde_json::from_slice(
-            &fs::read(&env_path).with_context(|| format!("read {}", env_path.display()))?,
+            &fs::read(env_path).with_context(|| format!("read {}", env_path.display()))?,
         )?;
-        value["SHADEFORM_API_KEY"]
+        if let Some(key) = value["SHADEFORM_API_KEY"]
             .as_str()
-            .unwrap_or_default()
-            .to_owned()
-    } else {
-        String::new()
-    };
-    if !env_key.is_empty() && !file_key.is_empty() && env_key != file_key {
-        eprintln!(
-            "warning: SHADEFORM_API_KEY in the environment differs from {}; using the file value",
-            env_path.display()
-        );
-        return Ok(file_key);
+            .filter(|key| !key.is_empty())
+        {
+            return Ok((key.to_owned(), "ENV_JSON file"));
+        }
     }
-    if !env_key.is_empty() {
-        return Ok(env_key);
+    bail!("Shadeform API key is unset in the environment and ENV_JSON source")
+}
+
+fn redact_credentials(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let key_lower = key.to_ascii_lowercase();
+                    let sensitive = ["password", "token", "key", "private", "secret"]
+                        .iter()
+                        .any(|marker| key_lower.contains(marker));
+                    (
+                        key.clone(),
+                        if sensitive {
+                            json!("[REDACTED]")
+                        } else {
+                            redact_credentials(value)
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redact_credentials).collect()),
+        _ => value.clone(),
     }
-    if !file_key.is_empty() {
-        return Ok(file_key);
-    }
-    bail!(
-        "SHADEFORM_API_KEY unset and no key found in {}",
-        env_path.display()
-    )
+}
+
+fn print_redacted(value: &Value) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&redact_credentials(value))?
+    );
+    Ok(())
 }
 
 fn gpu_rank(gpu: &str) -> Option<usize> {
@@ -306,9 +338,9 @@ pub fn run(command: ShadeformCommand) -> Result<()> {
                 let best = rows
                     .first()
                     .context("no preferred GPU types currently available")?;
-                println!("{}", serde_json::to_string_pretty(best)?);
+                print_redacted(best)?;
             } else {
-                println!("{}", serde_json::to_string_pretty(&rows)?);
+                print_redacted(&Value::Array(rows))?;
             }
         }
         ShadeformCommand::Create(args) => {
@@ -322,17 +354,17 @@ pub fn run(command: ShadeformCommand) -> Result<()> {
                     None
                 };
             let payload = create_payload(&args, selected.as_ref())?;
-            println!("{}", serde_json::to_string_pretty(&payload)?);
+            print_redacted(&payload)?;
             if args.execute {
                 let response = Shadeform::new()?.post("/instances/create", &payload)?;
-                println!("{}", serde_json::to_string_pretty(&response)?);
+                print_redacted(&response)?;
             } else {
                 println!("# dry-run: no instance was created; pass --execute to POST");
             }
         }
         ShadeformCommand::Info { id } => {
             let value = Shadeform::new()?.get(&format!("/instances/{id}/info"))?;
-            println!("{}", serde_json::to_string_pretty(&value)?);
+            print_redacted(&value)?;
         }
         ShadeformCommand::Wait {
             id,
@@ -359,7 +391,7 @@ pub fn run(command: ShadeformCommand) -> Result<()> {
         }
         ShadeformCommand::Delete { id } => {
             let result = Shadeform::new()?.delete_verified(&id)?;
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            print_redacted(&result)?;
         }
     }
     Ok(())
@@ -413,6 +445,49 @@ mod tests {
             },
             server,
         )
+    }
+
+    #[test]
+    fn api_key_uses_environment_then_falls_back_to_env_json() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("env.json");
+        fs::write(&path, r#"{"SHADEFORM_API_KEY":"file-test-key"}"#).unwrap();
+        let (key, source) =
+            resolve_api_key_from(Some("environment-test-key".into()), &path).unwrap();
+        assert_eq!(key, "environment-test-key");
+        assert_eq!(source, "environment");
+        let (key, source) = resolve_api_key_from(None, &path).unwrap();
+        assert_eq!(key, "file-test-key");
+        assert_eq!(source, "ENV_JSON file");
+    }
+
+    #[test]
+    fn api_output_recursively_redacts_credential_like_fields() {
+        let response = json!({
+            "id":"instance-1", "password":"pass-value", "access_token":"token-value",
+            "nested":{"api_key":"key-value", "private_key":"private-value", "client_secret":"secret-value", "status":"active"},
+            "items":[{"ssh_key_id":"ssh-id", "label":"safe"}]
+        });
+        let redacted = redact_credentials(&response);
+        assert_eq!(redacted["id"], "instance-1");
+        assert_eq!(redacted["password"], "[REDACTED]");
+        assert_eq!(redacted["access_token"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["api_key"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["private_key"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["client_secret"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["status"], "active");
+        assert_eq!(redacted["items"][0]["ssh_key_id"], "[REDACTED]");
+        let output = serde_json::to_string(&redacted).unwrap();
+        for secret in [
+            "pass-value",
+            "token-value",
+            "key-value",
+            "private-value",
+            "secret-value",
+            "ssh-id",
+        ] {
+            assert!(!output.contains(secret));
+        }
     }
 
     #[test]

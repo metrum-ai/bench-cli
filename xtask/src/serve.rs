@@ -38,6 +38,8 @@ pub struct ServeArgs {
     port: u16,
     #[arg(long, default_value_t = 1800)]
     ready_timeout_seconds: u64,
+    #[arg(long)]
+    logs_output: Option<PathBuf>,
 }
 
 struct Config {
@@ -403,6 +405,7 @@ mod tests {
             sources: Vec::new(),
             port: 8000,
             ready_timeout_seconds: 1,
+            logs_output: None,
         }
     }
 
@@ -563,11 +566,20 @@ pub fn run(args: ServeArgs) -> Result<()> {
             println!("stopped {container}");
         }
         "logs" => {
-            let status = Command::new("docker")
-                .args(["logs", "-f", &container])
-                .status()?;
-            if !status.success() {
-                bail!("docker logs exited with {status}");
+            let output = Command::new("docker").args(["logs", &container]).output()?;
+            if !output.status.success() {
+                bail!("docker logs exited with {}", output.status);
+            }
+            if let Some(path) = args.logs_output {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut bytes = output.stdout;
+                bytes.extend_from_slice(&output.stderr);
+                fs::write(path, bytes)?;
+            } else {
+                print!("{}", String::from_utf8_lossy(&output.stdout));
+                eprint!("{}", String::from_utf8_lossy(&output.stderr));
             }
         }
         "start" => {

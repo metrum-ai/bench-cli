@@ -8,6 +8,7 @@ mod bench_bin;
 mod dco;
 mod gitleaks;
 mod headers;
+mod local_smoke;
 mod presets;
 mod release_notes;
 mod render_cli;
@@ -47,6 +48,8 @@ enum Cmd {
     },
     /// Print docs/DATA_POINTS.md shaped for GitHub release notes.
     ReleaseNotesDataPoints,
+    /// Run one local modality smoke using prebuilt binaries and campaign fixtures.
+    LocalSmoke(local_smoke::LocalSmokeArgs),
     /// Check the campaign preset catalog's required schema and provenance.
     CheckPresets {
         #[arg(long, default_value = ".")]
@@ -83,6 +86,7 @@ fn main() -> Result<()> {
         Cmd::RenderCliHelp { check } => render_cli::run(check),
         Cmd::RenderDataPoints { check } => render_data_points::run(check),
         Cmd::ReleaseNotesDataPoints => release_notes::run(),
+        Cmd::LocalSmoke(args) => local_smoke::run(args),
         Cmd::CheckPresets { root } => presets::run(&root),
         Cmd::BenchBin { name, root } => {
             println!("{}", bench_bin::resolve(&root, &name)?.display());

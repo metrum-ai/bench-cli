@@ -41,6 +41,8 @@ jobs:
           cache-dependency-path: dummy-model-server/go.sum
       - name: copyright and SPDX headers
         run: cargo --locked xtask check-headers
+      - name: campaign preset schema and provenance
+        run: cargo --locked xtask check-presets
       - name: naming rule negative test
         run: cargo --locked test -p xtask naming_rejects_metrum_bench_and_accepts_transition -- --exact
       - name: live headline gate self-test
