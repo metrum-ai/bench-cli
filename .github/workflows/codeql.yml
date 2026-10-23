@@ -6,6 +6,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   schedule:
     - cron: "17 6 * * 1"
 
@@ -15,8 +17,38 @@ permissions:
   security-events: write
 
 jobs:
+  changes:
+    name: detect Rust changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          EVENT_BASE: ${{ github.event.base_sha }}
+          EVENT_HEAD: ${{ github.event.head_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          base="${PR_BASE}"
+          head="${PR_HEAD}"
+          case "${EVENT_NAME}" in
+            merge_group) base="${EVENT_BASE}"; head="${EVENT_HEAD}" ;;
+            push) base="${PUSH_BEFORE}"; head="${CURRENT_SHA}" ;;
+          esac
+          bash scripts/ci/rust_changes.sh "${EVENT_NAME}" "${base}" "${head}"
+
   analyze:
     name: Analyze (rust)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,3 +60,11 @@ jobs:
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:rust"
+
+  analyze_stub:
+    name: Analyze (rust)
+    needs: changes
+    if: needs.changes.outputs.rust != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Rust sources unchanged; required check intentionally passes.'
