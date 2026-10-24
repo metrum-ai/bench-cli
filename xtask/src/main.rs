@@ -6,6 +6,7 @@
 mod analysis_contract;
 mod assert_headline;
 mod check_docs;
+mod check_msrv;
 #[path = "../../src/count_points.rs"]
 mod count_points;
 mod dco;
@@ -44,6 +45,11 @@ enum Cmd {
     },
     /// Fail when any commit in base..head lacks a Signed-off-by trailer.
     CheckDco { base: String, head: String },
+    /// Check every locked package's declared rust-version against the MSRV.
+    CheckMsrv {
+        #[arg(long)]
+        msrv: String,
+    },
     /// Count data points in one or more Bench data logs.
     CountPoints {
         files: Vec<PathBuf>,
@@ -139,6 +145,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::CheckDco { base, head } => dco::run(&base, &head),
+        Cmd::CheckMsrv { msrv } => check_msrv::run(&msrv),
         Cmd::CountPoints {
             files,
             aiperf_dirs,

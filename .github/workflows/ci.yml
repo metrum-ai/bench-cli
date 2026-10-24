@@ -148,7 +148,7 @@ jobs:
         run: echo 'DCO was checked on the pull request before merge queue.'
 
   msrv:
-    name: MSRV 1.85
+    name: MSRV 1.89
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
@@ -158,15 +158,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.89.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Validate Rust versions of all locked packages
+        run: cargo --locked xtask check-msrv --msrv 1.89.0
       - name: cargo check (MSRV)
         run: cargo --locked check --all-targets --all-features
       - name: cargo test (MSRV lib)
         run: cargo --locked test --lib --all-features
 
   msrv_stub:
-    name: MSRV 1.85
+    name: MSRV 1.89
     needs: changes
     if: needs.changes.outputs.rust != 'true'
     runs-on: ubuntu-latest
