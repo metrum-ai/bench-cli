@@ -161,9 +161,7 @@ jobs:
           toolchain: "1.89.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Validate Rust versions of all locked packages
-        run: |
-          cargo --locked metadata --format-version 1 --all-features > "$RUNNER_TEMP/cargo-metadata.json"
-          python3 .github/scripts/check_locked_msrv.py --msrv 1.89.0 "$RUNNER_TEMP/cargo-metadata.json"
+        run: cargo --locked xtask check-msrv --msrv 1.89.0
       - name: cargo check (MSRV)
         run: cargo --locked check --all-targets --all-features
       - name: cargo test (MSRV lib)
