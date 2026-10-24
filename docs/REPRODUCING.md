@@ -3,7 +3,7 @@
 
 # Reproducing the checked-in reference
 
-Requirements: Rust 1.85+, Go 1.26.6+, and an otherwise idle local machine.
+Requirements: Rust 1.89+, Go 1.26.6+, and an otherwise idle local machine.
 
 ```bash
 cargo build --release
