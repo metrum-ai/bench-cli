@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Documentation
+- Add the 2026-10-23 four-model Endpoints comparison, scalar report and pre-release evidence index; disclose timing/arrival, quantization, power and accuracy boundaries.
+
 ## 1.5.5 (2026-10-23)
 
 ### Security
