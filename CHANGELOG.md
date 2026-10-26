@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Security
+- Dependabot applies a seven-day cooldown to routine version updates in all
+  three ecosystems (cargo, gomod, github-actions); security updates are never
+  delayed (#293).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
