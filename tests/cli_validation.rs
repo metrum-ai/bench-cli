@@ -2788,7 +2788,10 @@ fn sse_trace_first_n_writes_bounded_redacted_timelines() {
         "traced streaming run must succeed:\n{}",
         combined_output(&out)
     );
-    let trace_path = format!("{}.sse-trace.jsonl", data_log.to_str().unwrap());
+    let trace_path = format!(
+        "{}.sse-trace.jsonl",
+        data_log.to_str().unwrap().trim_end_matches(".jsonl")
+    );
     let text = std::fs::read_to_string(&trace_path).expect("trace file written");
     let rows: Vec<serde_json::Value> = text
         .lines()

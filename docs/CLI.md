@@ -117,8 +117,6 @@ Options:
           - overwrite:       Truncate the existing data log before the run, so runs never mix
           - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
 
-          [default: append]
-
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
 
@@ -370,8 +368,6 @@ Options:
           - refuse-existing: Fail before any traffic when the data log path already exists
           - overwrite:       Truncate the existing data log before the run, so runs never mix
           - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
-
-          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -635,8 +631,6 @@ Options:
           - refuse-existing: Fail before any traffic when the data log path already exists
           - overwrite:       Truncate the existing data log before the run, so runs never mix
           - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
-
-          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -992,8 +986,6 @@ Options:
           - refuse-existing: Fail before any traffic when the data log path already exists
           - overwrite:       Truncate the existing data log before the run, so runs never mix
           - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
-
-          [default: append]
 
       --ndjson <PATH>
           Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
