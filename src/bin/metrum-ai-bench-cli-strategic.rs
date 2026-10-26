@@ -1665,6 +1665,7 @@ async fn main() -> Result<()> {
                     require_telemetry: args.require_telemetry,
                     require_failures: args.require_telemetry_failures,
                     abort: Some(stop.clone()),
+                    request_timeout_s: None,
                 },
             )
             .await?,

@@ -261,31 +261,67 @@ pub async fn boundary_scrape_error(
         .await;
 }
 
-/// Shared per-source ring buffer of epoch ns timestamps of successfully
-/// written telemetry rows (#312 review). Bounded to the newest
-/// [`SAMPLE_HISTORY_CAP`] per source; the epoch clock is monotonic, so the
-/// buffer stays sorted and a reverse scan finds the newest sample
-/// at-or-before a given time. The record consumer uses it to compute
+/// Per-source ring buffer of epoch ns timestamps of successfully written
+/// telemetry rows (#312 review). The record consumer uses it to compute
 /// per-request queue-sample freshness measured at SEND time — the latest
 /// sample alone is wrong, because a request that completes after a newer
 /// scrape would read as missing (found on the 2026-10-26 Blackwell run:
-/// 100% false missing on a 500 ms-interval source).
-pub type SampleHistory = std::sync::Arc<
-    std::sync::Mutex<std::collections::BTreeMap<String, std::collections::VecDeque<u64>>>,
->;
+/// 100% false missing on a 500 ms-interval source). The epoch clock is
+/// monotonic, so each buffer stays sorted and a reverse scan finds the
+/// newest sample at-or-before a given time. Buffers MUST stay bounded: the
+/// cap is per source, sized from the run's request timeout and the source's
+/// own interval by [`sample_history_cap`], and hard-clamped to
+/// [`SAMPLE_HISTORY_MAX_CAP`].
+#[derive(Debug, Default)]
+pub struct SampleHistoryMap {
+    pub(crate) samples: std::collections::BTreeMap<String, std::collections::VecDeque<u64>>,
+    caps: std::collections::BTreeMap<String, usize>,
+}
 
-/// Samples kept per source for freshness coverage (#312 review). At the
-/// smallest realistic interval (500 ms) this covers ~128 s of history — far
-/// beyond any supported request latency. The buffer MUST stay bounded.
-pub const SAMPLE_HISTORY_CAP: usize = 256;
+/// Shared handle to the per-source sample histories.
+pub type SampleHistory = std::sync::Arc<std::sync::Mutex<SampleHistoryMap>>;
+
+/// Fallback per-source cap when a source has no computed cap (tests and
+/// defensive paths). NOT sufficient for a 100 ms interval with long
+/// requests — real runs always get a computed cap.
+pub const SAMPLE_HISTORY_FALLBACK_CAP: usize = 256;
+
+/// Hard upper bound for any per-source cap (u64 timestamps: 8 bytes each,
+/// so even the clamp is ~0.5 MB per source).
+pub const SAMPLE_HISTORY_MAX_CAP: usize = 65_536;
+
+/// Per-source history cap (#312 review): enough samples to span the run's
+/// request timeout plus one minute of slack at the source's interval, plus
+/// two, clamped to [`SAMPLE_HISTORY_MAX_CAP`]. A request that spends the
+/// whole timeout in flight must still find its at-or-before-send sample at
+/// completion.
+pub fn sample_history_cap(interval_ms: u64, request_timeout_s: u64) -> usize {
+    let interval_ms = interval_ms.max(1) as u128;
+    let span_ms = (request_timeout_s as u128 + 60) * 1000;
+    let cap = (span_ms.div_ceil(interval_ms) as usize).saturating_add(2);
+    cap.min(SAMPLE_HISTORY_MAX_CAP)
+}
+
+/// Create a history with per-source caps computed by the session.
+pub fn new_sample_history(caps: std::collections::BTreeMap<String, usize>) -> SampleHistory {
+    std::sync::Arc::new(std::sync::Mutex::new(SampleHistoryMap {
+        samples: std::collections::BTreeMap::new(),
+        caps,
+    }))
+}
 
 /// Record one successful sample time for a source, dropping the oldest
-/// beyond [`SAMPLE_HISTORY_CAP`] (#312 review).
+/// beyond the source's cap (#312 review).
 pub fn note_sample(history: &SampleHistory, source: &str, t_ns: u64) {
-    if let Ok(mut map) = history.lock() {
-        let deque = map.entry(source.to_string()).or_default();
+    if let Ok(mut history) = history.lock() {
+        let cap = history
+            .caps
+            .get(source)
+            .copied()
+            .unwrap_or(SAMPLE_HISTORY_FALLBACK_CAP);
+        let deque = history.samples.entry(source.to_string()).or_default();
         deque.push_back(t_ns);
-        while deque.len() > SAMPLE_HISTORY_CAP {
+        while deque.len() > cap {
             deque.pop_front();
         }
     }
@@ -294,8 +330,10 @@ pub fn note_sample(history: &SampleHistory, source: &str, t_ns: u64) {
 /// Newest recorded sample at-or-before `t_ns` for a source, if any (#312
 /// review: freshness is measured against the request's SEND time).
 pub fn sample_at_or_before(history: &SampleHistory, source: &str, t_ns: u64) -> Option<u64> {
-    history.lock().ok().and_then(|map| {
-        map.get(source)
+    history.lock().ok().and_then(|history| {
+        history
+            .samples
+            .get(source)
             .and_then(|dq| dq.iter().rev().copied().find(|t| *t <= t_ns))
     })
 }
@@ -609,7 +647,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
-        let sample_history = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+        let sample_history = new_sample_history(std::collections::BTreeMap::new());
         let epoch = Arc::new(RunEpoch::new());
         let run_id = Arc::new("run-probe".to_string());
         let handles = spawn_scrapers(
@@ -640,7 +678,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         // inserts would triple the entry count and fill the ring buffer
         // with duplicate timestamps).
         let history = sample_history.lock().unwrap();
-        let entries = history.get("dcgm").expect("dcgm history");
+        let entries = history.samples.get("dcgm").expect("dcgm history");
         assert!(
             !entries.is_empty() && entries.len() <= 6,
             "one history entry per scrape (100 ms interval, 350 ms window): {entries:?}"
@@ -689,7 +727,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
-        let sample_history = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+        let sample_history = new_sample_history(std::collections::BTreeMap::new());
         let handles = spawn_scrapers(
             client,
             cfg,
