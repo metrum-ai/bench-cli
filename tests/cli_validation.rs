@@ -2914,3 +2914,46 @@ fn ci_safety_defaults_data_log_mode_to_refuse_existing() {
         .count();
     assert_eq!(summaries, 2, "the second run appended: {logged}");
 }
+
+// Integration follow-up (c) (#329×#330): endpoints-export --scenario offline
+// on a burst run discloses native burst, not a closed-loop proxy.
+
+#[test]
+fn endpoints_export_offline_on_burst_says_native_burst() {
+    let mock = common::spawn_mock(&["--latency-ms", "50"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(burst_args(&url, data_log.to_str().unwrap(), &["--arrival", "burst"]))
+        .output()
+        .expect("burst run");
+    assert!(out.status.success());
+
+    let out_dir = dir.path().join("bundle");
+    let out = Command::new(unified_bin())
+        .args([
+            "endpoints-export",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--workload",
+            "W1",
+            "--scenario",
+            "offline",
+        ])
+        .output()
+        .expect("export burst run as offline");
+    assert!(out.status.success(), "{}", combined_output(&out));
+
+    let point = std::fs::read_to_string(out_dir.join("point.yaml")).unwrap();
+    assert!(
+        point.contains("native burst (bench definition; not an accepted MLPerf Offline result)"),
+        "burst runs disclose native burst, not a proxy:\n{point}"
+    );
+    assert!(
+        !point.contains("closed-loop/fixed-rate run"),
+        "the closed-loop proxy disclosure must not fire for burst runs:\n{point}"
+    );
+}

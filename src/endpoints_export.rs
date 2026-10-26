@@ -429,19 +429,35 @@ pub fn export_bundle(options: &ExportOptions) -> Result<BundleSummary> {
 
     // Scenario mapping disclosure: bench has no LoadStair/Pareto arrival
     // process, and no native Offline burst mode yet (#309).
+    // Arrival can be stamped flat (config.arrival) or nested in the
+    // effective common args (config.common.arrival); both are the raw
+    // --arrival value ("burst", "constant", "poisson"), defaulting to the
+    // closed-loop absence.
     let arrival = run
         .summary
         .pointer("/config/arrival")
+        .or_else(|| run.summary.pointer("/config/common/arrival"))
         .and_then(Value::as_str)
-        .unwrap_or("closed-loop");
+        .map(str::to_ascii_lowercase)
+        .filter(|a| !a.is_empty())
+        .unwrap_or_else(|| "closed-loop".to_string());
     let (upstream_type, scenario_disclosure) = match options.scenario {
         ScenarioKind::Server => ("Server", None),
-        ScenarioKind::Offline => (
-            "Offline",
-            Some(format!(
-                "Declared Offline on a bench '{arrival}' run: bench has no native Offline burst mode (#309). This point is a closed-loop/fixed-rate run exported with an Offline intent label; it is not a native Offline arrival process."
-            )),
-        ),
+        ScenarioKind::Offline => {
+            // #329×#330 follow-up: a burst-arrival run is the native
+            // Offline-style mode (#309); anything else stays a disclosed
+            // proxy.
+            if arrival == "burst" {
+                ("Offline", Some(
+                    "native burst (bench definition; not an accepted MLPerf Offline result)"
+                        .to_string(),
+                ))
+            } else {
+                ("Offline", Some(format!(
+                    "Declared Offline on a bench '{arrival}' run: bench has no native Offline burst mode (#309). This point is a closed-loop/fixed-rate run exported with an Offline intent label; it is not a native Offline arrival process."
+                )))
+            }
+        }
         ScenarioKind::Loadstair => (
             "LoadStair",
             Some(
