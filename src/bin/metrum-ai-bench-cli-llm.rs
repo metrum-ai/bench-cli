@@ -1192,6 +1192,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let client = client.clone();
         let endpoint_selector = endpoint_selector.clone();
         let prompt = metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt(
+            // #313: after apply_prescribed_sequence the pool IS the
+            // prescribed sequence, so normal cycling reproduces the
+            // recorded order and its log byte-for-byte.
             &prompts[i % prompts.len()],
             slot.seq,
             args.common.unique_prompts,
