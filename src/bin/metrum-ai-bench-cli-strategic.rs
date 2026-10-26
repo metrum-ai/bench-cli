@@ -1103,6 +1103,7 @@ fn spawn_one_request(
                     metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
                     sent,
                     infer_ttft,
+                    false,
                 )
                 .await?;
                 stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());

@@ -514,7 +514,8 @@ async fn check_streaming_first_token(
     }
     // Keep a stream that ends without visible content: a thinking model can
     // spend the whole small probe budget on reasoning (#230).
-    let result = chat_stream::consume_with_options(response.bytes_stream(), started, true).await;
+    let result =
+        chat_stream::consume_with_options(response.bytes_stream(), started, true, false).await;
     streaming_check(result)
 }
 
@@ -801,6 +802,7 @@ mod tests {
             futures_util::stream::iter(body),
             Instant::now(),
             true,
+            false,
         ));
         streaming_check(result)
     }

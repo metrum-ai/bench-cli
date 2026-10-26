@@ -279,6 +279,17 @@ Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 Warmup request lines remain in the file for audit but are excluded from
 summary distributions. Ctrl-C stops issuance, drains started requests, and
 writes a partial summary. The first real Ctrl-C or SIGTERM always drains and
+`metrum-ai-bench-cli.sse-trace.v1` rows (`--sse-trace-first-n`, llm only,
+#313) go to `<data-log>.sse-trace.jsonl`: one row per traced request
+(`run_id`, `seq`, `phase`, `events`), each event carrying `index`, `t_ms`
+and `categories` (`role`/`content`/`reasoning`/`usage`/`finish`/`done`/
+`error`/`other`). The trace is bounded to the first N requests and contains
+no prompt text, content, or secrets.
+
+`summary.v3` also gains `ttft_first_any_s` (#313): the first token of any
+category per request (`min` of visible TTFT and first-reasoning), reported
+only when at least one measured row reported reasoning.
+
 writes `summary.v3` (and, with `--ndjson`, the NDJSON `summary` row), even
 after an internal stop such as a mid-run `--require-telemetry` abort. Only a
 second real signal (Ctrl-C or SIGTERM, in any order) exits at once with
