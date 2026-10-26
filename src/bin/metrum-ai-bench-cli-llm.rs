@@ -740,10 +740,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .map_err(|e| format!("--prompt-sequence: {e}"))?;
             // Fingerprint-first replay: content must match the pool; nothing
             // is silently substituted (#313).
+            // The pool stays untouched: `order` is the slot→pool-index map
+            // into the ORIGINAL pool, so a replayed sequence log is
+            // byte-identical to the recorded one (#313).
             let order =
                 metrum_ai_bench::prompt_sequence::resolve_prescribed_order(&entries, &prompts)
                     .map_err(|e| format!("--prompt-sequence: {e}"))?;
-            metrum_ai_bench::prompt_sequence::apply_prescribed_sequence(&mut prompts, &order);
             Some(order)
         }
         None => None,
@@ -887,6 +889,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &prompts,
             u64::from(args.num_requests),
             u64::from(concurrency_limit as u32),
+            // The prescribed order IS the slot→index map; log it verbatim
+            // (fingerprint content anchors make it byte-identical on replay).
             prescribed_order.as_deref(),
         )
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
@@ -1192,10 +1196,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let client = client.clone();
         let endpoint_selector = endpoint_selector.clone();
         let prompt = metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt(
-            // #313: after apply_prescribed_sequence the pool IS the
-            // prescribed sequence, so normal cycling reproduces the
-            // recorded order and its log byte-for-byte.
-            &prompts[i % prompts.len()],
+            // #313: replay maps the slot through the prescribed order into
+            // the original pool; the log records the same indices.
+            match &prescribed_order {
+                Some(order) => &prompts[order[slot.seq as usize % order.len()] as usize],
+                None => &prompts[i % prompts.len()],
+            },
             slot.seq,
             args.common.unique_prompts,
             args.common.seed,
