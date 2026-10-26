@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- Ready telemetry presets for the Metrum all-smi fork plus vLLM:
+  `examples/telemetry/all-smi-vllm.yaml` (validated single-node include set,
+  pinned exporter/engine versions, loopback URLs and the operational
+  caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
+  (four lanes with source labels and loopback forwarding placeholders), with
+  a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
