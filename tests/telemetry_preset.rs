@@ -7,19 +7,21 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use metrum_ai_bench::telemetry::{parse_exposition, TelemetryConfig};
+use metrum_ai_bench::telemetry::TelemetryConfig;
 
 fn repo_file(path: &str) -> String {
     std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path))
         .unwrap_or_else(|e| panic!("read {path}: {e}"))
 }
 
-fn selected_series(
-    fixture: &str,
-    include: &metrum_ai_bench::telemetry::RegexSet,
-) -> BTreeSet<String> {
-    let parsed = parse_exposition(fixture, include);
-    parsed.samples.iter().map(|s| s.metric.clone()).collect()
+/// Selected series of `source_name` in `cfg` applied to `exposition`, via
+/// the library's doc-hidden preview helper (no third-party regex types on
+/// the public surface, #326 review).
+fn selected_series(cfg: &TelemetryConfig, source_name: &str, exposition: &str) -> BTreeSet<String> {
+    cfg.preview_source_selection(source_name, exposition)
+        .expect("preview selection")
+        .into_iter()
+        .collect()
 }
 
 #[test]
@@ -55,8 +57,9 @@ fn preset_parses_and_selects_the_documented_series() {
     // (v0.26.3-metrum.4); the preset's GPU group (power/energy/utilization/
     // memory/temperature/clock/frequency) selects exactly the series below.
     let all_smi_selected = selected_series(
+        &cfg,
+        "all-smi",
         &repo_file("test-data/telemetry/all-smi-fork-h100.prom"),
-        &all_smi.include,
     );
     let expected_all_smi: BTreeSet<String> = [
         "all_smi_chassis_power_watts",
@@ -116,8 +119,9 @@ fn preset_parses_and_selects_the_documented_series() {
     // The vLLM fixture mirrors the 0.32.0 study server (one sample per
     // series); the preset selects the full documented engine set.
     let vllm_selected = selected_series(
+        &cfg,
+        "vllm",
         &repo_file("test-data/telemetry/vllm-0.32.prom"),
-        &vllm.include,
     );
     let expected_vllm: BTreeSet<String> = [
         "vllm:e2e_request_latency_seconds_bucket",

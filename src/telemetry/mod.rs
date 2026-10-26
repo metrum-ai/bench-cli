@@ -13,12 +13,11 @@ mod session;
 mod writer;
 
 pub use config::{
-    CompiledSource, TelemetryConfig, TelemetrySource, UnitScale, DEFAULT_INTERVAL_MS,
-    DEFAULT_MAX_BODY_BYTES, DEFAULT_REQUIRE_FAILURES, DEFAULT_TIMEOUT_MS, MIN_INTERVAL_MS,
+    TelemetryConfig, TelemetrySource, UnitScale, DEFAULT_INTERVAL_MS, DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_REQUIRE_FAILURES, DEFAULT_TIMEOUT_MS, MIN_INTERVAL_MS,
 };
 pub use epoch::RunEpoch;
 pub use parser::{engine_include_patterns, parse_exposition, ParseResult, ParsedSample};
-pub use regex::RegexSet;
 pub use row::{
     MetricType, PhaseKind, RequestRow, Row, RunRow, ScrapeErrorRow, StageRow, SummaryRow,
     TelemetryRow, TelemetrySourceStamp, TELEMETRY_SCHEMA_VERSION,
