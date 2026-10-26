@@ -910,6 +910,13 @@ fn llm_strict_sut_profile_runs_with_complete_evidence() {
         "complete strict evidence runs:\n{}",
         combined_output(&out)
     );
+    // #327 review: the #142 warning must still fire in strict mode — the
+    // strict profile gates publication, it does not replace the warning.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("performance, not answer quality"),
+        "quantization warning fires in strict mode too:\n{stderr}"
+    );
     let logged = std::fs::read_to_string(&data_log).unwrap();
     assert!(
         logged.contains("\"kv_dtype\":\"fp8_e4m3\""),
