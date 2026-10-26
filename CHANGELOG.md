@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- Tagged NDJSON request rows now stream as requests complete on the llm, vlm,
+  asr and imagegen binaries: the completed-record channel is consumed
+  concurrently with issuance (previously only drained after the issuing loop
+  finished), and the NDJSON writer gains a 250 ms time-bound flush next to
+  the 64-row batch bound so sparse runs become visible to tailing readers
+  promptly (#310). Emission order is per-request completion order; the
+  ordered summary termination is unchanged. `metrum-ai-bench-cli-strategic`
+  already emitted request rows at completion and is unchanged.
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 

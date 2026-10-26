@@ -496,8 +496,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
-    let mut completed = 0;
-    let mut last_percentage = 0;
 
     // Total number of requests to send
     let num_requests = args.num_requests.unwrap();
@@ -543,8 +541,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let start_time = telemetry
         .as_ref()
         .map_or_else(Instant::now, |session| session.run_start());
-    let (record_tx, mut record_rx) =
+    let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
     let slots = metrum_ai_bench::load::schedule(
         arrival_kind,
@@ -555,6 +554,106 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut warmup_barrier =
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
             .with_tracker(Arc::clone(&inflight_tracker));
+
+    // Record consumer (#310): runs concurrently with issuance so tagged
+    // request rows are emitted to the NDJSON stream as requests complete,
+    // interleaved with live telemetry scrapes on the same writer, instead
+    // of only after the issuing loop finishes. Emission order is channel
+    // receive order (per-request completion order, not seq order); the
+    // ordered summary termination is unchanged. Returns the session,
+    // records and counters once all request tasks have sent.
+    let consumer_num_requests = num_requests;
+    let consumer = tokio::spawn(async move {
+        let mut record_rx = record_rx;
+        let mut telemetry = telemetry;
+        let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
+        let mut completed: usize = 0;
+        let mut errors: usize = 0;
+        let mut last_percentage: usize = 0;
+        while let Some(rec) = record_rx.recv().await {
+            if let Some(session) = telemetry.as_mut() {
+                session.record_request(&rec, start_time).await;
+            }
+            let _endpoint_name = rec.endpoint.clone();
+            let phase = rec.phase;
+            if rec.is_success() {
+                let response_time = Duration::from_secs_f64(rec.latency_s);
+                let inference_time = rec
+                    .modality_metrics
+                    .get("inference_time_s")
+                    .copied()
+                    .unwrap_or(0.0);
+                let _inference_time_duration = Duration::from_secs_f64(inference_time);
+                let word_count = rec
+                    .modality_metrics
+                    .get("word_count")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let char_count = rec
+                    .modality_metrics
+                    .get("char_count")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let _words_per_second = rec
+                    .modality_metrics
+                    .get("words_per_second")
+                    .copied()
+                    .unwrap_or(0.0);
+                let _chars_per_second = rec
+                    .modality_metrics
+                    .get("chars_per_second")
+                    .copied()
+                    .unwrap_or(0.0);
+                let _bytes_sent = rec
+                    .modality_metrics
+                    .get("bytes_sent")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let _bytes_received = rec
+                    .modality_metrics
+                    .get("bytes_received")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let _rtf = rec.modality_metrics.get("rtf").copied();
+                let _audio_duration = rec.modality_metrics.get("audio_duration_s").copied();
+                let _wer = rec.modality_metrics.get("wer").copied();
+                let _cer = rec.modality_metrics.get("cer").copied();
+
+                if phase == metrum_ai_bench::record::Phase::Warmup {
+                    records.push(rec);
+                    continue;
+                }
+                completed += 1;
+                debug!(
+                    "Request completed - RT: {:?}, Words: {}, Chars: {}",
+                    response_time, word_count, char_count
+                );
+                let percentage = (completed * 100) / (consumer_num_requests as usize);
+                if percentage >= last_percentage + 10 {
+                    info!(
+                        "{}% complete ({}/{} requests)",
+                        percentage, completed, consumer_num_requests
+                    );
+                    last_percentage = (percentage / 10) * 10;
+                }
+                if completed.is_multiple_of(100) {
+                    info!("Completed {} requests...", completed);
+                }
+                records.push(rec);
+            } else {
+                let err_msg = rec
+                    .error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown".into());
+                error!("Request failed: {err_msg}");
+                errors += 1;
+                records.push(rec);
+            }
+        }
+        (telemetry, records, completed, errors)
+    });
+
     'request_loop: for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier
@@ -831,89 +930,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     info!("All requests launched. Waiting for completion...");
 
-    let mut errors = 0;
-    let mut records = Vec::new();
-    while let Some(rec) = record_rx.recv().await {
-        if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, start_time).await;
+    // Join the record consumer (#310): it returns once every request task
+    // has finished sending, with the session, records and counters.
+    let (telemetry, records, completed, mut errors) = match consumer.await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            error!("Record consumer task failed: {e}");
+            return Err(anyhow::anyhow!("record consumer task failed: {e}").into());
         }
-        let _endpoint_name = rec.endpoint.clone();
-        let phase = rec.phase;
-        if rec.is_success() {
-            let response_time = Duration::from_secs_f64(rec.latency_s);
-            let inference_time = rec
-                .modality_metrics
-                .get("inference_time_s")
-                .copied()
-                .unwrap_or(0.0);
-            let _inference_time_duration = Duration::from_secs_f64(inference_time);
-            let word_count = rec
-                .modality_metrics
-                .get("word_count")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let char_count = rec
-                .modality_metrics
-                .get("char_count")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let _words_per_second = rec
-                .modality_metrics
-                .get("words_per_second")
-                .copied()
-                .unwrap_or(0.0);
-            let _chars_per_second = rec
-                .modality_metrics
-                .get("chars_per_second")
-                .copied()
-                .unwrap_or(0.0);
-            let _bytes_sent = rec
-                .modality_metrics
-                .get("bytes_sent")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let _bytes_received = rec
-                .modality_metrics
-                .get("bytes_received")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let _rtf = rec.modality_metrics.get("rtf").copied();
-            let _audio_duration = rec.modality_metrics.get("audio_duration_s").copied();
-            let _wer = rec.modality_metrics.get("wer").copied();
-            let _cer = rec.modality_metrics.get("cer").copied();
-
-            if phase == metrum_ai_bench::record::Phase::Warmup {
-                records.push(rec);
-                continue;
-            }
-            completed += 1;
-            debug!(
-                "Request completed - RT: {:?}, Words: {}, Chars: {}",
-                response_time, word_count, char_count
-            );
-            let percentage = (completed * 100) / (num_requests as usize);
-            if percentage >= last_percentage + 10 {
-                info!(
-                    "{}% complete ({}/{} requests)",
-                    percentage, completed, num_requests
-                );
-                last_percentage = (percentage / 10) * 10;
-            }
-            if completed.is_multiple_of(100) {
-                info!("Completed {} requests...", completed);
-            }
-            records.push(rec);
-        } else {
-            let err_msg = rec
-                .error
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "unknown".into());
-            error!("Request failed: {err_msg}");
-            errors += 1;
-            records.push(rec);
-        }
-    }
+    };
 
     errors += warmup_barrier.join_errors();
     for handle in handles {
