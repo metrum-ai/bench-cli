@@ -231,6 +231,14 @@ struct Args {
     #[arg(long)]
     data_log: String,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+
     #[command(flatten)]
     telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
 
@@ -435,7 +443,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let prompts = Arc::new(load_prompts(&args)?);
-    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    // Explicit output collision policy (#305), resolved before any traffic.
+    // run_id is generated first so new-dir can name the per-run file.
+    let run_id = metrum_ai_bench::unique_id::generate_uuid();
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
+        &effective_data_log,
+    )?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
             .create(true)
@@ -450,7 +470,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
     ));
-    let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     // Telemetry starts before the run clock so source probes are not timed.
@@ -472,7 +491,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_cap,
                     "request_rate": args.request_rate,
                     "warmup_requests": args.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- New `--data-log-mode` collision policy for the llm, vlm, asr and imagegen
+  data logs: `append` (default, unchanged), `refuse-existing` (exit 2 before
+  traffic), `overwrite` (truncate), and `new-dir` (per-run files named by
+  run_id inside a directory). The default append semantics are now documented
+  prominently (#305).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
