@@ -1,0 +1,41 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Performance-number validation (issue #333)
+
+Standard, versioned test that answers "did the performance numbers move?" for
+`metrum-ai-bench-cli-llm` on a reference GPU, replacing ad-hoc validation.
+
+## Pieces
+
+- `spec.yaml` — the versioned pins: vLLM image digest, checkpoint revisions,
+  serve flags, datasets and their SHA256, the point grid (W1/W2 × c1/c8/c32,
+  30 s warmup + 180 s measurement), the request parameters, the gate
+  tolerances, and the study reference numbers.
+- `runner.sh` — runs the grid for one model on one GPU box, interleaving the
+  baseline (release binary) and candidate (source build) per point, writing raw
+  request logs, NDJSON, power CSVs and `point.json` per point. Idempotent: a
+  point with `DONE` is skipped.
+- `compare.py` — derives per-point scalars from the raw logs and emits a
+  per-point PASS/FAIL table (markdown + JSON). Gate: `system_output_tok_s` and
+  `tpot_p50_ms` within tolerance (default 5%, or the point's study noise floor
+  if wider). TTFT is printed for information only (#313 cohort caveats).
+  `--reference` adds informational deltas against a previous study.
+- `baselines/` — recorded results, one JSON per box/date, so drift over time
+  is reviewable in git.
+
+## Rules
+
+- Self-hosted vLLM on our own rented/owned GPU only; loopback endpoint; the
+  only credential on the box is the HF token in a 0600 file, never in argv.
+- Record the dataset SHA256 actually used in the baseline file header; if it
+  differs from the study freeze, say so (2026-10-26 Blackwell baseline: both
+  datasets regenerated, hashes differ from the study freeze — see the header).
+- Never put hostnames, IPs or GPU UUIDs in committed files or PR text.
+
+## First baseline
+
+`baselines/blackwell-se-2026-10-26.json` — RTX PRO 6000 Blackwell SE (96 GB),
+driver 580.126.09, vLLM 0.32.0 pinned digest, v1.5.4 vs the
+`integration-20261026` candidate, regenerated datasets W1 `b089f9fb…` /
+W2 `e5480af1…`.
