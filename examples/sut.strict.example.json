@@ -1,0 +1,35 @@
+{
+  "provenance": "declared",
+  "name": "example-host / GPU x1 (strict profile example)",
+  "vendor": "Example OEM",
+  "gpu": { "model": "Example GPU", "count": 1, "memory_gb": 96 },
+  "cpu": "Example CPU",
+  "memory_gb": 256,
+  "driver_version": "Example 580.xx",
+  "runtime": {
+    "name": "example-engine",
+    "version": "0.0.0",
+    "config": "example-engine serve example/model --exact-flags 'replace with the real launch'"
+  },
+  "model": {
+    "id": "example/model",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "quantization": "W4A16 example-scheme (weight/activation)",
+    "kv_dtype": "fp8_e4m3",
+    "kernel_evidence": {
+      "kernel": "ExampleFp4LinearKernel",
+      "graph_mode": "piecewise",
+      "source": "engine startup log line, operator-declared",
+      "log_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "quality_evidence": {
+      "uri": "https://example.invalid/eval-reports/example-model/quality.json",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "n": 100,
+      "errors": 2,
+      "confidence": "wilson95"
+    }
+  },
+  "host_os": "Example Linux",
+  "notes": "Strict-profile example only: replace every field with your declared inventory; evidence URIs/hashes point at real quality-run artifacts. Strict validation never infers kernel or graph choices from the model name."
+}

@@ -232,6 +232,16 @@ partial declaration. `--require-sut` rejects a block missing `gpu.model`,
 }
 ```
 
+For quantization-sensitive results there is a stricter gate:
+`--sut-profile strict` (implies `--require-sut`) additionally requires
+`model.revision` (exact checkpoint), `model.quantization` (weight/activation
+scheme), `model.kv_dtype`, `model.kernel_evidence` (operator-declared kernel
+and CUDA-graph mode with its evidence source — the CLI **never infers kernel
+choice from the model name**), and `model.quality_evidence` (URI + sha256 +
+n/errors/confidence methodology linking a separate quality-run artifact).
+Quality evidence stays separate from throughput claims. Example:
+[examples/sut.strict.example.json](examples/sut.strict.example.json).
+
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
 must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v3`
 line in a published results directory); see the

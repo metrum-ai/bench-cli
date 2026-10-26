@@ -4,6 +4,8 @@
 //! Integration tests: CLI validation and fail-fast behavior (issue #128).
 //! Run with: cargo test --test cli_validation
 
+mod common;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -793,5 +795,128 @@ fn strategic_rejects_zero_requests_per_stage() {
     assert!(
         text.contains("requests_per_stage") || text.contains("range"),
         "must reject zero measured requests:\n{text}"
+    );
+}
+
+// #308: strict SUT publication profile.
+
+#[test]
+fn llm_strict_sut_profile_rejects_missing_kernel_evidence_before_traffic() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    // Publishable baseline but no kernel_evidence / quality_evidence.
+    let sut = dir.path().join("sut.json");
+    std::fs::write(
+        &sut,
+        std::fs::read_to_string("examples/sut.example.json").unwrap(),
+    )
+    .unwrap();
+
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "strict-sut",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--log-level",
+            "error",
+            "--sut",
+            sut.to_str().unwrap(),
+            "--sut-profile",
+            "strict",
+        ])
+        .output()
+        .expect("run llm with strict profile and incomplete evidence");
+    assert!(
+        !out.status.success(),
+        "strict profile must refuse before traffic"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--sut-profile strict"),
+        "error names the profile:\n{text}"
+    );
+    assert!(
+        text.contains("model.kernel_evidence"),
+        "error names the missing evidence:\n{text}"
+    );
+    assert!(
+        text.contains("never infers kernel/graph choices from the model name"),
+        "error states the no-inference rule:\n{text}"
+    );
+    assert!(
+        !data_log.exists(),
+        "refusal happens before any data-log write"
+    );
+}
+
+#[test]
+fn llm_strict_sut_profile_runs_with_complete_evidence() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "strict-sut",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--log-level",
+            "error",
+            "--sut",
+            "examples/sut.strict.example.json",
+            "--sut-profile",
+            "strict",
+        ])
+        .output()
+        .expect("run llm with strict profile and complete evidence");
+    assert!(
+        out.status.success(),
+        "complete strict evidence runs:\n{}",
+        combined_output(&out)
+    );
+    let logged = std::fs::read_to_string(&data_log).unwrap();
+    assert!(
+        logged.contains("\"kv_dtype\":\"fp8_e4m3\""),
+        "strict evidence lands in the summary sut block: {logged}"
+    );
+    assert!(
+        logged.contains("\"quality_evidence\""),
+        "quality evidence link stays in the summary, separate from throughput: {logged}"
     );
 }

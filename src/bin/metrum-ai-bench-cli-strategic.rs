@@ -363,6 +363,13 @@ struct Args {
     require_sut: bool,
     #[arg(
         long,
+        value_enum,
+        default_value = "standard",
+        help = "SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact"
+    )]
+    sut_profile: metrum_ai_bench::sut::SutProfile,
+    #[arg(
+        long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
         help = "Reserved for parity with modality binaries (strategic stamps SUT only)"
@@ -1551,10 +1558,11 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("--model is required"))?;
     metrum_ai_bench::sut::warn_remote_benchmark_url(&url);
     metrum_ai_bench::measurement::ensure_requests_per_stage(args.requests_per_stage)?;
-    let (sut_block, _redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
+    let (sut_block, _redact_hostname) = metrum_ai_bench::sut::resolve_sut_profile_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
+        args.sut_profile,
     )?;
     let sut_json = sut_block
         .as_ref()
@@ -1704,6 +1712,10 @@ async fn main() -> Result<()> {
         "streaming": args.streaming,
         "sut": sut_json,
         "require_sut": args.require_sut,
+        "sut_profile": match args.sut_profile {
+            metrum_ai_bench::sut::SutProfile::Standard => "standard",
+            metrum_ai_bench::sut::SutProfile::Strict => "strict",
+        },
         "ndjson": args.ndjson,
         // Secrets intentionally omitted (api_key never stamped).
     });

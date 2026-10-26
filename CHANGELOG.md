@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- New optional strict SUT publication profile (`--sut-profile strict`, implies
+  `--require-sut`): requires the exact model revision, weight/activation
+  quantization, KV dtype, operator-declared kernel/graph evidence (never
+  inferred from the model name), and a linked quality-evidence artifact
+  (URI + sha256 + n/errors/confidence). `examples/sut.strict.example.json`
+  demonstrates it. Quality evidence stays separate from throughput (#308).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
