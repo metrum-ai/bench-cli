@@ -3,14 +3,22 @@
 #
 # GitHub runner compose pool on pikachu. AppArmor is not required.
 #
-# Non-root runners (#292): the image ends as the base image `runner`
-# account (uid 1001, gid 121) with RUN_AS_ROOT=false; the upstream
-# entrypoint executes the CMD directly as that user. Toolchains live under
-# /opt/rust (runner-owned) and /usr/local/go, not under /root.
+# Non-root runners (#292): the image ends as the base image runner account
+# (uid 1001, gid 121) with RUN_AS_ROOT=false and NO passwordless sudo (the
+# runner account is removed from the sudo group); the upstream entrypoint
+# executes the CMD directly as that user. Toolchains live under /opt/rust
+# (runner-owned) and /usr/local/go, not under /root.
 #
-# Legacy status: primary CI now runs on the bench-cli-arc ARC scale set
-# (docs/SELF_HOSTED_RUNNERS.md). This pool is the documented fallback and
-# still hosts the opt-in gpu-h100 runner for live-modality-smoke.yml.
+# Deployment status (#292): the compose pool is not currently deployed
+# (the operator retired it and no repo-level or gpu-h100 runners are
+# registered; release.yml's live gate stays skipped until one is). This
+# directory remains the fallback and GPU-gate definition; the next
+# deployment must use this non-root image.
+#
+# Security boundary honesty (#292): job code in these containers runs
+# non-root without passwordless sudo. The GPU service also mounts the host
+# Docker socket, which is host-root-equivalent; for that service this is
+# defense in depth, not a hard boundary.
 #
 # Layout:
 #   ~/github-runners-bench-cli-compose   CI label bench-cli (this pool)
@@ -23,15 +31,23 @@
 # Bootstrap is managed by the runner host configuration; no repository shell bootstrap is provided.
 #
 # Non-root rollout (#292), once per host:
+#   # 1. Set the host docker group id in .env before starting the GPU
+#   #    service (required for the host Docker socket, uid 1001 cannot
+#   #    otherwise use it):
+#   #      echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> .env
 #   ./pool recreate
-#   # Pre-existing runner-tools named volumes keep their root-owned content
-#   # even after the image chowns /opt/hostedtoolcache, so drop them once
-#   # while the pool is stopped (they are only a tool cache; `down -v`
-#   # removes the project's named volumes, which is just runner-tools here):
+#   # 2. Pre-existing runner-tools named volumes keep their root-owned
+#   #    content even after the image chowns /opt/hostedtoolcache, so drop
+#   #    them once while the pool is stopped (they are only a tool cache;
+#   #    `down -v` removes the project's named volumes):
 #     docker compose down -v && ./pool start
-#   # Verify: docker exec gha-bench-cli-1 id   (must print uid=1001(runner))
-#   # and docker exec gha-bench-cli-1 cargo --version (shared /opt/rust
-#   # toolchain works as the non-root user).
+#   # 3. Verify inside a running worker:
+#   docker exec gha-bench-cli-1 id          # must print uid=1001(runner)
+#   docker exec gha-bench-cli-1 cargo --version   # /opt/rust works non-root
+#   docker exec gha-bench-cli-1 sudo -n true      # must FAIL: no passwordless sudo
+#   docker exec gha-bench-cli-1 rustup show        # shared RUSTUP_HOME works
+#   #    (GPU service: also verify `docker version` from inside the runner
+#   #    with DOCKER_GID set, and keep untrusted fork PRs off that label.)
 #
 # Daily / manual:
 #   ./pool start              # up -d
