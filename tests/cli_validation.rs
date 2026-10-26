@@ -1743,3 +1743,141 @@ fn ndjson_request_rows_preserve_order_and_termination() {
         .collect();
     assert_eq!(seqs.len(), 12, "each request row must have a unique seq");
 }
+// #303: agent/CI safety preset (--ci-safety implies --fail-on-error and
+// --fail-on-partial). HTTP-500, all-error, endpoint-down and interrupted
+// runs must not exit 0 under the preset; exploratory callers keep exit 0
+// with logs and summaries written.
+
+#[test]
+fn ci_safety_preset_rejects_http_500_all_error_runs() {
+    // Every mock response is a 503: an all-error run.
+    let mock = common::spawn_mock(&["--fail-every", "1"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+
+    // Preset run: must fail.
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--ci-safety"],
+        ))
+        .output()
+        .expect("run all-error with --ci-safety");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "HTTP-500 all-error run must not pass the preset"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("Test completed with errors"),
+        "failure must name the errors:\n{text}"
+    );
+
+    // Exploratory default: same run, no preset, exit 0 with the summary
+    // still written (compatibility preserved).
+    let exploratory = dir.path().join("exploratory.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(&url, exploratory.to_str().unwrap(), &[]))
+        .output()
+        .expect("run all-error without the preset");
+    assert!(
+        out.status.success(),
+        "exploratory caller keeps exit 0:\n{}",
+        combined_output(&out)
+    );
+    let logged = std::fs::read_to_string(&exploratory).unwrap();
+    assert!(
+        logged.contains("metrum-ai-bench-cli.summary.v3"),
+        "summary must still be written for exploratory callers: {logged}"
+    );
+}
+
+#[test]
+fn ci_safety_preset_rejects_endpoint_down_runs() {
+    // Valid absolute URL, nothing listening: endpoint-down run.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(
+            "http://127.0.0.1:1/v1/chat/completions",
+            data_log.to_str().unwrap(),
+            &["--ci-safety"],
+        ))
+        .output()
+        .expect("run endpoint-down with --ci-safety");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "endpoint-down run must not pass the preset"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("Test completed with errors"),
+        "failure must name the errors:\n{text}"
+    );
+}
+
+#[test]
+fn ci_safety_preset_rejects_interrupted_runs() {
+    use std::time::{Duration, Instant};
+
+    // Long-latency server so the run is still issuing when SIGINT lands.
+    let mock = common::spawn_mock(&["--latency-ms", "400"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+
+    let mut interrupt_args = collision_args(&url, data_log.to_str().unwrap(), &["--ci-safety"]);
+    // Replace the one-request defaults with a longer run (avoid duplicate
+    // flags, which clap rejects with exit 2).
+    for (flag, value) in [("--num-requests", "100"), ("--concurrency", "4")] {
+        if let Some(pos) = interrupt_args.iter().position(|a| a == flag) {
+            interrupt_args[pos + 1] = value.to_string();
+        }
+    }
+    let mut child = Command::new(metrum_ai_bench_llm_bin())
+        .args(&interrupt_args)
+        .spawn()
+        .expect("spawn llm with --ci-safety");
+
+    // Let a few requests land, then interrupt.
+    std::thread::sleep(Duration::from_millis(1200));
+    let signalled = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .expect("send SIGINT")
+        .success();
+    assert!(signalled, "could not deliver SIGINT");
+
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait().expect("wait") {
+            Some(status) => break status,
+            None if start.elapsed() > Duration::from_secs(60) => {
+                let _ = child.kill();
+                panic!("binary did not exit after SIGINT");
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "interrupted run must not pass the preset (got {status})"
+    );
+
+    // Logs and the partial summary are preserved even though the exit
+    // verdict is a failure.
+    let logged = std::fs::read_to_string(&data_log).expect("data log written");
+    assert!(
+        logged.contains("\"partial\":true"),
+        "partial summary must be written:\n{logged}"
+    );
+    assert!(
+        logged.lines().any(|l| l.contains("\"latency_s\"")),
+        "completed request rows must be preserved:\n{logged}"
+    );
+}

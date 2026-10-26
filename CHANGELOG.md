@@ -21,6 +21,15 @@
   (per-run files named by run_id inside a directory). The default append
   semantics are now documented prominently, and the policy resolves as the
   last configuration step before traffic (#305).
+- Synchronous telemetry boundary baseline (#312): with `--ndjson` +
+  `--telemetry`, every configured source is scraped once immediately before
+  the first measured request (after the warmup barrier) on the llm, vlm, asr
+  and imagegen binaries, emitting rows tagged `boundary: "pre-measured"` on
+  the shared run epoch. A failed source is marked by a boundary-tagged
+  `scrape_error` row instead of an invented sample; under
+  `--require-telemetry` it also gates measured issuance and fails the run
+  verdict. `boundary` is an additive optional field on `telemetry` and
+  `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
 - New agent/CI safety preset `--ci-safety` (implies `--fail-on-error` and the
   new `--fail-on-partial`) on the llm, vlm, asr and imagegen binaries: all-error,
   endpoint-down and interrupted runs can no longer exit 0 for automated
@@ -32,18 +41,6 @@
   caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
   (four lanes with source labels and loopback forwarding placeholders), with
   a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
-### Added
-- Synchronous telemetry boundary baseline (#312): with `--ndjson` +
-  `--telemetry`, every configured source is scraped once immediately before
-  the first measured request (after the warmup barrier) on the llm, vlm, asr
-  and imagegen binaries, emitting rows tagged `boundary: "pre-measured"` on
-  the shared run epoch. A failed source is marked by a boundary-tagged
-  `scrape_error` row instead of an invented sample; under
-  `--require-telemetry` it also gates measured issuance and fails the run
-  verdict. `boundary` is an additive optional field on `telemetry` and
-  `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
-
-<<<<<<< HEAD
 - New optional strict SUT publication profile (`--sut-profile strict`, implies
   `--require-sut`): requires the exact model revision, weight/activation
   quantization, KV dtype, operator-declared kernel/graph evidence (never
@@ -76,8 +73,6 @@
   (first token of any category) alongside visible-token TTFT when reasoning
   is present.
 
-=======
->>>>>>> origin/issue-312-telemetry-boundary-sample
 ### Fixed
 - Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
   rejected as configuration errors before any benchmark traffic, across llm,
