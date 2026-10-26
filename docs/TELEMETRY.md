@@ -183,6 +183,9 @@ boundary-tagged `scrape_error` row — coverage is explicitly missing, never
 invented. Under `--require-telemetry` a failed baseline also stops measured
 issuance and surfaces as the run verdict after the partial summary is
 written; without it the run proceeds and the missing baseline is on record.
+Boundary requests carry the header `x-metrum-telemetry-boundary:
+pre-measured`, so a real exporter or proxy can tell the synchronous
+baseline apart from periodic scrapes.
 
 `summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See

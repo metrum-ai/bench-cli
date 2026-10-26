@@ -222,10 +222,10 @@ pub struct TelemetrySession {
     /// Required-mode boundary failure, surfaced by [`close_session`] as the
     /// run verdict after the partial summary is written (#312).
     boundary_failure: Option<String>,
-    /// Latest successful telemetry sample t_ns per source (#312 review):
-    /// the record consumer reads it to mark per-request queue-sample
-    /// freshness (age + stale flag).
-    latest_samples: super::scraper::LatestSamples,
+    /// Bounded per-source history of successful telemetry sample t_ns
+    /// (#312 review): the record consumer reads it to mark per-request
+    /// queue-sample freshness (age + stale flag), measured at SEND time.
+    sample_history: crate::telemetry::scraper::SampleHistory,
 }
 
 impl TelemetrySession {
@@ -277,7 +277,7 @@ impl TelemetrySession {
             boundary_plan: None,
             abort: None,
             boundary_failure: None,
-            latest_samples: std::sync::Arc::new(std::sync::Mutex::new(
+            sample_history: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::BTreeMap::new(),
             )),
         };
@@ -307,7 +307,7 @@ impl TelemetrySession {
                 Arc::clone(&session.stop_scrapers),
                 options.require_telemetry,
                 options.require_failures,
-                Arc::clone(&session.latest_samples),
+                Arc::clone(&session.sample_history),
             );
             // Only a required source may stop the run; without
             // --require-telemetry a scraper exit stays a warning. The
@@ -404,6 +404,7 @@ impl TelemetrySession {
                 &self.run_id,
                 &self.writer,
                 BOUNDARY_PRE_MEASURED,
+                &self.sample_history,
             )
             .await
             {
@@ -501,30 +502,32 @@ impl TelemetrySession {
             .as_nanos() as u64;
         let mut row = request_row(&self.run_id, record, base_ns, self.load.unwrap_or(0.0));
 
-        // #312 review: per-request queue-sample freshness coverage. Compute
-        // the age of the latest successful telemetry sample at-or-before
-        // send for each source; mark stale when the age exceeds the scrape
-        // interval plus a documented jitter allowance (min(10% of the
-        // interval, 100 ms)) so near-bound scrapes are not false-positived.
-        // Requests with NO sample at-or-before send are marked missing
-        // (age ∞ → stale with "no sample").
+        // #312 review: per-request queue-sample freshness coverage. For
+        // each source, take the newest sample at-or-before the request's
+        // SEND from the bounded history — never the latest sample, which
+        // moved on while the request was in flight (2026-10-26 Blackwell
+        // finding: stamping against the latest sample read as missing for
+        // 100% of fast-interval sources). Mark stale when the age exceeds
+        // the scrape interval plus a documented jitter allowance (min(10%
+        // of the interval, 100 ms)) so near-bound scrapes are not
+        // false-positived. Requests with NO sample at-or-before send are
+        // marked missing (age ∞ → stale with "no sample").
         if let Some(boundary_plan) = &self.boundary_plan {
             let (_, _cfg, sources) = boundary_plan;
-            let latest = self
-                .latest_samples
-                .lock()
-                .map(|map| map.clone())
-                .unwrap_or_default();
             let mut ages = BTreeMap::new();
             let mut stale = Vec::new();
             for src in sources {
                 let interval_ms = src.interval_ms as f64;
                 let jitter_allowance_ms = (interval_ms * 0.10).min(100.0);
                 let bound_ms = interval_ms + jitter_allowance_ms;
-                let age_ms = match latest.get(&src.name) {
-                    Some(t_ns) if *t_ns <= row.t_sent_ns => (row.t_sent_ns - t_ns) as f64 / 1e6,
+                let age_ms = match crate::telemetry::scraper::sample_at_or_before(
+                    &self.sample_history,
+                    &src.name,
+                    row.t_sent_ns,
+                ) {
+                    Some(t_ns) => (row.t_sent_ns - t_ns) as f64 / 1e6,
                     // No sample at-or-before send: infinite age.
-                    _ => f64::INFINITY,
+                    None => f64::INFINITY,
                 };
                 ages.insert(src.name.clone(), age_ms);
                 if age_ms > bound_ms {
@@ -1247,11 +1250,8 @@ mod freshness_tests {
         let run_start = session.run_start();
 
         // Simulate a scrape at t=0 from the engine source.
-        {
-            let mut map = session.latest_samples.lock().unwrap();
-            map.insert("engine".to_string(), 0); // epoch t_ns = 0
-        }
-        // Record a request sent at t=1.05s: age = 1050ms, bound = 1100ms → fresh.
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0); // epoch t_ns = 0
+                                                                                      // Record a request sent at t=1.05s: age = 1050ms, bound = 1100ms → fresh.
         let rec = RequestRecord::success(
             0,
             Phase::Measure,
@@ -1322,10 +1322,7 @@ mod freshness_tests {
 
         // Simulate a scrape at t=0; the request sends at t=2.5s.
         // Age = 2500ms, bound = 1100ms → STALE.
-        {
-            let mut map = session.latest_samples.lock().unwrap();
-            map.insert("engine".to_string(), 0);
-        }
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0);
         let rec = RequestRecord::success(
             0,
             Phase::Measure,
@@ -1404,7 +1401,7 @@ mod freshness_tests {
             .expect("start")
             .expect("session");
         let run_start = session.run_start();
-        // NO latest_samples entry for the source: the request must be
+        // NO sample-history entry for the source: the request must be
         // marked stale with infinite age.
         let rec = RequestRecord::success(
             0,
@@ -1447,6 +1444,215 @@ mod freshness_tests {
                     .as_f64()
                     .is_some_and(|v| v > 1e12),
             "infinite age: {req}"
+        );
+    }
+
+    /// #312 review: samples that arrive AFTER a request's send must not
+    /// poison the stamp. The 2026-10-26 Blackwell run showed 100% false
+    /// missing when stamping against the latest sample at completion; the
+    /// stamp must use the newest sample at-or-before SEND from the history.
+    #[tokio::test]
+    async fn record_request_uses_send_time_sample_not_latest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "send-time-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // History: one sample at-or-before the send (t=1.000s), then three
+        // newer scrapes at 1.1s/1.2s/1.3s — a request completing after all
+        // of them must still stamp against the t=1.000s sample.
+        for t_ms in [1000u64, 1100, 1200, 1300] {
+            crate::telemetry::scraper::note_sample(
+                &session.sample_history,
+                "engine",
+                t_ms * 1_000_000,
+            );
+        }
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"].as_f64().expect("age");
+        assert!(
+            age > 40.0 && age < 60.0,
+            "age ~50ms from the t=1.000s sample: {age}"
+        );
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "send-time sample is fresh: {req}"
+        );
+    }
+
+    /// #312 review: every configured source is stamped from its own
+    /// history, with its own interval bound (both-sources pin).
+    #[tokio::test]
+    async fn record_request_stamps_both_sources_independently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n  - name: host\n    url: http://{addr}/metrics\n    interval_ms: 500\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "both-sources-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // engine sample at t=1.000s (bound 1100ms), host sample at t=0.6s
+        // (bound 550ms); request sent at t=1.05s → ages 50ms and 450ms,
+        // both fresh, each from its own buffer.
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 1_000_000_000);
+        crate::telemetry::scraper::note_sample(&session.sample_history, "host", 600_000_000);
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let engine_age = req["queue_sample_age_ms"]["engine"]
+            .as_f64()
+            .expect("engine age");
+        let host_age = req["queue_sample_age_ms"]["host"]
+            .as_f64()
+            .expect("host age");
+        assert!(
+            engine_age > 40.0 && engine_age < 60.0,
+            "engine age: {engine_age}"
+        );
+        assert!(host_age > 440.0 && host_age < 460.0, "host age: {host_age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "both fresh: {req}"
+        );
+    }
+
+    /// #312 review: the per-source history is bounded and drops the oldest
+    /// sample; the at-or-before lookup never sees evicted entries.
+    #[test]
+    fn sample_history_is_bounded_and_drops_oldest() {
+        let history: crate::telemetry::scraper::SampleHistory = Default::default();
+        let total = crate::telemetry::scraper::SAMPLE_HISTORY_CAP as u64 + 44;
+        for i in 0..total {
+            crate::telemetry::scraper::note_sample(&history, "engine", i);
+        }
+        {
+            let map = history.lock().unwrap();
+            let deque = map.get("engine").unwrap();
+            assert_eq!(
+                deque.len(),
+                crate::telemetry::scraper::SAMPLE_HISTORY_CAP,
+                "bounded"
+            );
+            assert_eq!(deque.front(), Some(&44), "oldest 44 dropped");
+            assert_eq!(deque.back(), Some(&(total - 1)), "newest retained");
+        }
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", 100),
+            Some(100)
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", 43),
+            None,
+            "evicted"
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", total * 10),
+            Some(total - 1),
+            "far-future send sees the newest retained sample"
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "absent", total * 10),
+            None
         );
     }
 }
