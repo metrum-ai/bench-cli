@@ -157,6 +157,7 @@ cargo test --all-targets
 | `metrum-ai-bench-cli imagegen` / `metrum-ai-bench-cli-imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
 | `metrum-ai-bench-cli prompts` / `metrum-ai-bench-cli-prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
 | `metrum-ai-bench-cli selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-cli endpoints-export` | Convert a completed run into an Endpoints-shaped, non-certifying bundle | Cross-checking bench results against the upstream result parser |
 | `metrum-ai-bench-cli preflight` | Serving URL reachability, chat, stream smoke | Before long GPU runs |
 | `metrum-ai-bench-cli sut init` | SUT JSON template / local `--probe` | Scaffold publishable inventory |
 | `metrum-ai-bench-cli compare` | Labeled delta table across strategic runs | Diff two of our own strategic summaries |

@@ -9,6 +9,7 @@ pub mod concurrency;
 pub mod connect_timing;
 pub mod count_points;
 pub mod endpoints;
+pub mod endpoints_export;
 pub mod environment;
 pub mod error;
 pub mod http_client;

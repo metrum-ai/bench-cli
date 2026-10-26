@@ -2010,3 +2010,196 @@ fn llm_strict_sut_profile_runs_with_complete_evidence() {
         "quality evidence link stays in the summary, separate from throughput: {logged}"
     );
 }
+// #306: Endpoints-compatible, explicitly non-certifying artifact adapter.
+
+fn unified_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli"))
+}
+
+#[test]
+fn endpoints_export_builds_parseable_bundle_from_a_real_run() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("run.jsonl");
+    let status = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "adapter-e2e",
+            "--num-requests",
+            "4",
+            "--concurrency",
+            "2",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "example/model",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--log-level",
+            "error",
+        ])
+        .status()
+        .expect("run llm");
+    assert!(status.success());
+
+    let out_dir = dir.path().join("bundle");
+    let out = Command::new(unified_bin())
+        .args([
+            "endpoints-export",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--workload",
+            "W1",
+            "--scenario",
+            "server",
+        ])
+        .output()
+        .expect("run endpoints-export");
+    assert!(
+        out.status.success(),
+        "adapter must succeed:\n{}",
+        combined_output(&out)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("EXPLICITLY NON-CERTIFYING"),
+        "stdout prints the disclaimer:\n{stdout}"
+    );
+
+    // The bundle is upstream-parser-shaped: performance/result_summary.json
+    // carries the keys the endpoints_parser reads.
+    let result: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("performance/result_summary.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["n_samples_issued"], 4);
+    assert_eq!(result["n_samples_completed"], 4);
+    assert_eq!(result["n_samples_failed"], 0);
+    assert!(result["qps"].as_f64().unwrap() > 0.0);
+    assert!(result["duration_ns"].as_u64().unwrap() > 0);
+    assert!(
+        result["result_completed_tokens_per_second"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
+
+    // Non-certifying files always present.
+    let compliance = std::fs::read_to_string(out_dir.join("NONCOMPLIANCE.md")).unwrap();
+    assert!(compliance.contains("IMPOSSIBLE"));
+    let power: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("system_power.json")).unwrap())
+            .unwrap();
+    assert_eq!(power["declared"], false, "no synthesized power facts");
+}
+
+#[test]
+fn endpoints_export_refuses_partial_runs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("run.jsonl");
+    std::fs::write(
+        &data_log,
+        concat!(
+            "{\"schema_version\":\"metrum-ai-bench-cli.request.v1\",\"run_id\":\"r\",\"seq\":0,\"phase\":\"measure\",\"started_at\":\"2026-01-01T00:00:00Z\",\"completed_at\":\"2026-01-01T00:00:01Z\",\"latency_s\":1.0,\"ttft_s\":0.1,\"prompt_tokens\":1,\"completion_tokens\":2,\"usage_missing\":false,\"error\":null}\n",
+            "{\"schema_version\":\"metrum-ai-bench-cli.summary.v3\",\"run_id\":\"r\",\"partial\":true,\"window_seconds\":1.0}\n"
+        ),
+    )
+    .unwrap();
+    let out = Command::new(unified_bin())
+        .args([
+            "endpoints-export",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--out-dir",
+            dir.path().join("bundle").to_str().unwrap(),
+            "--workload",
+            "W1",
+            "--scenario",
+            "server",
+        ])
+        .output()
+        .expect("run endpoints-export on a partial log");
+    assert!(!out.status.success(), "partial runs are not exportable");
+    let text = combined_output(&out);
+    assert!(text.contains("partial"), "error names the cause:\n{text}");
+}
+
+/// #306: pinned external-checker integration. Skipped unless the operator
+/// provides a checkout of the upstream submission checker (the study's
+/// pinned commit fda43ef8… is not publicly fetchable; see NONCOMPLIANCE.md).
+/// Set MLCOMMONS_INFERENCE_CHECKOUT=/path/to/mlcommons/inference to run.
+#[test]
+fn endpoints_export_upstream_parser_smoke() {
+    let Some(checkout) = std::env::var_os("MLCOMMONS_INFERENCE_CHECKOUT") else {
+        eprintln!("skipped: MLCOMMONS_INFERENCE_CHECKOUT not set");
+        return;
+    };
+    let parser = PathBuf::from(checkout)
+        .join("tools/submission/submission_checker/parsers/endpoints_parser.py");
+    if !parser.exists() {
+        eprintln!("skipped: endpoints parser not present in the checkout");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Build a bundle via the library (golden fixture).
+    let log = dir.path().join("run.jsonl");
+    std::fs::write(
+        &log,
+        concat!(
+            "{\"schema_version\":\"metrum-ai-bench-cli.request.v1\",\"run_id\":\"r\",\"seq\":0,\"phase\":\"measure\",\"started_at\":\"2026-01-01T00:00:00Z\",\"completed_at\":\"2026-01-01T00:00:01Z\",\"latency_s\":1.0,\"ttft_s\":0.1,\"prompt_tokens\":4,\"completion_tokens\":8,\"usage_missing\":false,\"error\":null}\n",
+            "{\"schema_version\":\"metrum-ai-bench-cli.summary.v3\",\"run_id\":\"r\",\"partial\":false,\"window_seconds\":1.0,\"ttft_s\":{\"p50\":0.1,\"p90\":0.1},\"completion_tokens_per_second\":8.0,\"config\":{\"model\":\"m\",\"concurrency\":1,\"arrival\":\"closed-loop\"}}\n"
+        ),
+    )
+    .unwrap();
+    let options = metrum_ai_bench::endpoints_export::ExportOptions {
+        data_log: log,
+        out_dir: dir.path().join("bundle"),
+        sut: None,
+        workload: "W1".into(),
+        scenario: metrum_ai_bench::endpoints_export::ScenarioKind::Server,
+        power_desc: None,
+        notes: None,
+    };
+    metrum_ai_bench::endpoints_export::export_bundle(&options).unwrap();
+    let status = Command::new("python3")
+        .args([
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); from tools.submission.submission_checker.parsers.endpoints_parser import EndpointsParser; p = EndpointsParser(sys.argv[2]); p[\"qps\"]; p[\"n_samples_issued\"]; print(\"parser-ok\")",
+            parser
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            dir.path().join("bundle").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run upstream parser");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert!(
+        status.status.success() && text.contains("parser-ok"),
+        "upstream endpoints_parser must parse the bundle:\n{text}"
+    );
+}
