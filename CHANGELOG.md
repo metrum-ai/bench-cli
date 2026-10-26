@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- New `metrum-ai-bench-cli endpoints-export` subcommand: converts a completed
+  run data log into an Endpoints-shaped, explicitly non-certifying bundle
+  (point.yaml, declared-only system_desc.json, declared-only system_power.json,
+  upstream-parser-compatible performance/result_summary.json + config.yaml,
+  crosscheck.json with record-vs-summary arithmetic checks, NONCOMPLIANCE.md
+  listing the checks that remain impossible). Offline/LoadStair/Pareto intents
+  are disclosed as unsupported mappings; TTFT/TPOT definition differences are
+  flagged per metric, never silently transformed (#306). See
+  docs/ENDPOINTS_ADAPTER.md.
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
