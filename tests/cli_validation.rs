@@ -2925,7 +2925,11 @@ fn endpoints_export_offline_on_burst_says_native_burst() {
     let dir = tempfile::tempdir().expect("tempdir");
     let data_log = dir.path().join("out.jsonl");
     let out = Command::new(metrum_ai_bench_llm_bin())
-        .args(burst_args(&url, data_log.to_str().unwrap(), &["--arrival", "burst"]))
+        .args(burst_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--arrival", "burst"],
+        ))
         .output()
         .expect("burst run");
     assert!(out.status.success());
