@@ -27,6 +27,7 @@ use crate::runner::StopFlag;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -221,6 +222,10 @@ pub struct TelemetrySession {
     /// Required-mode boundary failure, surfaced by [`close_session`] as the
     /// run verdict after the partial summary is written (#312).
     boundary_failure: Option<String>,
+    /// Latest successful telemetry sample t_ns per source (#312 review):
+    /// the record consumer reads it to mark per-request queue-sample
+    /// freshness (age + stale flag).
+    latest_samples: super::scraper::LatestSamples,
 }
 
 impl TelemetrySession {
@@ -272,6 +277,9 @@ impl TelemetrySession {
             boundary_plan: None,
             abort: None,
             boundary_failure: None,
+            latest_samples: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )),
         };
         // The run row goes first so readers see the epoch before any sample.
         session
@@ -299,6 +307,7 @@ impl TelemetrySession {
                 Arc::clone(&session.stop_scrapers),
                 options.require_telemetry,
                 options.require_failures,
+                Arc::clone(&session.latest_samples),
             );
             // Only a required source may stop the run; without
             // --require-telemetry a scraper exit stays a warning. The
@@ -490,7 +499,46 @@ impl TelemetrySession {
         let base_ns = run_start
             .saturating_duration_since(self.epoch.mono())
             .as_nanos() as u64;
-        let row = request_row(&self.run_id, record, base_ns, self.load.unwrap_or(0.0));
+        let mut row = request_row(&self.run_id, record, base_ns, self.load.unwrap_or(0.0));
+
+        // #312 review: per-request queue-sample freshness coverage. Compute
+        // the age of the latest successful telemetry sample at-or-before
+        // send for each source; mark stale when the age exceeds the scrape
+        // interval plus a documented jitter allowance (min(10% of the
+        // interval, 100 ms)) so near-bound scrapes are not false-positived.
+        // Requests with NO sample at-or-before send are marked missing
+        // (age ∞ → stale with "no sample").
+        if let Some(boundary_plan) = &self.boundary_plan {
+            let (_, _cfg, sources) = boundary_plan;
+            let latest = self
+                .latest_samples
+                .lock()
+                .map(|map| map.clone())
+                .unwrap_or_default();
+            let mut ages = BTreeMap::new();
+            let mut stale = Vec::new();
+            for src in sources {
+                let interval_ms = src.interval_ms as f64;
+                let jitter_allowance_ms = (interval_ms * 0.10).min(100.0);
+                let bound_ms = interval_ms + jitter_allowance_ms;
+                let age_ms = match latest.get(&src.name) {
+                    Some(t_ns) if *t_ns <= row.t_sent_ns => (row.t_sent_ns - t_ns) as f64 / 1e6,
+                    // No sample at-or-before send: infinite age.
+                    _ => f64::INFINITY,
+                };
+                ages.insert(src.name.clone(), age_ms);
+                if age_ms > bound_ms {
+                    stale.push(src.name.clone());
+                }
+            }
+            // Only stamp when telemetry is configured (boundary_plan is Some).
+            if !ages.is_empty() {
+                row.queue_sample_age_ms = Some(ages);
+                row.queue_sample_stale = Some(stale);
+            }
+        }
+
+        let row = row;
         let window = match record.phase {
             Phase::Warmup => Some(&mut self.warmup),
             Phase::Measure => Some(&mut self.measure),
@@ -668,6 +716,8 @@ pub fn request_row(run_id: &str, record: &RequestRecord, base_ns: u64, load: f64
         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
         error: record.error.as_ref().map(|e| e.to_string()),
         telemetry_at_done: None,
+        queue_sample_age_ms: None,
+        queue_sample_stale: None,
     }
 }
 
@@ -919,19 +969,19 @@ mod tests {
 }
 
 #[cfg(test)]
-mod boundary_tests {
+mod shared_test_helpers {
     use super::*;
     use std::net::SocketAddr;
 
     /// Minimal two-source scrape server: serves a fixed exposition with a
     /// queue gauge, and keeps the listener open until dropped.
-    fn boundary_yaml(live: SocketAddr, dead: &str, interval_ms: u64) -> String {
+    pub fn boundary_yaml(live: SocketAddr, dead: &str, interval_ms: u64) -> String {
         format!(
             "default_interval_ms: {interval_ms}\ntimeout_ms: 500\nsources:\n  - name: live\n    url: http://{live}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n  - name: dead\n    url: http://{dead}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n"
         )
     }
 
-    async fn spawn_metrics_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    pub async fn spawn_metrics_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {
@@ -946,13 +996,13 @@ mod boundary_tests {
         (addr, handle)
     }
 
-    fn write_yaml(dir: &tempfile::TempDir, yaml: String) -> std::path::PathBuf {
+    pub fn write_yaml(dir: &tempfile::TempDir, yaml: String) -> std::path::PathBuf {
         let path = dir.path().join("telemetry.yaml");
         std::fs::write(&path, yaml).expect("write yaml");
         path
     }
 
-    fn stamp() -> RunStamp {
+    pub fn stamp() -> RunStamp {
         RunStamp {
             run_id: "boundary-run".into(),
             tool_version: "0.0.0".into(),
@@ -960,6 +1010,12 @@ mod boundary_tests {
             config: serde_json::json!({"binary": "test"}),
         }
     }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::shared_test_helpers::*;
+    use super::*;
 
     fn read_rows(path: &std::path::Path) -> Vec<serde_json::Value> {
         std::fs::read_to_string(path)
@@ -1146,5 +1202,251 @@ mod boundary_tests {
             .expect("session");
         let outcome2 = session2.boundary_sample().await;
         assert!(outcome2.ok && outcome2.matched_series == 0);
+    }
+}
+
+#[cfg(test)]
+mod freshness_tests {
+    use super::shared_test_helpers::*;
+    use super::*;
+
+    /// #312 review: per-request queue-sample coverage is stamped on request
+    /// rows when telemetry is configured: age per source, stale when past
+    /// the bound (interval + 10% jitter allowance), missing when no sample.
+    #[tokio::test]
+    async fn record_request_stamps_queue_sample_freshness() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "fresh-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // Simulate a scrape at t=0 from the engine source.
+        {
+            let mut map = session.latest_samples.lock().unwrap();
+            map.insert("engine".to_string(), 0); // epoch t_ns = 0
+        }
+        // Record a request sent at t=1.05s: age = 1050ms, bound = 1100ms → fresh.
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"].as_f64().expect("age");
+        assert!(age > 1000.0 && age < 1100.0, "age ~1050ms: {age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "within the bound: {req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_request_marks_stale_when_past_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "stale-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // Simulate a scrape at t=0; the request sends at t=2.5s.
+        // Age = 2500ms, bound = 1100ms → STALE.
+        {
+            let mut map = session.latest_samples.lock().unwrap();
+            map.insert("engine".to_string(), 0);
+        }
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(2500));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        assert!(
+            req["queue_sample_stale"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("engine")),
+            "stale source named: {req}"
+        );
+        assert!(
+            req["queue_sample_age_ms"]["engine"].as_f64().unwrap() > 2000.0,
+            "age is the real age: {req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_request_marks_missing_when_no_sample_before_send() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://127.0.0.1:1/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n",
+        )
+        .unwrap();
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "missing-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+        // NO latest_samples entry for the source: the request must be
+        // marked stale with infinite age.
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(100));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        assert!(
+            req["queue_sample_stale"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("engine")),
+            "no sample → stale: {req}"
+        );
+        // Infinity serializes as null in JSON; the stale flag is the truth.
+        assert!(
+            req["queue_sample_age_ms"]["engine"].is_null()
+                || req["queue_sample_age_ms"]["engine"]
+                    .as_f64()
+                    .is_some_and(|v| v > 1e12),
+            "infinite age: {req}"
+        );
     }
 }

@@ -245,6 +245,11 @@ pub async fn boundary_scrape_error(
         .await;
 }
 
+/// Shared map: source name → epoch ns of the latest successfully-written
+/// telemetry row (#312 review). The record consumer reads it to compute
+/// per-request queue-sample freshness.
+pub type LatestSamples = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, u64>>>;
+
 struct SourceRuntime {
     consecutive_failures: AtomicU32,
 }
@@ -261,6 +266,7 @@ pub fn spawn_scrapers(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
+    latest_samples: LatestSamples,
 ) -> Vec<tokio::task::JoinHandle<Result<()>>> {
     let require_failures = require_failures.max(1);
     sources
@@ -272,6 +278,7 @@ pub fn spawn_scrapers(
             let run_id = Arc::clone(&run_id);
             let writer = writer.clone();
             let stop = Arc::clone(&stop);
+            let latest_samples = Arc::clone(&latest_samples);
             tokio::spawn(async move {
                 scrape_loop(
                     client,
@@ -283,6 +290,7 @@ pub fn spawn_scrapers(
                     stop,
                     require_telemetry,
                     require_failures,
+                    latest_samples,
                 )
                 .await
             })
@@ -301,6 +309,7 @@ async fn scrape_loop(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
+    latest_samples: LatestSamples,
 ) -> Result<()> {
     let runtime = SourceRuntime {
         consecutive_failures: AtomicU32::new(0),
@@ -338,6 +347,11 @@ async fn scrape_loop(
                                 raw,
                                 boundary: None,
                             }));
+                            // #312 review: record the latest successful
+                            // sample time for freshness coverage.
+                            if let Ok(mut map) = latest_samples.lock() {
+                                map.insert(src.name.clone(), t_ns);
+                            }
                         }
                     }
                     Err(err) => {
@@ -541,6 +555,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
+        let latest_samples = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         let epoch = Arc::new(RunEpoch::new());
         let run_id = Arc::new("run-probe".to_string());
         let handles = spawn_scrapers(
@@ -553,6 +568,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             false,
             3,
+            latest_samples.clone(),
         );
         tokio::time::sleep(Duration::from_millis(350)).await;
         stop.store(true, Ordering::Relaxed);
@@ -606,6 +622,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
+        let latest_samples = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         let handles = spawn_scrapers(
             client,
             cfg,
@@ -616,6 +633,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             true,
             2,
+            latest_samples.clone(),
         );
         let join = handles.into_iter().next().unwrap();
         let result = tokio::time::timeout(Duration::from_secs(3), join)
