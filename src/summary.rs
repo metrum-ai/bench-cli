@@ -71,6 +71,11 @@ pub struct RunSummary {
     pub queue_delay_s: DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: DistSummary,
+    /// First token of ANY category (`min(ttft_s, first_reasoning_s)` per
+    /// row): separates the two clocks for reasoning models (#313). Omitted
+    /// unless at least one measured row reported reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_first_any_s: Option<DistSummary>,
     /// DNS lookup inside the connector (`0` = no lookup: pool hit or IP literal).
     pub dns_s: DistSummary,
     /// Response headers to last body chunk.
@@ -300,6 +305,9 @@ struct RecordedFieldDists {
     first_byte_s: DistSummary,
     queue_delay_s: DistSummary,
     first_reasoning_s: DistSummary,
+    /// Optional first-any-category clock (#313): present only when at least
+    /// one row reported reasoning.
+    ttft_first_any_s: Option<DistSummary>,
     prefill_tps_per_user: DistSummary,
     time_to_second_token_s: DistSummary,
     user_tps: DistSummary,
@@ -319,6 +327,16 @@ impl RecordedFieldDists {
     /// (ASR, imagegen) contribute no sample.
     fn from_successes(successes: &[&RequestRecord]) -> Self {
         let first_byte: Vec<f64> = successes.iter().filter_map(|r| r.first_byte_s).collect();
+        let has_reasoning = successes.iter().any(|r| r.first_reasoning_s.is_some());
+        // #313: first-any-category clock (first visible OR first reasoning).
+        let first_any: Vec<f64> = if has_reasoning {
+            successes
+                .iter()
+                .filter_map(|r| first_generated_token_s(r.ttft_s, r.first_reasoning_s))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Queue delay is only measured when a request had an intended arrival.
         let queue_delay: Vec<f64> = successes
             .iter()
@@ -364,6 +382,7 @@ impl RecordedFieldDists {
             first_byte_s: DistSummary::from_values(&first_byte),
             queue_delay_s: DistSummary::from_values(&queue_delay),
             first_reasoning_s: DistSummary::from_values(&first_reasoning),
+            ttft_first_any_s: has_reasoning.then(|| DistSummary::from_values(&first_any)),
             prefill_tps_per_user: DistSummary::from_values(&prefill_rates),
             time_to_second_token_s: DistSummary::from_values(&second_token),
             user_tps: DistSummary::from_values(&user_rates),
@@ -655,6 +674,7 @@ impl RunSummary {
             first_byte_s: recorded.first_byte_s,
             queue_delay_s: recorded.queue_delay_s,
             first_reasoning_s: recorded.first_reasoning_s,
+            ttft_first_any_s: recorded.ttft_first_any_s,
             dns_s: http.dns_s,
             receive_s: http.receive_s,
             bytes_sent: http.bytes_sent,
@@ -1989,5 +2009,54 @@ mod tests {
         assert_eq!(json["effective_concurrency"]["n"], 0);
         assert!(json["effective_concurrency"]["avg"].is_null());
         assert!(json["tokens_in_flight"]["max"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod first_any_tests {
+    use super::*;
+    use chrono::Utc;
+
+    /// #313: the first-any clock fires only when a reasoning row exists,
+    /// and takes the earlier of the two clocks.
+    #[test]
+    fn ttft_first_any_tracks_reasoning_rows_only() {
+        let base = |ttft: Option<f64>, reasoning: Option<f64>| {
+            let now = Utc::now();
+            RequestRecord::success(
+                0,
+                crate::record::Phase::Measure,
+                "default".into(),
+                now,
+                now,
+                std::time::Duration::from_secs_f64(1.0),
+                ttft.map(std::time::Duration::from_secs_f64),
+                reasoning.map(std::time::Duration::from_secs_f64),
+                Vec::new(),
+                5,
+                10,
+                15,
+            )
+        };
+        // No reasoning: field omitted (serde skips None).
+        let without = vec![base(Some(1.0), None)];
+        let summary = RunSummary::from_records(&without, 1.0, false);
+        assert!(
+            summary.ttft_first_any_s.is_none(),
+            "no reasoning rows → no first-any clock"
+        );
+        // With reasoning: first-any = min(first-visible, first-reasoning).
+        let with = vec![base(Some(1.0), Some(0.3))];
+        let summary = RunSummary::from_records(&with, 1.0, false);
+        let first_any = summary
+            .ttft_first_any_s
+            .expect("reasoning rows produce the clock");
+        assert!(
+            (first_any.p50.unwrap() - 0.3).abs() < 1e-9,
+            "first-any is the earlier clock: {:?}",
+            first_any.p50
+        );
+        // and the visible clock stays separate.
+        assert!((summary.ttft_s.p50.unwrap() - 1.0).abs() < 1e-9);
     }
 }

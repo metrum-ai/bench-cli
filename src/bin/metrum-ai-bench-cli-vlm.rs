@@ -340,6 +340,7 @@ async fn make_request(
             metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
             allow_missing_ttft,
+            false,
         )
         .await?;
         return Ok((

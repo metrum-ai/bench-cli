@@ -269,6 +269,21 @@ Options:
       --ramp-up-seconds <RAMP_UP_SECONDS>
           Ramp up period in seconds to gradually increase concurrency
 
+      --prompt-sequence-log <PROMPT_SEQUENCE_LOG>
+          Write the effective canonical prompt sequence to this JSONL path (fingerprint + cohort per slot, no prompt text) (#313)
+
+      --prompt-sequence <PROMPT_SEQUENCE>
+          Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)
+
+      --start-jitter-ms <START_JITTER_MS>
+          Reproducible closed-loop start-stagger: seeded uniform jitter in [0, MS) ms per slot, to break persistent phase-locking (#313); opt-in, recorded in the run config
+
+      --start-jitter-seed <START_JITTER_SEED>
+          Seed for --start-jitter-ms (default: --seed)
+
+      --sse-trace-first-n <SSE_TRACE_FIRST_N>
+          Retain a bounded/redacted SSE event timeline (event index, ms-from-send, categories only — never content or secrets) for the first N requests, written to <data-log>.sse-trace.jsonl; streaming runs only (#313)
+
   -h, --help
           Print help (see a summary with '-h')
 

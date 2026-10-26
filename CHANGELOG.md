@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- Prompt-sequence and issuance comparability on the llm binary (#313):
+  `--prompt-sequence-log` emits the effective canonical sequence
+  (fingerprint + cohort per slot, no content); `--prompt-sequence` replays a
+  recorded sequence by content fingerprint (never silently substitutes);
+  `--start-jitter-ms`/`--start-jitter-seed` adds a reproducible per-slot
+  start stagger for closed-loop runs; `--sse-trace-first-n` writes a bounded,
+  redacted SSE event timeline; and summaries report `ttft_first_any_s`
+  (first token of any category) alongside visible-token TTFT when reasoning
+  is present.
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
