@@ -13,7 +13,7 @@ All 224 canonical points report zero request-error rate. All five rented instanc
 ## Evidence and traceability
 
 - [Full report](https://github.com/metrum-ai/bench-cli/releases/download/evidence-mlperf-endpoints-20261023/SUMMARY.md); [ZIP bundle](https://github.com/metrum-ai/bench-cli/releases/download/evidence-mlperf-endpoints-20261023/evidence-mlperf-endpoints-20261023.zip); [SHA256 file](https://github.com/metrum-ai/bench-cli/releases/download/evidence-mlperf-endpoints-20261023/evidence-mlperf-endpoints-20261023.zip.sha256sum).
-- ZIP SHA256: `01dd4cce4ba1b501e7dbcf496c70d3d6b221bedbae19363b7648d320460bffa6`.
+- ZIP SHA256: `c314b082fbadbf52a16cec8c1edc495e54ae503cdbb1679c1565e93675b9fcf6` (rebuilt 2026-10-25 for the erratum below; original `01dd4cce4ba1b501e7dbcf496c70d3d6b221bedbae19363b7648d320460bffa6`).
 - Bundle contains scalar reports, 224-row points-final.csv, exact run/extract/telemetry helpers, dataset hashes and unmodified bench summary.v3 rows with SUT/configuration/client environment plus native reference summaries.
 - Local per-request logs back the scalar observations but are not published. No prompts, generated responses, GPQA content, exporter labels, public rental addresses, box hostnames, GPU UUIDs or secret values are included. Loopback endpoints and generic study/provider-default paths are deliberately retained in unmodified summaries.
 - MANIFEST.json hashes every member except itself. The publication audit reports counts by candidate category and no blocked locations.
@@ -33,7 +33,7 @@ The study measured v1.5.4 and main@30b8872 (full SHA below), pinned at study sta
 | Workload | W1 CNN/DailyMail validation, 512 prompts, max 128; W2 prompt-library full/code-medium, 512 prompts, max 512; seed 42 |
 | Request | Streamed chat, temperature 0, seed 42, thinking disabled; client local to GPU |
 | Online | c1/8/32/64/128; separate30s warm-server process plus drain, then180s issuance plus drain; reference/release/main/reference-repeat/release-repeat |
-| Offline | Native reference max_throughput; bench c128 saturation proxy, not identical semantics; fixed512 requests |
+| Offline | Native reference max_throughput; bench c128 saturation proxy, not identical semantics; fixed 512 requests except the three points in the erratum below |
 | Cache/precision | Prefix caching disabled for canonical points. Dense NVFP4 uses PIECEWISE graphs; MoE NVIDIA checkpoint is mixed FP8 attention/W4A16 weight-only Marlin, not native W4A4 |
 
 Repeated-run noise is point/metric-specific. Differences count beyond-noise only when exceeding both 5% and the repeat range; main uses release repeat noise as a proxy because it has one scheduled pass. Small sample tails, output framing/tokenization, native duration/drain and percentile conventions remain explicit caveats. Power is measured GPU board power, not official provisioned whole-system power.
@@ -62,3 +62,10 @@ The upstream submission-checker PointSummary parser cross-checks units/rate arit
 Approved bench issues: [#303](https://github.com/metrum-ai/bench-cli/issues/303), [#304](https://github.com/metrum-ai/bench-cli/issues/304), [#305](https://github.com/metrum-ai/bench-cli/issues/305), [#306](https://github.com/metrum-ai/bench-cli/issues/306), [#307](https://github.com/metrum-ai/bench-cli/issues/307), [#308](https://github.com/metrum-ai/bench-cli/issues/308), [#309](https://github.com/metrum-ai/bench-cli/issues/309), [#310](https://github.com/metrum-ai/bench-cli/issues/310), [#311](https://github.com/metrum-ai/bench-cli/issues/311), [#312](https://github.com/metrum-ai/bench-cli/issues/312), [#313](https://github.com/metrum-ai/bench-cli/issues/313). Upstream Endpoints and all-smi findings are report-only; no issues were filed there.
 
 This PR commits scalar docs only. The evidence bundle is a pre-release targeted at the tested main commit, latest=false; its tag does not match v* release/deploy triggers.
+
+## Erratum 2026-10-25
+
+`summary.json` (and the release's `points-final.csv`) now carry a per-point `comparability_note`. No measured values changed and no points were removed.
+
+- **q36-35b W1 bench-rel Offline (2,600 requests): not like-for-like. Exclude it from Offline comparisons.** It is one complete run with a single run id, not an appended retry. It ran before the harness fix at 2026-10-23T21:22Z that limited Offline points to 512 requests, so it kept sending for the full 180 s.
+- **q38-27b W2 bench-rel and bench-src Offline (504 and 502 requests):** both runs hit the 180 s sending limit before issuing all 512 requests. The requests in flight then completed, and none failed.

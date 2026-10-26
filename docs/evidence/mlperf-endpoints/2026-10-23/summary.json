@@ -5579,7 +5579,8 @@
       "vllm_preemptions": 0.0,
       "telemetry_power_delta_vs_external_pct": -0.1655934958359806,
       "telemetry_energy_delta_vs_external_pct": 0.2982030337078667,
-      "telemetry_power_crosscheck_flag": false
+      "telemetry_power_crosscheck_flag": false,
+      "comparability_note": "180 s sending cap reached after 504 of 512 requests; in-flight requests completed; no failures"
     },
     {
       "ttft_comparison_status": "native definition and sampling caveats apply",
@@ -6215,7 +6216,8 @@
       "vllm_preemptions": 0.0,
       "telemetry_power_delta_vs_external_pct": -0.15936017122030188,
       "telemetry_energy_delta_vs_external_pct": 0.7774964970256537,
-      "telemetry_power_crosscheck_flag": false
+      "telemetry_power_crosscheck_flag": false,
+      "comparability_note": "180 s sending cap reached after 502 of 512 requests; in-flight requests completed; no failures"
     },
     {
       "ttft_comparison_status": "native definition and sampling caveats apply",
@@ -8208,7 +8210,8 @@
       "vllm_preemptions": 0.0,
       "telemetry_power_delta_vs_external_pct": -0.35361454835048933,
       "telemetry_energy_delta_vs_external_pct": 0.5205731072777553,
-      "telemetry_power_crosscheck_flag": false
+      "telemetry_power_crosscheck_flag": false,
+      "comparability_note": "not-like-for-like: single run (one run id) that kept sending for the full 180 s and completed 2600 requests; ran before the 512-request Offline cap (harness fix 2026-10-23T21:22Z); exclude from Offline cross-tool comparisons"
     },
     {
       "ttft_comparison_status": "native definition and sampling caveats apply",
@@ -22200,5 +22203,8 @@
     "q38-27b: native AIME stopped at45min; completed events do not imply retained/scorable accuracy answers. Preserve coverage and unavailable correctness rather than inventing a score.",
     "q38-27b-nvfp4: native/promptfoo AIME is aggregate_only_not_item_matched; missing per-item evidence prevents subgroup comparison.",
     "Canonical performance runs disable prefix caching (explicit methodology extension); initial prefix-enabled points are archived/excluded. Failed warmups/telemetry retries and backfills can alter strict interleave order; complete-run selection and repeat-noise caveats apply."
+  ],
+  "errata": [
+    "Erratum 2026-10-25: points-final.csv and summary.json gain a per-point comparability note. The q36-35b W1 bench-rel Offline row (2600 requests) is a complete single run but not like-for-like and must be excluded from Offline comparisons; the q38-27b W2 Bench Offline rows (504/502 requests) stopped at the 180 s sending cap without failures. No values changed."
   ]
 }
