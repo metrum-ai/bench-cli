@@ -78,6 +78,8 @@ mod tests {
                 ttft_source: Some("stream".into()),
                 error: None,
                 telemetry_at_done: None,
+                queue_sample_age_ms: None,
+                queue_sample_stale: None,
             }))
             .await
             .expect("send request");

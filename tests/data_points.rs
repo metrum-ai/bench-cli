@@ -54,7 +54,13 @@ const REQUEST_OPEN_MAPS: &[&str] = &["modality_metrics", "modality_labels"];
 const LLM_MODALITY_KEYS: &[&str] = &["completion_words", "prompt_words"];
 /// Telemetry NDJSON request-row keys never counted, plus the open map of
 /// YAML-selected series.
-const REQUEST_ROW_SKIP: &[&str] = &["seq", "error", "telemetry_at_done"];
+const REQUEST_ROW_SKIP: &[&str] = &[
+    "seq",
+    "error",
+    "telemetry_at_done",
+    "queue_sample_age_ms",
+    "queue_sample_stale",
+];
 /// Sweep-point keys never counted.
 const SWEEP_EXCLUDED: &[&str] = &["config"];
 
@@ -777,6 +783,8 @@ fn request_row_max() -> RequestRow {
         ttft_s: Some(0.1),
         ttft_source: Some("stream".into()),
         error: Some("timeout".into()),
+        queue_sample_age_ms: Some(std::collections::BTreeMap::from([("engine".into(), 42.0)])),
+        queue_sample_stale: Some(vec!["engine".to_string()]),
         telemetry_at_done: Some(BTreeMap::from([("gpu_util".to_string(), 50.0)])),
     }
 }
@@ -801,6 +809,8 @@ fn request_row_min() -> RequestRow {
         ttft_s: None,
         ttft_source: None,
         error: None,
+        queue_sample_age_ms: None,
+        queue_sample_stale: None,
         telemetry_at_done: None,
     }
 }
@@ -1344,7 +1354,12 @@ fn first_null(value: &Value, path: &str) -> Option<String> {
         Value::Null => Some(path.to_string()),
         Value::Object(map) => map
             .iter()
-            .filter(|(k, _)| !REQUEST_OPEN_MAPS.contains(&k.as_str()) && *k != "telemetry_at_done")
+            .filter(|(k, _)| {
+                !REQUEST_OPEN_MAPS.contains(&k.as_str())
+                    && *k != "telemetry_at_done"
+                    && !k.starts_with("queue_sample_age_ms")
+                    && *k != "queue_sample_stale"
+            })
             .find_map(|(k, v)| first_null(v, &format!("{path}.{k}"))),
         Value::Array(items) => items
             .iter()
