@@ -4,6 +4,14 @@
 # Bake cargo/go deps so the self-hosted bench-cli job rarely apt-gets on a
 # shared host lock. Base image registers via ACCESS_TOKEN / RUNNER_TOKEN.
 # AppArmor is not required and is not installed in this image.
+#
+# Non-root execution (#292): the base image creates the `runner` account
+# (uid 1001, group gid 121, home /home/runner, member of the NOPASSWD sudo
+# and docker groups). This image installs the toolchains under /opt (never
+# under /root), pre-owns every path the runner writes, and ends as the
+# numeric `runner` user with RUN_AS_ROOT=false, which the upstream
+# entrypoint supports: started non-root it executes the CMD directly
+# (no gosu drop needed). A root shell is no longer reachable from job code.
 
 FROM myoung34/github-runner:ubuntu-noble
 
@@ -20,6 +28,7 @@ RUN apt-get update \
         jq \
         libssl-dev \
         pkg-config \
+        procps \
         python3 \
         python3-pip \
         python3-venv \
@@ -33,10 +42,38 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
     && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
 # rust-toolchain action still pins the channel; this cuts cold-start time.
-RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable \
-    && ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc \
-    && ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo \
-    && ln -sf /root/.cargo/bin/rustup /usr/local/bin/rustup
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Shared toolchain path (#292): install under /opt/rust, runner-owned, so
+# the non-root final user can execute it and rust-cache/cargo can write
+# the registry cache there. Symlinks into /usr/local/bin keep the same
+# invocation paths as before.
+RUN curl -fsSL https://sh.rustup.rs \
+    | env CARGO_HOME=/opt/rust/cargo RUSTUP_HOME=/opt/rust/rustup \
+      sh -s -- -y --default-toolchain stable --no-modify-path \
+    && ln -sf /opt/rust/cargo/bin/rustc /usr/local/bin/rustc \
+    && ln -sf /opt/rust/cargo/bin/cargo /usr/local/bin/cargo \
+    && ln -sf /opt/rust/cargo/bin/rustup /usr/local/bin/rustup
+ENV CARGO_HOME=/opt/rust/cargo \
+    RUSTUP_HOME=/opt/rust/rustup
 
 WORKDIR /actions-runner
+
+# Non-root execution (#292): the upstream entrypoint chowns these paths only
+# when it starts as root; started as the `runner` user it executes the CMD
+# directly, so the image itself must ship the right ownership.
+RUN chown -R runner:runner /actions-runner \
+    && chown runner:runner /opt/hostedtoolcache \
+    && mkdir -p /tmp/runner-work \
+    && chown runner:runner /tmp/runner-work \
+    && chown -R runner:runner /opt/rust
+
+# Final user: the base image `runner` account, by numeric uid/gid (1001/121).
+# RUN_AS_ROOT must be false: the upstream entrypoint exits with an error if
+# RUN_AS_ROOT is unset (defaults true) while the container user is non-root.
+ENV RUN_AS_ROOT=false
+USER 1001:121
+
+# Runner-appropriate health check (#292): the registered agent listens as
+# Runner.Listener under the runner account; a dead listener is an unhealthy
+# container even though the entrypoint itself is still alive.
+HEALTHCHECK --interval=5m --timeout=10s --start-period=2m --retries=3 \
+    CMD pgrep -u runner -f Runner.Listener >/dev/null || exit 1

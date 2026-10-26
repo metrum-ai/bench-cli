@@ -14,3 +14,9 @@ until ARC has been proven in CI. Do not deregister or otherwise remove it based
 on this transition alone. The repository cannot independently verify the live
 runner pool or its operational configuration; confirm the actual runner name
 and job result from GitHub Actions before treating ARC as proven.
+
+The fallback pool and its opt-in GPU runner
+(`deploy/github-runners-bench-cli`) build and run as the base image `runner`
+account (uid 1001), never as root: the image ends with `USER 1001:121` and
+`RUN_AS_ROOT=false`, and the toolchains live under `/opt/rust` and
+`/usr/local/go` instead of `/root` (#292).

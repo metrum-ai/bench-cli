@@ -3,6 +3,15 @@
 #
 # GitHub runner compose pool on pikachu. AppArmor is not required.
 #
+# Non-root runners (#292): the image ends as the base image `runner`
+# account (uid 1001, gid 121) with RUN_AS_ROOT=false; the upstream
+# entrypoint executes the CMD directly as that user. Toolchains live under
+# /opt/rust (runner-owned) and /usr/local/go, not under /root.
+#
+# Legacy status: primary CI now runs on the bench-cli-arc ARC scale set
+# (docs/SELF_HOSTED_RUNNERS.md). This pool is the documented fallback and
+# still hosts the opt-in gpu-h100 runner for live-modality-smoke.yml.
+#
 # Layout:
 #   ~/github-runners-bench-cli-compose   CI label bench-cli (this pool)
 #   ~/github-runners-router-compose      CI label router
@@ -12,6 +21,17 @@
 # First time (once .env has RUNNER_TOKEN or ACCESS_TOKEN):
 #   cd ~/github-runners-bench-cli-compose
 # Bootstrap is managed by the runner host configuration; no repository shell bootstrap is provided.
+#
+# Non-root rollout (#292), once per host:
+#   ./pool recreate
+#   # Pre-existing runner-tools named volumes keep their root-owned content
+#   # even after the image chowns /opt/hostedtoolcache, so drop them once
+#   # while the pool is stopped (they are only a tool cache; `down -v`
+#   # removes the project's named volumes, which is just runner-tools here):
+#     docker compose down -v && ./pool start
+#   # Verify: docker exec gha-bench-cli-1 id   (must print uid=1001(runner))
+#   # and docker exec gha-bench-cli-1 cargo --version (shared /opt/rust
+#   # toolchain works as the non-root user).
 #
 # Daily / manual:
 #   ./pool start              # up -d
