@@ -781,13 +781,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // call so a failed validation never destroys an existing log.
     // #323×#321 follow-up: --ci-safety defaults the collision policy to
     // refuse-existing (the safe CI mode); an explicit --data-log-mode wins.
-    let data_log_mode = args.data_log_mode.unwrap_or(
-        if args.common.ci_safety {
-            metrum_ai_bench::jsonl::DataLogMode::RefuseExisting
-        } else {
-            metrum_ai_bench::jsonl::DataLogMode::Append
-        },
-    );
+    let data_log_mode = args.data_log_mode.unwrap_or(if args.common.ci_safety {
+        metrum_ai_bench::jsonl::DataLogMode::RefuseExisting
+    } else {
+        metrum_ai_bench::jsonl::DataLogMode::Append
+    });
     let effective_data_log =
         metrum_ai_bench::jsonl::prepare_data_log(data_log_mode, &args.data_log, &run_id)
             .unwrap_or_else(|e| {

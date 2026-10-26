@@ -622,23 +622,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Ordering contract (#305 review): this is the LAST configuration step
     // before traffic because overwrite truncates immediately; any
     // pre-traffic validation must run BEFORE this call.
-    let effective_data_log =
-        metrum_ai_bench::jsonl::prepare_data_log(
-            args.data_log_mode.unwrap_or(
-                if args.common.ci_safety {
-                    metrum_ai_bench::jsonl::DataLogMode::RefuseExisting
-                } else {
-                    metrum_ai_bench::jsonl::DataLogMode::Append
-                },
-            ),
-            &args.data_log,
-            &run_id,
-        )
-            .unwrap_or_else(|e| {
-                // Configuration error: exit 2, the code clap uses (#304, #305).
-                eprintln!("Error: data log collision: {e}");
-                std::process::exit(2);
-            });
+    let effective_data_log = metrum_ai_bench::jsonl::prepare_data_log(
+        args.data_log_mode.unwrap_or(if args.common.ci_safety {
+            metrum_ai_bench::jsonl::DataLogMode::RefuseExisting
+        } else {
+            metrum_ai_bench::jsonl::DataLogMode::Append
+        }),
+        &args.data_log,
+        &run_id,
+    )
+    .unwrap_or_else(|e| {
+        // Configuration error: exit 2, the code clap uses (#304, #305).
+        eprintln!("Error: data log collision: {e}");
+        std::process::exit(2);
+    });
     let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
         &effective_data_log,
     )?);

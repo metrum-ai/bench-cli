@@ -2824,11 +2824,7 @@ fn overwrite_mode_with_failed_model_preflight_leaves_old_log_untouched() {
     // Seed an existing log with a prior complete run.
     let seeded = dir.path().join("seed.jsonl");
     let out = Command::new(metrum_ai_bench_llm_bin())
-        .args(collision_args(
-            &url,
-            seeded.to_str().unwrap(),
-            &[],
-        ))
+        .args(collision_args(&url, seeded.to_str().unwrap(), &[]))
         .output()
         .expect("seed run");
     assert!(out.status.success());
@@ -2882,7 +2878,11 @@ fn ci_safety_defaults_data_log_mode_to_refuse_existing() {
 
     // --ci-safety with no explicit mode: refuse-existing, exit 2, no traffic.
     let out = Command::new(metrum_ai_bench_llm_bin())
-        .args(collision_args(&url, data_log.to_str().unwrap(), &["--ci-safety"]))
+        .args(collision_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--ci-safety"],
+        ))
         .output()
         .expect("run ci-safety against an existing log");
     assert_eq!(
@@ -2891,10 +2891,7 @@ fn ci_safety_defaults_data_log_mode_to_refuse_existing() {
         "preset defaults to refuse-existing"
     );
     let text = combined_output(&out);
-    assert!(
-        text.contains("already exists"),
-        "refusal named:\n{text}"
-    );
+    assert!(text.contains("already exists"), "refusal named:\n{text}");
 
     // Explicit append wins over the preset default.
     let out = Command::new(metrum_ai_bench_llm_bin())
