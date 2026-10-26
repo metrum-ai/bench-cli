@@ -68,8 +68,7 @@ pub fn write_sequence_log(
             prompt_bytes: prompts[index as usize].len() as u64,
             cohort: seq / cohort_width,
         };
-        serde_json::to_writer(&mut out, &entry)
-            .map_err(std::io::Error::other)?;
+        serde_json::to_writer(&mut out, &entry).map_err(std::io::Error::other)?;
         out.write_all(b"\n")?;
     }
     Ok(())
