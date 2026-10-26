@@ -374,13 +374,20 @@ jobs:
     # with repository variable LIVE_GATE_REQUIRED=true once a gpu-h100
     # runner is registered; while unset the job is skipped and publishing
     # proceeds as before. docs/RELEASING.md still requires a green gate.
+    # Least-privilege secret contract (#291): pass only the Hugging Face
+    # token the smoke needs instead of inheriting every repository secret;
+    # the reusable workflow declares its own contents: read grant.
     needs: verify
     if: vars.LIVE_GATE_REQUIRED == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/live-modality-smoke.yml
     with:
       from_release: true
       ref: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
-    secrets: inherit
+    secrets:
+      # Only the token the gate uses; never `secrets: inherit` here (#291).
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
   github-release:
     # always() so a skipped live-gate (variable unset) does not skip publish;
