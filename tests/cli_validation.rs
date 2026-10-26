@@ -4,6 +4,8 @@
 //! Integration tests: CLI validation and fail-fast behavior (issue #128).
 //! Run with: cargo test --test cli_validation
 
+mod common;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -793,5 +795,413 @@ fn strategic_rejects_zero_requests_per_stage() {
     assert!(
         text.contains("requests_per_stage") || text.contains("range"),
         "must reject zero measured requests:\n{text}"
+    );
+}
+
+// #304: invalid absolute URLs must be rejected before any network traffic.
+// Scheme-less --url values previously produced an all-error benchmark run
+// that still exited 0.
+
+/// Minimal full argument set for metrum-ai-bench-cli-llm so clap parse
+/// succeeds and the run reaches endpoint resolution.
+fn llm_args(url: &str, data_log: &str) -> Vec<String> {
+    [
+        "--url",
+        url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "url-validation",
+        "--num-requests",
+        "1",
+        "--concurrency",
+        "1",
+        "--prompts",
+        "missing-is-fine-before-url-check.jsonl",
+        "--mode",
+        "chat",
+        "--model",
+        "m",
+        "--data-log",
+        data_log,
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+#[test]
+fn metrum_ai_bench_llm_rejects_scheme_less_url_before_traffic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let args = llm_args(
+        "127.0.0.1:9/v1/chat/completions",
+        data_log.to_str().unwrap(),
+    );
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm with scheme-less --url");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "scheme-less --url must exit 2 (configuration error), not benchmark a broken endpoint"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("invalid endpoint URL"),
+        "error must explain the invalid URL:\n{text}"
+    );
+    assert!(
+        text.contains("127.0.0.1:9"),
+        "error must name the offending URL:\n{text}"
+    );
+    // Fail-fast proof: the run never reaches request issuance or logging.
+    assert!(
+        !text.contains("Starting load test"),
+        "must fail before the load loop starts:\n{text}"
+    );
+    assert!(
+        !data_log.exists(),
+        "must fail before the data log is created: {}",
+        data_log.display()
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_accepts_proxy_path_urls() {
+    // A URL with a proxy path prefix is valid; the (closed) port only fails
+    // later at request time, which this test does not reach because the
+    // prompts file is missing after validation.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let args = llm_args(
+        "http://127.0.0.1:9/llm-proxy/v1/chat/completions",
+        data_log.to_str().unwrap(),
+    );
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm with proxy-path --url");
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("invalid endpoint URL"),
+        "proxy path URLs must pass URL validation:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_vlm_rejects_scheme_less_url_before_traffic() {
+    let out = Command::new(metrum_ai_bench_vlm_bin())
+        .args([
+            "--url",
+            "127.0.0.1:9/v1/chat/completions",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "missing.jsonl",
+            "--model",
+            "m",
+            "--data-log",
+            "out-vlm.jsonl",
+            "--max-tokens",
+            "8",
+        ])
+        .output()
+        .expect("run metrum-ai-bench-cli-vlm with scheme-less --url");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
+    let text = combined_output(&out);
+    assert!(
+        text.contains("invalid endpoint URL"),
+        "error must explain the invalid URL:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_asr_rejects_scheme_less_url_before_traffic() {
+    let out = Command::new(metrum_ai_bench_asr_bin())
+        .args([
+            "--url",
+            "127.0.0.1:9/v1",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--input",
+            "missing-is-fine-before-url-check.jsonl",
+            "--model",
+            "whisper-1",
+        ])
+        .output()
+        .expect("run metrum-ai-bench-cli-asr with scheme-less --url");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
+    let text = combined_output(&out);
+    assert!(
+        text.contains("invalid endpoint URL"),
+        "error must explain the invalid URL:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_imagegen_rejects_scheme_less_url_before_traffic() {
+    let out = Command::new(metrum_ai_bench_imagegen_bin())
+        .args([
+            "--url",
+            "127.0.0.1:9/v1",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--model",
+            "m",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompt",
+            "a square",
+            "--data-log",
+            "out-imagegen.jsonl",
+        ])
+        .output()
+        .expect("run metrum-ai-bench-cli-imagegen with scheme-less --url");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
+    let text = combined_output(&out);
+    assert!(
+        text.contains("invalid endpoint URL"),
+        "error must explain the invalid URL:\n{text}"
+    );
+}
+
+// #304: opt-in exact-model preflight (--validate-model), tested against the
+// workspace mock server (serves /v1/models with "metrum-ai-bench-cli-mock").
+
+#[test]
+fn metrum_ai_bench_llm_invalid_url_redacts_embedded_credentials() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let args = llm_args(
+        "ftp://user:secret@h.example/llm/v1/chat/completions?api_key=hush",
+        data_log.to_str().unwrap(),
+    );
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm with credentials in --url");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "non-http scheme must exit 2 before traffic"
+    );
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("secret") && !text.contains("hush"),
+        "no password or query credential may be echoed:\n{text}"
+    );
+    assert!(
+        text.contains("api_key=REDACTED"),
+        "query keys stay, values are redacted:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_redacts_urls_in_failure_output() {
+    // Unreachable server with credentials in the URL: the preflight failure
+    // (stderr + report) must not leak them.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(
+        "http://user:hush@127.0.0.1:1/v1/chat/completions?token=shh",
+        data_log.to_str().unwrap(),
+    );
+    args.push("--validate-model".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model with credentials in --url");
+    assert_eq!(out.status.code(), Some(2), "must fail preflight");
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("hush") && !text.contains("shh"),
+        "userinfo and query credentials must be redacted from the failure output:\n{text}"
+    );
+    assert!(
+        text.contains("/v1/models"),
+        "the redacted models URL is still shown:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_reports_unreachable_server() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(
+        "http://127.0.0.1:1/v1/chat/completions",
+        data_log.to_str().unwrap(),
+    );
+    args.push("--validate-model".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model against closed port");
+    assert!(
+        !out.status.success(),
+        "unreachable server must fail preflight"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("model preflight failed"),
+        "must name the preflight failure:\n{text}"
+    );
+    assert!(
+        text.contains("/v1/models"),
+        "must name the models URL that could not be reached:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_reports_actual_server_models() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(&url, data_log.to_str().unwrap());
+    args.push("--validate-model".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model with unknown model");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unknown model must fail preflight with the configuration code"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("model preflight failed"),
+        "must name the preflight failure:\n{text}"
+    );
+    // The report must include the server's actual model list.
+    assert!(
+        text.contains("metrum-ai-bench-cli-mock"),
+        "must report the actual server model ids:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_passes_and_runs() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let prompts = dir.path().join("prompts.jsonl");
+    std::fs::write(&prompts, "{\"prompt\":\"Hi\"}\n").unwrap();
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(&url, data_log.to_str().unwrap());
+    // Point prompts at a real file so the run completes.
+    if let Some(pos) = args
+        .iter()
+        .position(|a| a == "missing-is-fine-before-url-check.jsonl")
+    {
+        args[pos] = prompts.to_str().unwrap().to_string();
+    }
+    args.push("--validate-model".into());
+    // The mock serves exactly "metrum-ai-bench-cli-mock".
+    if let Some(pos) = args.iter().position(|a| a == "m") {
+        args[pos] = "metrum-ai-bench-cli-mock".into();
+    }
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model happy path");
+    assert!(
+        out.status.success(),
+        "listed model must pass preflight and complete the run:\n{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("model preflight: ok"),
+        "preflight success must be reported on stdout:\n{stdout}"
+    );
+    let logged = std::fs::read_to_string(&data_log).expect("data log written");
+    let lines: Vec<&str> = logged.lines().collect();
+    assert_eq!(lines.len(), 2, "one request row and one summary: {logged}");
+    assert!(
+        lines[0].contains("\"seq\""),
+        "a measured request record must appear first: {logged}"
+    );
+    assert!(
+        lines[1].contains("metrum-ai-bench-cli.summary.v3"),
+        "the closing summary row must be present: {logged}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_alias_overrides_checked_id() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(&url, data_log.to_str().unwrap());
+    args.push("--validate-model".into());
+    // Run with model "m", validate the server-known alias instead (alias/
+    // proxy override for proxies that rewrite model names).
+    args.push("--model-alias".into());
+    args.push("metrum-ai-bench-cli-mock".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model --model-alias");
+    // The prompts file is missing, so the run fails AFTER preflight passes.
+    let text = combined_output(&out);
+    assert!(
+        text.contains("model preflight: ok"),
+        "alias must be validated and pass against the mock server:\n{text}"
+    );
+    assert!(
+        text.contains("'metrum-ai-bench-cli-mock' listed"),
+        "preflight success line must name the validated alias:\n{text}"
+    );
+    assert!(
+        !out.status.success(),
+        "run must still fail on missing prompts"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_model_alias_requires_validate_model() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(
+        "http://127.0.0.1:9/v1/chat/completions",
+        data_log.to_str().unwrap(),
+    );
+    args.push("--model-alias".into());
+    args.push("some-alias".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --model-alias without --validate-model");
+    assert!(
+        !out.status.success(),
+        "--model-alias must require --validate-model"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--validate-model"),
+        "parse error must name --validate-model:\n{text}"
     );
 }

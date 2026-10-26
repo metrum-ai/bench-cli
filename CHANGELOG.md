@@ -14,6 +14,18 @@
 - Dependabot applies a seven-day cooldown to routine version updates in all
   three ecosystems (cargo, gomod, github-actions); security updates are never
   delayed (#293).
+### Fixed
+- Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
+  rejected as configuration errors before any benchmark traffic, across llm,
+  vlm, asr, imagegen and strategic; proxy path prefixes remain valid (#304).
+- New opt-in `--validate-model` preflight for `metrum-ai-bench-cli-llm`: it
+  checks the model against the server's `/v1/models` list before any
+  benchmark traffic, reports the server's actual response, and supports a
+  `--model-alias` override for proxy/alias setups (#304).
+- Both the invalid-URL rejection and the failed `--validate-model` preflight
+  exit 2, the configuration/usage code clap already uses, and URLs echoed in
+  errors, logs and the preflight report have userinfo and query values
+  redacted (#304).
 
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
