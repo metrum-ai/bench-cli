@@ -1593,3 +1593,153 @@ fn llm_version_only_with_full_run_args_skips_traffic() {
         "no traffic or logging may occur with --version-only"
     );
 }
+
+// #310: tagged request rows must stream into the NDJSON log as requests
+// complete, while issuance is still running — not only after the issuing
+// loop finishes.
+
+#[test]
+fn ndjson_request_rows_stream_during_issuance() {
+    use std::time::{Duration, Instant};
+
+    // Long-latency server plus a paced (2 req/s) 40-request run: issuance
+    // alone spans ~20s, so request rows observed below are provably emitted
+    // mid-issuance.
+    let mock = common::spawn_mock(&["--latency-ms", "300"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ndjson = dir.path().join("run.ndjson");
+    let data_log = dir.path().join("run.jsonl");
+
+    let mut args: Vec<String> = [
+        "--url",
+        &url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "stream-ndjson",
+        "--num-requests",
+        "40",
+        "--concurrency",
+        "4",
+        "--request-rate",
+        "2",
+        "--prompts",
+        "test-data/llm-hi.jsonl",
+        "--mode",
+        "chat",
+        "--model",
+        "m",
+        "--data-log",
+        data_log.to_str().unwrap(),
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+        "--ndjson",
+        ndjson.to_str().unwrap(),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let _ = &mut args;
+    let mut child = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn llm with --ndjson");
+
+    // Tail the NDJSON log while the run is issuing: a request row must
+    // appear before the process exits (i.e. before the final stage/summary).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut observed_during_issuance = false;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("poll llm child") {
+            assert!(
+                observed_during_issuance,
+                "run finished ({status}) before any request row was tailed"
+            );
+            break;
+        }
+        if let Ok(text) = std::fs::read_to_string(&ndjson) {
+            if text.contains("\"kind\":\"request\"") {
+                observed_during_issuance = true;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        observed_during_issuance,
+        "a tagged request row must appear in the NDJSON log while issuance is still running"
+    );
+}
+
+#[test]
+fn ndjson_request_rows_preserve_order_and_termination() {
+    // After a full run: run row first, all request rows present exactly
+    // once, summary row last (#310 keeps the ordered summary termination
+    // and no duplicate/lost records when the consumer streams).
+    let mock = common::spawn_mock(&["--latency-ms", "20"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ndjson = dir.path().join("run.ndjson");
+    let data_log = dir.path().join("run.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "order-ndjson",
+            "--num-requests",
+            "12",
+            "--concurrency",
+            "4",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--log-level",
+            "error",
+            "--ndjson",
+            ndjson.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run llm with --ndjson");
+    assert!(
+        out.status.success(),
+        "run must succeed:\n{}",
+        combined_output(&out)
+    );
+    let text = std::fs::read_to_string(&ndjson).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines.first().unwrap().contains("\"kind\":\"run\""));
+    assert!(lines.last().unwrap().contains("\"kind\":\"summary\""));
+    let request_rows = lines
+        .iter()
+        .filter(|l| l.contains("\"kind\":\"request\""))
+        .count();
+    assert_eq!(request_rows, 12, "no lost or duplicated request rows");
+    // Distinct seq values: 12 unique request rows.
+    let seqs: std::collections::BTreeSet<u64> = lines
+        .iter()
+        .filter(|l| l.contains("\"kind\":\"request\""))
+        .filter_map(|l| {
+            serde_json::from_str::<serde_json::Value>(l)
+                .ok()
+                .and_then(|v| v.get("seq").and_then(serde_json::Value::as_u64))
+        })
+        .collect();
+    assert_eq!(seqs.len(), 12, "each request row must have a unique seq");
+}

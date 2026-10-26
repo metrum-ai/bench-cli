@@ -1,5 +1,3 @@
-# Changelog
-
 ## Unreleased
 
 ### Security
@@ -14,6 +12,68 @@
 - Dependabot applies a seven-day cooldown to routine version updates in all
   three ecosystems (cargo, gomod, github-actions); security updates are never
   delayed (#293).
+
+### Added
+- New `--data-log-mode` collision policy for the llm, vlm, asr and imagegen
+  data logs: `append` (default, unchanged), `refuse-existing` (atomic
+  O_EXCL claim of the path; exit 2 before traffic if it exists),
+  `overwrite` (truncates the previous log at run start), and `new-dir`
+  (per-run files named by run_id inside a directory). The default append
+  semantics are now documented prominently, and the policy resolves as the
+  last configuration step before traffic (#305).
+- New agent/CI safety preset `--ci-safety` (implies `--fail-on-error` and the
+  new `--fail-on-partial`) on the llm, vlm, asr and imagegen binaries: all-error,
+  endpoint-down and interrupted runs can no longer exit 0 for automated
+  callers. Exploratory default exit semantics are unchanged and now documented
+  in the flag help and README (#303).
+- Ready telemetry presets for the Metrum all-smi fork plus vLLM:
+  `examples/telemetry/all-smi-vllm.yaml` (validated single-node include set,
+  pinned exporter/engine versions, loopback URLs and the operational
+  caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
+  (four lanes with source labels and loopback forwarding placeholders), with
+  a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
+- Synchronous telemetry boundary baseline (#312): with `--ndjson` +
+  `--telemetry`, every configured source is scraped once immediately before
+  the first measured request (after the warmup barrier) on the llm, vlm, asr
+  and imagegen binaries, emitting rows tagged `boundary: "pre-measured"` on
+  the shared run epoch. A failed source is marked by a boundary-tagged
+  `scrape_error` row instead of an invented sample; under
+  `--require-telemetry` it also gates measured issuance and fails the run
+  verdict. `boundary` is an additive optional field on `telemetry` and
+  `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
+
+- New optional strict SUT publication profile (`--sut-profile strict`, implies
+  `--require-sut`): requires the exact model revision, weight/activation
+  quantization, KV dtype, operator-declared kernel/graph evidence (never
+  inferred from the model name), and a linked quality-evidence artifact
+  (URI + sha256 + n/errors/confidence). `examples/sut.strict.example.json`
+  demonstrates it. Quality evidence stays separate from throughput (#308).
+- New `metrum-ai-bench-cli endpoints-export` subcommand: converts a completed
+  run data log into an Endpoints-shaped, explicitly non-certifying bundle
+  (point.yaml, declared-only system_desc.json, declared-only system_power.json,
+  upstream-parser-compatible performance/result_summary.json + config.yaml,
+  crosscheck.json with record-vs-summary arithmetic checks, NONCOMPLIANCE.md
+  listing the checks that remain impossible). Offline/LoadStair/Pareto intents
+  are disclosed as unsupported mappings; TTFT/TPOT definition differences are
+  flagged per metric, never silently transformed (#306). See
+  docs/ENDPOINTS_ADAPTER.md.
+- New `--arrival burst` mode (llm, vlm, asr, imagegen): native Offline-style
+  population burst — every request scheduled at t=0 and issued immediately,
+  unbounded in flight unless `--max-concurrency` caps the transport (the
+  wait is recorded as queue delay). The measured window runs first-send to
+  last-completion (full-batch tail drain included), and `effective_max_concurrency`
+  stamps the actual cap. Never an accepted MLPerf submission label; the
+  Endpoints adapter (#306) discloses non-burst Offline mappings (#309).
+- Prompt-sequence and issuance comparability on the llm binary (#313):
+  `--prompt-sequence-log` emits the effective canonical sequence
+  (fingerprint + cohort per slot, no content); `--prompt-sequence` replays a
+  recorded sequence by content fingerprint (never silently substitutes);
+  `--start-jitter-ms`/`--start-jitter-seed` adds a reproducible per-slot
+  start stagger for closed-loop runs; `--sse-trace-first-n` writes a bounded,
+  redacted SSE event timeline; and summaries report `ttft_first_any_s`
+  (first token of any category) alongside visible-token TTFT when reasoning
+  is present.
+
 ### Fixed
 - Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
   rejected as configuration errors before any benchmark traffic, across llm,
@@ -26,6 +86,19 @@
   exit 2, the configuration/usage code clap already uses, and URLs echoed in
   errors, logs and the preflight report have userinfo and query values
   redacted (#304).
+- Standalone `--version-only` no longer fails with required-argument errors on
+  the llm, vlm and imagegen binaries: it prints the version and exits 0
+  without traffic, matching asr, strategic and prompts. Every distributed
+  binary's `--version` and `--version-only` behavior is now pinned by tests
+  (#307).
+- Tagged NDJSON request rows now stream as requests complete on the llm, vlm,
+  asr and imagegen binaries: the completed-record channel is consumed
+  concurrently with issuance (previously only drained after the issuing loop
+  finished), and the NDJSON writer gains a 250 ms time-bound flush next to
+  the 64-row batch bound so sparse runs become visible to tailing readers
+  promptly (#310). Emission order is per-request completion order; the
+  ordered summary termination is unchanged. `metrum-ai-bench-cli-strategic`
+  already emitted request rows at completion and is unchanged.
 
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
