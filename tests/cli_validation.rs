@@ -2810,3 +2810,54 @@ fn sse_trace_first_n_writes_bounded_redacted_timelines() {
         "no content in the trace: {all}"
     );
 }
+
+// Integration follow-up (a) (#320×#321): the --validate-model preflight runs
+// BEFORE prepare_data_log, so a failed overwrite-mode preflight never
+// destroys an existing log.
+
+#[test]
+fn overwrite_mode_with_failed_model_preflight_leaves_old_log_untouched() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    // Seed an existing log with a prior complete run.
+    let seeded = dir.path().join("seed.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(
+            &url,
+            seeded.to_str().unwrap(),
+            &[],
+        ))
+        .output()
+        .expect("seed run");
+    assert!(out.status.success());
+    std::fs::copy(&seeded, &data_log).unwrap();
+    let before = std::fs::read_to_string(&data_log).unwrap();
+
+    // overwrite + --validate-model with an unknown model must exit 2 and
+    // leave the old log byte-identical.
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--data-log-mode", "overwrite", "--validate-model"],
+        ))
+        .output()
+        .expect("run overwrite with failed preflight");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "failed preflight exits 2 (configuration)"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("model preflight failed"),
+        "preflight failure named:\n{text}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&data_log).unwrap(),
+        before,
+        "the old log is byte-identical — preflight ran before overwrite truncation"
+    );
+}
