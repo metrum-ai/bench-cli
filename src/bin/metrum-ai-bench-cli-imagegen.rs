@@ -311,6 +311,13 @@ struct Args {
 
     #[arg(
         long,
+        value_enum,
+        default_value = "standard",
+        help = "SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact"
+    )]
+    sut_profile: metrum_ai_bench::sut::SutProfile,
+    #[arg(
+        long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
         help = "Write environment.hostname as null"
@@ -444,10 +451,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
     validate_args(&args)?;
-    let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
+    let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_profile_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
+        args.sut_profile,
     )?;
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
