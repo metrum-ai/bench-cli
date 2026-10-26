@@ -30,13 +30,15 @@ on:
         description: Git ref to test (release.yml passes the release tag)
         type: string
         default: ""
-    # Least-privilege secret contract (#291): this workflow needs only the
+    # Least-privilege secret contract (#291): this workflow needs at most the
     # Hugging Face token to pull model weights. Callers must pass it
-    # explicitly; nothing else is inherited.
+    # explicitly; nothing else is inherited. Optional on purpose: the gate
+    # currently runs with public weights and no token, and making it
+    # required would break the first enabled live-gate run.
     secrets:
       HF_TOKEN:
-        description: Hugging Face token for the modality model weights
-        required: true
+        description: Optional Hugging Face token, needed only for gated weights
+        required: false
 
 permissions:
   contents: read

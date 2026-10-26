@@ -374,9 +374,10 @@ jobs:
     # with repository variable LIVE_GATE_REQUIRED=true once a gpu-h100
     # runner is registered; while unset the job is skipped and publishing
     # proceeds as before. docs/RELEASING.md still requires a green gate.
-    # Least-privilege secret contract (#291): pass only the Hugging Face
+    # Least-privilege secret contract (#291): pass at most the Hugging Face
     # token the smoke needs instead of inheriting every repository secret;
     # the reusable workflow declares its own contents: read grant.
+    # HF_TOKEN is optional and may be unset until gated weights are used.
     needs: verify
     if: vars.LIVE_GATE_REQUIRED == 'true'
     permissions:
@@ -386,7 +387,9 @@ jobs:
       from_release: true
       ref: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
     secrets:
-      # Only the token the gate uses; never `secrets: inherit` here (#291).
+      # At most the token the gate uses; never `secrets: inherit` here (#291).
+      # Passing an unset secret forwards an empty value, which the gate
+      # treats as no token (public weights) today.
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
   github-release:
