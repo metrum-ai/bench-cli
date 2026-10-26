@@ -2987,11 +2987,7 @@ fn sse_trace_under_new_dir_is_per_run_not_shared() {
             ))
             .output()
             .expect("run new-dir with trace");
-        assert!(
-            out.status.success(),
-            "{}",
-            combined_output(&out)
-        );
+        assert!(out.status.success(), "{}", combined_output(&out));
     }
     let entries: Vec<_> = std::fs::read_dir(&runs_dir).unwrap().collect();
     let trace_files: Vec<_> = entries
