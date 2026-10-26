@@ -430,7 +430,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
-    let args = Args::parse();
     let mut args = Args::parse();
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
