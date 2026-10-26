@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+- Standalone `--version-only` no longer fails with required-argument errors on
+  the llm, vlm and imagegen binaries: it prints the version and exits 0
+  without traffic, matching asr, strategic and prompts. Every distributed
+  binary's `--version` and `--version-only` behavior is now pinned by tests
+  (#307).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
