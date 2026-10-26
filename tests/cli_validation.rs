@@ -1017,3 +1017,158 @@ fn burst_error_handling_counts_failures_and_still_drains() {
     assert_eq!(summary["attempted"], 8);
     assert!(summary["errors"].as_u64().unwrap() >= 4);
 }
+
+// #309 review: uncapped-burst fd guard and cap-source stamping.
+
+#[test]
+fn burst_uncapped_stamps_cap_source_and_population_cap() {
+    let mock = common::spawn_mock(&["--latency-ms", "50"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(burst_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--arrival", "burst"],
+        ))
+        .output()
+        .expect("run uncapped burst");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        summary["config"]["effective_max_concurrency_source"],
+        "uncapped-burst"
+    );
+    assert_eq!(
+        summary["config"]["effective_max_concurrency"].as_u64(),
+        Some(8),
+        "uncapped burst caps at the population"
+    );
+}
+
+#[test]
+fn burst_with_explicit_cap_stamps_the_cap() {
+    let mock = common::spawn_mock(&["--latency-ms", "50"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(burst_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--arrival", "burst", "--max-concurrency", "3"],
+        ))
+        .output()
+        .expect("run capped burst");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        summary["config"]["effective_max_concurrency_source"],
+        "max-concurrency"
+    );
+    assert_eq!(
+        summary["config"]["effective_max_concurrency"].as_u64(),
+        Some(3)
+    );
+}
+
+#[test]
+fn uncapped_burst_over_fd_budget_exits_2_before_traffic() {
+    // A population beyond the fd budget must be refused with the
+    // configuration error code, before any traffic (#309 review).
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let budget = metrum_ai_bench::runner::fd_soft_limit().saturating_sub(128) + 1;
+    let mut args = burst_args(&url, data_log.to_str().unwrap(), &["--arrival", "burst"]);
+    if let Some(pos) = args.iter().position(|a| a == "8") {
+        args[pos] = budget.to_string();
+    }
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run oversize burst");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "oversize uncapped burst exits 2"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--max-concurrency"),
+        "message names the fix:\n{text}"
+    );
+    assert!(!data_log.exists(), "no traffic before refusal");
+}
+
+#[test]
+fn non_burst_stamp_is_unchanged() {
+    // #309 review: pin the existing effective_max_concurrency stamp for
+    // non-burst runs — only burst runs may change it.
+    let mock = common::spawn_mock(&["--latency-ms", "20"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    // Closed loop, --concurrency 2, no --max-concurrency.
+    let mut closed_args = burst_args(&url, data_log.to_str().unwrap(), &[]);
+    // Replace the baked-in counts (avoid duplicate flags: clap rejects them).
+    for (flag, value) in [("--num-requests", "4"), ("--concurrency", "2")] {
+        let pos = closed_args.iter().position(|a| a == flag).unwrap();
+        closed_args[pos + 1] = value.to_string();
+    }
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&closed_args)
+        .output()
+        .expect("run closed loop");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        summary["config"]["effective_max_concurrency"].as_u64(),
+        Some(2),
+        "closed-loop stamps the --concurrency value"
+    );
+    assert_eq!(
+        summary["config"]["effective_max_concurrency_source"],
+        "concurrency"
+    );
+
+    // Open-loop poisson with an explicit cap stamps the cap.
+    let data_log2 = dir.path().join("out2.jsonl");
+    let mut open_args = burst_args(
+        &url,
+        data_log2.to_str().unwrap(),
+        &[
+            "--request-rate",
+            "1000",
+            "--arrival",
+            "poisson",
+            "--max-concurrency",
+            "4",
+        ],
+    );
+    for (flag, value) in [("--num-requests", "6"), ("--concurrency", "2")] {
+        let pos = open_args.iter().position(|a| a == flag).unwrap();
+        open_args[pos + 1] = value.to_string();
+    }
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&open_args)
+        .output()
+        .expect("run open loop");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&data_log2).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        summary["config"]["effective_max_concurrency"].as_u64(),
+        Some(4),
+        "open-loop stamps the --max-concurrency value"
+    );
+    assert_eq!(
+        summary["config"]["effective_max_concurrency_source"],
+        "max-concurrency"
+    );
+}

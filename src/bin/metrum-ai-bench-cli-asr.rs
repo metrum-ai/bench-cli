@@ -302,6 +302,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-asr", args.common.quiet);
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+    let arrival_kind = args.common.arrival_kind();
+    if let Err(e) = args.common.validate_arrival() {
+        eprintln!("Error: {e}");
+        std::process::exit(2);
+    }
+    // Uncapped bursts hold one socket per outstanding request (#309
+    // review): refuse past the client fd budget before any traffic.
+    if matches!(
+        args.common.arrival_kind(),
+        metrum_ai_bench::load::ArrivalKind::Burst
+    ) && args.common.max_concurrency.is_none()
+    {
+        if let Err(msg) = metrum_ai_bench::runner::uncapped_burst_fd_guard(u64::from(
+            args.num_requests.unwrap_or(0),
+        )) {
+            eprintln!("Error: {msg}");
+            std::process::exit(2);
+        }
+    }
+
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     // Required: scenario, num_requests, input, model
@@ -482,9 +502,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     } else {
         None
     };
-
-    let arrival_kind = args.common.arrival_kind();
-    args.common.validate_arrival()?;
 
     // Burst (#309): the whole population is issued at once unless
     // --max-concurrency is set (the explicit transport limit).
@@ -964,6 +981,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         common: metrum_ai_bench::args_common::EffectiveCommonArgs::from(&args.common)
             .with_scenario(args.scenario.clone()),
         effective_max_concurrency: concurrency_cap,
+        effective_max_concurrency_source: Some(
+            metrum_ai_bench::runner::effective_max_concurrency_source(
+                arrival_kind,
+                args.common.max_concurrency.is_some(),
+            )
+            .to_string(),
+        ),
         effective_system_prompt: None,
         body_template,
         unique_prompt_nonce_template: None,

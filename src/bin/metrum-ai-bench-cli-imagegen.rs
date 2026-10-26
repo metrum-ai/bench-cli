@@ -407,6 +407,33 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.redact_hostname,
     )?;
     let telemetry_cfg = args.telemetry.resolve_config()?;
+    let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
+        (None, "burst") => metrum_ai_bench::load::ArrivalKind::Burst,
+        (Some(_), "burst") => {
+            // Configuration error: exit 2 (the code clap uses), as the
+            // other binaries do via validate_arrival (#309 review).
+            log::error!(
+                "--arrival burst issues the whole population immediately; remove --request-rate (or use constant|poisson for paced runs)"
+            );
+            std::process::exit(2);
+        }
+        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
+        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
+        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
+    };
+    // Uncapped bursts hold one socket per outstanding request (#309
+    // review): refuse past the client fd budget before any traffic.
+    if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst)
+        && args.max_concurrency.is_none()
+    {
+        if let Err(msg) =
+            metrum_ai_bench::runner::uncapped_burst_fd_guard(u64::from(args.num_requests))
+        {
+            log::error!("{msg}");
+            std::process::exit(2);
+        }
+    }
+
     prepare_artifacts(&args)?;
 
     let endpoints = resolve_endpoints(&args)?;
@@ -445,18 +472,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let metrics = Arc::new(Mutex::new(Metrics::default()));
     let rr = Arc::new(AtomicUsize::new(0));
-    let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
-        (None, "burst") => metrum_ai_bench::load::ArrivalKind::Burst,
-        (Some(_), "burst") => {
-            return Err(anyhow::anyhow!(
-                "--arrival burst issues the whole population immediately; remove --request-rate (or use constant|poisson for paced runs)"
-            )
-            .into());
-        }
-        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
-        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
-        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
-    };
 
     // Burst (#309): the whole population is issued at once unless
     // --max-concurrency is set (the explicit transport limit).
@@ -714,6 +729,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         effective_max_concurrency: concurrency_cap,
+        effective_max_concurrency_source: Some(
+            metrum_ai_bench::runner::effective_max_concurrency_source(
+                arrival_kind,
+                args.max_concurrency.is_some(),
+            )
+            .to_string(),
+        ),
         common: metrum_ai_bench::args_common::EffectiveCommonArgs {
             scenario: Some(args.scenario.clone()),
             seed: args.seed.unwrap_or(0) as u64,

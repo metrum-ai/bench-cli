@@ -484,6 +484,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+    let arrival_kind = args.common.arrival_kind();
+    if let Err(e) = args.common.validate_arrival() {
+        eprintln!("Error: {e}");
+        std::process::exit(2);
+    }
+    // Uncapped bursts hold one socket per outstanding request (#309
+    // review): refuse past the client fd budget before any traffic.
+    if matches!(
+        args.common.arrival_kind(),
+        metrum_ai_bench::load::ArrivalKind::Burst
+    ) && args.common.max_concurrency.is_none()
+    {
+        if let Err(msg) =
+            metrum_ai_bench::runner::uncapped_burst_fd_guard(u64::from(args.num_requests))
+        {
+            eprintln!("Error: {msg}");
+            std::process::exit(2);
+        }
+    }
+
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);
@@ -600,8 +620,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
-    let arrival_kind = args.common.arrival_kind();
-    args.common.validate_arrival()?;
 
     // Initialise semaphore with 1 permit if ramp-up is requested, otherwise with full capacity.
     // Burst (#309): the whole population is issued at once unless
@@ -1027,6 +1045,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         run_id: run_id.clone(),
         common: EffectiveCommonArgs::from(&args.common).with_scenario(Some(args.scenario.clone())),
         effective_max_concurrency: concurrency_limit as u32,
+        effective_max_concurrency_source: Some(
+            metrum_ai_bench::runner::effective_max_concurrency_source(
+                arrival_kind,
+                args.common.max_concurrency.is_some(),
+            )
+            .to_string(),
+        ),
         effective_system_prompt,
         body_template,
         unique_prompt_nonce_template:
