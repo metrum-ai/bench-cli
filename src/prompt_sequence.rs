@@ -40,6 +40,23 @@ pub fn prompt_fingerprint(prompt: &str) -> String {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Canonical pool index for a prompt: its rank when the pool is sorted by
+/// content fingerprint (#313). Stable across shuffles, seeds and clients,
+/// so two runs with the same content produce byte-identical sequence logs.
+fn canonical_index(prompts: &[String], prompt: &str) -> u64 {
+    let fp = prompt_fingerprint(prompt);
+    let mut order: Vec<(String, u64)> = prompts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (prompt_fingerprint(p), i as u64))
+        .collect();
+    order.sort();
+    order
+        .iter()
+        .position(|(f, _)| f == &fp)
+        .expect("prompt is from the same pool") as u64
+}
+
 /// The effective assignment for slot `seq`: pool index used by the run.
 fn slot_index(seq: u64, pool_len: usize, prescribed: Option<&[u64]>) -> u64 {
     match prescribed {
@@ -61,11 +78,15 @@ pub fn write_sequence_log(
     let cohort_width = effective_concurrency.max(1);
     for seq in 0..num_requests {
         let index = slot_index(seq, prompts.len(), prescribed);
+        let prompt = &prompts[index as usize];
         let entry = PromptSlotEntry {
             seq,
-            prompt_index: index,
-            prompt_sha256_16: prompt_fingerprint(&prompts[index as usize]),
-            prompt_bytes: prompts[index as usize].len() as u64,
+            // prompt_index is the CANONICAL rank (fingerprint-sorted), not
+            // the shuffled/replayed pool position — identical across
+            // clients and seeds for identical content (#313).
+            prompt_index: canonical_index(prompts, prompt),
+            prompt_sha256_16: prompt_fingerprint(prompt),
+            prompt_bytes: prompt.len() as u64,
             cohort: seq / cohort_width,
         };
         serde_json::to_writer(&mut out, &entry).map_err(std::io::Error::other)?;
