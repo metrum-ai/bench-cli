@@ -28,6 +28,15 @@ pub enum DataLogMode {
     NewDir,
 }
 
+/// Sibling SSE-trace path for an effective data-log path (#331×#321
+/// follow-up): same directory, same stem, `.sse-trace.jsonl` suffix — so a
+/// `new-dir` run traces to `<dir>/<run_id>.sse-trace.jsonl`, never one
+/// shared file for the whole directory.
+pub fn sibling_trace_path(effective_data_log: &str) -> String {
+    let stem = effective_data_log.trim_end_matches(".jsonl");
+    format!("{stem}.sse-trace.jsonl")
+}
+
 /// Resolve the effective data-log path for a run (#305).
 ///
 /// Returns the path `JsonlSink::create` should open. `RefuseExisting` and a

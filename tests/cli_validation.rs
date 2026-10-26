@@ -2961,3 +2961,103 @@ fn endpoints_export_offline_on_burst_says_native_burst() {
         "the closed-loop proxy disclosure must not fire for burst runs:\n{point}"
     );
 }
+
+// Integration follow-up (d) (#331×#321): the SSE trace path derives from the
+// effective data log (new-dir → <run_id>.sse-trace.jsonl) and follows the
+// collision policy.
+
+#[test]
+fn sse_trace_under_new_dir_is_per_run_not_shared() {
+    let mock = common::spawn_mock(&["--latency-ms", "30"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runs_dir = dir.path().join("runs");
+    for _ in 0..2 {
+        let out = Command::new(metrum_ai_bench_llm_bin())
+            .args(seq_run_args(
+                &url,
+                runs_dir.to_str().unwrap(),
+                &[
+                    "--data-log-mode",
+                    "new-dir",
+                    "--streaming",
+                    "--sse-trace-first-n",
+                    "1",
+                ],
+            ))
+            .output()
+            .expect("run new-dir with trace");
+        assert!(
+            out.status.success(),
+            "{}",
+            combined_output(&out)
+        );
+    }
+    let entries: Vec<_> = std::fs::read_dir(&runs_dir).unwrap().collect();
+    let trace_files: Vec<_> = entries
+        .iter()
+        .map(|e| e.as_ref().unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".sse-trace.jsonl"))
+        })
+        .collect();
+    assert_eq!(
+        trace_files.len(),
+        2,
+        "one per-run trace file per run: {trace_files:?}"
+    );
+    // Each is named <run_id>.sse-trace.jsonl, not a shared sibling.
+    for p in &trace_files {
+        let name = p.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            name.split('.').next().unwrap().len(),
+            36,
+            "per-run uuid stem (36-char run id): {name}"
+        );
+    }
+}
+
+#[test]
+fn sse_trace_refuses_when_trace_file_exists() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let trace = format!("{}.sse-trace.jsonl", data_log.to_str().unwrap());
+    std::fs::write(&trace, "prior trace\n").unwrap();
+    // Seed the data log too so the data-log refusal would also fire — use a
+    // fresh data log to isolate the trace refusal.
+    let fresh = dir.path().join("fresh.jsonl");
+    // sibling_trace_path strips .jsonl then appends .sse-trace.jsonl.
+    let fresh_trace = format!(
+        "{}.sse-trace.jsonl",
+        fresh.to_str().unwrap().trim_end_matches(".jsonl")
+    );
+    std::fs::write(&fresh_trace, "prior trace\n").unwrap();
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            fresh.to_str().unwrap(),
+            &[
+                "--data-log-mode",
+                "refuse-existing",
+                "--streaming",
+                "--sse-trace-first-n",
+                "1",
+            ],
+        ))
+        .output()
+        .expect("run refuse-existing with existing trace");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "the trace file follows the collision policy"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("SSE trace file collision"),
+        "the refusal names the trace file:\n{text}"
+    );
+}

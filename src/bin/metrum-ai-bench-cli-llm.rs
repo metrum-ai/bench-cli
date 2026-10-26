@@ -803,15 +803,39 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         })?,
     );
     // #313: SSE trace sink (bounded, redacted); only when tracing is on.
+    // #331×#321 follow-up: the trace path derives from the EFFECTIVE data
+    // log path (new-dir traces are <dir>/<run_id>.sse-trace.jsonl, not one
+    // shared sibling of the directory) and follows the same collision
+    // policy as the data log.
     let sse_trace_sink: Option<Arc<metrum_ai_bench::jsonl::JsonlSink>> = args
         .sse_trace_first_n
         .map(|_| {
-            let path = format!("{}.sse-trace.jsonl", args.data_log);
-            metrum_ai_bench::jsonl::JsonlSink::create(&path)
-                .map(Arc::new)
-                .map_err(|e| format!("Failed to open SSE trace file '{path}': {e}"))
+            let trace_path = metrum_ai_bench::jsonl::sibling_trace_path(&effective_data_log);
+            // The trace path is already per-run unique under new-dir
+            // (<run_id>.sse-trace.jsonl), so new-dir maps to append for it;
+            // refuse-existing and overwrite follow the data-log policy.
+            let trace_mode = match data_log_mode {
+                metrum_ai_bench::jsonl::DataLogMode::NewDir => {
+                    metrum_ai_bench::jsonl::DataLogMode::Append
+                }
+                mode => mode,
+            };
+            metrum_ai_bench::jsonl::prepare_data_log(trace_mode, &trace_path, &run_id)
+                .map_err(|e| format!("SSE trace file collision: {e}"))
+                .and_then(|effective_trace_path| {
+                    metrum_ai_bench::jsonl::JsonlSink::create(&effective_trace_path)
+                        .map(Arc::new)
+                        .map_err(|e| {
+                            format!("Failed to open SSE trace file '{effective_trace_path}': {e}")
+                        })
+                })
         })
-        .transpose()?;
+        .transpose()
+        .unwrap_or_else(|e| {
+            // Configuration error: exit 2, the code clap uses (#331×#321).
+            eprintln!("Error: {e}");
+            std::process::exit(2);
+        });
 
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
