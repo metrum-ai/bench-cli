@@ -235,7 +235,7 @@ struct Args {
         long,
         value_enum,
         default_value = "append",
-        help = "Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)"
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
     )]
     data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
 
@@ -444,6 +444,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let prompts = Arc::new(load_prompts(&args)?);
     // Explicit output collision policy (#305), resolved before any traffic.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately; any
+    // pre-traffic validation must run BEFORE this call.
     // run_id is generated first so new-dir can name the per-run file.
     let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let effective_data_log =

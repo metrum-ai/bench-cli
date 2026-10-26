@@ -1001,3 +1001,66 @@ fn data_log_mode_rejects_unknown_value() {
         "parse error must name the flag:\n{text}"
     );
 }
+
+#[test]
+fn vlm_refuse_existing_second_run_exits_2() {
+    // The shared atomic refusal path, exercised through a second binary
+    // (#305 review): the first run claims the path, the second is refused
+    // before traffic.
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("vlm-out.jsonl");
+    let base = [
+        "--url",
+        &url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "collision-vlm",
+        "--num-requests",
+        "1",
+        "--concurrency",
+        "1",
+        "--prompts",
+        "test-data/vlm/prompts.jsonl",
+        "--model",
+        "m",
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+    ];
+    let mut first: Vec<String> = base.iter().map(|s| s.to_string()).collect();
+    first.push("--data-log".into());
+    first.push(data_log.to_str().unwrap().to_string());
+    let status = Command::new(metrum_ai_bench_vlm_bin())
+        .args(&first)
+        .status()
+        .expect("run metrum-ai-bench-cli-vlm");
+    assert!(status.success());
+    let before = std::fs::read_to_string(&data_log).unwrap();
+
+    let mut second = first.clone();
+    second.push("--data-log-mode".into());
+    second.push("refuse-existing".into());
+    let out = Command::new(metrum_ai_bench_vlm_bin())
+        .args(&second)
+        .output()
+        .expect("run metrum-ai-bench-cli-vlm with refuse-existing");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "second vlm run must be refused with the configuration code"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("already exists"),
+        "refusal must name the collision:\n{text}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&data_log).unwrap(),
+        before,
+        "refusal must not touch the existing log"
+    );
+}

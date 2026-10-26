@@ -411,9 +411,13 @@ vlm, asr and imagegen binaries:
 | Mode | Behavior when the data log already exists |
 |------|-------------------------------------------|
 | `append` (default) | New run's rows are appended; unique run IDs keep everything attributable. |
-| `refuse-existing` | Exit 2 before any traffic. The safe CI/agent default. |
-| `overwrite` | Truncate first, so runs never mix. |
+| `refuse-existing` | Atomically claims the path (two concurrent runs cannot both win); exit 2 before any traffic if it exists. The safe CI/agent default. |
+| `overwrite` | **Truncates the previous log at run start — it is gone even if the new run is interrupted or all-errors.** Runs never mix. |
 | `new-dir` | `--data-log` names a directory (created if missing); each run writes `<run_id>.jsonl` inside it. |
+
+The policy is applied as the **last configuration step before traffic**
+(when a validation such as `--validate-model` fails first, an existing log
+is never touched).
 
 ## Metrics (summary)
 

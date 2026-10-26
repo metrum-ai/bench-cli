@@ -108,7 +108,7 @@ Options:
           Path to the data log file
 
       --data-log-mode <DATA_LOG_MODE>
-          Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
 
           Possible values:
           - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
@@ -329,7 +329,7 @@ Options:
           Path to the data log file
 
       --data-log-mode <DATA_LOG_MODE>
-          Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
 
           Possible values:
           - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
@@ -582,7 +582,7 @@ Options:
           [default: results.jsonl]
 
       --data-log-mode <DATA_LOG_MODE>
-          Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
 
           Possible values:
           - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
@@ -927,7 +927,7 @@ Options:
 
 
       --data-log-mode <DATA_LOG_MODE>
-          Collision policy for --data-log (#305): append (default), refuse-existing (exit 2 before traffic), overwrite (truncate), new-dir (per-run files named by run_id)
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
 
           Possible values:
           - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable

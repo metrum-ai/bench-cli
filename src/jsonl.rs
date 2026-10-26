@@ -33,6 +33,12 @@ pub enum DataLogMode {
 /// Returns the path `JsonlSink::create` should open. `RefuseExisting` and a
 /// non-directory `NewDir` target fail before any traffic; `Overwrite`
 /// truncates eagerly so a failed run cannot leave stale rows behind.
+///
+/// Ordering contract (#305 review): this must be the LAST configuration
+/// step before traffic, because `Overwrite` truncates the previous log
+/// immediately. Any pre-traffic validation (e.g. #304 `--validate-model`)
+/// must run BEFORE this call so a failed validation never destroys an
+/// existing log.
 pub fn prepare_data_log(
     mode: DataLogMode,
     requested: &str,
@@ -41,12 +47,22 @@ pub fn prepare_data_log(
     match mode {
         DataLogMode::Append => Ok(requested.to_string()),
         DataLogMode::RefuseExisting => {
-            if Path::new(requested).exists() {
-                Err(format!(
-                    "data log '{requested}' already exists; use --data-log-mode overwrite to replace it, append to add this run to it, or new-dir for per-run files"
-                ))
-            } else {
-                Ok(requested.to_string())
+            // Atomic create (O_EXCL), not check-then-open (#305 review):
+            // two concurrent runs pointed at the same fresh path cannot
+            // both pass a `Path::exists` check and then interleave rows.
+            // The sink appends to the file created here.
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(requested)
+            {
+                Ok(_) => Ok(requested.to_string()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    Err(format!(
+                        "data log '{requested}' already exists; use --data-log-mode overwrite to replace it, append to add this run to it, or new-dir for per-run files"
+                    ))
+                }
+                Err(e) => Err(format!("failed to create data log '{requested}': {e}")),
             }
         }
         DataLogMode::Overwrite => {
@@ -130,6 +146,25 @@ mod tests {
             "out.jsonl"
         );
         // Appending never touches the filesystem here; existing rows stay.
+    }
+
+    #[test]
+    fn prepare_data_log_refuse_existing_is_atomic_two_preparers_one_path() {
+        // O_EXCL semantics (#305 review): with a fresh path, the first
+        // prepare creates the log atomically and the second must be refused
+        // — check-then-open would let both through and interleave rows.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("fresh.jsonl");
+        assert!(
+            prepare_data_log(DataLogMode::RefuseExisting, log.to_str().unwrap(), "run-1").is_ok(),
+            "first preparer wins the fresh path"
+        );
+        let err = prepare_data_log(DataLogMode::RefuseExisting, log.to_str().unwrap(), "run-2")
+            .expect_err("second preparer must be refused");
+        assert!(
+            err.contains("already exists"),
+            "refusal must name the collision: {err}"
+        );
     }
 
     #[test]
