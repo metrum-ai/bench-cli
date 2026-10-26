@@ -483,12 +483,35 @@ fn valid_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Configuration error from the strict SUT profile (#308). Distinct type so
+/// binaries exit 2 (the configuration/usage code, matching #304's URL
+/// validation and #305's collision refusal) instead of the generic 1.
+#[derive(Debug)]
+pub struct StrictSutError(pub String);
+
+impl std::fmt::Display for StrictSutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for StrictSutError {}
+
+/// Exit with the configuration/usage code (2) when `err` is a strict-SUT
+/// refusal; returns otherwise so the caller can propagate it.
+pub fn exit_2_if_strict_sut_error(err: &(dyn std::error::Error + 'static)) {
+    if err.downcast_ref::<StrictSutError>().is_some() {
+        eprintln!("Error: {err}");
+        std::process::exit(2);
+    }
+}
+
 /// Validate the strict publication profile (#308). Caller first applies the
 /// publishable baseline; strict adds the exact model revision, the
 /// weight/activation quantization string, the KV dtype, the declared
 /// kernel/graph evidence, and the linked quality-evidence artifact. Model
 /// names never imply a native kernel choice: strict refuses to run without
-/// operator-declared evidence.
+/// operator-declared evidence. Refusals carry [`StrictSutError`].
 pub fn validate_strict_sut(sut: &Sut) -> anyhow::Result<()> {
     let mut missing: Vec<&str> = Vec::new();
     match sut.model.as_ref() {
@@ -558,10 +581,11 @@ pub fn validate_strict_sut(sut: &Sut) -> anyhow::Result<()> {
     if missing.is_empty() {
         return Ok(());
     }
-    anyhow::bail!(
+    Err(StrictSutError(format!(
         "--sut-profile strict: incomplete strict SUT declaration: missing {} — strict never infers kernel/graph choices from the model name; declare observed serving evidence instead",
         missing.join(", ")
-    )
+    ))
+    .into())
 }
 
 /// Resolve SUT flags before any request is sent.

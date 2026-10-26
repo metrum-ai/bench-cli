@@ -1565,12 +1565,18 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("--model is required"))?;
     metrum_ai_bench::sut::warn_remote_benchmark_url(&url);
     metrum_ai_bench::measurement::ensure_requests_per_stage(args.requests_per_stage)?;
-    let (sut_block, _redact_hostname) = metrum_ai_bench::sut::resolve_sut_profile_flags(
+    let (sut_block, _redact_hostname) = match metrum_ai_bench::sut::resolve_sut_profile_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
         args.sut_profile,
-    )?;
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            metrum_ai_bench::sut::exit_2_if_strict_sut_error(err.as_ref());
+            return Err(err);
+        }
+    };
     let sut_json = sut_block
         .as_ref()
         .map(serde_json::to_value)

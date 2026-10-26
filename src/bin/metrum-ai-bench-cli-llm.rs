@@ -554,7 +554,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         u64::from(args.num_requests),
     )?;
 
-    let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+    // #308: a strict-profile refusal exits 2 (the configuration code).
+    let (sut_block, redact_hostname) = match args.common.resolve_sut() {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            metrum_ai_bench::sut::exit_2_if_strict_sut_error(err.as_ref());
+            return Err(err.into());
+        }
+    };
     let arrival_kind = args.common.arrival_kind();
     if let Err(e) = args.common.validate_arrival() {
         eprintln!("Error: {e}");
@@ -574,7 +581,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             std::process::exit(2);
         }
     }
-
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);

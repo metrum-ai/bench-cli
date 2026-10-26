@@ -1928,9 +1928,10 @@ fn llm_strict_sut_profile_rejects_missing_kernel_evidence_before_traffic() {
         ])
         .output()
         .expect("run llm with strict profile and incomplete evidence");
-    assert!(
-        !out.status.success(),
-        "strict profile must refuse before traffic"
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "strict-profile refusal exits 2 (the configuration code, like URL/collision refusals)"
     );
     let text = combined_output(&out);
     assert!(
