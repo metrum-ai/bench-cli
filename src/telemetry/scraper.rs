@@ -181,6 +181,70 @@ pub async fn probe_sources(
     Ok(out)
 }
 
+/// Synchronously scrape one source once for the pre-measured boundary
+/// (#312). Boundary rows are priority-sent (never dropped) and tagged
+/// `boundary`, so the baseline is always visible in the stream. Returns the
+/// number of matched series on success.
+pub async fn boundary_scrape_once(
+    client: &reqwest::Client,
+    cfg: &TelemetryConfig,
+    src: &CompiledSource,
+    epoch: &RunEpoch,
+    run_id: &str,
+    writer: &NdjsonWriter,
+    boundary: &str,
+) -> Result<u64> {
+    let timeout = Duration::from_millis(cfg.timeout_ms.min(src.interval_ms).max(1));
+    let started = Instant::now();
+    let t_ns = epoch.elapsed_ns();
+    let (text, _offset, _status) = fetch_body(client, src, timeout, cfg.max_body_bytes).await?;
+    let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let parsed = parse_exposition(&text, &src.include);
+    let matched = parsed.samples.len() as u64;
+    for sample in parsed.samples {
+        let (value, unit, raw) = apply_units(src, &sample.metric, sample.value);
+        writer
+            .send_priority(Row::Telemetry(TelemetryRow {
+                run_id: run_id.to_string(),
+                t_ns,
+                src: src.name.clone(),
+                metric: sample.metric,
+                labels: sample.labels,
+                value,
+                unit,
+                mtype: sample.mtype,
+                scrape_ms,
+                raw,
+                boundary: Some(boundary.to_string()),
+            }))
+            .await
+            .map_err(|err| anyhow::anyhow!("boundary scrape write failed: {err:#}"))?;
+    }
+    Ok(matched)
+}
+
+/// Emit the boundary-tagged scrape_error row for a failed boundary scrape
+/// (#312): the missing baseline is explicit coverage, not an invented value.
+pub async fn boundary_scrape_error(
+    src: &CompiledSource,
+    epoch: &RunEpoch,
+    run_id: &str,
+    writer: &NdjsonWriter,
+    boundary: &str,
+    err: &anyhow::Error,
+) {
+    let _ = writer
+        .send_priority(Row::ScrapeError(ScrapeErrorRow {
+            run_id: run_id.to_string(),
+            t_ns: epoch.elapsed_ns(),
+            src: src.name.clone(),
+            http_status: extract_http_status(err),
+            error: err.to_string(),
+            boundary: Some(boundary.to_string()),
+        }))
+        .await;
+}
+
 struct SourceRuntime {
     consecutive_failures: AtomicU32,
 }
@@ -272,6 +336,7 @@ async fn scrape_loop(
                                 mtype: sample.mtype,
                                 scrape_ms,
                                 raw,
+                                boundary: None,
                             }));
                         }
                     }
@@ -285,6 +350,7 @@ async fn scrape_loop(
                                 src: src.name.clone(),
                                 http_status,
                                 error: err.to_string(),
+                                boundary: None,
                             }))
                             .await;
                         if require_telemetry && failures >= require_failures {

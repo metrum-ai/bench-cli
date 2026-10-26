@@ -27,8 +27,8 @@ pub use scraper::{
     LastSeenMap, ProbeResult,
 };
 pub use session::{
-    close_session, request_row, RunStamp, SessionOptions, TelemetryArgs, TelemetryRunInfo,
-    TelemetrySession,
+    close_session, request_row, BoundaryOutcome, BoundaryRequest, RunStamp, SessionOptions,
+    TelemetryArgs, TelemetryRunInfo, TelemetrySession, BOUNDARY_PRE_MEASURED,
 };
 pub use writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats, TELEMETRY_CHANNEL_CAPACITY};
 
@@ -145,6 +145,7 @@ mod tests {
                 mtype: MetricType::Gauge,
                 scrape_ms: 1.0,
                 raw: None,
+                boundary: None,
             }));
             if dropped {
                 drops += 1;

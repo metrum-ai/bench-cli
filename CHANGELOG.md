@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- Synchronous telemetry boundary baseline (#312): with `--ndjson` +
+  `--telemetry`, every configured source is scraped once immediately before
+  the first measured request (after the warmup barrier) on the llm, vlm, asr
+  and imagegen binaries, emitting rows tagged `boundary: "pre-measured"` on
+  the shared run epoch. A failed source is marked by a boundary-tagged
+  `scrape_error` row instead of an invented sample; under
+  `--require-telemetry` it also gates measured issuance and fails the run
+  verdict. `boundary` is an additive optional field on `telemetry` and
+  `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
+
 ### Fixed
 - Tagged NDJSON request rows now stream as requests complete on the llm, vlm,
   asr and imagegen binaries: the completed-record channel is consumed
