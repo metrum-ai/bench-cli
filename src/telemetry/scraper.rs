@@ -191,6 +191,7 @@ pub async fn probe_sources(
 /// (#312). Boundary rows are priority-sent (never dropped) and tagged
 /// `boundary`, so the baseline is always visible in the stream. Returns the
 /// number of matched series on success.
+#[allow(clippy::too_many_arguments)]
 pub async fn boundary_scrape_once(
     client: &reqwest::Client,
     cfg: &TelemetryConfig,
@@ -199,6 +200,7 @@ pub async fn boundary_scrape_once(
     run_id: &str,
     writer: &NdjsonWriter,
     boundary: &str,
+    sample_history: &SampleHistory,
 ) -> Result<u64> {
     let timeout = Duration::from_millis(cfg.timeout_ms.min(src.interval_ms).max(1));
     let started = Instant::now();
@@ -210,6 +212,11 @@ pub async fn boundary_scrape_once(
     let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
     let parsed = parse_exposition(&text, &src.include);
     let matched = parsed.samples.len() as u64;
+    if matched > 0 {
+        // The boundary baseline is a real at-or-before-send sample for the
+        // requests issued right after it (#312 review: freshness history).
+        note_sample(sample_history, &src.name, t_ns);
+    }
     for sample in parsed.samples {
         let (value, unit, raw) = apply_units(src, &sample.metric, sample.value);
         writer
@@ -254,10 +261,44 @@ pub async fn boundary_scrape_error(
         .await;
 }
 
-/// Shared map: source name → epoch ns of the latest successfully-written
-/// telemetry row (#312 review). The record consumer reads it to compute
-/// per-request queue-sample freshness.
-pub type LatestSamples = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, u64>>>;
+/// Shared per-source ring buffer of epoch ns timestamps of successfully
+/// written telemetry rows (#312 review). Bounded to the newest
+/// [`SAMPLE_HISTORY_CAP`] per source; the epoch clock is monotonic, so the
+/// buffer stays sorted and a reverse scan finds the newest sample
+/// at-or-before a given time. The record consumer uses it to compute
+/// per-request queue-sample freshness measured at SEND time — the latest
+/// sample alone is wrong, because a request that completes after a newer
+/// scrape would read as missing (found on the 2026-10-26 Blackwell run:
+/// 100% false missing on a 500 ms-interval source).
+pub type SampleHistory = std::sync::Arc<
+    std::sync::Mutex<std::collections::BTreeMap<String, std::collections::VecDeque<u64>>>,
+>;
+
+/// Samples kept per source for freshness coverage (#312 review). At the
+/// smallest realistic interval (500 ms) this covers ~128 s of history — far
+/// beyond any supported request latency. The buffer MUST stay bounded.
+pub const SAMPLE_HISTORY_CAP: usize = 256;
+
+/// Record one successful sample time for a source, dropping the oldest
+/// beyond [`SAMPLE_HISTORY_CAP`] (#312 review).
+pub fn note_sample(history: &SampleHistory, source: &str, t_ns: u64) {
+    if let Ok(mut map) = history.lock() {
+        let deque = map.entry(source.to_string()).or_default();
+        deque.push_back(t_ns);
+        while deque.len() > SAMPLE_HISTORY_CAP {
+            deque.pop_front();
+        }
+    }
+}
+
+/// Newest recorded sample at-or-before `t_ns` for a source, if any (#312
+/// review: freshness is measured against the request's SEND time).
+pub fn sample_at_or_before(history: &SampleHistory, source: &str, t_ns: u64) -> Option<u64> {
+    history.lock().ok().and_then(|map| {
+        map.get(source)
+            .and_then(|dq| dq.iter().rev().copied().find(|t| *t <= t_ns))
+    })
+}
 
 struct SourceRuntime {
     consecutive_failures: AtomicU32,
@@ -275,7 +316,7 @@ pub fn spawn_scrapers(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
-    latest_samples: LatestSamples,
+    sample_history: SampleHistory,
 ) -> Vec<tokio::task::JoinHandle<Result<()>>> {
     let require_failures = require_failures.max(1);
     sources
@@ -287,7 +328,7 @@ pub fn spawn_scrapers(
             let run_id = Arc::clone(&run_id);
             let writer = writer.clone();
             let stop = Arc::clone(&stop);
-            let latest_samples = Arc::clone(&latest_samples);
+            let sample_history = Arc::clone(&sample_history);
             tokio::spawn(async move {
                 scrape_loop(
                     client,
@@ -299,7 +340,7 @@ pub fn spawn_scrapers(
                     stop,
                     require_telemetry,
                     require_failures,
-                    latest_samples,
+                    sample_history,
                 )
                 .await
             })
@@ -318,7 +359,7 @@ async fn scrape_loop(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
-    latest_samples: LatestSamples,
+    sample_history: SampleHistory,
 ) -> Result<()> {
     let runtime = SourceRuntime {
         consecutive_failures: AtomicU32::new(0),
@@ -341,6 +382,15 @@ async fn scrape_loop(
                         let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
                         let parsed = parse_exposition(&text, &src.include);
                         runtime.consecutive_failures.store(0, Ordering::Relaxed);
+                        if !parsed.samples.is_empty() {
+                            // #312 review: record the sample time ONCE per
+                            // scrape in the bounded per-source history for
+                            // freshness coverage (age is measured at
+                            // request SEND, not completion). Once per
+                            // scrape: per-series inserts would fill the
+                            // ring buffer with duplicate timestamps.
+                            note_sample(&sample_history, &src.name, t_ns);
+                        }
                         for sample in parsed.samples {
                             let (value, unit, raw) = apply_units(&src, &sample.metric, sample.value);
                             let _ = writer.try_send_telemetry(Row::Telemetry(TelemetryRow {
@@ -356,11 +406,6 @@ async fn scrape_loop(
                                 raw,
                                 boundary: None,
                             }));
-                            // #312 review: record the latest successful
-                            // sample time for freshness coverage.
-                            if let Ok(mut map) = latest_samples.lock() {
-                                map.insert(src.name.clone(), t_ns);
-                            }
                         }
                     }
                     Err(err) => {
@@ -564,7 +609,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
-        let latest_samples = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+        let sample_history = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         let epoch = Arc::new(RunEpoch::new());
         let run_id = Arc::new("run-probe".to_string());
         let handles = spawn_scrapers(
@@ -577,7 +622,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             false,
             3,
-            latest_samples.clone(),
+            sample_history.clone(),
         );
         tokio::time::sleep(Duration::from_millis(350)).await;
         stop.store(true, Ordering::Relaxed);
@@ -590,6 +635,19 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let text = std::fs::read_to_string(file.path()).expect("read");
         assert!(text.contains("\"kind\":\"telemetry\""));
         assert!(text.contains("DCGM_FI_DEV_POWER_USAGE"));
+        // #312 review: the freshness history gets ONE entry per scrape,
+        // not one per series (the fixture has >= 2 series; per-series
+        // inserts would triple the entry count and fill the ring buffer
+        // with duplicate timestamps).
+        let history = sample_history.lock().unwrap();
+        let entries = history.get("dcgm").expect("dcgm history");
+        assert!(
+            !entries.is_empty() && entries.len() <= 6,
+            "one history entry per scrape (100 ms interval, 350 ms window): {entries:?}"
+        );
+        let mut sorted = entries.clone();
+        sorted.make_contiguous().sort();
+        assert_eq!(&sorted, entries, "monotonic append order");
     }
 
     #[tokio::test]
@@ -631,7 +689,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
-        let latest_samples = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+        let sample_history = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         let handles = spawn_scrapers(
             client,
             cfg,
@@ -642,7 +700,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             true,
             2,
-            latest_samples.clone(),
+            sample_history.clone(),
         );
         let join = handles.into_iter().next().unwrap();
         let result = tokio::time::timeout(Duration::from_secs(3), join)
