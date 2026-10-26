@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- New `--arrival burst` mode (llm, vlm, asr, imagegen): native Offline-style
+  population burst — every request scheduled at t=0 and issued immediately,
+  unbounded in flight unless `--max-concurrency` caps the transport (the
+  wait is recorded as queue delay). The measured window runs first-send to
+  last-completion (full-batch tail drain included), and `effective_max_concurrency`
+  stamps the actual cap. Never an accepted MLPerf submission label; the
+  Endpoints adapter (#306) discloses non-burst Offline mappings (#309).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 

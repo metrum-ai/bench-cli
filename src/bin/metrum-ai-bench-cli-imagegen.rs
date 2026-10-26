@@ -124,7 +124,7 @@ struct Args {
     #[arg(long, help = "Open-loop request rate (requests/second)")]
     request_rate: Option<f64>,
 
-    #[arg(long, default_value = "constant", value_parser = ["constant", "poisson"])]
+    #[arg(long, default_value = "constant", value_parser = ["constant", "poisson", "burst"])]
     arrival: String,
 
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
@@ -445,7 +445,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let metrics = Arc::new(Mutex::new(Metrics::default()));
     let rr = Arc::new(AtomicUsize::new(0));
-    let concurrency_cap = args.max_concurrency.unwrap_or(args.concurrency);
+    let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
+        (None, "burst") => metrum_ai_bench::load::ArrivalKind::Burst,
+        (Some(_), "burst") => {
+            return Err(anyhow::anyhow!(
+                "--arrival burst issues the whole population immediately; remove --request-rate (or use constant|poisson for paced runs)"
+            )
+            .into());
+        }
+        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
+        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
+        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
+    };
+
+    // Burst (#309): the whole population is issued at once unless
+    // --max-concurrency is set (the explicit transport limit).
+    let concurrency_cap = match args.max_concurrency {
+        Some(cap) => cap,
+        None if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst) => {
+            args.num_requests
+        }
+        None => args.concurrency,
+    };
     let sem = Arc::new(Semaphore::new(concurrency_cap as usize));
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
@@ -492,11 +513,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     use rand::SeedableRng;
     let mut arrival_rng =
         rand::rngs::StdRng::seed_from_u64(args.seed.unwrap_or_default() as u64 ^ 0x9e37_79b9);
-    let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
-        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
-        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
-        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
-    };
     let (record_tx, mut record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
     let slots = metrum_ai_bench::load::schedule(
@@ -697,7 +713,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
-        effective_max_concurrency: args.max_concurrency.unwrap_or(args.concurrency),
+        effective_max_concurrency: concurrency_cap,
         common: metrum_ai_bench::args_common::EffectiveCommonArgs {
             scenario: Some(args.scenario.clone()),
             seed: args.seed.unwrap_or(0) as u64,

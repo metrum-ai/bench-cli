@@ -483,7 +483,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
 
-    let concurrency_cap = args.common.max_concurrency.unwrap_or(args.concurrency);
+    let arrival_kind = args.common.arrival_kind();
+    args.common.validate_arrival()?;
+
+    // Burst (#309): the whole population is issued at once unless
+    // --max-concurrency is set (the explicit transport limit).
+    let concurrency_cap = match args.common.max_concurrency {
+        Some(cap) => cap,
+        None if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst) => num_requests,
+        None => args.concurrency,
+    };
     let semaphore = Arc::new(Semaphore::new(concurrency_cap as usize));
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
@@ -494,7 +503,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
-    let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
     let mut completed = 0;
     let mut last_percentage = 0;
@@ -955,7 +963,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         run_id: run_id.clone(),
         common: metrum_ai_bench::args_common::EffectiveCommonArgs::from(&args.common)
             .with_scenario(args.scenario.clone()),
-        effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
+        effective_max_concurrency: concurrency_cap,
         effective_system_prompt: None,
         body_template,
         unique_prompt_nonce_template: None,

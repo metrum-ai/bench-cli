@@ -191,12 +191,18 @@ pub fn queue_delay_for_slot(
 ) -> Duration {
     match kind {
         ArrivalKind::ClosedLoop => Duration::ZERO,
-        ArrivalKind::Constant | ArrivalKind::Poisson => run_elapsed.saturating_sub(scheduled_delay),
+        // Burst (#309): scheduled at t=0, so the queue delay is the
+        // wait-for-capacity time under an explicit --max-concurrency cap.
+        ArrivalKind::Burst | ArrivalKind::Constant | ArrivalKind::Poisson => {
+            run_elapsed.saturating_sub(scheduled_delay)
+        }
     }
 }
 
 /// Whether schedule fields should appear on the record.
 pub fn should_record_schedule(kind: ArrivalKind) -> bool {
+    // Burst records schedule fields: the queue delay is the transport-cap
+    // wait, and the record must not read as a paced run (#309).
     !matches!(kind, ArrivalKind::ClosedLoop)
 }
 

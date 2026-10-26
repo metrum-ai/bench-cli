@@ -14,6 +14,12 @@ pub enum ArrivalKind {
     ClosedLoop,
     Constant,
     Poisson,
+    /// Native Offline-style burst (#309): the whole population is scheduled
+    /// at t=0 and issued as fast as the transport allows. Without
+    /// `--max-concurrency` the whole population is in flight at once (the
+    /// endpoint paces itself); with it, the cap is the explicit transport
+    /// limit and wait-for-capacity time is recorded as queue delay.
+    Burst,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +63,7 @@ impl FakeClock {
 /// Open-loop: delays from a constant or exponential inter-arrival.
 pub fn schedule(kind: ArrivalKind, n: u64, request_rate: f64, rng: &mut StdRng) -> ArrivalSchedule {
     match kind {
-        ArrivalKind::ClosedLoop => (0..n)
+        ArrivalKind::ClosedLoop | ArrivalKind::Burst => (0..n)
             .map(|seq| RequestSlot {
                 seq,
                 scheduled_delay: Duration::ZERO,

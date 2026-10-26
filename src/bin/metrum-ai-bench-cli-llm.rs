@@ -601,9 +601,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
+    args.common.validate_arrival()?;
 
     // Initialise semaphore with 1 permit if ramp-up is requested, otherwise with full capacity.
-    let concurrency_limit = args.common.max_concurrency.unwrap_or(args.concurrency) as usize;
+    // Burst (#309): the whole population is issued at once unless
+    // --max-concurrency is set (the explicit transport limit).
+    let concurrency_limit = match args.common.max_concurrency {
+        Some(cap) => cap as usize,
+        None if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst) => {
+            args.num_requests as usize
+        }
+        None => args.concurrency as usize,
+    };
     let initial_permits: usize = if effective_ramp_up.is_some() {
         1
     } else {
@@ -1017,7 +1026,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
         common: EffectiveCommonArgs::from(&args.common).with_scenario(Some(args.scenario.clone())),
-        effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
+        effective_max_concurrency: concurrency_limit as u32,
         effective_system_prompt,
         body_template,
         unique_prompt_nonce_template:

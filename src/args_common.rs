@@ -37,7 +37,7 @@ pub struct CommonBenchArgs {
     #[arg(
         long,
         default_value = "constant",
-        help = "Arrival process when --request-rate is set: constant|poisson"
+        help = "Arrival process when --request-rate is set: constant|poisson; 'burst' (standalone, no --request-rate) issues the whole population immediately (#309, native Offline-style)"
     )]
     pub arrival: String,
 
@@ -328,6 +328,9 @@ impl CommonBenchArgs {
     }
 
     pub fn arrival_kind(&self) -> crate::load::ArrivalKind {
+        if self.arrival.eq_ignore_ascii_case("burst") {
+            return crate::load::ArrivalKind::Burst;
+        }
         if self.request_rate.is_none() {
             return crate::load::ArrivalKind::ClosedLoop;
         }
@@ -335,6 +338,18 @@ impl CommonBenchArgs {
             "poisson" => crate::load::ArrivalKind::Poisson,
             _ => crate::load::ArrivalKind::Constant,
         }
+    }
+
+    /// Arrival combination validation (#309). Burst is a standalone mode:
+    /// it issues the whole population immediately, so a pacing rate is
+    /// meaningless and must not be silently ignored.
+    pub fn validate_arrival(&self) -> anyhow::Result<()> {
+        if self.arrival.eq_ignore_ascii_case("burst") && self.request_rate.is_some() {
+            anyhow::bail!(
+                "--arrival burst issues the whole population immediately; remove --request-rate (or use constant|poisson for paced runs)"
+            );
+        }
+        Ok(())
     }
 
     pub fn parse_slos(&self) -> anyhow::Result<crate::summary::SloConfig> {
