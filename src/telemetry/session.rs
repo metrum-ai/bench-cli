@@ -93,6 +93,20 @@ impl TelemetryArgs {
         stamp: RunStamp,
         abort: Option<StopFlag>,
     ) -> Result<Option<TelemetrySession>> {
+        self.start_session_with_timeout(config, stamp, abort, None)
+            .await
+    }
+
+    /// Start with an explicit request timeout for sizing the per-source
+    /// freshness history (#312 review). Modality binaries pass their
+    /// `--request-timeout`; omitting it assumes the 300 s CLI default.
+    pub async fn start_session_with_timeout(
+        &self,
+        config: Option<&TelemetryConfig>,
+        stamp: RunStamp,
+        abort: Option<StopFlag>,
+        request_timeout_s: Option<u64>,
+    ) -> Result<Option<TelemetrySession>> {
         let Some(path) = &self.ndjson else {
             return Ok(None);
         };
@@ -102,6 +116,7 @@ impl TelemetryArgs {
             require_telemetry: self.require_telemetry,
             require_failures: self.require_telemetry_failures,
             abort,
+            request_timeout_s,
         };
         TelemetrySession::start(None, stamp, options)
             .await
@@ -128,6 +143,11 @@ pub struct SessionOptions<'a> {
     /// Run stop flag tripped when a required source fails mid-run, so the
     /// binary stops issuing requests instead of benchmarking blind.
     pub abort: Option<StopFlag>,
+    /// The run's request timeout in seconds (None → 300, the CLI default).
+    /// Sizes the per-source freshness history (#312 review): the buffer
+    /// must span timeout + slack at each source's interval, or long
+    /// requests read false-missing at fast intervals.
+    pub request_timeout_s: Option<u64>,
 }
 
 /// Tag stamped on the synchronous boundary baseline rows (#312).
@@ -248,6 +268,7 @@ impl TelemetrySession {
         let mut stamps: Vec<TelemetrySourceStamp> = Vec::new();
         let mut scrape_plan = None;
         let mut source_count = 0;
+        let mut history_caps = std::collections::BTreeMap::new();
         if let Some(cfg) = options.config {
             cfg.warn_fast_sources();
             let sources = cfg.compile()?;
@@ -258,6 +279,15 @@ impl TelemetrySession {
             )?;
             source_count = sources.len() as u64;
             stamps = probes.into_iter().map(|p| p.stamp).collect();
+            // #312 review: size each source's freshness history from its own
+            // interval and the run's request timeout (plus slack), clamped.
+            let timeout_s = options.request_timeout_s.unwrap_or(300);
+            for src in &sources {
+                history_caps.insert(
+                    src.name.clone(),
+                    super::scraper::sample_history_cap(src.interval_ms, timeout_s),
+                );
+            }
             scrape_plan = Some((client, cfg.clone(), sources));
         }
         let mut session = Self {
@@ -277,9 +307,7 @@ impl TelemetrySession {
             boundary_plan: None,
             abort: None,
             boundary_failure: None,
-            sample_history: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::BTreeMap::new(),
-            )),
+            sample_history: super::scraper::new_sample_history(history_caps),
         };
         // The run row goes first so readers see the epoch before any sample.
         session
@@ -922,6 +950,7 @@ mod tests {
                 require_telemetry: require,
                 require_failures: 1,
                 abort: Some(stop.clone()),
+                request_timeout_s: None,
             },
         )
         .await
@@ -1620,19 +1649,18 @@ mod freshness_tests {
     /// sample; the at-or-before lookup never sees evicted entries.
     #[test]
     fn sample_history_is_bounded_and_drops_oldest() {
-        let history: crate::telemetry::scraper::SampleHistory = Default::default();
-        let total = crate::telemetry::scraper::SAMPLE_HISTORY_CAP as u64 + 44;
+        let cap = 256usize;
+        let history = crate::telemetry::scraper::new_sample_history(
+            std::collections::BTreeMap::from([("engine".to_string(), cap)]),
+        );
+        let total = cap as u64 + 44;
         for i in 0..total {
             crate::telemetry::scraper::note_sample(&history, "engine", i);
         }
         {
             let map = history.lock().unwrap();
-            let deque = map.get("engine").unwrap();
-            assert_eq!(
-                deque.len(),
-                crate::telemetry::scraper::SAMPLE_HISTORY_CAP,
-                "bounded"
-            );
+            let deque = map.samples.get("engine").unwrap();
+            assert_eq!(deque.len(), cap, "bounded");
             assert_eq!(deque.front(), Some(&44), "oldest 44 dropped");
             assert_eq!(deque.back(), Some(&(total - 1)), "newest retained");
         }
@@ -1653,6 +1681,113 @@ mod freshness_tests {
         assert_eq!(
             crate::telemetry::scraper::sample_at_or_before(&history, "absent", total * 10),
             None
+        );
+    }
+
+    /// #312 review (bound fix): the cap is per source, from the source's
+    /// interval and the run's request timeout, plus slack, clamped.
+    #[test]
+    fn sample_history_cap_is_sized_from_interval_and_timeout() {
+        use crate::telemetry::scraper::{sample_history_cap, SAMPLE_HISTORY_MAX_CAP};
+        // 100 ms interval, 300 s timeout: (300+60)*1000/100 + 2 = 3602.
+        assert_eq!(sample_history_cap(100, 300), 3602);
+        assert_eq!(sample_history_cap(500, 300), 722);
+        assert_eq!(sample_history_cap(1000, 300), 362);
+        assert_eq!(
+            sample_history_cap(100, 1_000_000),
+            SAMPLE_HISTORY_MAX_CAP,
+            "clamped"
+        );
+        assert_eq!(
+            sample_history_cap(0, 300),
+            sample_history_cap(1, 300),
+            "zero interval floored"
+        );
+    }
+
+    /// #312 review (bound fix, 2026-10-26): at a 100 ms interval a 256-entry
+    /// buffer covers only 25.6 s — a request sent 30 s before stamping
+    /// would lose its at-or-before-send sample and read false-missing
+    /// again. With the timeout-sized cap the sample survives.
+    #[tokio::test]
+    async fn record_request_at_100ms_interval_survives_30s_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 100\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 100\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "long-flight-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        // 300 s request timeout → cap 3602 at the 100 ms interval.
+        let mut session = args
+            .start_session_with_timeout(cfg.as_ref(), stamp, None, Some(300))
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // One sample at t=0, then 300 scrapes over the next 30 s (100 ms
+        // interval) — 301 entries total, evicting t=0 under the old
+        // fixed 256 cap. The request was sent at t=50 ms (age 50 ms).
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0);
+        for i in 1..=300u64 {
+            crate::telemetry::scraper::note_sample(
+                &session.sample_history,
+                "engine",
+                i * 100_000_000,
+            );
+        }
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(50));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"]
+            .as_f64()
+            .expect("age must not be missing");
+        assert!(age > 40.0 && age < 60.0, "age ~50ms: {age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "not stale, not missing: {req}"
         );
     }
 }

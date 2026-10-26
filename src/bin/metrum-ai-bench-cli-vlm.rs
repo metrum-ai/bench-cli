@@ -568,7 +568,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Telemetry starts before the run clock so source probes are not timed.
     let mut telemetry = args
         .telemetry
-        .start_session(
+        .start_session_with_timeout(
             telemetry_cfg.as_ref(),
             metrum_ai_bench::telemetry::RunStamp {
                 run_id: run_id.clone(),
@@ -588,6 +588,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }),
             },
             Some(stop.clone()),
+            Some(args.request_timeout),
         )
         .await?;
     if let Some(session) = telemetry.as_mut() {
