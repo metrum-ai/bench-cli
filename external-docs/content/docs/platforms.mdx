@@ -20,7 +20,7 @@ accelerator matrix.
 | Path | Platforms |
 | --- | --- |
 | GitHub Release binaries | Linux `x86_64` / `aarch64` `*-unknown-linux-gnu` (glibc **2.17** floor); macOS Darwin `x86_64` / `aarch64` |
-| From source | Rust **1.85+** on a host that can build the crate |
+| From source | Rust **1.89+** on a host that can build the crate |
 | crates.io | `cargo install metrum-ai-bench-cli` (when published) |
 
 Not shipped as release targets:
@@ -46,7 +46,7 @@ bundle before unpacking.
 
 | Tool | When needed |
 | --- | --- |
-| Rust 1.85+ | Source builds and `cargo test` |
+| Rust 1.89+ | Source builds and `cargo test` |
 | Go **1.26.6+** (matches `dummy-model-server/go.mod` and CI) | Dummy model server and its tests |
 | Network / Hugging Face Hub | Prompt-library extracts (unless using `--local-jsonl` / `--local-parquet` / `--offline`) |
 

@@ -823,7 +823,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
         debug!("Launching request {}", i + 1);
 
-        if (i + 1) % 100 == 0 {
+        if (i + 1).is_multiple_of(100) {
             info!("Launched {} requests...", i + 1);
         }
     }
@@ -899,7 +899,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 );
                 last_percentage = (percentage / 10) * 10;
             }
-            if completed % 100 == 0 {
+            if completed.is_multiple_of(100) {
                 info!("Completed {} requests...", completed);
             }
             records.push(rec);

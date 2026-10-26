@@ -137,7 +137,7 @@ cd bench-cli
 cargo build --release
 ```
 
-Rust 1.85 or later is required to build from source. The dummy server used in
+Rust 1.89 or later is required to build from source. The dummy server used in
 Quickstart and the examples requires Go when built from source; a release
 tarball already includes it. The benchmark binaries do not need Go. Pass
 `--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
