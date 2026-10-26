@@ -34,6 +34,14 @@
 #     some series are optional. The startup probe prints `matched_series`
 #     per source into the `run` row; a source matching zero series fails the
 #     run at startup unless you set `allow_empty: true` on it.
+#   - Version-dependent / host-dependent series (Phase 2 validation on an
+#     RTX A6000, all-smi v0.27.1, vLLM 0.32.0):
+#     `all_smi_gpu_clock_graphics_max_mhz`, `all_smi_gpu_hollow_utilization_ratio`
+#     and `all_smi_gpu_memory_bandwidth_utilization` appear on the H100
+#     fixture but not on every host; `all_smi_gpu_temperature_threshold_acoustic_celsius`
+#     is an extra on some hosts. `vllm:gpu_cache_usage_perc` is not emitted
+#     by vLLM 0.32.0 in all configurations (`vllm:kv_cache_usage_perc`
+#     covers the same signal). These are expected drift, not preset bugs.
 #   - Validate against your live pages before a long run:
 #       python3 harness-equivalent probe (see docs/TELEMETRY.md) or simply
 #       curl the two URLs and confirm the series below exist.
