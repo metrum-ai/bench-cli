@@ -4,6 +4,8 @@
 //! Integration tests: CLI validation and fail-fast behavior (issue #128).
 //! Run with: cargo test --test cli_validation
 
+mod common;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
