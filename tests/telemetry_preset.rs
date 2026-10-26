@@ -167,6 +167,114 @@ fn preset_parses_and_selects_the_documented_series() {
     }
 }
 
+/// Phase 2 drift check (#326 review): the preset applied to the REAL
+/// redacted A6000 capture selects the same series as the synthetic fixture,
+/// with the known host/version drift recorded in the YAML header.
+#[test]
+fn preset_selection_on_real_capture_matches_fixture_plus_known_drift() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cfg = TelemetryConfig::load(&dir.join("examples/telemetry/all-smi-vllm.yaml"))
+        .expect("preset YAML must parse");
+    let expected_all_smi: BTreeSet<String> = [
+        "all_smi_chassis_power_watts",
+        "all_smi_cpu_core_count",
+        "all_smi_cpu_frequency_mhz",
+        "all_smi_cpu_socket_count",
+        "all_smi_cpu_socket_frequency_mhz",
+        "all_smi_cpu_socket_utilization",
+        "all_smi_cpu_thread_count",
+        "all_smi_cpu_utilization",
+        "all_smi_energy_consumed_joules_total",
+        "all_smi_gpu_frequency_mhz",
+        "all_smi_gpu_memory_total_bytes",
+        "all_smi_gpu_memory_used_bytes",
+        "all_smi_gpu_power_consumption_watts",
+        "all_smi_gpu_power_limit_current_watts",
+        "all_smi_gpu_power_limit_max_watts",
+        "all_smi_gpu_temperature_celsius",
+        "all_smi_gpu_temperature_threshold_max_operating_celsius",
+        "all_smi_gpu_temperature_threshold_shutdown_celsius",
+        "all_smi_gpu_temperature_threshold_slowdown_celsius",
+        "all_smi_gpu_utilization",
+        "all_smi_memory_available_bytes",
+        "all_smi_memory_buffers_bytes",
+        "all_smi_memory_cached_bytes",
+        "all_smi_memory_free_bytes",
+        "all_smi_memory_total_bytes",
+        "all_smi_memory_used_bytes",
+        "all_smi_memory_utilization",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let all_smi_selected = selected_series(
+        &cfg,
+        "all-smi",
+        &repo_file("test-data/telemetry/all-smi-a6000.prom"),
+    );
+    // Real A6000 capture = synthetic fixture minus the H100-only GPU series
+    // (clock_graphics_max, hollow_utilization_ratio, memory_bandwidth_utilization),
+    // plus the acoustic temperature threshold extra — documented drift.
+    let mut expected = expected_all_smi;
+    for dropped in [
+        "all_smi_gpu_clock_graphics_max_mhz",
+        "all_smi_gpu_hollow_utilization_ratio",
+        "all_smi_gpu_memory_bandwidth_utilization",
+    ] {
+        expected.remove(dropped);
+    }
+    // The real A6000 also emits these (H100-only on the synthetic fixture):
+    expected.insert("all_smi_gpu_energy_hw_millijoules_total".to_string());
+    expected.insert("all_smi_gpu_utilization_sample_max".to_string());
+    expected.insert("all_smi_gpu_utilization_sample_p50".to_string());
+    expected.insert("all_smi_gpu_utilization_sample_p95".to_string());
+    expected.insert("all_smi_gpu_temperature_threshold_acoustic_celsius".to_string());
+    assert_eq!(
+        all_smi_selected, expected,
+        "real capture selects the fixture set plus documented drift"
+    );
+
+    let expected_vllm: BTreeSet<String> = [
+        "vllm:e2e_request_latency_seconds_bucket",
+        "vllm:e2e_request_latency_seconds_count",
+        "vllm:e2e_request_latency_seconds_sum",
+        "vllm:external_prefix_cache_hits_total",
+        "vllm:external_prefix_cache_queries_total",
+        "vllm:generation_tokens_total",
+        "vllm:gpu_cache_usage_perc",
+        "vllm:inter_token_latency_seconds_bucket",
+        "vllm:inter_token_latency_seconds_count",
+        "vllm:inter_token_latency_seconds_sum",
+        "vllm:kv_cache_usage_perc",
+        "vllm:num_preemptions_total",
+        "vllm:num_requests_running",
+        "vllm:num_requests_waiting",
+        "vllm:prefix_cache_hits_total",
+        "vllm:prefix_cache_queries_total",
+        "vllm:prompt_tokens_cached_total",
+        "vllm:prompt_tokens_total",
+        "vllm:time_to_first_token_seconds_bucket",
+        "vllm:time_to_first_token_seconds_count",
+        "vllm:time_to_first_token_seconds_sum",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let vllm_selected = selected_series(
+        &cfg,
+        "vllm",
+        &repo_file("test-data/telemetry/vllm-0.32-a6000.prom"),
+    );
+    // vLLM 0.32.0 does not emit gpu_cache_usage_perc in this config;
+    // kv_cache_usage_perc covers the same signal (documented in the YAML).
+    let mut expected_v = expected_vllm;
+    expected_v.remove("vllm:gpu_cache_usage_perc");
+    assert_eq!(
+        vllm_selected, expected_v,
+        "real vLLM capture selects the fixture set minus the known absent series"
+    );
+}
+
 #[test]
 fn four_node_variant_compiles_to_eight_loopback_sources() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
