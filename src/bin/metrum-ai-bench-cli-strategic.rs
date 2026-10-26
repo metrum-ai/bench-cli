@@ -1545,6 +1545,8 @@ async fn main() -> Result<()> {
         .url
         .clone()
         .ok_or_else(|| anyhow::anyhow!("--url is required"))?;
+    // Fail fast on malformed URLs before any benchmark traffic (#304).
+    metrum_ai_bench::endpoints::validate_endpoint_url(&url).map_err(|err| anyhow::anyhow!(err))?;
     let model = args
         .model
         .clone()

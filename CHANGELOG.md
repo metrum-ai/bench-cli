@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+- Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
+  rejected as configuration errors before any benchmark traffic, across llm,
+  vlm, asr, imagegen and strategic; proxy path prefixes remain valid (#304).
+- New opt-in `--validate-model` preflight for `metrum-ai-bench-cli-llm`: it
+  checks the model against the server's `/v1/models` list before any
+  benchmark traffic, reports the server's actual response, and supports a
+  `--model-alias` override for proxy/alias setups (#304).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 

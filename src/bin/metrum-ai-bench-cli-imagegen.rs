@@ -832,6 +832,9 @@ fn prepare_artifacts(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send + Sync>> {
     if let Some(url) = &args.url {
+        // Fail fast on malformed URLs before any benchmark traffic (#304).
+        metrum_ai_bench::endpoints::validate_endpoint_url(url)
+            .map_err(|err| anyhow::anyhow!(err))?;
         return Ok(vec![Endpoint {
             name: endpoint_name(url, 0),
             url: normalize_base_url(url),
@@ -843,6 +846,10 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         }]);
     }
     if !args.endpoint.is_empty() {
+        for url in &args.endpoint {
+            metrum_ai_bench::endpoints::validate_endpoint_url(url)
+                .map_err(|err| anyhow::anyhow!(err))?;
+        }
         return Ok(args
             .endpoint
             .iter()
@@ -872,6 +879,10 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         };
         if records.is_empty() {
             return Err(anyhow::anyhow!("endpoints file contains no endpoints").into());
+        }
+        for rec in &records {
+            metrum_ai_bench::endpoints::validate_endpoint_url(&rec.url)
+                .map_err(|err| anyhow::anyhow!("{} (endpoints file '{}')", err, path))?;
         }
         return Ok(records
             .into_iter()

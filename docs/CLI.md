@@ -260,6 +260,12 @@ Options:
 
           [default: 60]
 
+      --validate-model
+          Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic
+
+      --model-alias <MODEL_ALIAS>
+          Model id to check instead of --model for --validate-model (alias/proxy setups); the run still uses --model
+
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 

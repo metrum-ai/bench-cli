@@ -196,6 +196,36 @@ pub fn hostname_from_url(url: &str) -> String {
         .to_string()
 }
 
+/// Validate that an endpoint URL is an absolute http(s) URL before any
+/// network traffic (#304).
+///
+/// Proxy deployments are supported: any path, query, or fragment is
+/// accepted (e.g. `https://proxy.example/llm/v1/chat/completions`). The URL
+/// must parse as absolute, use the `http` or `https` scheme, and carry a
+/// host; anything else (missing scheme such as `127.0.0.1:8000/v1`,
+/// non-HTTP schemes, empty input) is a configuration error and must fail
+/// before the first request is issued.
+pub fn validate_endpoint_url(raw: &str) -> Result<(), String> {
+    let url = raw.trim();
+    if url.is_empty() {
+        return Err("endpoint URL is empty".to_string());
+    }
+    let parsed =
+        reqwest::Url::parse(url).map_err(|err| format!("invalid endpoint URL '{url}': {err}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(format!(
+                "endpoint URL '{url}' must use http or https, not '{scheme}'"
+            ))
+        }
+    }
+    if parsed.host_str().map(str::is_empty).unwrap_or(true) {
+        return Err(format!("endpoint URL '{url}' has no host"));
+    }
+    Ok(())
+}
+
 /// Load and normalize endpoints from YAML file. Returns weighted list and display list.
 pub fn load_endpoints_file(
     path: &str,
@@ -218,6 +248,9 @@ pub fn load_endpoints_file(
         let api_key = c.api_key.trim().to_string();
         if url.is_empty() {
             return Err(anyhow::anyhow!("Endpoint has empty url in '{}'", path).into());
+        }
+        if let Err(err) = validate_endpoint_url(&url) {
+            return Err(anyhow::anyhow!("{} (endpoints file '{}')", err, path).into());
         }
         if api_key.is_empty() {
             return Err(anyhow::anyhow!("Endpoint has empty api_key in '{}'", path).into());
@@ -243,11 +276,15 @@ pub fn resolve_endpoints(
     endpoints_file: Option<&str>,
 ) -> Result<ResolvedEndpoints, Box<dyn Error + Send + Sync>> {
     match (url, api_key, endpoints_file) {
-        (Some(u), Some(a), None) => Ok(ResolvedEndpoints::Single {
-            url: u.to_string(),
-            api_key: a.to_string(),
-            name: hostname_from_url(u),
-        }),
+        (Some(u), Some(a), None) => {
+            // Fail fast on malformed URLs before any benchmark traffic (#304).
+            validate_endpoint_url(u).map_err(|err| anyhow::anyhow!(err))?;
+            Ok(ResolvedEndpoints::Single {
+                url: u.to_string(),
+                api_key: a.to_string(),
+                name: hostname_from_url(u),
+            })
+        }
         (None, None, Some(path)) => {
             let (weighted_list, endpoint_names_with_weights) = load_endpoints_file(path)?;
             Ok(ResolvedEndpoints::Multi {
@@ -268,8 +305,8 @@ pub fn resolve_endpoints(
 #[cfg(test)]
 mod tests {
     use super::{
-        hostname_from_url, load_endpoints_file, EndpointSelector, ResolvedEndpoints,
-        DEFAULT_CONNECT_EJECT_BACKOFF,
+        hostname_from_url, load_endpoints_file, resolve_endpoints, EndpointSelector,
+        ResolvedEndpoints, DEFAULT_CONNECT_EJECT_BACKOFF,
     };
     use crate::args_common::LoadBalancer;
     use std::io::Write;
@@ -394,5 +431,67 @@ mod tests {
         f.flush().unwrap();
         let r = load_endpoints_file(f.path().to_str().unwrap());
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn validate_endpoint_url_rejects_invalid_urls() {
+        // No scheme: parses as a relative URL, which cannot carry a host.
+        for bad in [
+            "",
+            "   ",
+            "127.0.0.1:8000/v1/chat/completions",
+            "not a url",
+            "ftp://example.com/v1/chat/completions",
+            "http://",
+        ] {
+            let err = super::validate_endpoint_url(bad)
+                .err()
+                .unwrap_or_else(|| panic!("'{bad}' must be rejected"));
+            assert!(!err.is_empty(), "rejection of '{bad}' must carry a message");
+        }
+    }
+
+    #[test]
+    fn validate_endpoint_url_accepts_absolute_http_and_proxy_paths() {
+        for good in [
+            "http://127.0.0.1:8000/v1/chat/completions",
+            "https://proxy.example/llm/v1/chat/completions",
+            "http://example.com",
+            "https://h.example:8443/v1/completions?trace=1",
+            " http://localhost:18321/v1/chat/completions ",
+            "http://127.0.0.1:8000/v1/", // trailing slash, still absolute
+        ] {
+            super::validate_endpoint_url(good)
+                .unwrap_or_else(|err| panic!("'{good}' must be accepted: {err}"));
+        }
+    }
+
+    #[test]
+    fn resolve_endpoints_rejects_invalid_single_url_before_traffic() {
+        let err = resolve_endpoints(Some("127.0.0.1:8000/v1"), Some("k"), None)
+            .expect_err("scheme-less --url must fail fast");
+        let text = err.to_string();
+        assert!(
+            text.contains("invalid endpoint URL"),
+            "error must explain the invalid URL: {text}"
+        );
+    }
+
+    #[test]
+    fn load_endpoints_file_rejects_invalid_url_entries() {
+        let yaml = "\
+- url: 127.0.0.1:10001/v1/chat/completions
+  api_key: k
+";
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(yaml.as_bytes()).unwrap();
+        f.flush().unwrap();
+        let err = load_endpoints_file(f.path().to_str().unwrap())
+            .expect_err("scheme-less endpoint entry must fail fast");
+        let text = err.to_string();
+        assert!(
+            text.contains("invalid endpoint URL") && text.contains("endpoints file"),
+            "error must name the invalid URL and the file: {text}"
+        );
     }
 }
