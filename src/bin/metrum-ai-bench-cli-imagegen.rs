@@ -408,12 +408,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
     validate_args(&args)?;
-    let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_profile_flags(
+    let (sut_block, redact_hostname) = match metrum_ai_bench::sut::resolve_sut_profile_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
         args.sut_profile,
-    )?;
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            metrum_ai_bench::sut::exit_2_if_strict_sut_error(err.as_ref());
+            return Err(err.into());
+        }
+    };
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
