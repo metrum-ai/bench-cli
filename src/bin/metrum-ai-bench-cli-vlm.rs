@@ -448,6 +448,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
 
     let (sut_block, redact_hostname) = args.common.resolve_sut()?;
+    let arrival_kind = args.common.arrival_kind();
+    if let Err(e) = args.common.validate_arrival() {
+        eprintln!("Error: {e}");
+        std::process::exit(2);
+    }
+    // Uncapped bursts hold one socket per outstanding request (#309
+    // review): refuse past the client fd budget before any traffic.
+    if matches!(
+        args.common.arrival_kind(),
+        metrum_ai_bench::load::ArrivalKind::Burst
+    ) && args.common.max_concurrency.is_none()
+    {
+        if let Err(msg) =
+            metrum_ai_bench::runner::uncapped_burst_fd_guard(u64::from(args.num_requests))
+        {
+            eprintln!("Error: {msg}");
+            std::process::exit(2);
+        }
+    }
+
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     // Resolve endpoints (single url+api_key or multi from file)
@@ -582,7 +602,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         extra_body_json: args.common.extra_body_json.clone(),
         system_prompt: args.common.system_prompt.clone(),
     });
-    let concurrency_cap = args.common.max_concurrency.unwrap_or(args.concurrency);
+
+    // Burst (#309): the whole population is issued at once unless
+    // --max-concurrency is set (the explicit transport limit).
+    let concurrency_cap = match args.common.max_concurrency {
+        Some(cap) => cap,
+        None if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst) => {
+            args.num_requests
+        }
+        None => args.concurrency,
+    };
     let semaphore = Arc::new(Semaphore::new(concurrency_cap as usize));
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
@@ -606,7 +635,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?);
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
-    let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
 
     // Telemetry starts before the run clock so source probes are not timed.
@@ -1482,7 +1510,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         run_id: run_id.clone(),
         common: metrum_ai_bench::args_common::EffectiveCommonArgs::from(&args.common)
             .with_scenario(Some(args.scenario.clone())),
-        effective_max_concurrency: args.common.max_concurrency.unwrap_or(args.concurrency),
+        effective_max_concurrency: concurrency_cap,
+        effective_max_concurrency_source: Some(
+            metrum_ai_bench::runner::effective_max_concurrency_source(
+                arrival_kind,
+                args.common.max_concurrency.is_some(),
+            )
+            .to_string(),
+        ),
         effective_system_prompt: vlm_system,
         body_template,
         unique_prompt_nonce_template:
