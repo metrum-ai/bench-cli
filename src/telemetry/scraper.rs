@@ -104,12 +104,17 @@ async fn fetch_body(
     src: &CompiledSource,
     timeout: Duration,
     max_body_bytes: u64,
+    boundary_tag: Option<&str>,
 ) -> Result<(String, Option<i64>, u16)> {
     let headers = auth_headers(src)?;
-    let response = client
-        .get(&src.url)
-        .headers(headers)
-        .timeout(timeout)
+    let mut request = client.get(&src.url).headers(headers).timeout(timeout);
+    // Boundary requests carry a marker header so a test fixture (or a
+    // server's logging) can tell the synchronous pre-measured baseline from
+    // a periodic scrape (#312 review).
+    if let Some(tag) = boundary_tag {
+        request = request.header("x-metrum-telemetry-boundary", tag);
+    }
+    let response = request
         .send()
         .await
         .with_context(|| format!("GET {} ({})", src.url, src.name))?;
@@ -153,7 +158,8 @@ pub async fn probe_sources(
     let mut out = Vec::with_capacity(sources.len());
     for src in sources {
         let started = Instant::now();
-        let (text, offset, _status) = fetch_body(client, src, timeout, cfg.max_body_bytes).await?;
+        let (text, offset, _status) =
+            fetch_body(client, src, timeout, cfg.max_body_bytes, None).await?;
         let parsed = parse_exposition(&text, &src.include);
         let matched = parsed.samples.len() as u64;
         eprintln!(
@@ -197,7 +203,10 @@ pub async fn boundary_scrape_once(
     let timeout = Duration::from_millis(cfg.timeout_ms.min(src.interval_ms).max(1));
     let started = Instant::now();
     let t_ns = epoch.elapsed_ns();
-    let (text, _offset, _status) = fetch_body(client, src, timeout, cfg.max_body_bytes).await?;
+    // Boundary requests are tagged so a fixture can distinguish the
+    // baseline from periodic scrapes (#312 review).
+    let (text, _offset, _status) =
+        fetch_body(client, src, timeout, cfg.max_body_bytes, Some(boundary)).await?;
     let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
     let parsed = parse_exposition(&text, &src.include);
     let matched = parsed.samples.len() as u64;
@@ -327,7 +336,7 @@ async fn scrape_loop(
                 }
                 let started = Instant::now();
                 let t_ns = epoch.elapsed_ns();
-                match fetch_body(&client, &src, timeout, cfg.max_body_bytes).await {
+                match fetch_body(&client, &src, timeout, cfg.max_body_bytes, None).await {
                     Ok((text, _offset, _status)) => {
                         let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
                         let parsed = parse_exposition(&text, &src.include);
@@ -661,9 +670,15 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             max_body_bytes: 8,
             sources: vec![],
         };
-        let err = fetch_body(&client, &src, Duration::from_secs(1), cfg.max_body_bytes)
-            .await
-            .expect_err("oversized");
+        let err = fetch_body(
+            &client,
+            &src,
+            Duration::from_secs(1),
+            cfg.max_body_bytes,
+            None,
+        )
+        .await
+        .expect_err("oversized");
         assert!(err.to_string().contains("max_body_bytes"));
         src.allow_empty = true;
         let _ = src;
@@ -724,6 +739,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             &src,
             Duration::from_secs(1),
             DEFAULT_MAX_BODY_BYTES,
+            None,
         )
         .await
         .expect_err("missing bearer");
