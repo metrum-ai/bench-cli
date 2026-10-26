@@ -264,6 +264,20 @@ struct Args {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)"
+    )]
+    fail_on_partial: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption"
+    )]
+    ci_safety: bool,
+
+    #[arg(
+        long,
         value_name = "USD_PER_HOUR",
         help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
     )]
@@ -385,7 +399,12 @@ struct Metrics {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    if args.ci_safety {
+        args.fail_on_error = true;
+        args.fail_on_partial = true;
+    }
     if args.version_only {
         println!("metrum-ai-bench-cli-imagegen version {}", VERSION);
         return Ok(());
@@ -790,6 +809,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .count();
     if args.fail_on_error && failed > 0 {
         return Err(anyhow::anyhow!("Test completed with {failed} errors").into());
+    }
+    if args.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        return Err(anyhow::anyhow!(
+            "Run was interrupted before completing all planned requests (rejected by --fail-on-partial / --ci-safety)"
+        )
+        .into());
     }
     Ok(())
 }

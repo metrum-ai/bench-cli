@@ -468,7 +468,9 @@ fn build_request_body(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    args.common.apply_ci_safety_preset();
 
     // Check for version-only flag first
     if args.version_only {
@@ -1105,6 +1107,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             .context(format!("Total errors: {measure_errors}"))
             .context("Load test encountered failures")
             .into())
+    } else if args.common.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        Err(
+            anyhow::anyhow!("Run was interrupted before completing all planned requests")
+                .context("interrupted run rejected by --fail-on-partial (--ci-safety)")
+                .into(),
+        )
     } else {
         Ok(())
     }
