@@ -2861,3 +2861,59 @@ fn overwrite_mode_with_failed_model_preflight_leaves_old_log_untouched() {
         "the old log is byte-identical — preflight ran before overwrite truncation"
     );
 }
+
+// Integration follow-up (b) (#323×#321): --ci-safety defaults --data-log-mode
+// to refuse-existing; an explicit --data-log-mode wins.
+
+#[test]
+fn ci_safety_defaults_data_log_mode_to_refuse_existing() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    // Seed an existing log.
+    let seeded = dir.path().join("seed.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(&url, seeded.to_str().unwrap(), &[]))
+        .output()
+        .expect("seed run");
+    assert!(out.status.success());
+    std::fs::copy(&seeded, &data_log).unwrap();
+
+    // --ci-safety with no explicit mode: refuse-existing, exit 2, no traffic.
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(&url, data_log.to_str().unwrap(), &["--ci-safety"]))
+        .output()
+        .expect("run ci-safety against an existing log");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "preset defaults to refuse-existing"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("already exists"),
+        "refusal named:\n{text}"
+    );
+
+    // Explicit append wins over the preset default.
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(collision_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--ci-safety", "--data-log-mode", "append"],
+        ))
+        .output()
+        .expect("run ci-safety with explicit append");
+    assert!(
+        out.status.success(),
+        "explicit append wins:\n{}",
+        combined_output(&out)
+    );
+    let logged = std::fs::read_to_string(&data_log).unwrap();
+    let summaries = logged
+        .lines()
+        .filter(|l| l.contains("metrum-ai-bench-cli.summary.v3"))
+        .count();
+    assert_eq!(summaries, 2, "the second run appended: {logged}");
+}

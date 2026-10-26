@@ -237,10 +237,9 @@ struct Args {
     #[arg(
         long,
         value_enum,
-        default_value = "append",
         help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
     )]
-    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+    data_log_mode: Option<metrum_ai_bench::jsonl::DataLogMode>,
 
     #[command(flatten)]
     telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
@@ -527,7 +526,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // run_id is generated first so new-dir can name the per-run file.
     let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let effective_data_log =
-        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+        metrum_ai_bench::jsonl::prepare_data_log(
+            args.data_log_mode.unwrap_or(
+                if args.ci_safety {
+                    metrum_ai_bench::jsonl::DataLogMode::RefuseExisting
+                } else {
+                    metrum_ai_bench::jsonl::DataLogMode::Append
+                },
+            ),
+            &args.data_log,
+            &run_id,
+        )
             .unwrap_or_else(|e| {
                 // Configuration error: exit 2, the code clap uses (#304, #305).
                 eprintln!("Error: data log collision: {e}");
