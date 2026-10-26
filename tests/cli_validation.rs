@@ -846,9 +846,10 @@ fn metrum_ai_bench_llm_rejects_scheme_less_url_before_traffic() {
         .args(&args)
         .output()
         .expect("run metrum-ai-bench-cli-llm with scheme-less --url");
-    assert!(
-        !out.status.success(),
-        "scheme-less --url must fail the run, not benchmark a broken endpoint"
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "scheme-less --url must exit 2 (configuration error), not benchmark a broken endpoint"
     );
     let text = combined_output(&out);
     assert!(
@@ -918,7 +919,7 @@ fn metrum_ai_bench_vlm_rejects_scheme_less_url_before_traffic() {
         ])
         .output()
         .expect("run metrum-ai-bench-cli-vlm with scheme-less --url");
-    assert!(!out.status.success(), "must fail fast");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
     let text = combined_output(&out);
     assert!(
         text.contains("invalid endpoint URL"),
@@ -945,7 +946,7 @@ fn metrum_ai_bench_asr_rejects_scheme_less_url_before_traffic() {
         ])
         .output()
         .expect("run metrum-ai-bench-cli-asr with scheme-less --url");
-    assert!(!out.status.success(), "must fail fast");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
     let text = combined_output(&out);
     assert!(
         text.contains("invalid endpoint URL"),
@@ -976,7 +977,7 @@ fn metrum_ai_bench_imagegen_rejects_scheme_less_url_before_traffic() {
         ])
         .output()
         .expect("run metrum-ai-bench-cli-imagegen with scheme-less --url");
-    assert!(!out.status.success(), "must fail fast");
+    assert_eq!(out.status.code(), Some(2), "must exit 2 before traffic");
     let text = combined_output(&out);
     assert!(
         text.contains("invalid endpoint URL"),
@@ -986,6 +987,61 @@ fn metrum_ai_bench_imagegen_rejects_scheme_less_url_before_traffic() {
 
 // #304: opt-in exact-model preflight (--validate-model), tested against the
 // workspace mock server (serves /v1/models with "metrum-ai-bench-cli-mock").
+
+#[test]
+fn metrum_ai_bench_llm_invalid_url_redacts_embedded_credentials() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let args = llm_args(
+        "ftp://user:secret@h.example/llm/v1/chat/completions?api_key=hush",
+        data_log.to_str().unwrap(),
+    );
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm with credentials in --url");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "non-http scheme must exit 2 before traffic"
+    );
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("secret") && !text.contains("hush"),
+        "no password or query credential may be echoed:\n{text}"
+    );
+    assert!(
+        text.contains("api_key=REDACTED"),
+        "query keys stay, values are redacted:\n{text}"
+    );
+}
+
+#[test]
+fn metrum_ai_bench_llm_validate_model_redacts_urls_in_failure_output() {
+    // Unreachable server with credentials in the URL: the preflight failure
+    // (stderr + report) must not leak them.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let mut args = llm_args(
+        "http://user:hush@127.0.0.1:1/v1/chat/completions?token=shh",
+        data_log.to_str().unwrap(),
+    );
+    args.push("--validate-model".into());
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(&args)
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --validate-model with credentials in --url");
+    assert_eq!(out.status.code(), Some(2), "must fail preflight");
+    let text = combined_output(&out);
+    assert!(
+        !text.contains("hush") && !text.contains("shh"),
+        "userinfo and query credentials must be redacted from the failure output:\n{text}"
+    );
+    assert!(
+        text.contains("/v1/models"),
+        "the redacted models URL is still shown:\n{text}"
+    );
+}
 
 #[test]
 fn metrum_ai_bench_llm_validate_model_reports_unreachable_server() {
@@ -1027,7 +1083,11 @@ fn metrum_ai_bench_llm_validate_model_reports_actual_server_models() {
         .args(&args)
         .output()
         .expect("run metrum-ai-bench-cli-llm --validate-model with unknown model");
-    assert!(!out.status.success(), "unknown model must fail preflight");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unknown model must fail preflight with the configuration code"
+    );
     let text = combined_output(&out);
     assert!(
         text.contains("model preflight failed"),

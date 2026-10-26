@@ -148,8 +148,12 @@ pub async fn validate_model_listed(
     let models_url = derive_models_url(endpoint_url);
     let mut report = ModelPreflightReport {
         schema_version: "metrum-ai-bench-cli.model-preflight.v1",
-        endpoint_url: endpoint_url.to_string(),
-        models_url: models_url.clone(),
+        // Redacted (#304 review): URLs carry credentials (userinfo, ?api_key)
+        // surprisingly often, and these fields reach stderr/stdout and logs.
+        endpoint_url: crate::endpoints::redact_url(endpoint_url),
+        // Redacted at construction: this field is serialized in the failure
+        // report (#304 review).
+        models_url: crate::endpoints::redact_url(&models_url),
         model: model.to_string(),
         validated_alias: alias.map(str::to_string),
         listed: false,
@@ -168,7 +172,13 @@ pub async fn validate_model_listed(
     let response = match response {
         Ok(response) => response,
         Err(err) => {
-            report.detail = format!("GET {models_url} failed: {err}");
+            // reqwest errors embed the full URL; strip it and print the
+            // redacted URL ourselves (#304 review).
+            report.detail = format!(
+                "GET {} failed: {}",
+                crate::endpoints::redact_url(&models_url),
+                err.without_url()
+            );
             return report;
         }
     };
@@ -179,7 +189,8 @@ pub async fn validate_model_listed(
         let body = response.text().await.unwrap_or_default();
         let snippet: String = body.chars().take(200).collect();
         report.detail = format!(
-            "GET {models_url} returned HTTP {}: {}",
+            "GET {} returned HTTP {}: {}",
+            crate::endpoints::redact_url(&models_url),
             status.as_u16(),
             if snippet.is_empty() {
                 "<empty body>".to_string()
@@ -194,8 +205,10 @@ pub async fn validate_model_listed(
         Ok(body) => body,
         Err(err) => {
             report.detail = format!(
-                "GET {models_url} succeeded but the body is not the expected \
-                 {{\"data\":[{{\"id\"}}...]}} JSON: {err}"
+                "GET {} succeeded but the body is not the expected \
+                 {{\"data\":[{{\"id\"}}...]}} JSON: {}",
+                crate::endpoints::redact_url(&models_url),
+                err.without_url()
             );
             return report;
         }
@@ -213,7 +226,8 @@ pub async fn validate_model_listed(
         .unwrap_or_default();
     if ids.is_empty() {
         report.detail = format!(
-            "GET {models_url} returned no model ids (body: {})",
+            "GET {} returned no model ids (body: {})",
+            crate::endpoints::redact_url(&models_url),
             serde_json::to_string(&body).unwrap_or_else(|_| "<unserializable>".into())
         );
         return report;
@@ -225,10 +239,11 @@ pub async fn validate_model_listed(
         ids.push(format!("(+{} more)", total - MODEL_ID_ECHO_CAP));
     }
     report.server_model_ids = ids;
+    let redacted_models_url = crate::endpoints::redact_url(&models_url);
     report.detail = if report.listed {
-        format!("'{checked_id}' is listed at {models_url}")
+        format!("'{checked_id}' is listed at {redacted_models_url}")
     } else {
-        format!("'{checked_id}' is NOT listed at {models_url}")
+        format!("'{checked_id}' is NOT listed at {redacted_models_url}")
     };
     report
 }
@@ -1045,6 +1060,42 @@ mod tests {
         assert!(!report.listed);
         assert_eq!(report.http_status, None);
         assert!(report.detail.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_redacts_credentials_from_report() {
+        // Unreachable server with credentials in the URL: neither the
+        // report fields nor the transport-error detail may leak them
+        // (#304 review). reqwest errors embed the URL, so it is stripped.
+        let report = validate_model_listed(
+            &probe_client(),
+            "http://user:hush@127.0.0.1:1/v1/chat/completions?token=shh",
+            "key",
+            "m",
+            None,
+        )
+        .await;
+        assert!(!report.listed);
+        assert!(
+            !report.endpoint_url.contains("hush") && !report.endpoint_url.contains("shh"),
+            "endpoint_url must be redacted: {}",
+            report.endpoint_url
+        );
+        assert!(
+            !report.models_url.contains("hush") && !report.models_url.contains("shh"),
+            "models_url must be redacted: {}",
+            report.models_url
+        );
+        assert!(
+            !report.detail.contains("hush") && !report.detail.contains("shh"),
+            "transport error must not embed the raw URL: {}",
+            report.detail
+        );
+        let serialized = serde_json::to_string(&report).expect("report serializes");
+        assert!(
+            !serialized.contains("hush") && !serialized.contains("shh"),
+            "serialized report must not leak credentials: {serialized}"
+        );
     }
 
     #[tokio::test]

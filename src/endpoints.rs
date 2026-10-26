@@ -196,6 +196,97 @@ pub fn hostname_from_url(url: &str) -> String {
         .to_string()
 }
 
+/// Redact credentials from a URL before it is echoed in a message, log or
+/// serialized report (#304 review): strip userinfo and replace query values
+/// with `REDACTED`, keeping the keys.
+///
+/// Endpoint URLs carry secrets surprisingly often (`https://user:pass@proxy`
+/// or `?api_key=...`), and every URL that reaches stderr/stdout or a report
+/// goes through this first. Unparseable input gets a conservative
+/// string-level pass so a malformed URL with credentials is redacted too.
+pub fn redact_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Ok(mut url) = reqwest::Url::parse(trimmed) {
+        // Opaque URLs (e.g. `user:pass@host/...`, parsed as scheme `user`)
+        // carry credentials without an authority, so they take the
+        // string-level pass too.
+        if url.has_authority() {
+            if !url.username().is_empty() {
+                let _ = url.set_username("REDACTED");
+            }
+            let _ = url.set_password(None);
+            if url.query().is_some() {
+                let pairs: Vec<String> = url
+                    .query_pairs()
+                    .map(|(key, _)| format!("{key}=REDACTED"))
+                    .collect();
+                url.set_query(Some(&pairs.join("&")));
+            }
+            return url.to_string();
+        }
+    }
+    redact_url_string_level(trimmed)
+}
+
+/// Conservative fallback for URLs that do not parse into an authority:
+/// mask a userinfo-looking segment (with or without a scheme) and redact
+/// query values, keeping the keys.
+fn redact_url_string_level(trimmed: &str) -> String {
+    let mut out = trimmed.to_string();
+    // Authority starts after "://" when present, else at the start
+    // (scheme-less input such as `user:pass@host/path`).
+    let auth_start = out.find("://").map(|index| index + 3).unwrap_or(0);
+    let first_sep = out[auth_start..]
+        .find('/')
+        .map(|index| auth_start + index)
+        .unwrap_or(out.len());
+    if let Some(at) = out[auth_start..].find('@') {
+        let userinfo_end = auth_start + at;
+        // Only a real userinfo segment: the '@' precedes the first path
+        // separator (an '@' inside a path or query is left alone).
+        if userinfo_end < first_sep {
+            out.replace_range(auth_start..userinfo_end, "REDACTED");
+        }
+    }
+    if let Some(query_start) = out.find('?') {
+        let (head, query) = out.split_at(query_start);
+        let redacted: Vec<String> = query
+            .split('&')
+            .map(|pair| match pair.split_once('=') {
+                Some((key, _)) if !key.is_empty() => format!("{key}=REDACTED"),
+                _ => pair.to_string(),
+            })
+            .collect();
+        out = format!("{head}{}", redacted.join("&"));
+    }
+    out
+}
+
+/// Configuration error for an invalid endpoint URL (#304).
+///
+/// Distinct type so binaries can exit with the configuration/usage code
+/// (2, the code clap already uses) instead of the generic 1.
+#[derive(Debug)]
+pub struct UrlValidationError(pub String);
+
+impl std::fmt::Display for UrlValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for UrlValidationError {}
+
+/// Exit with the configuration/usage code (2) when `err` is a URL
+/// validation error (#304 review). Returns otherwise so the caller can
+/// propagate the original error.
+pub fn exit_2_if_url_validation_error(err: &(dyn std::error::Error + 'static)) {
+    if err.downcast_ref::<UrlValidationError>().is_some() {
+        eprintln!("Error: {err}");
+        std::process::exit(2);
+    }
+}
+
 /// Validate that an endpoint URL is an absolute http(s) URL before any
 /// network traffic (#304).
 ///
@@ -203,25 +294,30 @@ pub fn hostname_from_url(url: &str) -> String {
 /// accepted (e.g. `https://proxy.example/llm/v1/chat/completions`). The URL
 /// must parse as absolute, use the `http` or `https` scheme, and carry a
 /// host; anything else (missing scheme such as `127.0.0.1:8000/v1`,
-/// non-HTTP schemes, empty input) is a configuration error and must fail
-/// before the first request is issued.
-pub fn validate_endpoint_url(raw: &str) -> Result<(), String> {
+/// non-HTTP schemes, empty input) is a configuration error that fails
+/// before the first request is issued and exits 2.
+pub fn validate_endpoint_url(raw: &str) -> Result<(), UrlValidationError> {
     let url = raw.trim();
     if url.is_empty() {
-        return Err("endpoint URL is empty".to_string());
+        return Err(UrlValidationError("endpoint URL is empty".to_string()));
     }
-    let parsed =
-        reqwest::Url::parse(url).map_err(|err| format!("invalid endpoint URL '{url}': {err}"))?;
+    let parsed = reqwest::Url::parse(url).map_err(|err| {
+        UrlValidationError(format!("invalid endpoint URL '{}': {err}", redact_url(url)))
+    })?;
     match parsed.scheme() {
         "http" | "https" => {}
         scheme => {
-            return Err(format!(
-                "endpoint URL '{url}' must use http or https, not '{scheme}'"
-            ))
+            return Err(UrlValidationError(format!(
+                "endpoint URL '{}' must use http or https, not '{scheme}'",
+                redact_url(url)
+            )))
         }
     }
     if parsed.host_str().map(str::is_empty).unwrap_or(true) {
-        return Err(format!("endpoint URL '{url}' has no host"));
+        return Err(UrlValidationError(format!(
+            "endpoint URL '{}' has no host",
+            redact_url(url)
+        )));
     }
     Ok(())
 }
@@ -250,7 +346,7 @@ pub fn load_endpoints_file(
             return Err(anyhow::anyhow!("Endpoint has empty url in '{}'", path).into());
         }
         if let Err(err) = validate_endpoint_url(&url) {
-            return Err(anyhow::anyhow!("{} (endpoints file '{}')", err, path).into());
+            return Err(UrlValidationError(format!("{err} (endpoints file '{path}')")).into());
         }
         if api_key.is_empty() {
             return Err(anyhow::anyhow!("Endpoint has empty api_key in '{}'", path).into());
@@ -278,7 +374,8 @@ pub fn resolve_endpoints(
     match (url, api_key, endpoints_file) {
         (Some(u), Some(a), None) => {
             // Fail fast on malformed URLs before any benchmark traffic (#304).
-            validate_endpoint_url(u).map_err(|err| anyhow::anyhow!(err))?;
+            // The typed error lets callers exit with the usage code 2.
+            validate_endpoint_url(u)?;
             Ok(ResolvedEndpoints::Single {
                 url: u.to_string(),
                 api_key: a.to_string(),
@@ -434,6 +531,57 @@ mod tests {
     }
 
     #[test]
+    fn redact_url_strips_userinfo_and_query_values_keeps_keys() {
+        assert_eq!(
+            super::redact_url("https://user:pass@proxy.example/llm/v1/chat/completions"),
+            "https://REDACTED@proxy.example/llm/v1/chat/completions"
+        );
+        assert_eq!(
+            super::redact_url("http://u@127.0.0.1:8000/v1?api_key=shh&x=1"),
+            "http://REDACTED@127.0.0.1:8000/v1?api_key=REDACTED&x=REDACTED"
+        );
+        // No credentials: unchanged.
+        assert_eq!(
+            super::redact_url("http://127.0.0.1:8000/v1/chat/completions"),
+            "http://127.0.0.1:8000/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn redact_url_handles_unparseable_urls_with_credentials() {
+        // Scheme-less URLs fail to parse but must still be redacted in the
+        // error message (#304 review).
+        let out = super::redact_url("user:pass@host/v1/chat/completions?token=shh");
+        assert!(
+            !out.contains("pass") && !out.contains("shh"),
+            "malformed URL credentials must be masked: {out}"
+        );
+        // ftp:// URLs parse; they are rejected by validation but redaction
+        // still applies when they appear in messages.
+        let out = super::redact_url("ftp://user:secret@h.example/v1?api_key=hush");
+        assert!(
+            !out.contains("secret") && !out.contains("hush"),
+            "non-http scheme URLs keep their shape but lose secrets: {out}"
+        );
+        assert!(out.contains("api_key=REDACTED"), "keys stay: {out}");
+    }
+
+    #[test]
+    fn validate_endpoint_url_error_messages_redact_credentials() {
+        let err = super::validate_endpoint_url("ftp://user:secret@h.example/v1?api_key=hush")
+            .expect_err("non-http scheme must be rejected");
+        let text = err.to_string();
+        assert!(
+            !text.contains("secret") && !text.contains("hush"),
+            "rejection message must not echo credentials: {text}"
+        );
+        assert!(
+            text.contains("http or https"),
+            "must explain the rule: {text}"
+        );
+    }
+
+    #[test]
     fn validate_endpoint_url_rejects_invalid_urls() {
         // No scheme: parses as a relative URL, which cannot carry a host.
         for bad in [
@@ -444,10 +592,11 @@ mod tests {
             "ftp://example.com/v1/chat/completions",
             "http://",
         ] {
-            let err = super::validate_endpoint_url(bad)
-                .err()
-                .unwrap_or_else(|| panic!("'{bad}' must be rejected"));
-            assert!(!err.is_empty(), "rejection of '{bad}' must carry a message");
+            let err = super::validate_endpoint_url(bad).expect_err("must be rejected");
+            assert!(
+                !err.to_string().is_empty(),
+                "rejection must carry a message"
+            );
         }
     }
 

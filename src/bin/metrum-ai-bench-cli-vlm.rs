@@ -140,7 +140,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key."
+        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -428,11 +428,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     // Resolve endpoints (single url+api_key or multi from file)
-    let resolved_endpoints = resolve_endpoints(
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // traffic (#304 review).
+    let resolved_endpoints = match resolve_endpoints(
         args.url.as_deref(),
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
-    )?;
+    ) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
 
     // Validate ramp-up period if specified

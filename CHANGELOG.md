@@ -10,6 +10,10 @@
   checks the model against the server's `/v1/models` list before any
   benchmark traffic, reports the server's actual response, and supports a
   `--model-alias` override for proxy/alias setups (#304).
+- Both the invalid-URL rejection and the failed `--validate-model` preflight
+  exit 2, the configuration/usage code clap already uses, and URLs echoed in
+  errors, logs and the preflight report have userinfo and query values
+  redacted (#304).
 
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.

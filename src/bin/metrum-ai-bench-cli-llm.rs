@@ -62,7 +62,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key."
+        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -144,7 +144,7 @@ struct Args {
         long,
         default_value_t = false,
         requires = "url",
-        help = "Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic"
+        help = "Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic; exits 2 on failure"
     )]
     validate_model: bool,
 
@@ -520,12 +520,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    // Resolve endpoints (single url+api_key or multi from file)
-    let resolved_endpoints = resolve_endpoints(
+    // Resolve endpoints (single url+api_key or multi from file). Invalid
+    // URLs exit 2 (the configuration/usage code clap uses) before traffic.
+    let resolved_endpoints = match resolve_endpoints(
         args.url.as_deref(),
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
-    )?;
+    ) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();
@@ -624,17 +631,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 let report_json = serde_json::to_string_pretty(&report)
                     .unwrap_or_else(|_| "<unserializable report>".to_string());
                 error!("model preflight failed:\n{report_json}");
-                return Err(anyhow::anyhow!(
-                    "model preflight failed: {checked_id} is not available at {} — {}",
-                    report.models_url,
-                    report.detail
-                )
-                .context(
+                eprintln!(
+                    "Error: model preflight failed: {checked_id} is not available at {} — {}",
+                    report.models_url, report.detail
+                );
+                eprintln!(
                     "--validate-model rejected the run before any benchmark traffic; \
                      fix --model (or set --model-alias for proxy/alias setups), or drop \
-                     --validate-model to proceed without validation",
-                )
-                .into());
+                     --validate-model to proceed without validation"
+                );
+                // Configuration error: exit 2, the code clap uses (#304 review).
+                std::process::exit(2);
             }
         } else {
             return Err(anyhow::anyhow!(
