@@ -10,13 +10,17 @@
 //! imagegen binaries all go through it, so every `telemetry.v1` file has the
 //! same kinds and one monotonic clock.
 
+use super::config::CompiledSource;
 use super::config::TelemetryConfig;
 use super::epoch::RunEpoch;
 use super::row::{
-    PhaseKind, RequestRow, Row, RunRow, StageRow, SummaryRow, TelemetrySourceStamp,
+    PhaseKind, RequestRow, Row, RunRow, ScrapeErrorRow, StageRow, SummaryRow, TelemetrySourceStamp,
     TELEMETRY_SCHEMA_VERSION,
 };
-use super::scraper::{build_telemetry_client, probe_sources, spawn_scrapers};
+use super::scraper::{
+    boundary_scrape_error, boundary_scrape_once, build_telemetry_client, probe_sources,
+    spawn_scrapers,
+};
 use super::writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats};
 use crate::record::{Phase, RequestRecord};
 use crate::runner::StopFlag;
@@ -125,6 +129,34 @@ pub struct SessionOptions<'a> {
     pub abort: Option<StopFlag>,
 }
 
+/// Tag stamped on the synchronous boundary baseline rows (#312).
+pub const BOUNDARY_PRE_MEASURED: &str = "pre-measured";
+
+/// Request from the issuing loop to the record consumer for the
+/// synchronous pre-measured boundary sample (#312, post-#310 structure):
+/// the telemetry session lives in the consumer task, so the loop sends this
+/// request and **awaits the ack** before the first measured send. A
+/// fire-and-forget message would not guarantee baseline-before-send.
+/// `budget_ms` bounds the boundary scrape; the consumer answers even while
+/// busy processing records (biased select).
+pub struct BoundaryRequest {
+    /// Overall scrape budget in milliseconds; on overrun the consumer marks
+    /// the baseline as failed ([`TelemetrySession::note_boundary_timeout`]).
+    pub budget_ms: u64,
+    pub ack: tokio::sync::oneshot::Sender<BoundaryOutcome>,
+}
+
+/// Result of [`TelemetrySession::boundary_sample`] (#312).
+#[derive(Debug, Clone, Default)]
+pub struct BoundaryOutcome {
+    /// Every configured source scraped cleanly.
+    pub ok: bool,
+    /// Total matched series across sources.
+    pub matched_series: u64,
+    /// Sources whose boundary scrape failed (`name: error`).
+    pub failed_sources: Vec<String>,
+}
+
 /// Additive `summary.v3.telemetry` block: where the NDJSON went and how
 /// many rows of each kind it holds. Present only when `--ndjson` is set.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -179,6 +211,16 @@ pub struct TelemetrySession {
     /// rows are skipped and [`Self::finish`] reports it, so a dead writer
     /// never costs the run its `summary.v3`.
     write_error: Option<anyhow::Error>,
+    /// Retained scrape plan for the synchronous pre-measured boundary
+    /// sample (#312); `None` when no telemetry YAML configured any source.
+    boundary_plan: Option<(reqwest::Client, TelemetryConfig, Vec<CompiledSource>)>,
+    /// Run stop flag, retained only in `--require-telemetry` mode: a failed
+    /// required boundary sample trips it so measured issuance never starts
+    /// blind (#312); a later Ctrl-C still drains and writes the summary.
+    abort: Option<StopFlag>,
+    /// Required-mode boundary failure, surfaced by [`close_session`] as the
+    /// run verdict after the partial summary is written (#312).
+    boundary_failure: Option<String>,
 }
 
 impl TelemetrySession {
@@ -227,6 +269,9 @@ impl TelemetrySession {
             warmup: None,
             measure: None,
             write_error: None,
+            boundary_plan: None,
+            abort: None,
+            boundary_failure: None,
         };
         // The run row goes first so readers see the epoch before any sample.
         session
@@ -242,6 +287,8 @@ impl TelemetrySession {
             }))
             .await?;
         if let Some((client, cfg, sources)) = scrape_plan {
+            // Retain the plan for the synchronous boundary sample (#312).
+            session.boundary_plan = Some((client.clone(), cfg.clone(), sources.clone()));
             let handles = spawn_scrapers(
                 client,
                 cfg,
@@ -254,8 +301,11 @@ impl TelemetrySession {
                 options.require_failures,
             );
             // Only a required source may stop the run; without
-            // --require-telemetry a scraper exit stays a warning.
+            // --require-telemetry a scraper exit stays a warning. The
+            // filtered flag is also retained for a failed required boundary
+            // sample (#312), which gates measured issuance the same way.
             let abort = options.abort.filter(|_| options.require_telemetry);
+            session.abort = abort.clone();
             session.scrapers = handles
                 .into_iter()
                 .map(|handle| {
@@ -310,6 +360,122 @@ impl TelemetrySession {
     /// fills `stage` and `load` on request and stage rows.
     pub fn set_load(&mut self, load: f64) {
         self.load = Some(load);
+    }
+
+    /// Synchronously scrape every configured source once, immediately
+    /// before the first measured request (#312), emitting normal telemetry
+    /// rows tagged `boundary: "pre-measured"` with the shared run epoch as
+    /// time anchor. No-op when no telemetry sources are configured.
+    ///
+    /// Contracts: every measured send then has a queue sample at-or-before
+    /// send and no older than the configured scrape interval (periodic
+    /// scrapes carry the rest of the run). A source that fails the boundary
+    /// scrape always emits a boundary-tagged `scrape_error` row — coverage
+    /// is marked missing/stale, never invented. Under `--require-telemetry`
+    /// a failed source additionally trips the run stop flag (gating
+    /// measured issuance) and is reported by `close_session` as the run
+    /// verdict after the partial summary is written; otherwise the failure
+    /// is recorded and the run proceeds.
+    pub async fn boundary_sample(&mut self) -> BoundaryOutcome {
+        let Some((client, cfg, sources)) = self.boundary_plan.take() else {
+            // No telemetry sources configured: no-op success.
+            return BoundaryOutcome {
+                ok: true,
+                ..BoundaryOutcome::default()
+            };
+        };
+        let mut outcome = BoundaryOutcome::default();
+        let mut failed: Vec<String> = Vec::new();
+        for src in &sources {
+            match boundary_scrape_once(
+                &client,
+                &cfg,
+                src,
+                &self.epoch,
+                &self.run_id,
+                &self.writer,
+                BOUNDARY_PRE_MEASURED,
+            )
+            .await
+            {
+                Ok(matched) => {
+                    outcome.matched_series += matched;
+                }
+                Err(err) => {
+                    boundary_scrape_error(
+                        src,
+                        &self.epoch,
+                        &self.run_id,
+                        &self.writer,
+                        BOUNDARY_PRE_MEASURED,
+                        &err,
+                    )
+                    .await;
+                    failed.push(format!("{}: {err:#}", src.name));
+                }
+            }
+        }
+        // Put the plan back: a second boundary call (e.g. a future stage
+        // boundary) uses the same plan; the idempotence guard at the call
+        // site makes this a single shot today.
+        self.boundary_plan = Some((client, cfg, sources));
+        if failed.is_empty() {
+            outcome.ok = true;
+        } else if self.require_telemetry {
+            let message = format!(
+                "telemetry boundary sample failed before measured issuance: {}",
+                failed.join("; ")
+            );
+            self.boundary_failure = Some(message.clone());
+            if let Some(flag) = &self.abort {
+                flag.stop();
+            }
+            eprintln!("error: {message}");
+        } else {
+            eprintln!(
+                "warning: telemetry boundary sample failed for {}; proceeding without a pre-measured baseline for those sources",
+                failed.join("; ")
+            );
+        }
+        outcome.failed_sources = failed;
+        outcome
+    }
+
+    /// A boundary sample that exceeded its budget (#312): mark the missing
+    /// baseline exactly like a failed scrape — one boundary-tagged
+    /// `scrape_error` row (source name `boundary`; per-source attribution is
+    /// unknown after a timeout, never invented) — and under
+    /// `--require-telemetry` trip the run stop flag and record the failure
+    /// for the `close_session` verdict.
+    pub async fn note_boundary_timeout(&mut self, budget_ms: u64) -> BoundaryOutcome {
+        let message = format!(
+            "telemetry boundary sample exceeded the {budget_ms}ms budget before measured issuance"
+        );
+        let _ = self
+            .writer
+            .send_priority(Row::ScrapeError(ScrapeErrorRow {
+                run_id: (*self.run_id).clone(),
+                t_ns: self.epoch.elapsed_ns(),
+                src: "boundary".to_string(),
+                http_status: None,
+                error: message.clone(),
+                boundary: Some(BOUNDARY_PRE_MEASURED.to_string()),
+            }))
+            .await;
+        if self.require_telemetry {
+            self.boundary_failure = Some(message.clone());
+            if let Some(flag) = &self.abort {
+                flag.stop();
+            }
+            log::error!("{message}");
+        } else {
+            eprintln!("warning: {message}");
+        }
+        BoundaryOutcome {
+            ok: false,
+            matched_series: 0,
+            failed_sources: vec![message],
+        }
     }
 
     /// Write one `request` row for a modality record and widen its phase
@@ -441,7 +607,14 @@ pub async fn close_session(
     let Some(mut session) = session else {
         return (None, Ok(()));
     };
-    let verdict = session.join_scrapers().await;
+    let mut verdict = session.join_scrapers().await;
+    if let Some(message) = session.boundary_failure.take() {
+        // A failed required boundary sample is a run verdict (#312): the
+        // partial summary and logs were already written.
+        if verdict.is_ok() {
+            verdict = Err(anyhow::anyhow!("{message}"));
+        }
+    }
     match session.finish(stopped || verdict.is_err()).await {
         Ok(info) => (Some(info), verdict),
         Err(err) => (None, verdict.and(Err(err))),
@@ -742,5 +915,236 @@ mod tests {
             "summary keeps the file name only"
         );
         assert_eq!(rows.last().expect("rows")["partial"], false);
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    /// Minimal two-source scrape server: serves a fixed exposition with a
+    /// queue gauge, and keeps the listener open until dropped.
+    fn boundary_yaml(live: SocketAddr, dead: &str, interval_ms: u64) -> String {
+        format!(
+            "default_interval_ms: {interval_ms}\ntimeout_ms: 500\nsources:\n  - name: live\n    url: http://{live}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n  - name: dead\n    url: http://{dead}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n"
+        )
+    }
+
+    async fn spawn_metrics_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let app = axum::Router::new().route(
+                "/metrics",
+                axum::routing::get(|| async {
+                    "# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n"
+                }),
+            );
+            axum::serve(listener, app).await.unwrap();
+        });
+        (addr, handle)
+    }
+
+    fn write_yaml(dir: &tempfile::TempDir, yaml: String) -> std::path::PathBuf {
+        let path = dir.path().join("telemetry.yaml");
+        std::fs::write(&path, yaml).expect("write yaml");
+        path
+    }
+
+    fn stamp() -> RunStamp {
+        RunStamp {
+            run_id: "boundary-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        }
+    }
+
+    fn read_rows(path: &std::path::Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(path)
+            .expect("read ndjson")
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("json"))
+            .collect()
+    }
+
+    /// #312: the boundary sample emits pre-measured-tagged rows on the run
+    /// epoch before issuance, and a partial source failure is recorded as a
+    /// boundary-tagged scrape_error row without aborting the run (optional
+    /// mode).
+    #[tokio::test]
+    async fn boundary_sample_tags_rows_and_marks_missing_coverage() {
+        let (live, _server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        // A closed port as the second source: probe would fail it, so start
+        // with both sources live is impossible; instead put the dead source
+        // in allow-unprobed state? Startup probes run on every source, so
+        // for this test the "dead" source must die between start() and the
+        // boundary call.
+        let (dying_addr, dying_server) = spawn_metrics_server().await;
+        let yaml = boundary_yaml(live, &dying_addr.to_string(), 500);
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        // The source dies after the startup probe, before the boundary.
+        dying_server.abort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let outcome = session.boundary_sample().await;
+        assert!(!outcome.ok, "a dead source means partial boundary coverage");
+        assert_eq!(
+            outcome.failed_sources.len(),
+            1,
+            "{}",
+            outcome.failed_sources.join(";")
+        );
+        assert!(
+            outcome.failed_sources[0].starts_with("dead"),
+            "failed source is named: {:?}",
+            outcome.failed_sources
+        );
+        assert!(outcome.matched_series >= 1, "live source matched series");
+
+        // Stop scrapers so finish() closes cleanly; then inspect rows.
+        let mut session = session;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows = read_rows(&ndjson);
+        let boundary_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.get("boundary").and_then(|b| b.as_str()) == Some(BOUNDARY_PRE_MEASURED))
+            .collect();
+        assert!(
+            boundary_rows
+                .iter()
+                .any(|r| r["kind"] == "telemetry" && r["src"] == "live"),
+            "live source boundary row must be tagged pre-measured: {rows:?}"
+        );
+        assert!(
+            boundary_rows
+                .iter()
+                .any(|r| r["kind"] == "scrape_error" && r["src"] == "dead"),
+            "the missing baseline is a boundary-tagged scrape_error row, not silence: {rows:?}"
+        );
+        // Time anchor: boundary rows share the run epoch (t_ns present, small).
+        let boundary_t = boundary_rows
+            .iter()
+            .filter(|r| r["kind"] == "telemetry")
+            .map(|r| r["t_ns"].as_u64().unwrap())
+            .min()
+            .unwrap();
+        assert!(
+            boundary_t < 500_000_000,
+            "boundary near epoch: {boundary_t}"
+        );
+    }
+
+    /// #312: under --require-telemetry a failed boundary scrape trips the
+    /// run stop flag (gating measured issuance) and surfaces as the close
+    /// verdict after the partial summary is written.
+    #[tokio::test]
+    async fn boundary_failure_gates_issuance_in_required_mode() {
+        let (live, _server) = spawn_metrics_server().await;
+        let (dying_addr, dying_server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = boundary_yaml(live, &dying_addr.to_string(), 500);
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let stop = crate::runner::StopFlag::new();
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: true,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), Some(stop.clone()))
+            .await
+            .expect("start")
+            .expect("session");
+        dying_server.abort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let outcome = session.boundary_sample().await;
+        assert!(!outcome.ok);
+        assert!(
+            stop.is_stopped(),
+            "required boundary failure must trip the run stop flag"
+        );
+
+        let (info, verdict) = close_session(Some(session), true).await;
+        assert!(info.is_some(), "partial summary rows still written");
+        let err = verdict.expect_err("boundary failure is the run verdict");
+        assert!(
+            format!("{err:#}").contains("boundary sample failed"),
+            "verdict names the boundary failure: {err:#}"
+        );
+    }
+
+    /// #312: a clean boundary emits tagged rows and reports success; without
+    /// configured sources the call is a no-op.
+    #[tokio::test]
+    async fn boundary_sample_clean_and_noop_cases() {
+        let (live, _server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        // Single live source.
+        let yaml = format!(
+            "default_interval_ms: 500\ntimeout_ms: 300\nsources:\n  - name: live\n    url: http://{live}/metrics\n    interval_ms: 500\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n"
+        );
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        let outcome = session.boundary_sample().await;
+        assert!(outcome.ok && outcome.matched_series >= 1);
+        let mut session = session;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows = read_rows(&ndjson);
+        assert!(
+            rows.iter()
+                .any(|r| r.get("boundary").and_then(|b| b.as_str()) == Some(BOUNDARY_PRE_MEASURED)),
+            "clean boundary rows carry the tag: {rows:?}"
+        );
+
+        // No sources configured: boundary_sample is a no-op.
+        let dir2 = tempfile::tempdir().unwrap();
+        let ndjson2 = dir2.path().join("run2.ndjson");
+        let args2 = TelemetryArgs {
+            ndjson: Some(ndjson2),
+            telemetry: None,
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let mut session2 = args2
+            .start_session(None, stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        let outcome2 = session2.boundary_sample().await;
+        assert!(outcome2.ok && outcome2.matched_series == 0);
     }
 }

@@ -154,11 +154,7 @@ A modality run is one stage. Its NDJSON holds:
 - One `run` row first. `config.binary` names the binary; `config` never holds
   API keys.
 - One `request` row per `request.v3` record, written as each request
-  completes, joined on `seq` and `run_id`. Emission order is per-request
-  completion order (the record channel's receive order), not `seq` order,
-  and rows become visible to a tailing reader within the writer flush bound:
-  every 64 buffered rows or every 250 ms, whichever comes first (#310).
-  `t_sent_ns` is the record's
+  completes, joined on `seq` and `run_id`. `t_sent_ns` is the record's
   `send_offset_s` in nanoseconds (the run clock starts at the NDJSON epoch,
   after the telemetry probes, so both share one origin), `t_done_ns = t_sent_ns + latency_s`,
   `t_first_ns` is response headers (`first_byte_s`) as on strategic rows,
@@ -173,6 +169,20 @@ A modality run is one stage. Its NDJSON holds:
   window ends at or before the `measure` window starts, at any concurrency.
 - `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
   row last.
+
+### Pre-measured boundary baseline (#312)
+
+Immediately before the first measured request (after the warmup barrier),
+each configured source is scraped once synchronously. The rows are normal
+`telemetry` rows tagged `boundary: "pre-measured"` on the shared run epoch,
+so the opening burst has a queue sample at-or-before send and no older than
+the configured scrape interval (periodic scrapes carry the rest of the run).
+The baseline scrape latency is before the first measured send, outside the
+measured request window. A source that fails the baseline emits a
+boundary-tagged `scrape_error` row — coverage is explicitly missing, never
+invented. Under `--require-telemetry` a failed baseline also stops measured
+issuance and surfaces as the run verdict after the partial summary is
+written; without it the run proceeds and the missing baseline is on record.
 
 `summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See

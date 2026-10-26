@@ -176,3 +176,156 @@ fn strategic_require_telemetry_aborts_mid_run() {
     let stage_rows = rows.iter().filter(|r| r["kind"] == "stage").count() as u64;
     assert_eq!(summary["stage_rows"], stage_rows, "{summary}");
 }
+
+// #312: the synchronous pre-measured boundary sample gives the opening
+// burst a queue sample at-or-before send, no older than the scrape interval.
+
+#[test]
+fn boundary_sample_precedes_and_anchors_measured_requests() {
+    use std::fs;
+
+    let mock = common::spawn_mock(&["--latency-ms", "100"]);
+    let address = mock.address;
+    let directory = tempfile::tempdir().expect("tmp");
+    let ndjson = directory.path().join("run.ndjson");
+    let data_log = directory.path().join("run.jsonl");
+    let telemetry = directory.path().join("telemetry.yaml");
+    fs::write(
+        &telemetry,
+        format!(
+            r#"
+default_interval_ms: 1000
+timeout_ms: 500
+sources:
+  - name: engine
+    url: http://{address}/metrics
+    interval_ms: 100
+    include:
+      - "^vllm:(num_requests_running|num_requests_waiting)$"
+"#
+        ),
+    )
+    .expect("write telemetry yaml");
+
+    // Burst: 20 measured requests at concurrency 8, no pacing, plus 3
+    // warmup requests — the boundary sample belongs after the warmup
+    // barrier, at the first measured send, so warmup rows may precede the
+    // baseline while measured rows must not.
+    let out = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
+        .args([
+            "--url",
+            &format!("http://{address}/v1/chat/completions"),
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "boundary",
+            "--num-requests",
+            "23",
+            "--concurrency",
+            "8",
+            "--warmup-requests",
+            "3",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+            "--log-level",
+            "error",
+            "--ndjson",
+            ndjson.to_str().unwrap(),
+            "--telemetry",
+            telemetry.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run llm burst with telemetry");
+    assert!(
+        out.status.success(),
+        "burst run must succeed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let rows: Vec<serde_json::Value> = fs::read_to_string(&ndjson)
+        .expect("read ndjson")
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+
+    let boundary_rows: Vec<&serde_json::Value> = rows
+        .iter()
+        .filter(|r| r.get("boundary").and_then(|b| b.as_str()) == Some("pre-measured"))
+        .collect();
+    assert!(
+        boundary_rows
+            .iter()
+            .any(|r| r["kind"] == "telemetry" && r["src"] == "engine"),
+        "pre-measured boundary rows must exist: {:?}",
+        rows.iter().map(|r| &r["kind"]).collect::<Vec<_>>()
+    );
+    let boundary_t = boundary_rows
+        .iter()
+        .filter(|r| r["kind"] == "telemetry")
+        .map(|r| r["t_ns"].as_u64().unwrap())
+        .min()
+        .unwrap();
+
+    let request_rows: Vec<&serde_json::Value> =
+        rows.iter().filter(|r| r["kind"] == "request").collect();
+    assert_eq!(
+        request_rows.len(),
+        23,
+        "all warmup+measured requests recorded"
+    );
+    let measured_rows: Vec<&serde_json::Value> = request_rows
+        .iter()
+        .filter(|r| r["warmup"] == serde_json::Value::Bool(false))
+        .copied()
+        .collect();
+    assert_eq!(
+        measured_rows.len(),
+        20,
+        "warmup rows excluded from the measured set"
+    );
+
+    // Baseline-before-send: every MEASURED request is sent at or after the
+    // boundary sample...
+    for row in &measured_rows {
+        let t_sent = row["t_sent_ns"].as_u64().unwrap();
+        assert!(
+            t_sent >= boundary_t,
+            "measured request sent at {t_sent} before boundary baseline at {boundary_t}"
+        );
+    }
+    // ...and no older than the scrape interval (100 ms) for the first send.
+    let first_sent = measured_rows
+        .iter()
+        .map(|r| r["t_sent_ns"].as_u64().unwrap())
+        .min()
+        .unwrap();
+    assert!(
+        first_sent - boundary_t < 100_000_000,
+        "boundary baseline is fresh: first send {first_sent}, baseline {boundary_t}"
+    );
+
+    // File order: boundary rows precede the first MEASURED request row.
+    // (Post-#310 the consumer streams rows live, so warmup request rows may
+    // precede the baseline; the baseline sits at the warmup→measure
+    // boundary by construction.)
+    let first_measured_pos = rows
+        .iter()
+        .position(|r| r["kind"] == "request" && r["warmup"] == serde_json::Value::Bool(false))
+        .expect("measured request rows");
+    for (i, row) in boundary_rows.iter().enumerate() {
+        let pos = rows.iter().position(|r| *r == **row).unwrap();
+        assert!(
+            pos < first_measured_pos,
+            "boundary row {i} must precede measured request rows in the file"
+        );
+    }
+}
