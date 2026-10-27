@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Security
+- The `examples/agent/build_prompt_pool.py` helper no longer depends on the
+  unpinned `requests` package: its JSON POST helpers now use the standard
+  library (`urllib.request`), removing the unmanifested Python dependency
+  that pip-audit could not assess (#340).
 - Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
   unique per-test `tempfile` directories instead of predictable paths under
   the shared temp directory (#337).
