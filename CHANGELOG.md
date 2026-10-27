@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Security
+- Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
+  values) are now redacted in every per-request log path: the llm binary's
+  streaming request-failure report and context blocks, the vlm/asr request
+  debug lines, the vlm per-request failure report, imagegen's per-request
+  `error.log` lines, and the library's VLM image-URL fetch diagnostics.
+  reqwest error text (whose `Display` embeds the full URL) is redacted before
+  it reaches any log. Regression tests run a failing request against a
+  credentialed endpoint URL for all four modality binaries and assert that
+  neither `error.log`, `debug.log` nor stderr contains the secret parts
+  (#332).
 - external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
   (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
   CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,

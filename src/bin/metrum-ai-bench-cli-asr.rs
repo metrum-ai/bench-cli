@@ -235,7 +235,10 @@ async fn make_request(
     (Duration, Duration, String, f64, &'static str, usize, usize),
     Box<dyn Error + Send + Sync>,
 > {
-    debug!("Request URL: {}", url);
+    debug!(
+        "Request URL: {}",
+        metrum_ai_bench::endpoints::redact_url(url)
+    );
     debug!("Model: {}", model);
     debug!("Response format: {}", response_format);
 
