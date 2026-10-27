@@ -407,15 +407,27 @@ async fn make_request(
     ))
 }
 
+fn print_version_only() {
+    println!("metrum-ai-bench-cli-vlm version {VERSION}");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Standalone --version-only must not demand run arguments (#307):
+    // the run-required arguments are non-optional fields, so clap cannot
+    // waive them; check before parsing.
+    if metrum_ai_bench::version_only_invoked() {
+        print_version_only();
+        return Ok(());
+    }
+
     let mut args = Args::parse();
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
 
     // Check for version-only flag first
     if args.version_only {
-        println!("metrum-ai-bench-cli-vlm version {}", VERSION);
+        print_version_only();
         return Ok(());
     }
 
