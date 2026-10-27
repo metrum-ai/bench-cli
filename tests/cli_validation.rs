@@ -798,6 +798,128 @@ fn strategic_rejects_zero_requests_per_stage() {
     );
 }
 
+// #307: standalone --version-only must print the version and exit 0 without
+// traffic or required benchmark arguments, on every distributed binary.
+
+#[test]
+fn every_distributed_binary_supports_standalone_version_flags() {
+    let with_version_only: Vec<(&str, PathBuf)> = vec![
+        ("metrum-ai-bench-cli-llm", metrum_ai_bench_llm_bin()),
+        ("metrum-ai-bench-cli-vlm", metrum_ai_bench_vlm_bin()),
+        ("metrum-ai-bench-cli-asr", metrum_ai_bench_asr_bin()),
+        (
+            "metrum-ai-bench-cli-imagegen",
+            metrum_ai_bench_imagegen_bin(),
+        ),
+        (
+            "metrum-ai-bench-cli-strategic",
+            metrum_ai_bench_strategic_bin(),
+        ),
+        ("metrum-ai-bench-cli-prompts", metrum_ai_bench_prompts_bin()),
+    ];
+    for (name, bin) in &with_version_only {
+        // --version works everywhere (clap built-in).
+        let out = Command::new(bin).arg("--version").output().expect(name);
+        assert!(
+            out.status.success(),
+            "{name} --version must exit 0:\n{}",
+            combined_output(&out)
+        );
+        // --version-only: the regression fixed by #307.
+        let out = Command::new(bin)
+            .arg("--version-only")
+            .output()
+            .expect(name);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{name} --version-only must print the version without required run arguments:\n{}",
+            combined_output(&out)
+        );
+        let text = combined_output(&out);
+        assert!(
+            text.contains(&format!("{name} version")),
+            "{name} --version-only must print the version line:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn dispatcher_binaries_have_no_version_only_flag() {
+    // The unified dispatcher and the mock server never had --version-only;
+    // --version covers them. This pins the current distribution surface so
+    // the flag cannot silently appear or disappear.
+    for bin in [
+        PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli")),
+        PathBuf::from(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-mock-server")),
+    ] {
+        let out = Command::new(&bin).arg("--version").output().expect("bin");
+        assert!(
+            out.status.success(),
+            "--version must work:\n{}",
+            combined_output(&out)
+        );
+        let out = Command::new(&bin)
+            .arg("--version-only")
+            .output()
+            .expect("bin");
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--version-only is not a flag of these binaries; parse must reject it:\n{}",
+            combined_output(&out)
+        );
+    }
+}
+
+#[test]
+fn llm_version_only_with_full_run_args_skips_traffic() {
+    // --version-only wins even when a complete run is also configured: the
+    // version prints and no traffic, data log, or banner side effects occur.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args([
+            "--version-only",
+            "--url",
+            "http://127.0.0.1:9/v1/chat/completions",
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "t",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            "test-data/llm-hi.jsonl",
+            "--mode",
+            "chat",
+            "--model",
+            "m",
+            "--data-log",
+            data_log.to_str().unwrap(),
+            "--max-tokens",
+            "8",
+        ])
+        .output()
+        .expect("run metrum-ai-bench-cli-llm --version-only with full args");
+    assert!(
+        out.status.success(),
+        "--version-only must exit 0:\n{}",
+        combined_output(&out)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("metrum-ai-bench-cli-llm version"),
+        "version line must print:\n{stdout}"
+    );
+    assert!(
+        !data_log.exists(),
+        "no traffic or logging may occur with --version-only"
+    );
+}
+
 // #304: invalid absolute URLs must be rejected before any network traffic.
 // Scheme-less --url values previously produced an all-error benchmark run
 // that still exited 0.

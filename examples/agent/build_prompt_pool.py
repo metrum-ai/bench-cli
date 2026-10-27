@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build and server-filter an LLM prompt pool.
 
-Python 3.10+. Dependencies: requests. The script invokes
-metrum-ai-bench-cli-prompts, compares /tokenize with usage.prompt_tokens once,
-and keeps rows whose calibrated server ISL falls inside the requested window.
+Python 3.10+. Dependencies: none (standard library only). The script
+invokes metrum-ai-bench-cli-prompts, compares /tokenize with
+usage.prompt_tokens once, and keeps rows whose calibrated server ISL
+falls inside the requested window.
 """
 
 from __future__ import annotations
@@ -13,10 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
-
-import requests
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,10 +53,25 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def post_json(session: requests.Session, url: str, body: dict[str, Any]) -> dict[str, Any]:
-    response = session.post(url, json=body, timeout=120)
-    response.raise_for_status()
-    value = response.json()
+def post_json(headers: dict[str, str], url: str, body: dict[str, Any]) -> dict[str, Any]:
+    """POST a JSON body and return the JSON object response.
+
+    Standard-library replacement for the previous requests.Session().post
+    helper: same JSON encoding, Authorization header, 120 s timeout and
+    fail-on-HTTP-error semantics, without a third-party dependency.
+    """
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"{url}: HTTP {exc.code}: {detail}") from exc
     if not isinstance(value, dict):
         raise ValueError(f"{url}: expected a JSON object")
     return value
@@ -102,8 +118,6 @@ def main() -> int:
 
     base = args.url.rstrip("/")
     headers = {"Authorization": f"Bearer {args.api_key}"}
-    session = requests.Session()
-    session.headers.update(headers)
 
     def messages(prompt: str) -> list[dict[str, str]]:
         return [{"role": "user", "content": prompt}]
@@ -111,13 +125,13 @@ def main() -> int:
     calibration_row = rows[0]
     calibration_messages = messages(calibration_row["prompt"])
     tokenize_value = post_json(
-        session,
+        headers,
         f"{base}/tokenize",
         {"model": args.model, "messages": calibration_messages, "add_generation_prompt": True},
     )
     tokenize_tokens = token_count(tokenize_value)
     completion = post_json(
-        session,
+        headers,
         f"{base}/chat/completions",
         {
             "model": args.model,
@@ -141,7 +155,7 @@ def main() -> int:
     for row in rows:
         measured = token_count(
             post_json(
-                session,
+                headers,
                 f"{base}/tokenize",
                 {"model": args.model, "messages": messages(row["prompt"]), "add_generation_prompt": True},
             )
