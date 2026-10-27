@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Security
+- The external-docs dependency lockfile now resolves `launch-editor` 2.14.2
+  (CVE-2026-112942/112943/112944), `serialize-javascript` 7.1.4
+  (CVE-2026-115897) and `http-cache-semantics` 4.3.0 (CVE-2026-93748), with
+  npm override floors preventing the lockfile from regressing below the
+  fixed versions (#336).
 - The release workflow's live-gate call now passes only the Hugging Face
   token (`HF_TOKEN`) to the reusable smoke workflow instead of
   `secrets: inherit`, and the reusable workflow declares that single-secret
