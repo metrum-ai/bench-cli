@@ -354,7 +354,7 @@ fn vlm_png() -> Result<Vec<u8>> {
         }
     }
     let mut raw = Vec::with_capacity(SIZE * (1 + 3 * SIZE));
-    for row in pixels.chunks_exact(SIZE) {
+    for row in pixels.as_chunks::<SIZE>().0 {
         raw.push(0);
         for pixel in row {
             raw.extend_from_slice(pixel);
