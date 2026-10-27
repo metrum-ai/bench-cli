@@ -107,6 +107,17 @@ Options:
       --data-log <DATA_LOG>
           Path to the data log file
 
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
+
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
 
@@ -328,6 +339,17 @@ Options:
 
       --data-log <DATA_LOG>
           Path to the data log file
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -576,6 +598,17 @@ Options:
           Path to the data log file
 
           [default: results.jsonl]
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -916,6 +949,17 @@ Options:
 
       --data-log <DATA_LOG>
 
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --ndjson <PATH>
           Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)

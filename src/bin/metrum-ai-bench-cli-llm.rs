@@ -110,6 +110,14 @@ struct Args {
     #[arg(long, help = "Path to the data log file")]
     data_log: String,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+
     #[command(flatten)]
     common: metrum_ai_bench::args_common::CommonBenchArgs,
 
@@ -679,9 +687,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         &mut arrival_rng,
     );
 
+    // Explicit output collision policy (#305): resolve the effective log
+    // path before any traffic; refuse-existing fails here, overwrite
+    // truncates now, new-dir names a per-run file by run_id.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately. Any
+    // pre-traffic validation (#304 --validate-model) must run BEFORE this
+    // call so a failed validation never destroys an existing log.
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+
     let sink = Arc::new(
-        metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)
-            .map_err(|e| format!("Failed to open data log file '{}': {}", args.data_log, e))?,
+        metrum_ai_bench::jsonl::JsonlSink::create(&effective_data_log).map_err(|e| {
+            format!(
+                "Failed to open data log file '{}': {}",
+                effective_data_log, e
+            )
+        })?,
     );
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
@@ -741,7 +768,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_limit,
                     "request_rate": args.common.request_rate,
                     "warmup_requests": args.common.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },

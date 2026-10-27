@@ -77,6 +77,14 @@ struct Args {
     )]
     data_log: String,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+
     #[command(flatten)]
     common: metrum_ai_bench::args_common::CommonBenchArgs,
 
@@ -498,7 +506,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
     ));
-    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    // Explicit output collision policy (#305), resolved before any traffic.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately; any
+    // pre-traffic validation must run BEFORE this call.
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
+        &effective_data_log,
+    )?);
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
@@ -530,7 +551,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_cap,
                     "request_rate": args.common.request_rate,
                     "warmup_requests": args.common.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },

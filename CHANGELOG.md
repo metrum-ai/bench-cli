@@ -8,6 +8,13 @@
   endpoint-down and interrupted runs can no longer exit 0 for automated
   callers. Exploratory default exit semantics are unchanged and now documented
   in the flag help and README (#303).
+- New `--data-log-mode` collision policy for the llm, vlm, asr and imagegen
+  data logs: `append` (default, unchanged), `refuse-existing` (atomic
+  O_EXCL claim of the path; exit 2 before traffic if it exists),
+  `overwrite` (truncates the previous log at run start), and `new-dir`
+  (per-run files named by run_id inside a directory). The default append
+  semantics are now documented prominently, and the policy resolves as the
+  last configuration step before traffic (#305).
 
 ### Security
 - The `examples/agent/build_prompt_pool.py` helper no longer depends on the

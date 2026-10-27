@@ -954,6 +954,273 @@ fn collision_args(url: &str, data_log: &str, extra: &[&str]) -> Vec<String> {
     args
 }
 
+/// Full metrum-ai-bench-cli-llm argument set for a one-request run against
+/// `url`, writing `data_log`, with `extra` args appended.
+fn one_req_args(url: &str, data_log: &str, extra: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--url",
+        url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "collision-policy",
+        "--num-requests",
+        "1",
+        "--concurrency",
+        "1",
+        "--prompts",
+        "test-data/llm-hi.jsonl",
+        "--mode",
+        "chat",
+        "--model",
+        "m",
+        "--data-log",
+        data_log,
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    args.extend(extra.iter().map(|s| s.to_string()));
+    args
+}
+
+// #305: explicit output collision policy for --data-log.
+
+/// Run metrum-ai-bench-cli-llm once against `url` with one request and
+/// `extra` args appended; return the exit status.
+fn run_llm_once(url: &str, data_log: &str, extra: &[&str]) -> std::process::ExitStatus {
+    Command::new(metrum_ai_bench_llm_bin())
+        .args(one_req_args(url, data_log, extra))
+        .status()
+        .expect("run metrum-ai-bench-cli-llm")
+}
+
+/// Distinct run_ids present in a data log (one per summary row).
+fn data_log_run_ids(path: &std::path::Path) -> std::collections::BTreeSet<String> {
+    let text = std::fs::read_to_string(path).expect("data log readable");
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|row| {
+            row.get("run_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+#[test]
+fn data_log_default_is_append_across_runs() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let status = run_llm_once(&url, data_log.to_str().unwrap(), &[]);
+    assert!(status.success());
+    let status = run_llm_once(&url, data_log.to_str().unwrap(), &[]);
+    assert!(status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.len(),
+        4,
+        "two runs of 1 request + summary each: {text}"
+    );
+    assert_eq!(
+        data_log_run_ids(&data_log).len(),
+        2,
+        "appended runs stay attributable by unique run_id: {text}"
+    );
+}
+
+#[test]
+fn data_log_refuse_existing_exits_2_before_traffic() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let status = run_llm_once(&url, data_log.to_str().unwrap(), &[]);
+    assert!(status.success());
+    let before = std::fs::read_to_string(&data_log).unwrap();
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .env_remove("NO_BANNER")
+        .args(one_req_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--data-log-mode", "refuse-existing"],
+        ))
+        .output()
+        .expect("run with refuse-existing");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "existing data log must be refused with the configuration code"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("already exists"),
+        "refusal must name the collision:\n{text}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&data_log).unwrap(),
+        before,
+        "refuse-existing must not touch the existing log"
+    );
+}
+
+#[test]
+fn data_log_overwrite_never_mixes_runs() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let status = run_llm_once(&url, data_log.to_str().unwrap(), &[]);
+    assert!(status.success());
+    let status = run_llm_once(
+        &url,
+        data_log.to_str().unwrap(),
+        &["--data-log-mode", "overwrite"],
+    );
+    assert!(status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "overwrite keeps exactly the new run: {text}"
+    );
+    assert_eq!(
+        data_log_run_ids(&data_log).len(),
+        1,
+        "no previous-run rows may survive overwrite: {text}"
+    );
+}
+
+#[test]
+fn data_log_new_dir_writes_one_file_per_run() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runs_dir = dir.path().join("runs");
+    for _ in 0..2 {
+        let status = run_llm_once(
+            &url,
+            runs_dir.to_str().unwrap(),
+            &["--data-log-mode", "new-dir"],
+        );
+        assert!(status.success());
+    }
+    let entries: Vec<_> = std::fs::read_dir(&runs_dir)
+        .expect("new-dir creates the directory")
+        .collect();
+    assert_eq!(entries.len(), 2, "one file per run: {entries:?}");
+    for entry in &entries {
+        let text = std::fs::read_to_string(entry.as_ref().unwrap().path()).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "each per-run file holds one run: {text}");
+    }
+    let ids: std::collections::BTreeSet<String> = entries
+        .iter()
+        .map(|entry| {
+            data_log_run_ids(&entry.as_ref().unwrap().path())
+                .into_iter()
+                .next()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(ids.len(), 2, "per-run files are named by distinct run_ids");
+}
+
+#[test]
+fn data_log_mode_rejects_unknown_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(one_req_args(
+            "http://127.0.0.1:9/v1/chat/completions",
+            data_log.to_str().unwrap(),
+            &["--data-log-mode", "bogus"],
+        ))
+        .output()
+        .expect("run with bogus mode");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "clap rejects unknown enum values"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("--data-log-mode"),
+        "parse error must name the flag:\n{text}"
+    );
+}
+
+#[test]
+fn vlm_refuse_existing_second_run_exits_2() {
+    // The shared atomic refusal path, exercised through a second binary
+    // (#305 review): the first run claims the path, the second is refused
+    // before traffic.
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("vlm-out.jsonl");
+    let base = [
+        "--url",
+        &url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "collision-vlm",
+        "--num-requests",
+        "1",
+        "--concurrency",
+        "1",
+        "--prompts",
+        "test-data/vlm/prompts.jsonl",
+        "--model",
+        "m",
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+    ];
+    let mut first: Vec<String> = base.iter().map(|s| s.to_string()).collect();
+    first.push("--data-log".into());
+    first.push(data_log.to_str().unwrap().to_string());
+    let status = Command::new(metrum_ai_bench_vlm_bin())
+        .args(&first)
+        .status()
+        .expect("run metrum-ai-bench-cli-vlm");
+    assert!(status.success());
+    let before = std::fs::read_to_string(&data_log).unwrap();
+
+    let mut second = first.clone();
+    second.push("--data-log-mode".into());
+    second.push("refuse-existing".into());
+    let out = Command::new(metrum_ai_bench_vlm_bin())
+        .args(&second)
+        .output()
+        .expect("run metrum-ai-bench-cli-vlm with refuse-existing");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "second vlm run must be refused with the configuration code"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("already exists"),
+        "refusal must name the collision:\n{text}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&data_log).unwrap(),
+        before,
+        "refusal must not touch the existing log"
+    );
+}
+
 // #304: invalid absolute URLs must be rejected before any network traffic.
 // Scheme-less --url values previously produced an all-error benchmark run
 // that still exited 0.
