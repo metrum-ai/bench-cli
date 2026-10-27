@@ -811,7 +811,13 @@ async fn vlm_inputs(args: &Args, model: &str) -> Result<Vec<Input>> {
                 .map_err(|err| {
                     anyhow::anyhow!(
                         "image {}: {err}",
-                        metrum_ai_bench::prompt_inputs::image_ref_key(image_ref)
+                        // Log the redacted ref: http(s) URLs can carry
+                        // credentials (#332).
+                        if image_ref.starts_with("http://") || image_ref.starts_with("https://") {
+                            metrum_ai_bench::endpoints::redact_url(image_ref)
+                        } else {
+                            metrum_ai_bench::prompt_inputs::image_ref_key(image_ref)
+                        }
                     )
                 })?;
             images.push(image);
