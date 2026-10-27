@@ -585,13 +585,15 @@ mod tests {
     #[tokio::test]
     async fn redact_reqwest_error_never_echoes_url_credentials() {
         // A real reqwest error whose Display embeds the request URL
-        // (connection refused to a closed port; no external network).
+        // (connection refused to a closed port; no external network). https
+        // scheme: the connection is refused at the TCP layer before any TLS
+        // handshake, and CodeQL requires request URLs to be https.
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(500))
             .build()
             .expect("client");
         let err = client
-            .get("http://user:sekrit-pw@127.0.0.1:1/v1/chat/completions?api_key=sekrit-key&token=sekrit-tok")
+            .get("https://user:sekrit-pw@127.0.0.1:1/v1/chat/completions?api_key=sekrit-key&token=sekrit-tok")
             .send()
             .await
             .expect_err("closed port must fail");
@@ -600,11 +602,13 @@ mod tests {
             !text.contains("sekrit-pw")
                 && !text.contains("sekrit-key")
                 && !text.contains("sekrit-tok"),
-            "redacted reqwest error must not echo credentials: {text}"
+            // No {text} here: on failure the text carries the raw credential,
+            // and a panic message is a log sink (CodeQL rust/cleartext-logging).
+            "redacted reqwest error must not echo the fixture credentials"
         );
         assert!(
             text.contains("api_key=REDACTED") && text.contains("token=REDACTED"),
-            "keys stay visible for diagnosis: {text}"
+            "keys stay visible for diagnosis"
         );
         // The raw Display is the negative control: it embeds the URL.
         let raw = err.to_string();

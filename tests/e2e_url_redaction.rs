@@ -17,8 +17,14 @@ use std::io::Write;
 use std::process::Command;
 
 /// Secret fragments that must never appear in any log; chosen so that a
-/// partial redaction cannot accidentally pass (each is one token).
-const SECRETS: [&str; 3] = ["sekrit-pw", "sekrit-key", "sekrit-tok"];
+/// partial redaction cannot accidentally pass (each is one token). Names are
+/// separate so a failure message can say which one leaked without echoing
+/// the value into the test output (a panic message is a log sink).
+const SECRETS: [(&str, &str); 3] = [
+    ("userinfo password", "sekrit-pw"),
+    ("api_key query value", "sekrit-key"),
+    ("token query value", "sekrit-tok"),
+];
 
 /// Unreachable endpoint whose URL carries userinfo and query credentials.
 fn credentialed_url(path: &str) -> String {
@@ -72,10 +78,15 @@ fn assert_no_secrets(fixture: &Fixture, output: &std::process::Output, what: &st
             String::from_utf8_lossy(&output.stdout).into_owned(),
         ),
     ] {
-        for secret in SECRETS {
+        for (name, secret) in SECRETS {
+            // On failure, name the leaked credential but never echo its value
+            // or the offending log text: this assert exists precisely because
+            // that text can contain the raw credential, and a panic message
+            // lands in CI logs.
             assert!(
                 !text.contains(secret),
-                "{what}: {label} leaks credential '{secret}':\n{text}"
+                "{what}: {label} leaked the fixture {name}; inspect the run's \
+                 logs locally to locate the unredacted line"
             );
         }
     }
