@@ -40,8 +40,11 @@ impl RequestError {
             // TCP RST / broken pipe after the request was sent (N-05).
             Self::Connect
         } else {
+            // reqwest's Display embeds the full URL (userinfo, query), and
+            // this message reaches the per-run error log through the
+            // consumer's `Request failed` line, so redact it (#332).
             Self::Other {
-                message: err.to_string(),
+                message: crate::endpoints::redact_reqwest_error(err),
             }
         }
     }

@@ -1532,10 +1532,12 @@ async fn make_image_request(
             metrum_ai_bench::error::RequestError::Connect => "connect",
             _ => "request_error",
         };
+        // reqwest's Display embeds the full request URL (userinfo, query);
+        // this text reaches the per-run error.log, so redact it (#332).
         (
             err_type.to_string(),
             e.status().map(|s| s.as_u16()),
-            e.to_string(),
+            metrum_ai_bench::endpoints::redact_reqwest_error(&e),
         )
     })?;
     let first_byte = send_start.elapsed();
@@ -1549,7 +1551,13 @@ async fn make_image_request(
                 metrum_ai_bench::error::RequestError::Timeout => "timeout",
                 _ => "connection_error",
             };
-            (err_type.to_string(), Some(status), e.to_string())
+            // Same redaction as the send failure: the body-read Display can
+            // embed the URL and this text reaches error.log (#332).
+            (
+                err_type.to_string(),
+                Some(status),
+                metrum_ai_bench::endpoints::redact_reqwest_error(&e),
+            )
         })?;
     // Service latency ends once the response body is fully read; decode/hash/write
     // below are client-side and excluded from the measured interval.
