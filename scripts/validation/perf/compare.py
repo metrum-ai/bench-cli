@@ -15,7 +15,14 @@
 #              --candidate-root RUNS/q38-27b/bench-src \
 #              --model q38-27b --pass 1 \
 #              [--reference study-reference.json] \
+#              [--noise-floor noise-floor.json] \
 #              [--tolerance-pct 5] [--out-md table.md] [--out-json table.json]
+#
+# --noise-floor loads per-point, per-metric repeat-noise floors
+# {"<model>": {"W1": {"c1": {"system_output_tok_s": 0.58, ...}}}}; a point's
+# gate tolerance is max(--tolerance-pct, its noise floor) per metric. A point
+# directory missing from either root is a FAIL verdict ("missing"), because a
+# run that did not produce the full grid is not a valid PASS.
 import argparse, csv, json, pathlib, statistics, sys
 
 
@@ -113,6 +120,22 @@ def rel_delta(a, b):
     return 100.0 * (a - b) / abs(b)
 
 
+def load_noise_floor(path, model):
+    """{model: {W: {cN: {metric: pct}}}} -> {(W, c): {metric: pct}} for `model`."""
+    if not path:
+        return {}
+    data = json.load(open(path))
+    out = {}
+    for w, cc_map in (data.get(model) or {}).items():
+        for c_key, metrics in (cc_map or {}).items():
+            try:
+                c = int(str(c_key).lstrip("c"))
+            except ValueError:
+                raise ValueError(f"noise floor: bad concurrency key {c_key!r} under {model}.{w}")
+            out[(w, c)] = {k: float(v) for k, v in (metrics or {}).items()}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--baseline-root", required=True)
@@ -120,6 +143,7 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--pass", dest="pass_", default="1")
     ap.add_argument("--reference", help="optional study reference JSON (per-point scalars)")
+    ap.add_argument("--noise-floor", help="per-point repeat-noise floors; tolerance is max(tolerance-pct, floor)")
     ap.add_argument("--tolerance-pct", type=float, default=5.0)
     ap.add_argument("--out-md")
     ap.add_argument("--out-json")
@@ -129,18 +153,39 @@ def main():
     if a.reference:
         for p in json.load(open(a.reference)):
             ref[(p["workload"], int(p["concurrency"]))] = p
+    try:
+        noise = load_noise_floor(a.noise_floor, a.model)
+    except (ValueError, OSError, json.JSONDecodeError) as e:
+        sys.exit(f"compare.py: bad --noise-floor file: {e}")
+
+    def tolerance_for(metric, w, c):
+        return max(a.tolerance_pct, (noise.get((w, c)) or {}).get(metric, 0.0))
 
     rows = []
+    missing = []
     verdict = "PASS"
     for w in ("W1", "W2"):
         for c in (1, 8, 32):
-            b = extract_point(pathlib.Path(a.baseline_root) / a.pass_ / w / f"c{c}")
-            k = extract_point(pathlib.Path(a.candidate_root) / a.pass_ / w / f"c{c}")
+            b_dir = pathlib.Path(a.baseline_root) / a.pass_ / w / f"c{c}"
+            k_dir = pathlib.Path(a.candidate_root) / a.pass_ / w / f"c{c}"
+            absent = [label for label, d in (("baseline", b_dir), ("candidate", k_dir))
+                      if not (d / "point.json").exists()]
+            if absent:
+                missing.append(f"{w}/c{c}: {' and '.join(absent)}")
+                verdict = "FAIL"
+                rows.append({"workload": w, "concurrency": c, "missing": absent,
+                             "baseline": None, "candidate": None,
+                             "checks": {m: {"delta_pct": None, "pass": False} for m in
+                                        ("system_output_tok_s", "tpot_p50_ms")}})
+                continue
+            b = extract_point(b_dir)
+            k = extract_point(k_dir)
             row = {"workload": w, "concurrency": c, "baseline": b, "candidate": k, "checks": {}}
             for m in ("system_output_tok_s", "tpot_p50_ms"):
                 d = rel_delta(k.get(m), b.get(m))
-                okm = d is not None and abs(d) <= a.tolerance_pct
-                row["checks"][m] = {"delta_pct": d, "pass": okm}
+                okm = d is not None and abs(d) <= tolerance_for(m, w, c)
+                row["checks"][m] = {"delta_pct": d, "pass": okm,
+                                    "tolerance_pct": tolerance_for(m, w, c)}
                 if not okm:
                     verdict = "FAIL"
             if (w, c) in ref:
@@ -159,6 +204,10 @@ def main():
              "| point | base tok/s | cand tok/s | Δ% | base TPOT50 ms | cand TPOT50 ms | Δ% | TTFT50 ms base/cand (info) | verdict |",
              "|---|---:|---:|---:|---:|---:|---:|---|:---:|"]
     for row in rows:
+        if row.get("missing"):
+            lines.append(f"| {row['workload']} c{row['concurrency']} | — | — | — | — | — | — | — | "
+                         f"FAIL (missing: {' + '.join(row['missing'])}) |")
+            continue
         b, k, ch = row["baseline"], row["candidate"], row["checks"]
         ok = all(x["pass"] for x in ch.values())
         lines.append(
@@ -166,8 +215,14 @@ def main():
             f"{f(k.get('system_output_tok_s'))} | {f(ch['system_output_tok_s']['delta_pct'])} | "
             f"{f(b.get('tpot_p50_ms'))} | {f(k.get('tpot_p50_ms'))} | {f(ch['tpot_p50_ms']['delta_pct'])} | "
             f"{f(b.get('ttft_p50_ms'))} / {f(k.get('ttft_p50_ms'))} | {'PASS' if ok else 'FAIL'} |")
-    lines += ["", f"**Overall: {verdict}** (gate: output tok/s and TPOT p50 within {a.tolerance_pct}%; "
-                  "TTFT informational, #313 caveats)", ""]
+    gate_note = f"gate: output tok/s and TPOT p50 within {a.tolerance_pct}%"
+    if noise:
+        floors = sorted({tol for (_, _), m in noise.items() for tol in m.values()})
+        gate_note += f" (per-point noise floor up to {max(floors)}%, whichever is wider)"
+    gate_note += "; TTFT informational, #313 caveats"
+    lines += ["", f"**Overall: {verdict}** ({gate_note})", ""]
+    if missing:
+        lines += [f"Missing points ({len(missing)}): " + "; ".join(missing), ""]
     md = "\n".join(lines)
     out = {"model": a.model, "pass": a.pass_, "tolerance_pct": a.tolerance_pct,
            "verdict": verdict, "points": rows}

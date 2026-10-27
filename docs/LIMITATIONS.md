@@ -42,7 +42,15 @@ Headline outputs are latency, throughput, goodput under SLOs, and related
 distributions. The only built-in **quality** scores are ASR **WER/CER** (with
 `--normalizer`). There is no general task accuracy, judge score, or agent
 success metric in 1.0. When `sut.model.quantization` is set, the CLI prints a
-stderr warning that the run measures performance, not answer quality. For
+stderr warning that the run measures performance, not answer quality (this
+warning also fires under `--sut-profile strict`). To publish a
+quantized-model throughput number, gate it with the strict SUT publication
+profile (`--sut-profile strict`, [#308](https://github.com/metrum-ai/bench-cli/issues/308)):
+exact checkpoint revision, weight/activation quantization, KV dtype,
+operator-declared kernel/graph evidence, and a linked quality-evidence
+artifact (`examples/sut.strict.example.json`) are required before traffic,
+which links the separate quality run instead of pretending throughput is
+quality. For
 thinking-model timing (TTFT vs first reasoning, `--max-tokens`,
 `reasoning_effort`), see [REASONING_MODELS.md](REASONING_MODELS.md).
 
@@ -63,13 +71,23 @@ a simple `$ / 1M output tokens` conversion, not total cost of ownership
 (network, storage, multi-node, idle time, or currency FX). Absent price leaves
 the field `null`. There is still no "cost per accepted task" quality gate.
 
-## Open-loop and closed-loop
+## Open-loop, closed-loop, and burst
 
 Both modes exist: omit `--request-rate` for closed-loop concurrency; set
 `--request-rate` (and optional `--arrival poisson`) for open-loop. Open-loop
 coordinated-omission latency is the headline field when scheduling is open-loop.
 Do not compare open-loop and closed-loop numbers as if they were the same
 experiment.
+
+`--arrival burst` (llm, vlm, asr, imagegen; #309) is the native Offline-style
+mode: the whole population is scheduled at t=0 and issued immediately —
+unbounded in flight unless `--max-concurrency` sets an explicit transport
+limit (the wait for capacity is recorded as queue delay). The measured window
+runs from the first send to the last completion, so the full-batch tail drain
+is inside the duration denominator, and completed/failed counts stay exact.
+A burst result is a native bench mode, NOT an accepted MLPerf Endpoints
+submission — the compliance story lives in the adapter (#306), which labels
+an Offline intent on non-burst arrivals as a disclosed proxy.
 
 ## Pooled multi-endpoint = mixture
 

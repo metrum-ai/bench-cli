@@ -279,6 +279,17 @@ Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
 Warmup request lines remain in the file for audit but are excluded from
 summary distributions. Ctrl-C stops issuance, drains started requests, and
 writes a partial summary. The first real Ctrl-C or SIGTERM always drains and
+`metrum-ai-bench-cli.sse-trace.v1` rows (`--sse-trace-first-n`, llm only,
+#313) go to `<data-log>.sse-trace.jsonl`: one row per traced request
+(`run_id`, `seq`, `phase`, `events`), each event carrying `index`, `t_ms`
+and `categories` (`role`/`content`/`reasoning`/`usage`/`finish`/`done`/
+`error`/`other`). The trace is bounded to the first N requests and contains
+no prompt text, content, or secrets.
+
+`summary.v3` also gains `ttft_first_any_s` (#313): the first token of any
+category per request (`min` of visible TTFT and first-reasoning), reported
+only when at least one measured row reported reasoning.
+
 writes `summary.v3` (and, with `--ndjson`, the NDJSON `summary` row), even
 after an internal stop such as a mid-run `--require-telemetry` abort. Only a
 second real signal (Ctrl-C or SIGTERM, in any order) exits at once with
@@ -527,9 +538,9 @@ before any telemetry sample, and the `summary` row is the last. See
 |--------|-----------------|----------|
 | `run` | `run_id`, `t0_wall`, `tool_version`, `schema_version` (`metrum-ai-bench-cli.telemetry.v1`), `config` | `sut`, `telemetry_sources` (`name`, `url`, `interval_ms`, `clock_offset_ms`, `matched_series`) |
 | `stage` | `run_id`, `stage`, `load`, `phase` (`warmup` \| `measure`), `t_start_ns`, `t_end_ns` | |
-| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`) |
-| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `reasoning_tokens` (integer tokens, server-reported; omitted when not reported, #192), `telemetry_at_done` (last-seen map; sugar, not truth) |
-| `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status` |
+| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`), `boundary` (baseline tag; `pre-measured` rows are the synchronous scrape immediately before the first measured send, #312) |
+| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `reasoning_tokens` (integer tokens, server-reported; omitted when not reported, #192), `telemetry_at_done` (last-seen map; sugar, not truth), `queue_sample_age_ms` (per-source age of the latest telemetry sample at-or-before send, ms, #312 review), `queue_sample_stale` (sources whose newest at-or-before-send sample exceeded interval + 10% jitter allowance, or that had no such sample; analysis may exclude these requests' queue evidence) |
+| `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status`, `boundary` (baseline tag; marks an explicit missing pre-measured sample, never an invented value, #312) |
 | `summary` | `run_id`, `partial`, `dropped_telemetry_rows`, `request_rows`, `telemetry_rows`, `scrape_error_rows`, `stage_rows` | |
 
 `mtype` is `counter`, `gauge`, `histogram_bucket`, `summary`, or `unknown`.

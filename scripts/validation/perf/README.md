@@ -15,14 +15,31 @@ Standard, versioned test that answers "did the performance numbers move?" for
 - `runner.sh` — runs the grid for one model on one GPU box, interleaving the
   baseline (release binary) and candidate (source build) per point, writing raw
   request logs, NDJSON, power CSVs and `point.json` per point. Idempotent: a
-  point with `DONE` is skipped.
+  point with `DONE` is skipped. `runner.sh --plan` is a dry run: it resolves
+  the pins, prints the serve command and the full grid with binary/dataset
+  checks, and exits 0 with no side effects — no docker, no GPU, no requests
+  (CI exercises it on every change here).
 - `compare.py` — derives per-point scalars from the raw logs and emits a
   per-point PASS/FAIL table (markdown + JSON). Gate: `system_output_tok_s` and
-  `tpot_p50_ms` within tolerance (default 5%, or the point's study noise floor
-  if wider). TTFT is printed for information only (#313 cohort caveats).
-  `--reference` adds informational deltas against a previous study.
+  `tpot_p50_ms` within tolerance (default 5%, or the point's noise floor if
+  wider — `--noise-floor noise.json` with `{"<model>": {"W1": {"c1": {metric:
+  pct}}}}`). TTFT is printed for information only (#313 cohort caveats).
+  `--reference` adds informational deltas against a previous study. A point
+  missing from either root is a FAIL verdict, listed in the table footer.
+- `lint_spec.py` — structural spec check (required keys, runner-known model
+  tags, digest/sha256 formats, grid and gate sanity, reference coverage);
+  CI runs it on every change here, plus a negative self-test.
+- `test_compare.py` — offline unit tests (stdlib `unittest`, synthetic
+  exact-by-construction point roots): tolerance verdicts, noise-floor
+  widening, missing points, study-reference columns. `python3 -m unittest
+  test_compare.py`.
 - `baselines/` — recorded results, one JSON per box/date, so drift over time
   is reviewable in git.
+
+CI: `.github/workflows/perf-validation.yml` lints the spec, runs the unit
+ tests, the plan mode and the compile checks on every change under
+ `scripts/validation/perf/`. The GPU run itself is not CI: it is a scripted
+ rental run wired into `docs/RELEASING.md` as a required pre-release step.
 
 ## Rules
 

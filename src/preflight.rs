@@ -64,6 +64,190 @@ fn remediation_docker() -> String {
     )
 }
 
+/// Derive the OpenAI-compatible `/v1/models` list URL from a serving
+/// endpoint URL, preserving any proxy path prefix (#304).
+///
+/// The last `/v1` path segment is the version root (so
+/// `https://proxy.example/llm/v1/chat/completions` derives
+/// `https://proxy.example/llm/v1/models`). When the path carries no version
+/// segment, the OpenAI `/v1` convention at the URL origin is used.
+pub fn derive_models_url(endpoint_url: &str) -> String {
+    let trimmed = endpoint_url.trim().trim_end_matches('/');
+    let (prefix, path) = match trimmed.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = match rest.split_once('/') {
+                Some((auth, path)) => (auth.to_string(), format!("/{path}")),
+                None => (rest.to_string(), String::new()),
+            };
+            (format!("{scheme}://{authority}"), path)
+        }
+        None => (String::new(), trimmed.to_string()),
+    };
+    let v1 = path.rmatch_indices("/v1").find_map(|(index, _)| {
+        let after = &path[index + 3..];
+        (after.is_empty() || after.starts_with('/')).then_some(index)
+    });
+    match v1 {
+        Some(index) => format!("{}{}/models", prefix, &path[..index + 3]),
+        None => format!("{prefix}/v1/models"),
+    }
+}
+
+/// Cap on server model ids echoed back in a report or error message.
+const MODEL_ID_ECHO_CAP: usize = 50;
+
+/// Result of an opt-in `--validate-model` preflight (#304): the exact model
+/// id checked against the server's `/v1/models` list before any benchmark
+/// traffic.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelPreflightReport {
+    pub schema_version: &'static str,
+    /// Chat/completions endpoint the run will use.
+    pub endpoint_url: String,
+    /// Derived `/v1/models` URL that was probed.
+    pub models_url: String,
+    /// Model id the benchmark will request.
+    pub model: String,
+    /// Model id validated instead of `model` (alias/proxy override); the run
+    /// itself still uses `model`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validated_alias: Option<String>,
+    /// Whether the checked id was listed by the server.
+    pub listed: bool,
+    /// HTTP status of the `/v1/models` response; `None` on transport failure
+    /// (unreachable server).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    /// Model ids the server actually reported (capped for readability).
+    pub server_model_ids: Vec<String>,
+    /// Human-readable outcome, including the actual server response on
+    /// non-200 or malformed payloads.
+    pub detail: String,
+}
+
+impl ModelPreflightReport {
+    /// The model id this report validated (`validated_alias` if present).
+    pub fn checked_id(&self) -> &str {
+        self.validated_alias.as_deref().unwrap_or(&self.model)
+    }
+}
+
+/// GET the server's `/v1/models` list and check the exact model id is
+/// present (#304, opt-in `--validate-model`).
+///
+/// A transport failure (unreachable server) or a non-200 response is
+/// reported as `listed: false` with the actual outcome in `detail`; it is
+/// not an internal error of the probe itself.
+pub async fn validate_model_listed(
+    client: &Client,
+    endpoint_url: &str,
+    api_key: &str,
+    model: &str,
+    alias: Option<&str>,
+) -> ModelPreflightReport {
+    let models_url = derive_models_url(endpoint_url);
+    let mut report = ModelPreflightReport {
+        schema_version: "metrum-ai-bench-cli.model-preflight.v1",
+        // Redacted (#304 review): URLs carry credentials (userinfo, ?api_key)
+        // surprisingly often, and these fields reach stderr/stdout and logs.
+        endpoint_url: crate::endpoints::redact_url(endpoint_url),
+        // Redacted at construction: this field is serialized in the failure
+        // report (#304 review).
+        models_url: crate::endpoints::redact_url(&models_url),
+        model: model.to_string(),
+        validated_alias: alias.map(str::to_string),
+        listed: false,
+        http_status: None,
+        server_model_ids: Vec::new(),
+        detail: String::new(),
+    };
+    let checked_id = report.checked_id().to_string();
+
+    let response = client
+        .get(&models_url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(err) => {
+            // reqwest errors embed the full URL; strip it and print the
+            // redacted URL ourselves (#304 review).
+            report.detail = format!(
+                "GET {} failed: {}",
+                crate::endpoints::redact_url(&models_url),
+                err.without_url()
+            );
+            return report;
+        }
+    };
+
+    let status = response.status();
+    report.http_status = Some(status.as_u16());
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let snippet: String = body.chars().take(200).collect();
+        report.detail = format!(
+            "GET {} returned HTTP {}: {}",
+            crate::endpoints::redact_url(&models_url),
+            status.as_u16(),
+            if snippet.is_empty() {
+                "<empty body>".to_string()
+            } else {
+                snippet
+            }
+        );
+        return report;
+    }
+
+    let body: serde_json::Value = match response.json().await {
+        Ok(body) => body,
+        Err(err) => {
+            report.detail = format!(
+                "GET {} succeeded but the body is not the expected \
+                 {{\"data\":[{{\"id\"}}...]}} JSON: {}",
+                crate::endpoints::redact_url(&models_url),
+                err.without_url()
+            );
+            return report;
+        }
+    };
+    let mut ids: Vec<String> = body
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.get("id").and_then(serde_json::Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if ids.is_empty() {
+        report.detail = format!(
+            "GET {} returned no model ids (body: {})",
+            crate::endpoints::redact_url(&models_url),
+            serde_json::to_string(&body).unwrap_or_else(|_| "<unserializable>".into())
+        );
+        return report;
+    }
+    let total = ids.len();
+    report.listed = ids.iter().any(|id| id == &checked_id);
+    if ids.len() > MODEL_ID_ECHO_CAP {
+        ids.truncate(MODEL_ID_ECHO_CAP);
+        ids.push(format!("(+{} more)", total - MODEL_ID_ECHO_CAP));
+    }
+    report.server_model_ids = ids;
+    let redacted_models_url = crate::endpoints::redact_url(&models_url);
+    report.detail = if report.listed {
+        format!("'{checked_id}' is listed at {redacted_models_url}")
+    } else {
+        format!("'{checked_id}' is NOT listed at {redacted_models_url}")
+    };
+    report
+}
+
 /// Run staged probes against an OpenAI-compatible chat endpoint.
 pub async fn run_preflight(
     url: &str,
@@ -330,7 +514,8 @@ async fn check_streaming_first_token(
     }
     // Keep a stream that ends without visible content: a thinking model can
     // spend the whole small probe budget on reasoning (#230).
-    let result = chat_stream::consume_with_options(response.bytes_stream(), started, true).await;
+    let result =
+        chat_stream::consume_with_options(response.bytes_stream(), started, true, false).await;
     streaming_check(result)
 }
 
@@ -617,6 +802,7 @@ mod tests {
             futures_util::stream::iter(body),
             Instant::now(),
             true,
+            false,
         ));
         streaming_check(result)
     }
@@ -718,5 +904,210 @@ mod tests {
         let body = chat_body("m", true, 8, Some(&extra));
         assert_eq!(body["stream"], true);
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[test]
+    fn derive_models_url_uses_last_v1_segment() {
+        assert_eq!(
+            derive_models_url("http://127.0.0.1:8000/v1/chat/completions"),
+            "http://127.0.0.1:8000/v1/models"
+        );
+        // Proxy path prefix is preserved.
+        assert_eq!(
+            derive_models_url("https://proxy.example/llm/v1/chat/completions"),
+            "https://proxy.example/llm/v1/models"
+        );
+        assert_eq!(
+            derive_models_url("http://127.0.0.1:8000/v1/completions"),
+            "http://127.0.0.1:8000/v1/models"
+        );
+    }
+
+    #[test]
+    fn derive_models_url_falls_back_to_origin_v1_convention() {
+        assert_eq!(
+            derive_models_url("http://127.0.0.1:8000"),
+            "http://127.0.0.1:8000/v1/models"
+        );
+        assert_eq!(
+            derive_models_url("http://127.0.0.1:8000/"),
+            "http://127.0.0.1:8000/v1/models"
+        );
+        assert_eq!(
+            derive_models_url("https://h.example/custom/chat/completions"),
+            "https://h.example/v1/models"
+        );
+    }
+
+    #[test]
+    fn derive_models_url_ignores_v1_lookalikes_inside_other_segments() {
+        // /v1beta is not a /v1 version segment, so the convention fallback
+        // applies instead of cutting the path at ".../v1".
+        assert_eq!(
+            derive_models_url("https://h.example/v1beta/chat/completions"),
+            "https://h.example/v1/models"
+        );
+        // A model id containing "/v1" must not be used as the version root.
+        assert_eq!(
+            derive_models_url("https://h.example/serve/v1/chat/completions"),
+            "https://h.example/serve/v1/models"
+        );
+    }
+
+    /// Start an ephemeral axum server serving `routes` and return its base
+    /// URL plus a shutdown handle dropped at the end of the test.
+    async fn serve_models_response(status: axum::http::StatusCode, body: String) -> String {
+        use axum::routing::get;
+
+        let app = axum::Router::new().route(
+            "/v1/models",
+            get(move || {
+                let body = body.clone();
+                async move { (status, [("content-type", "application/json")], body) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/v1/chat/completions")
+    }
+
+    fn probe_client() -> Client {
+        build_http_client(HttpClientOptions {
+            request_timeout: Some(Duration::from_secs(10)),
+            connect_timeout: Duration::from_secs(10),
+            pool_max_idle_per_host: 2,
+            pool_idle_timeout: Duration::from_secs(5),
+            tcp_keepalive: Duration::from_secs(5),
+            ca_cert: None,
+            insecure: false,
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_passes_on_exact_match() {
+        let endpoint = serve_models_response(
+            axum::http::StatusCode::OK,
+            r#"{"object":"list","data":[{"id":"m-1"},{"id":"m-2"}]}"#.into(),
+        )
+        .await;
+        let report = validate_model_listed(&probe_client(), &endpoint, "key", "m-2", None).await;
+        assert!(report.listed, "{}", report.detail);
+        assert_eq!(report.http_status, Some(200));
+        assert_eq!(report.server_model_ids, vec!["m-1", "m-2"]);
+        assert_eq!(report.checked_id(), "m-2");
+        assert!(report.models_url.ends_with("/v1/models"));
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_reports_actual_ids_on_mismatch() {
+        let endpoint = serve_models_response(
+            axum::http::StatusCode::OK,
+            r#"{"object":"list","data":[{"id":"metrum-ai-bench-cli-mock"}]}"#.into(),
+        )
+        .await;
+        let report = validate_model_listed(&probe_client(), &endpoint, "key", "nope", None).await;
+        assert!(!report.listed);
+        assert_eq!(report.server_model_ids, vec!["metrum-ai-bench-cli-mock"]);
+        assert!(report.detail.contains("NOT listed"));
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_alias_checks_alias_not_model() {
+        let endpoint = serve_models_response(
+            axum::http::StatusCode::OK,
+            r#"{"object":"list","data":[{"id":"proxy-alias"}]}"#.into(),
+        )
+        .await;
+        let report = validate_model_listed(
+            &probe_client(),
+            &endpoint,
+            "key",
+            "real-model",
+            Some("proxy-alias"),
+        )
+        .await;
+        assert!(report.listed, "{}", report.detail);
+        assert_eq!(report.checked_id(), "proxy-alias");
+        assert_eq!(report.model, "real-model");
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_reports_http_error_status_and_body() {
+        let endpoint = serve_models_response(
+            axum::http::StatusCode::NOT_FOUND,
+            r#"{"error":"no models route"}"#.into(),
+        )
+        .await;
+        let report = validate_model_listed(&probe_client(), &endpoint, "key", "m", None).await;
+        assert!(!report.listed);
+        assert_eq!(report.http_status, Some(404));
+        assert!(report.detail.contains("HTTP 404"));
+        assert!(report.detail.contains("no models route"));
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_reports_unreachable_server() {
+        // Port 1 on loopback is not listening; the probe must report a
+        // transport failure, not panic or hang.
+        let report = validate_model_listed(
+            &probe_client(),
+            "http://127.0.0.1:1/v1/chat/completions",
+            "key",
+            "m",
+            None,
+        )
+        .await;
+        assert!(!report.listed);
+        assert_eq!(report.http_status, None);
+        assert!(report.detail.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_redacts_credentials_from_report() {
+        // Unreachable server with credentials in the URL: neither the
+        // report fields nor the transport-error detail may leak them
+        // (#304 review). reqwest errors embed the URL, so it is stripped.
+        let report = validate_model_listed(
+            &probe_client(),
+            "http://user:hush@127.0.0.1:1/v1/chat/completions?token=shh",
+            "key",
+            "m",
+            None,
+        )
+        .await;
+        assert!(!report.listed);
+        assert!(
+            !report.endpoint_url.contains("hush") && !report.endpoint_url.contains("shh"),
+            "endpoint_url must be redacted: {}",
+            report.endpoint_url
+        );
+        assert!(
+            !report.models_url.contains("hush") && !report.models_url.contains("shh"),
+            "models_url must be redacted: {}",
+            report.models_url
+        );
+        assert!(
+            !report.detail.contains("hush") && !report.detail.contains("shh"),
+            "transport error must not embed the raw URL: {}",
+            report.detail
+        );
+        let serialized = serde_json::to_string(&report).expect("report serializes");
+        assert!(
+            !serialized.contains("hush") && !serialized.contains("shh"),
+            "serialized report must not leak credentials: {serialized}"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_model_listed_rejects_unexpected_json_shape() {
+        let endpoint =
+            serve_models_response(axum::http::StatusCode::OK, r#"{"unexpected":true}"#.into())
+                .await;
+        let report = validate_model_listed(&probe_client(), &endpoint, "key", "m", None).await;
+        assert!(!report.listed);
+        assert_eq!(report.http_status, Some(200));
+        assert!(report.detail.contains("no model ids"));
     }
 }

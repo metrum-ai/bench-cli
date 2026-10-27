@@ -40,11 +40,53 @@ tags (tags only when `LIVE_RUNNER_READY` is `true`), on the self-hosted runner l
 A release is blocked until the gate is green for every modality the README
 claims. Link the green run in the release PR.
 
+## Standard performance-number validation (required, #333)
+
+A release is **also blocked** until the perf-number A/B gate passes on one
+reference GPU class (RTX PRO 6000 Blackwell SE, H100 or H200), alongside
+the live modality gate above. `scripts/validation/perf/` is the versioned
+harness (Metrum AI):
+
+- `spec.yaml` pins the serving stack (vLLM image digest, checkpoint
+  revisions, serve flags), datasets, the point grid (W1/W2 × c1/c8/c32,
+  30 s warmup + 180 s issuance) and the gates. CI lints it
+  (`lint_spec.py`, `.github/workflows/perf-validation.yml`).
+- `runner.sh` runs the grid on one GPU box, interleaving the last release
+  (baseline) and the release candidate per point, and writes raw request
+  logs, NDJSON and power CSVs. `runner.sh --plan` is a CI-safe dry run
+  (no docker, no GPU, no requests) and is exercised in CI.
+- `compare.py` emits the per-point PASS/FAIL table (markdown + JSON).
+  **The gate is `system_output_tok_s` and `tpot_p50_ms` within 5% (or the
+  point's recorded noise floor, if wider) between baseline and candidate;
+  TTFT is informational only (#313 cohort caveats). A missing point is a
+  FAIL.** `test_compare.py` unit-tests the verdict logic offline in CI.
+- `baselines/` records each validated run (one JSON per box/date) so drift
+  is reviewable in git.
+
+Before tagging a release: run the grid on the reference box with the last
+release and the candidate, link the `compare.py` table (verdict PASS) and
+the recorded baseline JSON in the release PR, and state the run's cost.
+If the release only changes docs or packaging (no Rust source), the A/B
+run may be skipped with a one-line justification in the release PR
+instead. Teardown of the rented box is verified as part of the run
+record.
+
 | Variable | Effect |
 |----------|--------|
 | `LIVE_GATE_REQUIRED` | When `true`, `release.yml` calls the gate as job `live-gate` on the release tag, and `github-release` and `crates-io` need it to succeed. The tag-triggered copy of the gate then skips so it does not run twice. |
 | `LIVE_RUNNER_READY` | When `true`, `v*` tag pushes start the gate on their own. Leave unset until a `gpu-h100` runner is registered, so tags do not queue on a label no runner has. |
 | `LIVE_HF_HOME` | Hugging Face cache path on the GPU host (default `/srv/hf-cache`). |
+
+The gate runs with a least-privilege secret contract (#291): when
+`release.yml` calls the reusable workflow it passes only the Hugging Face
+token (`HF_TOKEN`) the gate needs for model weights — never
+`secrets: inherit` — and the reusable workflow's only grant is
+`permissions: contents: read`. `HF_TOKEN` is optional: it is needed only
+for gated weights, the gate runs with public weights and no token today,
+and an unset token forwards an empty value the gate treats as anonymous
+access. Configure it as a repository secret before switching the gate to
+gated models. A future secret needed by the gate must be declared in
+`workflow_call.secrets` and passed explicitly by the caller.
 
 `LIVE_GATE_REQUIRED` is off by default because no runner carries `gpu-h100`
 yet. With it on and no such runner, the `live-gate` jobs queue until GitHub

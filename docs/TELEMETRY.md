@@ -154,7 +154,11 @@ A modality run is one stage. Its NDJSON holds:
 - One `run` row first. `config.binary` names the binary; `config` never holds
   API keys.
 - One `request` row per `request.v3` record, written as each request
-  completes, joined on `seq` and `run_id`. `t_sent_ns` is the record's
+  completes, joined on `seq` and `run_id`. Emission order is per-request
+  completion order (the record channel's receive order), not `seq` order,
+  and rows become visible to a tailing reader within the writer flush bound:
+  every 64 buffered rows or every 250 ms, whichever comes first (#310).
+  `t_sent_ns` is the record's
   `send_offset_s` in nanoseconds (the run clock starts at the NDJSON epoch,
   after the telemetry probes, so both share one origin), `t_done_ns = t_sent_ns + latency_s`,
   `t_first_ns` is response headers (`first_byte_s`) as on strategic rows,
@@ -170,6 +174,23 @@ A modality run is one stage. Its NDJSON holds:
 - `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
   row last.
 
+### Pre-measured boundary baseline (#312)
+
+Immediately before the first measured request (after the warmup barrier),
+each configured source is scraped once synchronously. The rows are normal
+`telemetry` rows tagged `boundary: "pre-measured"` on the shared run epoch,
+so the opening burst has a queue sample at-or-before send and no older than
+the configured scrape interval (periodic scrapes carry the rest of the run).
+The baseline scrape latency is before the first measured send, outside the
+measured request window. A source that fails the baseline emits a
+boundary-tagged `scrape_error` row — coverage is explicitly missing, never
+invented. Under `--require-telemetry` a failed baseline also stops measured
+issuance and surfaces as the run verdict after the partial summary is
+written; without it the run proceeds and the missing baseline is on record.
+Boundary requests carry the header `x-metrum-telemetry-boundary:
+pre-measured`, so a real exporter or proxy can tell the synchronous
+baseline apart from periodic scrapes.
+
 `summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
@@ -180,6 +201,65 @@ Do not use a sidecar. Live cells pass `--ndjson` and `--telemetry` to the
 bench binary with one YAML listing the all-smi fork and engine `/metrics`
 sources. Build the `include` series list from a live `/metrics` response for
 the exact server, as directed by the campaign skill.
+
+## Ready preset: all-smi fork + vLLM
+
+[examples/telemetry/all-smi-vllm.yaml](../examples/telemetry/all-smi-vllm.yaml)
+is the validated single-node preset for the Metrum all-smi fork and vLLM —
+no need to discover live series and hand-build a YAML before the first
+capture. The same include set was validated against live pages on every
+measured point of the 2026-10-23 study (all-smi fork at
+`3b6eaec3364d3c2eb897bf1433ee93eef609c6a9`, vLLM 0.32.0); a selected-series
+fixture/test pins the pattern→selection mapping
+([tests/telemetry_preset.rs](../tests/telemetry_preset.rs) with
+`test-data/telemetry/all-smi-fork-h100.prom` and
+`test-data/telemetry/vllm-0.32.prom`).
+
+Read the comment block in the YAML — it carries the operational caveats:
+
+- **Endpoints are `/metrics`, not `/metric`** (the fork serves only
+  `/metrics`; the mock server's `/metric` alias exists for old configs).
+- **Loopback URLs are deliberate.** Run the client on the serving host.
+  When the exporter listens on a Unix socket (the fork's `socket` setting)
+  or on another box, forward it to loopback first
+  (`socat TCP-LISTEN:9090,bind=127.0.0.1,fork UNIX-CONNECT:<path>` or
+  `ssh -L 9090:127.0.0.1:9090 -N <host>`); the YAML takes an http(s) URL.
+  The fork's default TCP listener binds `0.0.0.0` — firewall it on shared
+  hosts (see the default source section above).
+- **Exporter freshness bound.** all-smi refreshes its internal collection
+  at roughly 1 Hz, so the preset's 500 ms scrape yields repeated values
+  between cycles: sample freshness is bounded by the exporter cycle, not
+  the scrape interval. Keep 500 ms for sub-second resolution or drop to
+  1000 ms when duplicates are noise.
+- **Unit scaling.** `all_smi_gpu_energy_hw_millijoules_total` is hardware
+  millijoules; the preset's `units` block scales it to joules and keeps the
+  pre-scale value in `raw`.
+- **No whole-system power claim.** These series are NVML GPU board power;
+  they are not provisioned/rated system power and must not be published as
+  an MLPerf-style system-power disclosure.
+- **Optional series differ by host, exporter and engine version.** The
+  startup probe prints `matched_series` per source into the `run` row; a
+  source matching zero series fails the run at startup
+  (`allow_empty: true` tolerates that deliberately). With
+  `--require-telemetry`, N consecutive scrape failures abort the run
+  (default 3; `--require-telemetry-failures N`); without it, failures are
+  `scrape_error` rows and the run continues — see the boundary section for
+  the pre-measured baseline behavior (#312).
+- **Offline join recipe.** Every row shares one monotonic epoch and
+  `run_id`: request rows carry `t_sent_ns`/`t_done_ns`, telemetry rows
+  `t_ns`, so a DuckDB/jq join of `request` and `telemetry` rows on `run_id`
+  with `t_ns BETWEEN t_sent_ns AND t_done_ns` (or a window around a stage's
+  `t_start_ns`/`t_end_ns`) reproduces the study's per-request and per-stage
+  joins. With #312 the `boundary: "pre-measured"` rows are the baseline the
+  opening burst joins against.
+
+[examples/telemetry/all-smi-vllm-4node.yaml](../examples/telemetry/all-smi-vllm-4node.yaml)
+is the optional four-node variant: same include set replicated per lane
+(`node-a`..`node-d` source names, loopback placeholder ports, no host
+identities), each lane forwarded over an SSH local forward. It is distinct
+from the 2026-10-23 four-node observability demo, which used deliberately
+narrower include patterns and a 2000 ms interval; that demo's YAML is kept
+in the study evidence bundle, not here.
 
 ## Default source
 

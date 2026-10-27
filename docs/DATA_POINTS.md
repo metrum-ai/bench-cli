@@ -16,7 +16,7 @@ and the release workflow publishes it in the release notes.
 
 | Output | Quantities | Distributions | Blocks | Scalars | Values | Always | Optional |
 |---|---|---|---|---|---|---|---|
-| `summary.v3` run summary | 54 | 25 | 10 | 19 | 330 | 39 | 15 |
+| `summary.v3` run summary | 55 | 26 | 10 | 19 | 340 | 39 | 16 |
 | `summary.v3` `per_endpoint`, each endpoint | 14 | 11 | 0 | 3 | 113 | 14 | 0 |
 | Strategic sweep point (`points[]`) | 62 | 29 | 10 | 23 | 367 | 32 | 30 |
 
@@ -164,6 +164,7 @@ than the schema `values` here, which counts every numeric slot.
 | `total_tokens_per_second` | scalar | 1 | `usage` or `tokenizer` |
 | `tpot_s` | distribution | 10 | always |
 | `ttft_approx_count` | scalar | 1 | `ttft-approx` |
+| `ttft_first_any_s` | distribution | 10 | `reasoning-stream` |
 | `ttft_s` | distribution | 10 | always |
 | `usage_missing_count` | scalar | 1 | always |
 | `user_tps` | distribution | 10 | always |
