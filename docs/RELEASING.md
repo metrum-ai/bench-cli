@@ -46,6 +46,17 @@ claims. Link the green run in the release PR.
 | `LIVE_RUNNER_READY` | When `true`, `v*` tag pushes start the gate on their own. Leave unset until a `gpu-h100` runner is registered, so tags do not queue on a label no runner has. |
 | `LIVE_HF_HOME` | Hugging Face cache path on the GPU host (default `/srv/hf-cache`). |
 
+The gate runs with a least-privilege secret contract (#291): when
+`release.yml` calls the reusable workflow it passes only the Hugging Face
+token (`HF_TOKEN`) the gate needs for model weights — never
+`secrets: inherit` — and the reusable workflow's only grant is
+`permissions: contents: read`. `HF_TOKEN` is optional: it is needed only
+for gated weights, the gate runs with public weights and no token today,
+and an unset token forwards an empty value the gate treats as anonymous
+access. Configure it as a repository secret before switching the gate to
+gated models. A future secret needed by the gate must be declared in
+`workflow_call.secrets` and passed explicitly by the caller.
+
 `LIVE_GATE_REQUIRED` is off by default because no runner carries `gpu-h100`
 yet. With it on and no such runner, the `live-gate` jobs queue until GitHub
 times them out and the release never publishes. Turn it on once the GPU runner

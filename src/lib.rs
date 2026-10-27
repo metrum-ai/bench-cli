@@ -35,6 +35,21 @@ pub mod tokenizer;
 pub mod usage;
 pub mod vlm;
 
+/// True when the process was invoked with the `--version-only` flag
+/// (#307).
+///
+/// The run-required CLI arguments are non-optional fields, so clap cannot
+/// waive them for a standalone `--version-only` invocation:
+/// `required_unless_present` conflicts with the `required` implied by the
+/// field type. Binaries whose required arguments are not all optional
+/// (llm, vlm, imagegen) call this BEFORE `Args::parse()` and print the
+/// version without traffic or argument validation; the flag is kept for
+/// compatibility with the other binaries (asr, strategic, prompts), which
+/// short-circuit after parsing.
+pub fn version_only_invoked() -> bool {
+    std::env::args_os().skip(1).any(|a| a == "--version-only")
+}
+
 pub mod banner {
     use std::io::IsTerminal;
 
