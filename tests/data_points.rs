@@ -182,6 +182,7 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("telemetry", &[Ndjson]),
     ("total_tokens_per_second", &[Usage, Tokenizer]),
     ("ttft_approx_count", &[TtftApprox]),
+    ("ttft_first_any_s", &[ReasoningStream]),
     ("visible_completion_tokens_total", &[ReasoningUsage]),
 ];
 
@@ -428,6 +429,7 @@ fn summary_max() -> RunSummary {
         first_byte_s: d(),
         queue_delay_s: d(),
         first_reasoning_s: d(),
+        ttft_first_any_s: Some(d()),
         dns_s: d(),
         receive_s: d(),
         bytes_sent: d(),
@@ -501,6 +503,7 @@ fn summary_min() -> RunSummary {
         first_byte_s: d(),
         queue_delay_s: d(),
         first_reasoning_s: d(),
+        ttft_first_any_s: None,
         dns_s: d(),
         receive_s: d(),
         bytes_sent: d(),

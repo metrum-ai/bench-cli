@@ -178,6 +178,33 @@ struct Args {
         help = "Ramp up period in seconds to gradually increase concurrency"
     )]
     ramp_up_seconds: Option<u64>,
+
+    #[arg(
+        long,
+        help = "Write the effective canonical prompt sequence to this JSONL path (fingerprint + cohort per slot, no prompt text) (#313)"
+    )]
+    prompt_sequence_log: Option<String>,
+
+    #[arg(
+        long,
+        help = "Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)"
+    )]
+    prompt_sequence: Option<String>,
+
+    #[arg(
+        long,
+        help = "Reproducible closed-loop start-stagger: seeded uniform jitter in [0, MS) ms per slot, to break persistent phase-locking (#313); opt-in, recorded in the run config"
+    )]
+    start_jitter_ms: Option<u64>,
+
+    #[arg(long, help = "Seed for --start-jitter-ms (default: --seed)")]
+    start_jitter_seed: Option<u64>,
+
+    #[arg(
+        long,
+        help = "Retain a bounded/redacted SSE event timeline (event index, ms-from-send, categories only — never content or secrets) for the first N requests, written to <data-log>.sse-trace.jsonl; streaming runs only (#313)"
+    )]
+    sse_trace_first_n: Option<u64>,
 }
 
 /// Makes a request to the AI model endpoint and measures various performance metrics.
@@ -205,6 +232,8 @@ struct StreamMetrics {
     completion_words: usize,
     prompt_text: String,
     completion_text: String,
+    /// Bounded/redacted SSE event timeline (#313); only on traced requests.
+    trace: Option<Vec<metrum_ai_bench::chat_stream::StreamEventTrace>>,
 }
 
 async fn make_request(
@@ -216,6 +245,8 @@ async fn make_request(
     request_timeout: u64,
     api_key: &str,
     allow_missing_ttft: bool,
+    // trace_sse: record the bounded/redacted SSE event timeline (#313).
+    trace_sse: bool,
 ) -> Result<StreamMetrics, Box<dyn Error + Send + Sync>> {
     let start_time = Instant::now();
 
@@ -297,6 +328,7 @@ async fn make_request(
             metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
             allow_missing_ttft,
+            trace_sse,
         )
         .await?;
         let completion_text = stream.completion_text;
@@ -316,6 +348,7 @@ async fn make_request(
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
             completion_text,
+            trace: stream.trace,
         })
     } else {
         // Handle non-streaming response
@@ -409,6 +442,7 @@ async fn make_request(
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
             completion_text: completion_text.to_string(),
+            trace: None,
         })
     }
 }
@@ -703,10 +737,42 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let mut prompts = load_metrum_ai_bench_llm_prompts(&args.prompts)?;
 
+    // #313: prescribed-sequence replay (converter compensation) reorders the
+    // pool by content fingerprint and skips the seeded shuffle; the run
+    // order is never silently substituted.
+    let prescribed_order = match &args.prompt_sequence {
+        Some(path) => {
+            let entries = metrum_ai_bench::prompt_sequence::load_prescribed_entries(
+                std::path::Path::new(path),
+            )
+            .map_err(|e| format!("--prompt-sequence: {e}"))?;
+            // Fingerprint-first replay: content must match the pool; nothing
+            // is silently substituted (#313).
+            let order =
+                metrum_ai_bench::prompt_sequence::resolve_prescribed_order(&entries, &prompts)
+                    .map_err(|e| format!("--prompt-sequence: {e}"))?;
+            metrum_ai_bench::prompt_sequence::apply_prescribed_sequence(&mut prompts, &order);
+            Some(order)
+        }
+        None => None,
+    };
+
     // Shuffle prompts once for even distribution, then cycle through them deterministically
-    let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
-    prompts.shuffle(&mut shuffle_rng);
+    if prescribed_order.is_none() {
+        let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
+        prompts.shuffle(&mut shuffle_rng);
+    }
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
+
+    // #313: opt-in reproducible start-stagger (never applied to scored or
+    // existing runs by default; recorded in the run config).
+    let start_jitter = args.start_jitter_ms.filter(|ms| *ms > 0).map(|max_ms| {
+        metrum_ai_bench::prompt_sequence::StartJitter {
+            max_ms,
+            seed: args.start_jitter_seed.unwrap_or(args.common.seed),
+        }
+    });
+
     let slots = metrum_ai_bench::load::schedule(
         args.common.arrival_kind(),
         args.num_requests as u64,
@@ -737,6 +803,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
         })?,
     );
+    // #313: SSE trace sink (bounded, redacted); only when tracing is on.
+    let sse_trace_sink: Option<Arc<metrum_ai_bench::jsonl::JsonlSink>> = args
+        .sse_trace_first_n
+        .map(|_| {
+            let path = format!("{}.sse-trace.jsonl", args.data_log);
+            metrum_ai_bench::jsonl::JsonlSink::create(&path)
+                .map(Arc::new)
+                .map_err(|e| format!("Failed to open SSE trace file '{path}': {e}"))
+        })
+        .transpose()?;
+
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
 
@@ -778,6 +855,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
     ));
+
+    // #313: the effective canonical sequence, emitted before the issuing
+    // loop sends any traffic; cohorts are send waves (effective cap).
+    if let Some(path) = &args.prompt_sequence_log {
+        metrum_ai_bench::prompt_sequence::write_sequence_log(
+            std::path::Path::new(path),
+            &prompts,
+            u64::from(args.num_requests),
+            u64::from(concurrency_limit as u32),
+            prescribed_order.as_deref(),
+        )
+        .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
+    }
 
     let mut handles = vec![];
 
@@ -1008,6 +1098,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tokio::time::sleep(wait).await;
         }
 
+        // #313: opt-in reproducible start-stagger for closed-loop waves;
+        // drawn per (seed, seq) so slot order never shifts the draws.
+        if let Some(jitter) = &start_jitter {
+            let delay_ns = jitter.delay_ns(slot.seq);
+            if delay_ns > 0 {
+                tokio::time::sleep(Duration::from_nanos(delay_ns)).await;
+            }
+        }
+
         let i = slot.seq as usize;
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
 
@@ -1096,6 +1195,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let streaming = args.streaming;
         let infer_ttft = args.infer_ttft_from_first_byte;
         let seq = slot.seq;
+        // #313: the bounded/redacted SSE trace covers the first N requests
+        // (warmup included) — never prompt text, content, or secrets.
+        let trace_sse = args.sse_trace_first_n.is_some_and(|n| seq < n);
+        let sse_trace_sink_task = sse_trace_sink.clone();
         let sink_task = sink.clone();
         let record_tx = record_tx.clone();
         let tokenizer_path = args.common.tokenizer.clone();
@@ -1119,6 +1222,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     request_timeout,
                     &api_key,
                     infer_ttft,
+                    trace_sse,
                 ),
             )
             .await;
@@ -1135,6 +1239,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .expect("disabled tokenizer"),
             };
 
+            let sse_events = match &result {
+                Ok(sm) => sm.trace.clone(),
+                Err(_) => None,
+            };
+            let run_id_trace = run_id_task.clone();
             let record = match result {
                 Ok(sm) => {
                     let completed_at =
@@ -1212,6 +1321,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             if let Err(e) = sink_task.write(&record) {
                 warn!("Failed to write request JSONL: {e}");
+            }
+            // #313: bounded/redacted SSE timeline for traced requests.
+            if let (Some(trace_sink), Some(events)) = (&sse_trace_sink_task, sse_events) {
+                let row = serde_json::json!({
+                    "schema_version": "metrum-ai-bench-cli.sse-trace.v1",
+                    "run_id": run_id_trace,
+                    "seq": seq,
+                    "phase": format!("{:?}", phase).to_ascii_lowercase(),
+                    "events": events,
+                });
+                if let Err(e) = trace_sink.write(&row) {
+                    warn!("Failed to write SSE trace JSONL: {e}");
+                }
             }
             let _ = record_tx.send(record);
         });
@@ -1307,7 +1429,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
                 args.common.unique_prompts,
             ),
-        modality: Default::default(),
+        modality: {
+            // #313: the comparability knobs are recorded, never silent.
+            let mut map = std::collections::BTreeMap::new();
+            if let Some(ms) = args.start_jitter_ms.filter(|ms| *ms > 0) {
+                map.insert("start_jitter_ms".into(), serde_json::json!(ms));
+                map.insert(
+                    "start_jitter_seed".into(),
+                    serde_json::json!(args.start_jitter_seed.unwrap_or(args.common.seed)),
+                );
+            }
+            if let Some(path) = &args.prompt_sequence {
+                map.insert("prompt_sequence".into(), serde_json::json!(path));
+            }
+            if let Some(path) = &args.prompt_sequence_log {
+                map.insert("prompt_sequence_log".into(), serde_json::json!(path));
+            }
+            if let Some(n) = args.sse_trace_first_n {
+                map.insert("sse_trace_first_n".into(), serde_json::json!(n));
+            }
+            map
+        },
     });
     run_summary.environment = metrum_ai_bench::environment::collect(
         ntp_offset_ms,

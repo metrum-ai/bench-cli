@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Prompt-sequence and issuance comparability on the llm binary (#313):
+  `--prompt-sequence-log` emits the effective canonical sequence
+  (fingerprint + cohort per slot, no content); `--prompt-sequence` replays a
+  recorded sequence by content fingerprint (never silently substitutes);
+  `--start-jitter-ms`/`--start-jitter-seed` adds a reproducible per-slot
+  start stagger for closed-loop runs; `--sse-trace-first-n` writes a bounded,
+  redacted SSE event timeline; and summaries report `ttft_first_any_s`
+  (first token of any category) alongside visible-token TTFT when reasoning
+  is present.
 - New `--arrival burst` mode (llm, vlm, asr, imagegen): native Offline-style
   population burst — every request scheduled at t=0 and issued immediately,
   unbounded in flight unless `--max-concurrency` caps the transport (the

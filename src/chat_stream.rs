@@ -6,6 +6,7 @@
 use crate::error::RequestError;
 use crate::sse::SseParser;
 use futures_util::{Stream, StreamExt};
+use serde::Serialize;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
@@ -23,11 +24,27 @@ pub struct ChatStreamResult {
     /// Server-reported reasoning tokens from the usage chunk; `None` when absent.
     pub reasoning_tokens: Option<u64>,
     pub completion_text: String,
+    /// Bounded SSE event timeline (#313): index, timestamp and categories
+    /// per event — never prompt text, content or secrets. `Some` only when
+    /// the caller enabled tracing (`--sse-trace-first-n`).
+    pub trace: Option<Vec<StreamEventTrace>>,
+}
+
+/// One SSE event in a traced request (#313): categories and timing only.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StreamEventTrace {
+    /// Event index in arrival order.
+    pub index: u32,
+    /// Milliseconds from request send.
+    pub t_ms: u64,
+    /// Detected categories for this event (may be several on one delta).
+    pub categories: Vec<&'static str>,
 }
 
 #[derive(Default)]
 struct Consumer {
     parser: SseParser,
+    trace: Option<Vec<StreamEventTrace>>,
     first_token_time: Option<Duration>,
     first_reasoning_time: Option<Duration>,
     last_token_at: Option<Duration>,
@@ -44,6 +61,44 @@ struct Consumer {
 impl Consumer {
     fn feed(&mut self, bytes: &[u8], elapsed: Duration) -> Result<(), RequestError> {
         for event in self.parser.feed(bytes) {
+            // Trace the event's categories and timing only (#313): no
+            // prompt text, content, or secrets are ever recorded.
+            let mut categories: Vec<&'static str> = Vec::new();
+            match &event {
+                crate::sse::SseEvent::Done => categories.push("done"),
+                crate::sse::SseEvent::Raw(_) => categories.push("other"),
+                crate::sse::SseEvent::Json(parsed) => {
+                    if parsed.get("error").is_some() {
+                        categories.push("error");
+                    }
+                    if parsed.get("usage").is_some() {
+                        categories.push("usage");
+                    }
+                    if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
+                        for choice in choices {
+                            if crate::sse::choice_finish_reason(choice).is_some() {
+                                categories.push("finish");
+                            }
+                            if crate::sse::choice_has_reasoning_token(choice) {
+                                categories.push("reasoning");
+                            }
+                            if crate::sse::choice_has_output_token(choice) {
+                                categories.push("content");
+                            }
+                        }
+                    }
+                    if categories.is_empty() {
+                        categories.push("other");
+                    }
+                }
+            }
+            if let Some(trace) = self.trace.as_mut() {
+                trace.push(StreamEventTrace {
+                    index: trace.len() as u32,
+                    t_ms: elapsed.as_millis() as u64,
+                    categories,
+                });
+            }
             match event {
                 crate::sse::SseEvent::Done => {
                     self.done = true;
@@ -122,6 +177,7 @@ impl Consumer {
             total_tokens: self.total_tokens,
             reasoning_tokens: self.reasoning_tokens,
             completion_text: self.completion_text,
+            trace: self.trace,
         })
     }
 }
@@ -134,23 +190,28 @@ where
     S: Stream<Item = Result<B, reqwest::Error>>,
     B: AsRef<[u8]>,
 {
-    consume_with_options(stream, started, false).await
+    consume_with_options(stream, started, false, false).await
 }
 
 /// Like [`consume`], but keep a finished stream that never emitted a visible
 /// token when `allow_missing_ttft` is true (for `--infer-ttft-from-first-byte`
-/// and the preflight streaming probe, #230).
+/// and the preflight streaming probe, #230). `trace` records a bounded
+/// category/timestamp timeline per event (#313; never content or secrets).
 pub async fn consume_with_options<S, B>(
     stream: S,
     started: Instant,
     allow_missing_ttft: bool,
+    trace: bool,
 ) -> Result<ChatStreamResult, RequestError>
 where
     S: Stream<Item = Result<B, reqwest::Error>>,
     B: AsRef<[u8]>,
 {
     futures_util::pin_mut!(stream);
-    let mut consumer = Consumer::default();
+    let mut consumer = Consumer {
+        trace: trace.then(Vec::new),
+        ..Consumer::default()
+    };
     while let Some(item) = stream.next().await {
         let bytes = item.map_err(|error| RequestError::from_reqwest(&error))?;
         consumer.feed(bytes.as_ref(), started.elapsed())?;
@@ -382,5 +443,58 @@ mod tests {
             "{:?}",
             result.latency
         );
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+
+    /// #313: tracing records categories and timestamps only — never content.
+    #[tokio::test]
+    async fn trace_records_categories_and_timestamps_never_content() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"secret thinking\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let stream =
+            futures_util::stream::iter(vec![Ok::<_, reqwest::Error>(bytes::Bytes::from(body))]);
+        let result = consume_with_options(stream, Instant::now(), false, true)
+            .await
+            .expect("stream parses");
+        let trace = result.trace.expect("trace enabled");
+        let serialized = serde_json::to_string(&trace).unwrap();
+        assert!(
+            !serialized.contains("hi") && !serialized.contains("secret"),
+            "no content in the trace: {serialized}"
+        );
+        let categories: Vec<&str> = trace
+            .iter()
+            .flat_map(|e| e.categories.iter().copied())
+            .collect();
+        assert!(categories.contains(&"reasoning"), "{categories:?}");
+        assert!(categories.contains(&"content"), "{categories:?}");
+        assert!(categories.contains(&"usage"), "{categories:?}");
+        assert!(categories.contains(&"finish"), "{categories:?}");
+        assert!(categories.contains(&"done"), "{categories:?}");
+        // Indices are arrival-ordered and timestamps are ms from send.
+        for (i, event) in trace.iter().enumerate() {
+            assert_eq!(event.index as usize, i);
+        }
+    }
+
+    #[tokio::test]
+    async fn no_trace_without_the_flag() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+        let stream =
+            futures_util::stream::iter(vec![Ok::<_, reqwest::Error>(bytes::Bytes::from(body))]);
+        let result = consume_with_options(stream, Instant::now(), false, false)
+            .await
+            .expect("stream parses");
+        assert!(result.trace.is_none());
     }
 }

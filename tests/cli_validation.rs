@@ -2616,3 +2616,237 @@ fn non_burst_stamp_is_unchanged() {
         "max-concurrency"
     );
 }
+
+// #313: effective prompt-sequence emission/replay, cohort diagnostics,
+// bounded SSE trace, and reproducible start jitter.
+
+fn seq_run_args(url: &str, data_log: &str, extra: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--url",
+        url,
+        "--api-key",
+        "dummy",
+        "--scenario",
+        "sequence",
+        "--num-requests",
+        "6",
+        "--concurrency",
+        "2",
+        "--prompts",
+        "test-data/llm-hi.jsonl",
+        "--mode",
+        "chat",
+        "--model",
+        "m",
+        "--data-log",
+        data_log,
+        "--max-tokens",
+        "8",
+        "--log-level",
+        "error",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    args.extend(extra.iter().map(|s| s.to_string()));
+    args
+}
+
+#[test]
+fn prompt_sequence_log_emits_effective_order_without_content() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let seq_log = dir.path().join("seq.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--prompt-sequence-log", seq_log.to_str().unwrap()],
+        ))
+        .output()
+        .expect("run with sequence log");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&seq_log).unwrap();
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 6, "one row per slot");
+    assert_eq!(rows[0]["seq"], 0);
+    assert_eq!(rows[0]["cohort"], 0, "cohort = seq / cap");
+    assert_eq!(rows[4]["cohort"], 2);
+    assert!(rows[0]["prompt_sha256_16"].as_str().unwrap().len() == 16);
+    assert_eq!(
+        rows[0]["prompt_bytes"].as_u64(),
+        Some(2),
+        "llm-hi.jsonl prompt length"
+    );
+    assert!(
+        !text.contains("Hi"),
+        "no prompt text in the sequence log: {text}"
+    );
+}
+
+#[test]
+fn prompt_sequence_replay_reproduces_the_recorded_order() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log_a = dir.path().join("seq-a.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            dir.path().join("a.jsonl").to_str().unwrap(),
+            &["--prompt-sequence-log", log_a.to_str().unwrap()],
+        ))
+        .output()
+        .expect("run A");
+    assert!(out.status.success());
+
+    // Replay A's effective order with a DIFFERENT seed; the replayed
+    // sequence log must match A exactly (seq → fingerprint).
+    let log_b = dir.path().join("seq-b.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            dir.path().join("b.jsonl").to_str().unwrap(),
+            &[
+                "--prompt-sequence",
+                log_a.to_str().unwrap(),
+                "--prompt-sequence-log",
+                log_b.to_str().unwrap(),
+                "--seed",
+                "999",
+            ],
+        ))
+        .output()
+        .expect("run B replay");
+    assert!(
+        out.status.success(),
+        "replay must succeed:\n{}",
+        combined_output(&out)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log_a).unwrap(),
+        std::fs::read_to_string(&log_b).unwrap(),
+        "replayed sequence reproduces the recorded order exactly"
+    );
+}
+
+#[test]
+fn prompt_sequence_replay_rejects_unmatched_content() {
+    let mock = common::spawn_mock(&[]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let seq = dir.path().join("foreign.jsonl");
+    std::fs::write(
+        &seq,
+        "{\"seq\":0,\"prompt_index\":0,\"prompt_sha256_16\":\"deadbeef00000000\",\"prompt_bytes\":99,\"cohort\":0}\n",
+    )
+    .unwrap();
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            dir.path().join("out.jsonl").to_str().unwrap(),
+            &["--prompt-sequence", seq.to_str().unwrap()],
+        ))
+        .output()
+        .expect("run replay with foreign content");
+    assert!(
+        !out.status.success(),
+        "replaying content that is not in the pool must fail before traffic"
+    );
+    let text = combined_output(&out);
+    assert!(
+        text.contains("prompt"),
+        "error names the sequence problem:\n{text}"
+    );
+}
+
+#[test]
+fn start_jitter_staggers_sends_and_is_stamped() {
+    let mock = common::spawn_mock(&["--latency-ms", "20"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--start-jitter-ms", "400", "--start-jitter-seed", "1234"],
+        ))
+        .output()
+        .expect("run with jitter");
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&data_log).unwrap();
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let offsets: Vec<f64> = rows
+        .iter()
+        .filter(|r| {
+            r["schema_version"]
+                .as_str()
+                .unwrap_or("")
+                .contains(".request.")
+        })
+        .filter_map(|r| r["send_offset_s"].as_f64())
+        .collect();
+    let spread = offsets.iter().fold(f64::MIN, |a, &b| a.max(b))
+        - offsets.iter().fold(f64::MAX, |a, &b| a.min(b));
+    assert!(
+        spread > 0.05,
+        "jitter staggers the closed-loop sends: spread {spread}s over {offsets:?}"
+    );
+    let summary = rows.last().unwrap();
+    assert_eq!(
+        summary["config"]["modality"]["start_jitter_ms"], 400,
+        "jitter is recorded in the run config"
+    );
+    assert_eq!(summary["config"]["modality"]["start_jitter_seed"], 1234);
+}
+
+#[test]
+fn sse_trace_first_n_writes_bounded_redacted_timelines() {
+    let mock = common::spawn_mock(&["--latency-ms", "30"]);
+    let url = format!("http://{}/v1/chat/completions", mock.address);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_log = dir.path().join("out.jsonl");
+    let out = Command::new(metrum_ai_bench_llm_bin())
+        .args(seq_run_args(
+            &url,
+            data_log.to_str().unwrap(),
+            &["--streaming", "--sse-trace-first-n", "2"],
+        ))
+        .output()
+        .expect("run with SSE trace");
+    assert!(
+        out.status.success(),
+        "traced streaming run must succeed:\n{}",
+        combined_output(&out)
+    );
+    let trace_path = format!("{}.sse-trace.jsonl", data_log.to_str().unwrap());
+    let text = std::fs::read_to_string(&trace_path).expect("trace file written");
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2, "bounded to the first N requests");
+    for row in &rows {
+        assert_eq!(row["schema_version"], "metrum-ai-bench-cli.sse-trace.v1");
+        let events = row["events"].as_array().unwrap();
+        assert!(!events.is_empty(), "traced requests have events");
+        for event in events {
+            assert!(event["t_ms"].as_u64().is_some(), "timestamps only");
+            assert!(event["categories"].as_array().is_some(), "categories only");
+        }
+    }
+    let all = std::fs::read_to_string(&trace_path).unwrap();
+    assert!(
+        !all.contains("Hi") && !all.contains("hello"),
+        "no content in the trace: {all}"
+    );
+}
