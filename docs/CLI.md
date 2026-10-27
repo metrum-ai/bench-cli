@@ -71,7 +71,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML, curl-style). Mutually exclusive with --url/--api-key
@@ -266,6 +266,12 @@ Options:
 
           [default: 60]
 
+      --validate-model
+          Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic; exits 2 on failure
+
+      --model-alias <MODEL_ALIAS>
+          Model id to check instead of --model for --validate-model (alias/proxy setups); the run still uses --model
+
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
@@ -298,7 +304,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML). Mutually exclusive with --url/--api-key
@@ -545,7 +551,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the audio transcription API endpoint. Required with --api-key.
+          URL of the audio transcription API endpoint. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --num-requests <NUM_REQUESTS>
           Number of requests to send (must be >= 1 when set)
@@ -781,13 +787,13 @@ Options:
 
 
       --url <URL>
-          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key.
+          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
       --endpoint <ENDPOINT>
-          Repeatable endpoint URL for multi-endpoint mode
+          Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           JSON or JSONL endpoint file

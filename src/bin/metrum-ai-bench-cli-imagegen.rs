@@ -77,7 +77,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -88,7 +88,10 @@ struct Args {
     )]
     api_key: Option<String>,
 
-    #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
+    #[arg(
+        long,
+        help = "Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic."
+    )]
     endpoint: Vec<String>,
 
     #[arg(long, help = "JSON or JSONL endpoint file")]
@@ -440,7 +443,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
-    let endpoints = resolve_endpoints(&args)?;
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // any traffic (#304 review).
+    let endpoints = match resolve_endpoints(&args) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));
     let runtime = endpoints
         .iter()
@@ -872,6 +883,9 @@ fn prepare_artifacts(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send + Sync>> {
     if let Some(url) = &args.url {
+        // Fail fast on malformed URLs before any benchmark traffic (#304).
+        // The typed error lets the caller exit with the usage code 2.
+        metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
         return Ok(vec![Endpoint {
             name: endpoint_name(url, 0),
             url: normalize_base_url(url),
@@ -883,6 +897,9 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         }]);
     }
     if !args.endpoint.is_empty() {
+        for url in &args.endpoint {
+            metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
+        }
         return Ok(args
             .endpoint
             .iter()
@@ -912,6 +929,14 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         };
         if records.is_empty() {
             return Err(anyhow::anyhow!("endpoints file contains no endpoints").into());
+        }
+        for rec in &records {
+            if let Err(err) = metrum_ai_bench::endpoints::validate_endpoint_url(&rec.url) {
+                return Err(metrum_ai_bench::endpoints::UrlValidationError(format!(
+                    "{err} (endpoints file '{path}')"
+                ))
+                .into());
+            }
         }
         return Ok(records
             .into_iter()

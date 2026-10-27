@@ -44,7 +44,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "URL of the audio transcription API endpoint. Required with --api-key."
+        help = "URL of the audio transcription API endpoint. Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -321,15 +321,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         u64::from(args.num_requests.unwrap()),
     )?;
     // Endpoint source: exactly one of (--url + --api-key) or --endpoints-file
-    let resolved_endpoints = resolve_endpoints(
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // traffic (#304 review).
+    let resolved_endpoints = match resolve_endpoints(
         args.url.as_deref(),
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
-    )
-    .map_err(|e| {
-        eprintln!("Error: {}", e);
-        e
-    })?;
+    ) {
+        Ok(endpoints) => endpoints,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(e.as_ref());
+            return Err(e);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
     let ntp_offset_ms = if args.ntp_check {
         let offset = metrum_ai_bench::timecheck::check_ntp_offset();

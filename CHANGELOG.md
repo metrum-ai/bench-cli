@@ -40,6 +40,17 @@
   without traffic, matching asr, strategic and prompts. Every distributed
   binary's `--version` and `--version-only` behavior is now pinned by tests
   (#307).
+- Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
+  rejected as configuration errors before any benchmark traffic, across llm,
+  vlm, asr, imagegen and strategic; proxy path prefixes remain valid (#304).
+- New opt-in `--validate-model` preflight for `metrum-ai-bench-cli-llm`: it
+  checks the model against the server's `/v1/models` list before any
+  benchmark traffic, reports the server's actual response, and supports a
+  `--model-alias` override for proxy/alias setups (#304).
+- Both the invalid-URL rejection and the failed `--validate-model` preflight
+  exit 2, the configuration/usage code clap already uses, and URLs echoed in
+  errors, logs and the preflight report have userinfo and query values
+  redacted (#304).
 
 ### Added
 - Ready telemetry presets for the Metrum all-smi fork plus vLLM:
