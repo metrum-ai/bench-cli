@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Security
+- The `examples/agent/build_prompt_pool.py` helper no longer depends on the
+  unpinned `requests` package: its JSON POST helpers now use the standard
+  library (`urllib.request`), removing the unmanifested Python dependency
+  that pip-audit could not assess (#340).
 - The release workflow's live-gate call now passes only the Hugging Face
   token (`HF_TOKEN`) to the reusable smoke workflow instead of
   `secrets: inherit`, and the reusable workflow declares that single-secret
