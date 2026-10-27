@@ -27,6 +27,13 @@
   three ecosystems (cargo, gomod, github-actions); security updates are never
   delayed (#293).
 
+### Fixed
+- Standalone `--version-only` no longer fails with required-argument errors on
+  the llm, vlm and imagegen binaries: it prints the version and exits 0
+  without traffic, matching asr, strategic and prompts. Every distributed
+  binary's `--version` and `--version-only` behavior is now pinned by tests
+  (#307).
+
 ### Changed
 - Fix three xtask-only Clippy lints (`chunks_exact_to_as_chunks` in
   `fixtures`, `items_after_test_module` in `local_smoke` and `serve`) so the
