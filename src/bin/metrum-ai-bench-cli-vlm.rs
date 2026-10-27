@@ -611,7 +611,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Telemetry starts before the run clock so source probes are not timed.
     let mut telemetry = args
         .telemetry
-        .start_session(
+        .start_session_with_timeout(
             telemetry_cfg.as_ref(),
             metrum_ai_bench::telemetry::RunStamp {
                 run_id: run_id.clone(),
@@ -631,6 +631,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }),
             },
             Some(stop.clone()),
+            Some(args.request_timeout),
         )
         .await?;
     if let Some(session) = telemetry.as_mut() {
@@ -650,6 +651,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut current_concurrency;
     let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+    // Boundary-request channel (#312): the issuing loop asks the record
+    // consumer (owner of the telemetry session, #310) for the synchronous
+    // pre-measured baseline and awaits the ack before the first measured
+    // send.
+    let (boundary_tx, boundary_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::telemetry::BoundaryRequest>();
+    // Budget: per-source timeout × sources × 2 plus slack; default when no
+    // telemetry is configured.
+    let boundary_budget_ms = telemetry_cfg
+        .as_ref()
+        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1_000)
+        .unwrap_or(5_000);
 
     // Record consumer (#310): runs concurrently with issuance so tagged
     // request rows are emitted to the NDJSON stream as requests complete,
@@ -662,102 +675,148 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let consumer_ramp_up = args.ramp_up_seconds;
     let consumer = tokio::spawn(async move {
         let mut record_rx = record_rx;
+        let mut boundary_rx = boundary_rx;
         let mut telemetry = telemetry;
         let mut metrics_started = false;
         let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
         let mut completed: usize = 0;
         let mut errors: usize = 0;
         let mut last_percentage: usize = 0;
-        while let Some(rec) = record_rx.recv().await {
-            if let Some(session) = telemetry.as_mut() {
-                session.record_request(&rec, start_time).await;
-            }
-            let _endpoint_name = rec.endpoint.clone();
-            let phase = rec.phase;
-            if rec.is_success() {
-                let response_time = Duration::from_secs_f64(rec.latency_s);
-                let ttft = rec.ttft_s.map(Duration::from_secs_f64);
-                let _prompt_tokens = rec.prompt_tokens;
-                let completion_tokens = rec.completion_tokens;
-                let total_tokens = rec.total_tokens;
-                let image_count = rec
-                    .modality_metrics
-                    .get("image_count")
-                    .copied()
-                    .unwrap_or(0.0) as usize;
-                let mut image_stats = Vec::with_capacity(image_count);
-                for idx in 0..image_count {
-                    let size = rec
-                        .modality_metrics
-                        .get(&format!("image_{idx}_bytes"))
-                        .copied()
-                        .unwrap_or(0.0) as u64;
-                    let w = rec
-                        .modality_metrics
-                        .get(&format!("image_{idx}_width"))
-                        .copied()
-                        .unwrap_or(0.0) as u32;
-                    let h = rec
-                        .modality_metrics
-                        .get(&format!("image_{idx}_height"))
-                        .copied()
-                        .unwrap_or(0.0) as u32;
-                    image_stats.push((size, (w, h)));
-                }
-
-                if let Some(ramp_up) = consumer_ramp_up {
-                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
-                        metrics_started = true;
-                        info!("Ramp-up complete. Starting metrics collection...");
-                    }
-                    if !metrics_started {
-                        records.push(rec);
-                        continue;
+        let mut record_closed = false;
+        let mut boundary_closed = false;
+        // Exit when BOTH channels are closed (#310 hang class review): each
+        // side is disabled once closed, and a closed-but-guarded arm never
+        // spins.
+        while !(record_closed && boundary_closed) {
+            tokio::select! {
+                biased;
+                // Boundary requests (#312) are answered between records; the
+                // ack goes out as soon as the scrape finishes. Biased: a
+                // pending boundary beats the next record, and an in-flight
+                // record finishes first (its awaits are bounded by the
+                // writer channel).
+                maybe_req = boundary_rx.recv(), if !boundary_closed => {
+                    match maybe_req {
+                        Some(req) => {
+                            let outcome = match telemetry.as_mut() {
+                                Some(session) => match tokio::time::timeout(
+                                    Duration::from_millis(req.budget_ms),
+                                    session.boundary_sample(),
+                                )
+                                .await
+                                {
+                                    Ok(outcome) => outcome,
+                                    Err(_elapsed) => {
+                                        session.note_boundary_timeout(req.budget_ms).await
+                                    }
+                                },
+                                None => metrum_ai_bench::telemetry::BoundaryOutcome {
+                                    ok: true,
+                                    ..Default::default()
+                                },
+                            };
+                            let _ = req.ack.send(outcome);
+                        }
+                        None => boundary_closed = true,
                     }
                 }
-                if phase == metrum_ai_bench::record::Phase::Warmup {
-                    records.push(rec);
-                    continue;
-                }
-
-                let _tpot = match ttft {
-                    Some(ttft) if completion_tokens > 1 => {
-                        response_time.checked_sub(ttft).and_then(|d| {
-                            if d.is_zero() {
-                                None
-                            } else {
-                                Some(d / (completion_tokens as u32 - 1))
+                maybe_rec = record_rx.recv(), if !record_closed => {
+                    match maybe_rec {
+                        Some(rec) => {
+                            if let Some(session) = telemetry.as_mut() {
+                                session.record_request(&rec, start_time).await;
                             }
-                        })
+                            let _endpoint_name = rec.endpoint.clone();
+                            let phase = rec.phase;
+                            if rec.is_success() {
+                                let response_time = Duration::from_secs_f64(rec.latency_s);
+                                let ttft = rec.ttft_s.map(Duration::from_secs_f64);
+                                let _prompt_tokens = rec.prompt_tokens;
+                                let completion_tokens = rec.completion_tokens;
+                                let total_tokens = rec.total_tokens;
+                                let image_count = rec
+                                    .modality_metrics
+                                    .get("image_count")
+                                    .copied()
+                                    .unwrap_or(0.0) as usize;
+                                let mut image_stats = Vec::with_capacity(image_count);
+                                for idx in 0..image_count {
+                                    let size = rec
+                                        .modality_metrics
+                                        .get(&format!("image_{idx}_bytes"))
+                                        .copied()
+                                        .unwrap_or(0.0) as u64;
+                                    let w = rec
+                                        .modality_metrics
+                                        .get(&format!("image_{idx}_width"))
+                                        .copied()
+                                        .unwrap_or(0.0) as u32;
+                                    let h = rec
+                                        .modality_metrics
+                                        .get(&format!("image_{idx}_height"))
+                                        .copied()
+                                        .unwrap_or(0.0) as u32;
+                                    image_stats.push((size, (w, h)));
+                                }
+
+                                if let Some(ramp_up) = consumer_ramp_up {
+                                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
+                                        metrics_started = true;
+                                        info!("Ramp-up complete. Starting metrics collection...");
+                                    }
+                                    if !metrics_started {
+                                        records.push(rec);
+                                        continue;
+                                    }
+                                }
+                                if phase == metrum_ai_bench::record::Phase::Warmup {
+                                    records.push(rec);
+                                    continue;
+                                }
+
+                                let _tpot = match ttft {
+                                    Some(ttft) if completion_tokens > 1 => {
+                                        response_time.checked_sub(ttft).and_then(|d| {
+                                            if d.is_zero() {
+                                                None
+                                            } else {
+                                                Some(d / (completion_tokens as u32 - 1))
+                                            }
+                                        })
+                                    }
+                                    _ => None,
+                                };
+                                completed += 1;
+                                debug!(
+                                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
+                                    response_time, ttft, total_tokens
+                                );
+                                let percentage = (completed * 100) / (consumer_num_requests as usize);
+                                if percentage >= last_percentage + 10 {
+                                    info!(
+                                        "{}% complete ({}/{} requests)",
+                                        percentage, completed, consumer_num_requests
+                                    );
+                                    last_percentage = (percentage / 10) * 10;
+                                }
+                                if completed.is_multiple_of(100) {
+                                    info!("Completed {} requests...", completed);
+                                }
+                                records.push(rec);
+                            } else {
+                                let err_msg = rec
+                                    .error
+                                    .as_ref()
+                                    .map(|e| e.to_string())
+                                    .unwrap_or_else(|| "unknown".into());
+                                error!("Request failed: {err_msg}");
+                                errors += 1;
+                                records.push(rec);
+                            }
+                        }
+                        None => record_closed = true,
                     }
-                    _ => None,
-                };
-                completed += 1;
-                debug!(
-                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
-                    response_time, ttft, total_tokens
-                );
-                let percentage = (completed * 100) / (consumer_num_requests as usize);
-                if percentage >= last_percentage + 10 {
-                    info!(
-                        "{}% complete ({}/{} requests)",
-                        percentage, completed, consumer_num_requests
-                    );
-                    last_percentage = (percentage / 10) * 10;
                 }
-                if completed.is_multiple_of(100) {
-                    info!("Completed {} requests...", completed);
-                }
-                records.push(rec);
-            } else {
-                let err_msg = rec
-                    .error
-                    .as_ref()
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "unknown".into());
-                error!("Request failed: {err_msg}");
-                errors += 1;
-                records.push(rec);
             }
         }
         (telemetry, records, completed, errors)
@@ -773,6 +832,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut warmup_barrier =
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
             .with_tracker(Arc::clone(&inflight_tracker));
+    let mut measured_boundary_done = false;
     'request_loop: for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier
@@ -820,6 +880,49 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
+
+        if !measured_boundary_done
+            && metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests)
+                == metrum_ai_bench::record::Phase::Measure
+        {
+            // #312: the session lives in the record consumer task (#310), so
+            // the boundary sample is requested over a channel and the ack is
+            // awaited before the first measured send — fire-and-forget would
+            // not guarantee baseline-before-send.
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            match boundary_tx.send(metrum_ai_bench::telemetry::BoundaryRequest {
+                budget_ms: boundary_budget_ms,
+                ack: ack_tx,
+            }) {
+                Ok(()) => {
+                    // Generous overall wait (budget + slack); a dead
+                    // consumer fails the ack fast, and the consumer join
+                    // below fails the run.
+                    let wait_ms = boundary_budget_ms + 2_000;
+                    match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
+                        Ok(Ok(_outcome)) => {}
+                        Ok(Err(_)) => {
+                            error!("telemetry boundary ack dropped by the consumer");
+                        }
+                        Err(_) => {
+                            error!("telemetry boundary did not answer within {wait_ms}ms");
+                        }
+                    }
+                }
+                Err(_) => {
+                    error!("telemetry boundary request failed: record consumer is gone");
+                }
+            }
+            measured_boundary_done = true;
+            // Required boundary failures trip the stop flag inside the
+            // session (boundary_sample / note_boundary_timeout): stop before
+            // the first measured send (#312).
+            if stop.is_stopped() {
+                info!("Stop flag set after telemetry boundary; not issuing measured requests");
+                break 'request_loop;
+            }
+        }
+
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
             semaphore.clone(),
             &inflight_tracker,
@@ -1297,7 +1400,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
         }
     }
+    // Both channels must close for the consumer to exit (#312): the record
+    // channel closes when every request task has sent; the boundary channel
+    // closes here, once issuance is over (no more boundary requests can
+    // arrive).
     drop(record_tx);
+    drop(boundary_tx);
 
     info!("All requests launched. Waiting for completion...");
 

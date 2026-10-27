@@ -15,6 +15,15 @@
   (per-run files named by run_id inside a directory). The default append
   semantics are now documented prominently, and the policy resolves as the
   last configuration step before traffic (#305).
+- Synchronous telemetry boundary baseline (#312): with `--ndjson` +
+  `--telemetry`, every configured source is scraped once immediately before
+  the first measured request (after the warmup barrier) on the llm, vlm, asr
+  and imagegen binaries, emitting rows tagged `boundary: "pre-measured"` on
+  the shared run epoch. A failed source is marked by a boundary-tagged
+  `scrape_error` row instead of an invented sample; under
+  `--require-telemetry` it also gates measured issuance and fails the run
+  verdict. `boundary` is an additive optional field on `telemetry` and
+  `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
 
 ### Security
 - The `examples/agent/build_prompt_pool.py` helper no longer depends on the

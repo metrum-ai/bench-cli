@@ -1225,6 +1225,8 @@ fn spawn_one_request(
                         ttft_s: record.ttft_s,
                         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
                         error,
+                        queue_sample_age_ms: None,
+                        queue_sample_stale: None,
                         telemetry_at_done: None,
                     },
                 ))
@@ -1648,6 +1650,7 @@ async fn main() -> Result<()> {
                     require_telemetry: args.require_telemetry,
                     require_failures: args.require_telemetry_failures,
                     abort: Some(stop.clone()),
+                    request_timeout_s: None,
                 },
             )
             .await?,

@@ -174,6 +174,23 @@ A modality run is one stage. Its NDJSON holds:
 - `telemetry` and `scrape_error` rows from the scrapers, then one `summary`
   row last.
 
+### Pre-measured boundary baseline (#312)
+
+Immediately before the first measured request (after the warmup barrier),
+each configured source is scraped once synchronously. The rows are normal
+`telemetry` rows tagged `boundary: "pre-measured"` on the shared run epoch,
+so the opening burst has a queue sample at-or-before send and no older than
+the configured scrape interval (periodic scrapes carry the rest of the run).
+The baseline scrape latency is before the first measured send, outside the
+measured request window. A source that fails the baseline emits a
+boundary-tagged `scrape_error` row — coverage is explicitly missing, never
+invented. Under `--require-telemetry` a failed baseline also stops measured
+issuance and surfaces as the run verdict after the partial summary is
+written; without it the run proceeds and the missing baseline is on record.
+Boundary requests carry the header `x-metrum-telemetry-boundary:
+pre-measured`, so a real exporter or proxy can tell the synchronous
+baseline apart from periodic scrapes.
+
 `summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
