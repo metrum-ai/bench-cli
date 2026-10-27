@@ -167,6 +167,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -382,6 +388,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
@@ -624,6 +636,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
@@ -933,6 +951,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
