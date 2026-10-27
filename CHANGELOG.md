@@ -42,6 +42,14 @@
   ordered summary termination is unchanged. `metrum-ai-bench-cli-strategic`
   already emitted request rows at completion and is unchanged.
 
+### Added
+- Ready telemetry presets for the Metrum all-smi fork plus vLLM:
+  `examples/telemetry/all-smi-vllm.yaml` (validated single-node include set,
+  pinned exporter/engine versions, loopback URLs and the operational
+  caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
+  (four lanes with source labels and loopback forwarding placeholders), with
+  a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
+
 ### Changed
 - Fix three xtask-only Clippy lints (`chunks_exact_to_as_chunks` in
   `fixtures`, `items_after_test_module` in `local_smoke` and `serve`) so the
