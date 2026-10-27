@@ -141,35 +141,6 @@ fn run_child(binary: &Path, args: &[String], cwd: &Path, out: &Path) -> Result<(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fixture_paths_are_resolved_and_sut_extra_stays_string_compatible() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("input.jsonl");
-        let target = dir.path().join("out.jsonl");
-        fs::write(
-            &source,
-            "{\"id\":\"row1\",\"path\":\"test-data/asr/a.wav\"}\n",
-        )
-        .unwrap();
-        rewrite_jsonl_paths(&source, &target, "path", dir.path()).unwrap();
-        let row: Value = serde_json::from_str(fs::read_to_string(&target).unwrap().trim()).unwrap();
-        assert_eq!(
-            row["path"],
-            dir.path().join("test-data/asr/a.wav").display().to_string()
-        );
-        let sut = dir.path().join("sut.json");
-        fs::write(&sut, r#"{"notes":"declared","extra":{}}"#).unwrap();
-        stamp_sut(&sut, "prompt_rows", &json!("17")).unwrap();
-        let value: Value = serde_json::from_slice(&fs::read(sut).unwrap()).unwrap();
-        assert_eq!(value["extra"]["prompt_rows"], "17");
-    }
-}
-
 pub fn run(args: LocalSmokeArgs) -> Result<()> {
     if !["llm", "vlm", "asr", "imagegen"].contains(&args.modality.as_str()) {
         bail!("unsupported modality {}", args.modality);
@@ -476,4 +447,32 @@ pub fn run(args: LocalSmokeArgs) -> Result<()> {
         bail!("headline assertion failed with {check}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixture_paths_are_resolved_and_sut_extra_stays_string_compatible() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("input.jsonl");
+        let target = dir.path().join("out.jsonl");
+        fs::write(
+            &source,
+            "{\"id\":\"row1\",\"path\":\"test-data/asr/a.wav\"}\n",
+        )
+        .unwrap();
+        rewrite_jsonl_paths(&source, &target, "path", dir.path()).unwrap();
+        let row: Value = serde_json::from_str(fs::read_to_string(&target).unwrap().trim()).unwrap();
+        assert_eq!(
+            row["path"],
+            dir.path().join("test-data/asr/a.wav").display().to_string()
+        );
+        let sut = dir.path().join("sut.json");
+        fs::write(&sut, r#"{"notes":"declared","extra":{}}"#).unwrap();
+        stamp_sut(&sut, "prompt_rows", &json!("17")).unwrap();
+        let value: Value = serde_json::from_slice(&fs::read(sut).unwrap()).unwrap();
+        assert_eq!(value["extra"]["prompt_rows"], "17");
+    }
 }
