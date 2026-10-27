@@ -202,7 +202,9 @@ pub fn decode_data_url(s: &str) -> Result<DataUrlImage, String> {
 /// Stable short identity for an image reference, used as the VLM image-cache
 /// key and in log and error messages. `data:` URLs are reduced to a SHA-256
 /// digest so multi-megabyte inline images are not copied into keys or logs;
-/// every other reference is returned unchanged.
+/// every other reference is returned unchanged. Logging sites that echo this
+/// key must redact http(s) refs first (`endpoints::redact_url`), because they
+/// can carry credentials (#332); the cache key itself stays exact.
 pub fn image_ref_key(s: &str) -> String {
     use sha2::{Digest, Sha256};
     if !is_data_url(s) {
