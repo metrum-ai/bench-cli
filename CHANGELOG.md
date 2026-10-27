@@ -41,6 +41,9 @@
   warnings` exits 0 (#338).
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
+### Documentation
+- Add the 2026-10-23 four-model Endpoints comparison, scalar report and pre-release evidence index; disclose timing/arrival, quantization, power and accuracy boundaries.
+
 ## 1.5.5 (2026-10-23)
 
 ### Security
