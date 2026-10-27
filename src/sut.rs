@@ -115,6 +115,9 @@ pub fn template_sut() -> Sut {
             id: Some("example/model".into()),
             revision: None,
             quantization: None,
+            kv_dtype: None,
+            kernel_evidence: None,
+            quality_evidence: None,
         }),
         host_os: Some("Ubuntu 22.04".into()),
         notes: Some(
@@ -199,6 +202,9 @@ pub fn probe_local_sut(warnings: &mut Vec<String>) -> anyhow::Result<Sut> {
             id: Some("REPLACE_ME".into()),
             revision: None,
             quantization: None,
+            kv_dtype: None,
+            kernel_evidence: None,
+            quality_evidence: None,
         }),
         host_os: host_os.or(Some(std::env::consts::OS.into())),
         notes: Some(
@@ -341,6 +347,64 @@ pub struct SutModel {
     pub id: Option<String>,
     pub revision: Option<String>,
     pub quantization: Option<String>,
+    /// KV-cache dtype actually served (e.g. "fp8_e4m3", "bf16"). Optional;
+    /// required under `--sut-profile strict` (#308).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kv_dtype: Option<String>,
+    /// Declared kernel and CUDA-graph evidence. Never inferred by the CLI
+    /// from the model name (#308): an operator declares it from serving
+    /// logs/config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_evidence: Option<SutKernelEvidence>,
+    /// Linked external quality-evidence artifact. Quality results stay
+    /// separate from throughput (#308); this block only links them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_evidence: Option<SutQualityEvidence>,
+}
+
+/// Declared kernel and CUDA-graph evidence for the served checkpoint (#308).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SutKernelEvidence {
+    /// Kernel path actually used (e.g. "FlashInferCutlassNvFp4LinearKernel").
+    pub kernel: Option<String>,
+    /// CUDA graph mode actually used (e.g. "piecewise", "full", "none").
+    pub graph_mode: Option<String>,
+    /// How the operator knows: "serving startup log", "launch flag", ...
+    pub source: Option<String>,
+    /// Optional sha256 (hex) of the log excerpt or config proving it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_sha256: Option<String>,
+}
+
+/// Link to external quality evidence (accuracy/quality run), with the
+/// statistical surface needed to read it honestly (#308).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SutQualityEvidence {
+    /// Link to the quality artifact (release URL, object store, or path).
+    pub uri: Option<String>,
+    /// sha256 (hex) of the referenced artifact.
+    pub sha256: Option<String>,
+    /// Sample size of the quality run.
+    pub n: Option<u64>,
+    /// Error/failure count within the quality run (n >= errors).
+    pub errors: Option<u64>,
+    /// Confidence-interval methodology label (e.g. "wilson95").
+    pub confidence: Option<String>,
+}
+
+/// SUT validation profile (#308). `standard` is the `--require-sut`
+/// publication baseline; `strict` additionally requires the exact model
+/// revision, weight/activation quantization, KV dtype, declared
+/// kernel/graph evidence, and a linked quality-evidence artifact, and
+/// refuses to infer native kernel choice from the model name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum SutProfile {
+    #[default]
+    Standard,
+    Strict,
 }
 
 /// Load a SUT declaration from JSON (`.json`) or YAML (`.yaml`/`.yml`).
@@ -415,6 +479,115 @@ fn nonblank(value: Option<&str>) -> bool {
     value.map(str::trim).is_some_and(|s| !s.is_empty())
 }
 
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Configuration error from the strict SUT profile (#308). Distinct type so
+/// binaries exit 2 (the configuration/usage code, matching #304's URL
+/// validation and #305's collision refusal) instead of the generic 1.
+#[derive(Debug)]
+pub struct StrictSutError(pub String);
+
+impl std::fmt::Display for StrictSutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for StrictSutError {}
+
+/// Exit with the configuration/usage code (2) when `err` is a strict-SUT
+/// refusal; returns otherwise so the caller can propagate it.
+pub fn exit_2_if_strict_sut_error(err: &(dyn std::error::Error + 'static)) {
+    if err.downcast_ref::<StrictSutError>().is_some() {
+        eprintln!("Error: {err}");
+        std::process::exit(2);
+    }
+}
+
+/// Validate the strict publication profile (#308). Caller first applies the
+/// publishable baseline; strict adds the exact model revision, the
+/// weight/activation quantization string, the KV dtype, the declared
+/// kernel/graph evidence, and the linked quality-evidence artifact. Model
+/// names never imply a native kernel choice: strict refuses to run without
+/// operator-declared evidence. Refusals carry [`StrictSutError`].
+pub fn validate_strict_sut(sut: &Sut) -> anyhow::Result<()> {
+    let mut missing: Vec<&str> = Vec::new();
+    match sut.model.as_ref() {
+        None => missing.push("model"),
+        Some(model) => {
+            if !nonblank(model.id.as_deref()) {
+                missing.push("model.id");
+            }
+            if !nonblank(model.revision.as_deref()) {
+                missing.push("model.revision");
+            }
+            if !nonblank(model.quantization.as_deref()) {
+                missing.push("model.quantization");
+            }
+            if !nonblank(model.kv_dtype.as_deref()) {
+                missing.push("model.kv_dtype");
+            }
+            match model.kernel_evidence.as_ref() {
+                None => missing.push("model.kernel_evidence"),
+                Some(kernel) => {
+                    if !nonblank(kernel.kernel.as_deref()) {
+                        missing.push("model.kernel_evidence.kernel");
+                    }
+                    if !nonblank(kernel.graph_mode.as_deref()) {
+                        missing.push("model.kernel_evidence.graph_mode");
+                    }
+                    if !nonblank(kernel.source.as_deref()) {
+                        missing.push("model.kernel_evidence.source");
+                    }
+                    if let Some(sha) = kernel.log_sha256.as_deref() {
+                        if !valid_sha256_hex(sha) {
+                            anyhow::bail!(
+                                "--sut-profile strict: model.kernel_evidence.log_sha256 must be 64 hex chars, got {sha:?}"
+                            );
+                        }
+                    }
+                }
+            }
+            match model.quality_evidence.as_ref() {
+                None => missing.push("model.quality_evidence"),
+                Some(quality) => {
+                    if !nonblank(quality.uri.as_deref()) {
+                        missing.push("model.quality_evidence.uri");
+                    }
+                    match quality.sha256.as_deref() {
+                        Some(sha) if valid_sha256_hex(sha) => {}
+                        Some(sha) => anyhow::bail!(
+                            "--sut-profile strict: model.quality_evidence.sha256 must be 64 hex chars, got {sha:?}"
+                        ),
+                        None => missing.push("model.quality_evidence.sha256"),
+                    }
+                    match quality.n {
+                        Some(n) if n >= 1 => {}
+                        _ => missing.push("model.quality_evidence.n"),
+                    }
+                    match (quality.errors, quality.n) {
+                        (Some(errors), Some(n)) if errors <= n => {}
+                        _ => missing.push("model.quality_evidence.errors"),
+                    }
+                    if !nonblank(quality.confidence.as_deref()) {
+                        missing.push("model.quality_evidence.confidence");
+                    }
+                }
+            }
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(StrictSutError(format!(
+        "--sut-profile strict: incomplete strict SUT declaration: missing {} — strict never infers kernel/graph choices from the model name; declare observed serving evidence instead",
+        missing.join(", ")
+    ))
+    .into())
+}
+
 /// Resolve SUT flags before any request is sent.
 ///
 /// Returns `(sut, redact_hostname)`. `--require-sut` implies hostname redaction
@@ -425,12 +598,27 @@ pub fn resolve_sut_flags(
     require_sut: bool,
     redact_hostname: bool,
 ) -> anyhow::Result<(Option<Sut>, bool)> {
+    resolve_sut_profile_flags(sut_path, require_sut, redact_hostname, SutProfile::Standard)
+}
+
+/// Like [`resolve_sut_flags`], with the validation profile (#308).
+/// `strict` implies the `--require-sut` baseline plus the strict gates.
+pub fn resolve_sut_profile_flags(
+    sut_path: Option<&Path>,
+    require_sut: bool,
+    redact_hostname: bool,
+    profile: SutProfile,
+) -> anyhow::Result<(Option<Sut>, bool)> {
+    let require_sut = require_sut || profile == SutProfile::Strict;
     let redact = redact_hostname || require_sut;
     match sut_path {
         Some(path) => {
             let sut = load_sut(path)?;
             if require_sut {
                 validate_publishable_sut(&sut)?;
+            }
+            if profile == SutProfile::Strict {
+                validate_strict_sut(&sut)?;
             }
             warn_quantization(&sut);
             Ok((Some(sut), redact))
@@ -688,5 +876,151 @@ mod tests {
         init_sut(&path, false, false).unwrap();
         let err = init_sut(&path, false, false).unwrap_err().to_string();
         assert!(err.contains("--force"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod strict_tests {
+    use super::*;
+
+    /// A complete strict SUT declaration (all strict fields populated).
+    fn strict_sut_json() -> serde_json::Value {
+        serde_json::json!({
+            "provenance": "declared",
+            "gpu": {"model": "H100", "count": 1, "memory_gb": 80},
+            "driver_version": "580.126.09",
+            "runtime": {"name": "vllm", "version": "0.32.0", "config": "vllm serve m --flags"},
+            "host_os": "Linux",
+            "model": {
+                "id": "vendor/model",
+                "revision": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                "quantization": "NVFP4 W4A4",
+                "kv_dtype": "fp8_e4m3",
+                "kernel_evidence": {
+                    "kernel": "FlashInferCutlassNvFp4LinearKernel",
+                    "graph_mode": "piecewise",
+                    "source": "serving startup log"
+                },
+                "quality_evidence": {
+                    "uri": "https://example.invalid/quality.json",
+                    "sha256": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                    "n": 100,
+                    "errors": 2,
+                    "confidence": "wilson95"
+                }
+            }
+        })
+    }
+
+    fn strict_sut() -> Sut {
+        serde_json::from_value(strict_sut_json()).expect("strict example parses")
+    }
+
+    fn strict_err(mut json: serde_json::Value) -> String {
+        let sut: Sut = serde_json::from_value(std::mem::take(&mut json)).expect("parses");
+        validate_publishable_sut(&sut).expect("baseline passes");
+        validate_strict_sut(&sut)
+            .expect_err("strict must reject")
+            .to_string()
+    }
+
+    #[test]
+    fn strict_accepts_complete_declaration() {
+        let sut = strict_sut();
+        validate_publishable_sut(&sut).expect("baseline passes");
+        validate_strict_sut(&sut).expect("strict passes");
+    }
+
+    #[test]
+    fn strict_rejects_missing_kernel_and_graph_evidence() {
+        let mut j = strict_sut_json();
+        j.pointer_mut("/model")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("kernel_evidence");
+        let err = strict_err(j);
+        assert!(err.contains("model.kernel_evidence"), "{err}");
+        assert!(
+            err.contains("never infers kernel/graph choices from the model name"),
+            "strict must state the no-inference rule: {err}"
+        );
+    }
+
+    #[test]
+    fn strict_rejects_missing_revision_quantization_and_kv_dtype() {
+        for key in ["revision", "quantization", "kv_dtype"] {
+            let mut j = strict_sut_json();
+            j.pointer_mut("/model")
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            let err = strict_err(j);
+            assert!(err.contains(&format!("model.{key}")), "{key}: {err}");
+        }
+    }
+
+    #[test]
+    fn strict_rejects_missing_quality_evidence() {
+        let mut j = strict_sut_json();
+        j.pointer_mut("/model")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("quality_evidence");
+        let err = strict_err(j);
+        assert!(err.contains("model.quality_evidence"), "{err}");
+    }
+
+    #[test]
+    fn strict_rejects_malformed_quality_hash() {
+        let mut j = strict_sut_json();
+        j.pointer_mut("/model/quality_evidence")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("sha256".into(), serde_json::json!("not-hex"));
+        let sut: Sut = serde_json::from_value(j).expect("parses");
+        validate_publishable_sut(&sut).expect("baseline");
+        let err = validate_strict_sut(&sut)
+            .expect_err("bad hash must fail")
+            .to_string();
+        assert!(err.contains("sha256"), "{err}");
+    }
+
+    #[test]
+    fn strict_rejects_errors_exceeding_n() {
+        let mut j = strict_sut_json();
+        j.pointer_mut("/model/quality_evidence")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("errors".into(), serde_json::json!(500));
+        let err = strict_err(j);
+        assert!(err.contains("quality_evidence.errors"), "{err}");
+    }
+
+    #[test]
+    fn standard_profile_never_requires_strict_fields() {
+        // Baseline alone: no model block at all is fine for standard runs.
+        let sut = serde_json::from_value::<Sut>(serde_json::json!({
+            "provenance": "declared",
+            "gpu": {"model": "H100", "count": 1, "memory_gb": 80},
+            "driver_version": "580.126.09",
+            "runtime": {"name": "vllm", "version": "0.32.0", "config": "vllm serve m"},
+            "host_os": "Linux"
+        }))
+        .expect("parses");
+        validate_publishable_sut(&sut).expect("baseline passes without model evidence");
+    }
+
+    #[test]
+    fn shipped_strict_example_passes_strict_validation() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/sut.strict.example.json");
+        let sut = load_sut(&path).expect("strict example loads");
+        validate_publishable_sut(&sut).expect("baseline");
+        validate_strict_sut(&sut).expect("shipped strict example passes strict validation");
     }
 }

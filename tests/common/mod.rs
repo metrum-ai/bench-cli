@@ -347,17 +347,25 @@ pub fn spawn_flaky_metrics(ok: usize) -> SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind flaky metrics");
     let address = listener.local_addr().expect("flaky metrics addr");
     thread::spawn(move || {
-        for (served, stream) in listener.incoming().enumerate() {
+        let mut served = 0usize;
+        for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
-            let response = if served < ok {
+            let request = String::from_utf8_lossy(&buf);
+            // Boundary samples are tagged with a marker header (#312 review);
+            // serve them OK regardless of the fail-after-N budget so the
+            // baseline is deterministic and only periodic scrapes flake.
+            let is_boundary = request.contains("x-metrum-telemetry-boundary");
+            let response = if is_boundary || served < ok {
                 let body = "all_smi_gpu_utilization{gpu=\"0\"} 50\n";
+                served += usize::from(!is_boundary);
                 format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 )
             } else {
+                served += 1;
                 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     .to_string()
             };

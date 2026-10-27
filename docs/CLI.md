@@ -72,7 +72,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML, curl-style). Mutually exclusive with --url/--api-key
@@ -107,6 +107,17 @@ Options:
 
       --data-log <DATA_LOG>
           Path to the data log file
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -168,6 +179,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -200,6 +217,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -261,6 +284,12 @@ Options:
 
           [default: 60]
 
+      --validate-model
+          Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic; exits 2 on failure
+
+      --model-alias <MODEL_ALIAS>
+          Model id to check instead of --model for --validate-model (alias/proxy setups); the run still uses --model
+
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
@@ -293,7 +322,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML). Mutually exclusive with --url/--api-key
@@ -317,6 +346,17 @@ Options:
 
       --data-log <DATA_LOG>
           Path to the data log file
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -378,6 +418,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -410,6 +456,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -534,7 +586,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the audio transcription API endpoint. Required with --api-key.
+          URL of the audio transcription API endpoint. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --num-requests <NUM_REQUESTS>
           Number of requests to send (must be >= 1 when set)
@@ -559,6 +611,17 @@ Options:
           Path to the data log file
 
           [default: results.jsonl]
+
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
 
       --seed <SEED>
           RNG seed for shuffle/arrival/unique prompts
@@ -620,6 +683,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -652,6 +721,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -764,13 +839,13 @@ Options:
 
 
       --url <URL>
-          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key.
+          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
       --endpoint <ENDPOINT>
-          Repeatable endpoint URL for multi-endpoint mode
+          Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           JSON or JSONL endpoint file
@@ -894,6 +969,17 @@ Options:
       --data-log <DATA_LOG>
 
 
+      --data-log-mode <DATA_LOG_MODE>
+          Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)
+
+          Possible values:
+          - append:          Default, unchanged behavior: append request and summary rows to the file. Each run keeps its unique `run_id`, so rows stay attributable
+          - refuse-existing: Fail before any traffic when the data log path already exists
+          - overwrite:       Truncate the existing data log before the run, so runs never mix
+          - new-dir:         Treat the `--data-log` value as a directory (created if missing) and write one file per run, named by the run's unique `run_id`
+
+          [default: append]
+
       --ndjson <PATH>
           Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
 
@@ -929,6 +1015,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -939,6 +1031,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -1323,6 +1421,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Reserved for parity with modality binaries (strategic stamps SUT only)

@@ -90,6 +90,12 @@ pub struct TelemetryRow {
     /// Present only when a units scale != 1 was applied at ingest.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<f64>,
+    /// Boundary sample tag (#312): `pre-measured` rows are the synchronous
+    /// baseline scraped immediately before the first measured request, so
+    /// the opening burst has a queue sample at-or-before send. Absent on
+    /// periodic scrapes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +128,15 @@ pub struct RequestRow {
     /// Last-seen included metric values at request completion (sugar, not truth).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_at_done: Option<BTreeMap<String, f64>>,
+    /// Age of the latest telemetry sample at-or-before send, per source,
+    /// in ms (#312 review). Omitted when telemetry is not configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_sample_age_ms: Option<BTreeMap<String, f64>>,
+    /// Sources whose latest sample at-or-before send exceeded the
+    /// freshness bound (interval + jitter allowance); empty when fresh
+    /// (#312 review). Analysis can exclude these requests' queue evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_sample_stale: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +147,11 @@ pub struct ScrapeErrorRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
     pub error: String,
+    /// Boundary sample tag (#312): marks a failed baseline scrape, so a
+    /// missing pre-measured queue sample is explicit coverage, not an
+    /// invented value. Absent on periodic scrape errors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

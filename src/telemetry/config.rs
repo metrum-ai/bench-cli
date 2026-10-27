@@ -87,6 +87,27 @@ pub struct CompiledSource {
 }
 
 impl TelemetryConfig {
+    /// Preview the metric series a compiled source would select from an
+    /// exposition body. Test/ops helper for pinning preset
+    /// pattern→selection mappings (#311); not a stable API.
+    #[doc(hidden)]
+    pub fn preview_source_selection(
+        &self,
+        source_name: &str,
+        exposition: &str,
+    ) -> Result<Vec<String>> {
+        let sources = self.compile()?;
+        let source = sources
+            .iter()
+            .find(|s| s.name == source_name)
+            .with_context(|| format!("no source named {source_name}"))?;
+        let parsed = crate::telemetry::parser::parse_exposition(exposition, &source.include);
+        let mut names: Vec<String> = parsed.samples.iter().map(|s| s.metric.clone()).collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("read telemetry config {}", path.display()))?;

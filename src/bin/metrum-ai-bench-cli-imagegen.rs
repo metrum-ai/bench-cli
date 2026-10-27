@@ -77,7 +77,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -88,7 +88,10 @@ struct Args {
     )]
     api_key: Option<String>,
 
-    #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
+    #[arg(
+        long,
+        help = "Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic."
+    )]
     endpoint: Vec<String>,
 
     #[arg(long, help = "JSON or JSONL endpoint file")]
@@ -231,6 +234,14 @@ struct Args {
     #[arg(long)]
     data_log: String,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+
     #[command(flatten)]
     telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
 
@@ -264,6 +275,20 @@ struct Args {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)"
+    )]
+    fail_on_partial: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption"
+    )]
+    ci_safety: bool,
+
+    #[arg(
+        long,
         value_name = "USD_PER_HOUR",
         help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
     )]
@@ -284,6 +309,13 @@ struct Args {
     )]
     require_sut: bool,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "standard",
+        help = "SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact"
+    )]
+    sut_profile: metrum_ai_bench::sut::SutProfile,
     #[arg(
         long,
         default_value_t = false,
@@ -397,7 +429,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    if args.ci_safety {
+        args.fail_on_error = true;
+        args.fail_on_partial = true;
+    }
     if args.version_only {
         print_version_only();
         return Ok(());
@@ -413,15 +450,30 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None
     };
     validate_args(&args)?;
-    let (sut_block, redact_hostname) = metrum_ai_bench::sut::resolve_sut_flags(
+    let (sut_block, redact_hostname) = match metrum_ai_bench::sut::resolve_sut_profile_flags(
         args.sut.as_deref(),
         args.require_sut,
         args.redact_hostname,
-    )?;
+        args.sut_profile,
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            metrum_ai_bench::sut::exit_2_if_strict_sut_error(err.as_ref());
+            return Err(err.into());
+        }
+    };
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
-    let endpoints = resolve_endpoints(&args)?;
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // any traffic (#304 review).
+    let endpoints = match resolve_endpoints(&args) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));
     let runtime = endpoints
         .iter()
@@ -447,7 +499,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let prompts = Arc::new(load_prompts(&args)?);
-    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    // Explicit output collision policy (#305), resolved before any traffic.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately; any
+    // pre-traffic validation must run BEFORE this call.
+    // run_id is generated first so new-dir can name the per-run file.
+    let run_id = metrum_ai_bench::unique_id::generate_uuid();
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
+        &effective_data_log,
+    )?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
             .create(true)
@@ -462,13 +529,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
     ));
-    let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     // Telemetry starts before the run clock so source probes are not timed.
     let mut telemetry = args
         .telemetry
-        .start_session(
+        .start_session_with_timeout(
             telemetry_cfg.as_ref(),
             metrum_ai_bench::telemetry::RunStamp {
                 run_id: run_id.clone(),
@@ -484,11 +550,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_cap,
                     "request_rate": args.request_rate,
                     "warmup_requests": args.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },
             Some(stop.clone()),
+            Some(args.request_timeout),
         )
         .await?;
     if let Some(session) = telemetry.as_mut() {
@@ -509,8 +576,87 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
         (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
     };
-    let (record_tx, mut record_rx) =
+    let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+    // Boundary-request channel (#312): the issuing loop asks the record
+    // consumer (owner of the telemetry session, #310) for the synchronous
+    // pre-measured baseline and awaits the ack before the first measured
+    // send.
+    let (boundary_tx, boundary_rx) =
+        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::telemetry::BoundaryRequest>();
+    // Budget: per-source timeout × sources × 2 plus slack; default when no
+    // telemetry is configured.
+    let boundary_budget_ms = telemetry_cfg
+        .as_ref()
+        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1_000)
+        .unwrap_or(5_000);
+
+    // Record consumer (#310): runs concurrently with issuance so tagged
+    // request rows are emitted to the NDJSON stream as requests complete,
+    // interleaved with live telemetry scrapes on the same writer, instead
+    // of only after the issuing loop finishes. Emission order is channel
+    // receive order (per-request completion order, not seq order); the
+    // ordered summary termination is unchanged. Returns the session and
+    // records once all request tasks have sent.
+    let consumer = tokio::spawn(async move {
+        let mut record_rx = record_rx;
+        let mut boundary_rx = boundary_rx;
+        let mut telemetry = telemetry;
+        let mut shared_records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
+        let mut record_closed = false;
+        let mut boundary_closed = false;
+        // Exit when BOTH channels are closed (#310 hang class review): each
+        // side is disabled once closed, and a closed-but-guarded arm never
+        // spins.
+        while !(record_closed && boundary_closed) {
+            tokio::select! {
+                biased;
+                // Boundary requests (#312) are answered between records; the
+                // ack goes out as soon as the scrape finishes. Biased: a
+                // pending boundary beats the next record, and an in-flight
+                // record finishes first (its awaits are bounded by the
+                // writer channel).
+                maybe_req = boundary_rx.recv(), if !boundary_closed => {
+                    match maybe_req {
+                        Some(req) => {
+                            let outcome = match telemetry.as_mut() {
+                                Some(session) => match tokio::time::timeout(
+                                    Duration::from_millis(req.budget_ms),
+                                    session.boundary_sample(),
+                                )
+                                .await
+                                {
+                                    Ok(outcome) => outcome,
+                                    Err(_elapsed) => {
+                                        session.note_boundary_timeout(req.budget_ms).await
+                                    }
+                                },
+                                None => metrum_ai_bench::telemetry::BoundaryOutcome {
+                                    ok: true,
+                                    ..Default::default()
+                                },
+                            };
+                            let _ = req.ack.send(outcome);
+                        }
+                        None => boundary_closed = true,
+                    }
+                }
+                maybe_rec = record_rx.recv(), if !record_closed => {
+                    match maybe_rec {
+                        Some(rec) => {
+                            if let Some(session) = telemetry.as_mut() {
+                                session.record_request(&rec, run_start).await;
+                            }
+                            shared_records.push(rec);
+                        }
+                        None => record_closed = true,
+                    }
+                }
+            }
+        }
+        (telemetry, shared_records)
+    });
+
     let slots = metrum_ai_bench::load::schedule(
         arrival_kind,
         u64::from(args.num_requests),
@@ -519,6 +665,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let mut warmup_barrier = metrum_ai_bench::runner::WarmupBarrier::new(args.warmup_requests)
         .with_tracker(Arc::clone(&inflight_tracker));
+    let mut measured_boundary_done = false;
     for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier
@@ -532,6 +679,49 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
+
+        if !measured_boundary_done
+            && metrum_ai_bench::record::Phase::for_seq(slot.seq, args.warmup_requests)
+                == metrum_ai_bench::record::Phase::Measure
+        {
+            // #312: the session lives in the record consumer task (#310), so
+            // the boundary sample is requested over a channel and the ack is
+            // awaited before the first measured send — fire-and-forget would
+            // not guarantee baseline-before-send.
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            match boundary_tx.send(metrum_ai_bench::telemetry::BoundaryRequest {
+                budget_ms: boundary_budget_ms,
+                ack: ack_tx,
+            }) {
+                Ok(()) => {
+                    // Generous overall wait (budget + slack); a dead
+                    // consumer fails the ack fast, and the consumer join
+                    // below fails the run.
+                    let wait_ms = boundary_budget_ms + 2_000;
+                    match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
+                        Ok(Ok(_outcome)) => {}
+                        Ok(Err(_)) => {
+                            log::error!("telemetry boundary ack dropped by the consumer");
+                        }
+                        Err(_) => {
+                            log::error!("telemetry boundary did not answer within {wait_ms}ms");
+                        }
+                    }
+                }
+                Err(_) => {
+                    log::error!("telemetry boundary request failed: record consumer is gone");
+                }
+            }
+            measured_boundary_done = true;
+            // Required boundary failures trip the stop flag inside the
+            // session (boundary_sample / note_boundary_timeout): stop before
+            // the first measured send (#312).
+            if stop.is_stopped() {
+                log::info!("Stop flag set after telemetry boundary; not issuing measured requests");
+                break;
+            }
+        }
+
         let request_index = slot.seq as usize;
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
             Arc::clone(&sem),
@@ -673,15 +863,23 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             metrics.lock().await.outcomes.push(outcome);
         }));
     }
+    // Both channels must close for the consumer to exit (#312): the record
+    // channel closes when every request task has sent; the boundary channel
+    // closes here, once issuance is over (no more boundary requests can
+    // arrive).
     drop(record_tx);
+    drop(boundary_tx);
 
-    let mut shared_records = Vec::new();
-    while let Some(rec) = record_rx.recv().await {
-        if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, run_start).await;
+    // Join the record consumer (#310): it returns the session and records
+    // once every request task has finished sending.
+    let (telemetry, shared_records) = match consumer.await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            let _ = write_error(&error_log, &format!("record_consumer_join_error: {}", e)).await;
+            return Err(anyhow::anyhow!("record consumer task failed: {e}").into());
         }
-        shared_records.push(rec);
-    }
+    };
+
     for h in handles {
         h.await?;
     }
@@ -803,6 +1001,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if args.fail_on_error && failed > 0 {
         return Err(anyhow::anyhow!("Test completed with {failed} errors").into());
     }
+    if args.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        return Err(anyhow::anyhow!(
+            "Run was interrupted before completing all planned requests (rejected by --fail-on-partial / --ci-safety)"
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -844,6 +1051,9 @@ fn prepare_artifacts(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send + Sync>> {
     if let Some(url) = &args.url {
+        // Fail fast on malformed URLs before any benchmark traffic (#304).
+        // The typed error lets the caller exit with the usage code 2.
+        metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
         return Ok(vec![Endpoint {
             name: endpoint_name(url, 0),
             url: normalize_base_url(url),
@@ -855,6 +1065,9 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         }]);
     }
     if !args.endpoint.is_empty() {
+        for url in &args.endpoint {
+            metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
+        }
         return Ok(args
             .endpoint
             .iter()
@@ -884,6 +1097,14 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         };
         if records.is_empty() {
             return Err(anyhow::anyhow!("endpoints file contains no endpoints").into());
+        }
+        for rec in &records {
+            if let Err(err) = metrum_ai_bench::endpoints::validate_endpoint_url(&rec.url) {
+                return Err(metrum_ai_bench::endpoints::UrlValidationError(format!(
+                    "{err} (endpoints file '{path}')"
+                ))
+                .into());
+            }
         }
         return Ok(records
             .into_iter()
