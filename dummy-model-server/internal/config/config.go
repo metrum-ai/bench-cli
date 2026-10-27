@@ -89,7 +89,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.IntVar(&cfg.MaxImages, "max-images", 4, "Maximum n for image generations")
 	fs.BoolVar(&cfg.AllowAnyModel, "allow-any-model", true, "Accept any model name on image generations")
 	fs.BoolVar(&cfg.StrictMedia, "strict-media", false, "Reject invalid image data: URLs and audio uploads with HTTP 400, like real servers")
-	idleTimeout := fs.String("idle-timeout", "60s", "Keep-alive budget: how long an idle HTTP connection stays open between requests (e.g. 30m; 0 = never close idle connections)")
+	idleTimeout := fs.String("idle-timeout", "60s", "Keep-alive budget: how long an idle HTTP connection stays open between requests (e.g. 30m; 0 = fall back to ReadTimeout, 30s)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

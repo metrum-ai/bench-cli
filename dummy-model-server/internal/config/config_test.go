@@ -91,8 +91,9 @@ func TestParseFlagsIdleTimeout(t *testing.T) {
 	if cfg.IdleTimeout != 30*time.Minute {
 		t.Fatalf("IdleTimeout = %v, want 30m", cfg.IdleTimeout)
 	}
-	// 0 pins an unlimited budget (Go http.Server semantics: never close idle
-	// connections).
+	// 0 is accepted and left as-is: Go http.Server then falls back to
+	// ReadTimeout (30 s here) for idle keep-alive connections — it does NOT
+	// mean "never close idle connections".
 	cfg, err = config.ParseFlags([]string{"-idle-timeout", "0"})
 	if err != nil {
 		t.Fatal(err)

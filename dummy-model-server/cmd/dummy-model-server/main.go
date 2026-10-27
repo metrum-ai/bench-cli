@@ -39,7 +39,9 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		// Server-side keep-alive budget, pinnable per test so idle eviction
-		// cannot race sequential connection-reuse assertions (#328).
+		// cannot race sequential connection-reuse assertions (#328). Go
+		// http.Server semantics: IdleTimeout 0 falls back to ReadTimeout
+		// (30 s here), it does not mean "never close idle connections".
 		IdleTimeout:    cfg.IdleTimeout,
 		MaxHeaderBytes: 1 << 20, // 1 MiB
 	}
