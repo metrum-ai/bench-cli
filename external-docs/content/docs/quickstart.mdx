@@ -33,7 +33,7 @@ You'll need:
 - A Linux (`x86_64` or `aarch64` glibc) or macOS Darwin host for release
   binaries, **or** Rust **1.89+** to build from source. Windows has no release
   binaries (see [Platforms](./platforms)).
-- Go **1.26.6+** only if you start the dummy model server from a **source
+- Go **1.26.10+** only if you start the dummy model server from a **source
   clone** with `go run` (matches `dummy-model-server/go.mod` and CI). Release
   tarballs already ship `bin/dummy-model-server` and need no Go.
 - Network access only if you download a GitHub Release or fetch the prompt
@@ -116,7 +116,7 @@ the same binary name works without the `bin/` prefix:
 dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms
 ```
 
-From a **source clone** (needs Go **1.26.6+**), from the repository root:
+From a **source clone** (needs Go **1.26.10+**), from the repository root:
 
 ```bash
 go run ./dummy-model-server/cmd/dummy-model-server \
