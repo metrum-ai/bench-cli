@@ -11,6 +11,16 @@
   vulnerabilities and the OSV scan now reports only the two documented
   unmaintained-crate exceptions (Refs #341).
 
+### Fixed
+- `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
+  flakes on busy runners (#328): the test pins the dummy server's new
+  `-idle-timeout` keep-alive budget (server-side idle eviction can no longer
+  race the sequential requests) and paces its requests at 5 req/s so the
+  next request cannot race the previous connection's return to the client
+  pool. All reuse assertions stay strict, and a new negative-control test
+  proves the fixture still detects a no-pooling client (`--pool-idle-timeout
+  0`).
+
 ## 1.6.0 (2026-10-27)
 
 ### Security
