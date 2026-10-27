@@ -1,0 +1,71 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ready single-node telemetry preset (#311): Metrum all-smi fork + vLLM,
+# validated end-to-end on a live host (study 2026-10-23: every measured
+# point scraped with this include set).
+#
+# Pinned validation versions:
+#   - all-smi fork: metrum-ai/all-smi @ 3b6eaec3364d3c2eb897bf1433ee93eef609c6a9
+#     (fork of all-smi v0.26.3; series names come from the fork source at
+#     that commit)
+#   - vLLM 0.32.0
+#
+# Scope and caveats (do not skip):
+#   - Endpoints are the `/metrics` path (all-smi serves `/metrics`, not
+#     `/metric`; the legacy `/metric` alias exists only in this repo's mock
+#     server for old configs).
+#   - URLs are loopback on purpose: run all-smi and vLLM on the same host as
+#     the benchmark client. If all-smi only listens on its Unix socket,
+#     forward it to loopback HTTP first (e.g.
+#     `socat TCP-LISTEN:9090,bind=127.0.0.1,fork UNIX-CONNECT:<socket>` or
+#     `ssh -L 9090:... -N`); the YAML needs an http(s) URL.
+#   - all-smi refreshes its internal collection at ~1 Hz, so 500 ms scraping
+#     yields repeated values between cycles: exporter freshness is bounded
+#     by the exporter cycle, not the scrape interval. Keep 500 ms if you
+#     want sub-second resolution; drop the interval to 1000 ms if duplicate
+#     values are noise for you.
+#   - `all_smi_gpu_energy_hw_millijoules_total` is hardware millijoules; the
+#     `units` block scales it to joules (the NDJSON row keeps the raw value
+#     in `raw`).
+#   - Power here is GPU board power (NVML), NOT whole-system or provisioned
+#     power. Do not publish it as an MLPerf-style system-power claim.
+#   - Not every pattern matches on every host or exporter/engine version:
+#     some series are optional. The startup probe prints `matched_series`
+#     per source into the `run` row; a source matching zero series fails the
+#     run at startup unless you set `allow_empty: true` on it.
+#   - Version-dependent / host-dependent series (Phase 2 validation on an
+#     RTX A6000, all-smi v0.27.1, vLLM 0.32.0):
+#     `all_smi_gpu_clock_graphics_max_mhz`, `all_smi_gpu_hollow_utilization_ratio`
+#     and `all_smi_gpu_memory_bandwidth_utilization` appear on the H100
+#     fixture but not on every host; `all_smi_gpu_temperature_threshold_acoustic_celsius`
+#     is an extra on some hosts. `vllm:gpu_cache_usage_perc` is not emitted
+#     by vLLM 0.32.0 in all configurations (`vllm:kv_cache_usage_perc`
+#     covers the same signal). These are expected drift, not preset bugs.
+#   - Validate against your live pages before a long run:
+#       python3 harness-equivalent probe (see docs/TELEMETRY.md) or simply
+#       curl the two URLs and confirm the series below exist.
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: all-smi
+    url: http://127.0.0.1:9090/metrics
+    interval_ms: 500
+    include:
+      - '^all_smi_gpu_.*(power|energy|utilization|memory|temperature|clock|frequency)'
+      - '^all_smi_memory_'
+      - '^all_smi_cpu_(utilization|frequency_mhz|power_consumption_watts|temperature_celsius|socket_count|core_count|thread_count)$'
+      - '^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$'
+      - '^all_smi_chassis_.*(power|energy|temperature)'
+      - '^all_smi_energy_consumed_joules_total$'
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: vllm
+    url: http://127.0.0.1:8000/metrics
+    interval_ms: 1000
+    include:
+      - '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$'
+      - '^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_(bucket|sum|count)$'
+      - '^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$'
