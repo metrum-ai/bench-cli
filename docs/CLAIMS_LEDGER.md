@@ -38,6 +38,8 @@ scope and are tracked separately.
 | Documented limitations describe client-side measurement boundaries and output-schema behavior | `docs/LIMITATIONS.md` and `docs/OUTPUT_SCHEMA.md` | Verified-in-code | Harness behavior, tests, and the published output schema |
 | `metrum-ai/prompt-library` is published on Hugging Face as a public Apache-2.0 dataset for LLM workload mixes | `docs/datasets/DATASET_CARD.md`, Hub card | Third-party public page | Hub API 2026-09-22: `private=false`, `gated=false`, `cardData.license=apache-2.0`, root `LICENSE` present; publisher asserts Apache-2.0 while upstream collection authors remain undocumented on the card |
 
+| Endpoints comparison: 224 canonical four-model LLM points, decode/TTFT/noise/quality boundaries disclosed | [Study](evidence/mlperf-endpoints/2026-10-23/README.md) | Measured (`mlperf-endpoints-20261023`, 2026-10-23) | [Evidence bundle](https://github.com/metrum-ai/bench-cli/releases/download/evidence-mlperf-endpoints-20261023/evidence-mlperf-endpoints-20261023.zip), sha256 `01dd4cce4ba1b501e7dbcf496c70d3d6b221bedbae19363b7648d320460bffa6`; unmodified SUT summaries; not an accepted MLPerf submission |
+
 ## Maintenance
 
 - Add a row when a new material public claim is introduced in this repository.
