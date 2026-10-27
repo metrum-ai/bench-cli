@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# actionlint config: declare the self-hosted runner labels used by this
+# repository's workflows so actionlint can lint them cleanly (#291).
+self-hosted-runner:
+  # Labels on the bench-cli ARC/self-hosted pools (deploy/).
+  labels:
+    - bench-cli
+    - bench-cli-arc
+    - gpu-h100
+    - macos-15-intel
