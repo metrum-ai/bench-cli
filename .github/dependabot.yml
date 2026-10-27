@@ -1,5 +1,11 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Supply-chain window (#293): every ecosystem entry applies a seven-day
+# cooldown to routine version updates (default-days; cooldown never delays
+# security updates, and security PRs like #266/#285 remain expedited).
+# Supported for cargo, gomod and github-actions per the Dependabot options
+# reference; unsupported keys would fail configuration validation.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -7,6 +13,8 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     ignore:
       # parquet pins thrift 0.17; no resolvable path to patched ≥0.23 yet
       - dependency-name: "thrift"
@@ -15,8 +23,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7

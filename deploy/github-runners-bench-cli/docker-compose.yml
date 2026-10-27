@@ -2,12 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Ephemeral self-hosted pool for metrum-ai/bench-cli (label: bench-cli).
+#
+# Deployment status (#292): the compose pool is not currently deployed (no
+# repo-level or gpu-h100 runners registered); it remains the fallback and
+# GPU-gate definition, and the next deployment must use this non-root image.
 # Deploy on pikachu. Replaces bare-metal ~/github-runners-bench-cli for CI
 # cargo test. Docs are not deployed from any runner: the docs web host
 # pulls the docs bundle from each GitHub Release (see docs/RELEASING.md).
 #
 # AppArmor is not required. apparmor:unconfined skips the host
 # docker-default profile so the pool starts on hosts without AA policy.
+#
+# Security boundary honesty (#292): the runner containers run as the
+# non-root runner account without passwordless sudo. The gpu service below
+# additionally mounts the host Docker socket, which is host-root-equivalent;
+# for that service this is defense in depth, not a hard boundary.
 
 # Compatible with docker-compose v1.29 (no top-level `name:`).
 x-runner: &runner
@@ -27,6 +36,9 @@ x-runner: &runner
     EPHEMERAL: ${EPHEMERAL:-true}
     DISABLE_AUTO_UPDATE: "true"
     RUNNER_WORKDIR: /tmp/runner-work
+    # Non-root runner (#292). Also baked into the image; restated so an
+    # older image tag cannot silently reintroduce a root shell.
+    RUN_AS_ROOT: "false"
   volumes:
     - runner-tools:/opt/hostedtoolcache
 
@@ -42,6 +54,7 @@ services:
       LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
       EPHEMERAL: ${EPHEMERAL:-true}
       DISABLE_AUTO_UPDATE: "true"
+      RUN_AS_ROOT: "false"
       RUNNER_WORKDIR: /tmp/runner-work
 
   runner-2:
@@ -55,6 +68,7 @@ services:
       LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
       EPHEMERAL: ${EPHEMERAL:-true}
       DISABLE_AUTO_UPDATE: "true"
+      RUN_AS_ROOT: "false"
       RUNNER_WORKDIR: /tmp/runner-work
 
   runner-3:
@@ -68,6 +82,7 @@ services:
       LABELS: ${LABELS:-self-hosted,linux,x64,bench-cli}
       EPHEMERAL: ${EPHEMERAL:-true}
       DISABLE_AUTO_UPDATE: "true"
+      RUN_AS_ROOT: "false"
       RUNNER_WORKDIR: /tmp/runner-work
 
   # Opt-in GPU runner for .github/workflows/live-modality-smoke.yml. Not
@@ -86,6 +101,8 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu, utility]
+    # Compose merge is shallow: this service's environment map replaces the
+    # x-runner one entirely, so RUN_AS_ROOT must be restated here (#292).
     environment:
       RUNNER_NAME: ${RUNNER_NAME_PREFIX:-pikachu-bench-cli}-gpu
       RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
@@ -94,7 +111,14 @@ services:
       LABELS: ${GPU_LABELS:-self-hosted,linux,x64,bench-cli,gpu-h100}
       EPHEMERAL: ${EPHEMERAL:-true}
       DISABLE_AUTO_UPDATE: "true"
+      RUN_AS_ROOT: "false"
       RUNNER_WORKDIR: /tmp/runner-work
+    # Non-root runner + host Docker socket (#292): the socket is owned by the
+    # HOST docker group, so uid 1001 needs that group id (not the image's own
+    # docker group) to reach the daemon. Set DOCKER_GID in .env to the host
+    # docker group id: DOCKER_GID=$(getent group docker | cut -d: -f3).
+    group_add:
+      - "${DOCKER_GID:?set to the host docker group id (see MANUAL, Non-root rollout)}"
     volumes:
       - runner-tools:/opt/hostedtoolcache
       # The launchers run `docker run --gpus` against the host daemon.
