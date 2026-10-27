@@ -322,7 +322,8 @@ mod tests {
 
     #[test]
     fn test_load_metrum_ai_bench_llm_prompts_valid() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_prompts_test.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_llm_prompts_test.jsonl");
         let content = r#"{"prompt":"Hello"}
 {"prompt":"World with, comma"}
 {"prompt":"Quote \"inside\""}
@@ -334,25 +335,24 @@ mod tests {
         assert_eq!(prompts[1], "World with, comma");
         assert_eq!(prompts[2], "Quote \"inside\"");
         assert_eq!(prompts[3], "New\nline");
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
     fn test_load_metrum_ai_bench_llm_prompts_missing_prompt() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_missing.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_llm_missing.jsonl");
         std::fs::write(&tmp, r#"{"other":"field"}"#).unwrap();
         let err = load_metrum_ai_bench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("prompt"));
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
     fn test_load_metrum_ai_bench_llm_prompts_malformed_json() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_llm_bad.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_llm_bad.jsonl");
         std::fs::write(&tmp, r#"not json"#).unwrap();
         let err = load_metrum_ai_bench_llm_prompts(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("line 1"));
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
@@ -371,7 +371,8 @@ mod tests {
 
     #[test]
     fn test_load_metrum_ai_bench_vlm_records_valid() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_test.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_vlm_test.jsonl");
         let content = r#"{"prompt":"What is this?","image_urls":["https://example.com/a.jpg"]}
 {"prompt":"Describe","image_url":"file:///path/to/local.jpg"}
 {"prompt":"Multi","image_urls":["https://a.com/1.jpg","https://b.com/2.jpg"]}"#;
@@ -382,16 +383,15 @@ mod tests {
         assert_eq!(records[0].1, vec!["https://example.com/a.jpg"]);
         assert_eq!(records[1].1, vec!["/path/to/local.jpg"]);
         assert_eq!(records[2].1.len(), 2);
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
     fn test_load_metrum_ai_bench_vlm_records_missing_image_urls() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_no_urls.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_vlm_no_urls.jsonl");
         std::fs::write(&tmp, r#"{"prompt":"No images"}"#).unwrap();
         let err = load_metrum_ai_bench_vlm_records(tmp.to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("image_urls"));
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
@@ -412,11 +412,11 @@ mod tests {
 
     #[test]
     fn test_read_utf8_from_path_or_url_file() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_read_utf8_file_test.txt");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_read_utf8_file_test.txt");
         std::fs::write(&tmp, "hello utf8").unwrap();
         let s = read_utf8_from_path_or_url(tmp.to_str().unwrap()).unwrap();
         assert_eq!(s, "hello utf8");
-        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]
@@ -563,7 +563,8 @@ mod tests {
 
     #[test]
     fn test_load_metrum_ai_bench_vlm_records_keeps_data_urls() {
-        let tmp = std::env::temp_dir().join("metrum_ai_bench_vlm_data_url_test.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("metrum_ai_bench_vlm_data_url_test.jsonl");
         let data = "data:image/png;base64,iVBORw0KGgo=";
         let content = format!(
             "{{\"prompt\":\"A\",\"image_url\":\"{data}\"}}\n{{\"prompt\":\"B\",\"image_urls\":[\"/x.png\",\"{data}\"]}}\n"
@@ -572,6 +573,5 @@ mod tests {
         let records = load_metrum_ai_bench_vlm_records(tmp.to_str().unwrap()).unwrap();
         assert_eq!(records[0].1, vec![data.to_string()]);
         assert_eq!(records[1].1, vec!["/x.png".to_string(), data.to_string()]);
-        let _ = std::fs::remove_file(&tmp);
     }
 }

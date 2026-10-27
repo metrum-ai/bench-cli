@@ -301,3 +301,10 @@ the live telemetry abort wrote `summary.v3` and a `partial=true` NDJSON summary.
 summary (exit 1) and two SIGINTs hard-exit 130. #242 works live with a 2.2 MB image body. Because of an
 operator copy error, the VLM and ASR SUT `notes` say "H100"; their `gpu` fields are correct.
 Instance deleted and verified via `GET /instances/<id>/info`.
+
+
+## Endpoints comparison: 2026-10-23
+
+[Scalar study and scope](evidence/mlperf-endpoints/2026-10-23/README.md): 224 canonical LLM points across four official Qwen/NVIDIA checkpoints, zero reported request errors. Decode timing agrees within the stated 5% criterion; dense W2/c8 TTFT is arrival-pattern confounded, not a parser regression. Native AIME/quality coverage limitations are disclosed.
+
+[Unmodified-summary evidence bundle](https://github.com/metrum-ai/bench-cli/releases/download/evidence-mlperf-endpoints-20261023/evidence-mlperf-endpoints-20261023.zip), SHA256 `01dd4cce4ba1b501e7dbcf496c70d3d6b221bedbae19363b7648d320460bffa6`. This exploratory comparison is not an accepted MLPerf submission.
