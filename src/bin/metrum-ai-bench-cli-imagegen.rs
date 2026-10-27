@@ -127,7 +127,7 @@ struct Args {
     #[arg(long, help = "Open-loop request rate (requests/second)")]
     request_rate: Option<f64>,
 
-    #[arg(long, default_value = "constant", value_parser = ["constant", "poisson"])]
+    #[arg(long, default_value = "constant", value_parser = ["constant", "poisson", "burst"])]
     arrival: String,
 
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
@@ -463,6 +463,33 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     };
     let telemetry_cfg = args.telemetry.resolve_config()?;
+    let arrival_kind = match (args.request_rate, args.arrival.as_str()) {
+        (None, "burst") => metrum_ai_bench::load::ArrivalKind::Burst,
+        (Some(_), "burst") => {
+            // Configuration error: exit 2 (the code clap uses), as the
+            // other binaries do via validate_arrival (#309 review).
+            log::error!(
+                "--arrival burst issues the whole population immediately; remove --request-rate (or use constant|poisson for paced runs)"
+            );
+            std::process::exit(2);
+        }
+        (None, _) => metrum_ai_bench::load::ArrivalKind::ClosedLoop,
+        (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
+        (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
+    };
+    // Uncapped bursts hold one socket per outstanding request (#309
+    // review): refuse past the client fd budget before any traffic.
+    if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst)
+        && args.max_concurrency.is_none()
+    {
+        if let Err(msg) =
+            metrum_ai_bench::runner::uncapped_burst_fd_guard(u64::from(args.num_requests))
+        {
+            log::error!("{msg}");
+            std::process::exit(2);
+        }
+    }
+
     prepare_artifacts(&args)?;
 
     // Invalid URLs exit 2 (the configuration/usage code clap uses) before
@@ -524,7 +551,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
     let metrics = Arc::new(Mutex::new(Metrics::default()));
     let rr = Arc::new(AtomicUsize::new(0));
-    let concurrency_cap = args.max_concurrency.unwrap_or(args.concurrency);
+
+    // Burst (#309): the whole population is issued at once unless
+    // --max-concurrency is set (the explicit transport limit).
+    let concurrency_cap = match args.max_concurrency {
+        Some(cap) => cap,
+        None if matches!(arrival_kind, metrum_ai_bench::load::ArrivalKind::Burst) => {
+            args.num_requests
+        }
+        None => args.concurrency,
+    };
     let sem = Arc::new(Semaphore::new(concurrency_cap as usize));
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
@@ -907,7 +943,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )
     .with_config(metrum_ai_bench::summary::EffectiveRunConfig {
         run_id: run_id.clone(),
-        effective_max_concurrency: args.max_concurrency.unwrap_or(args.concurrency),
+        effective_max_concurrency: concurrency_cap,
+        effective_max_concurrency_source: Some(
+            metrum_ai_bench::runner::effective_max_concurrency_source(
+                arrival_kind,
+                args.max_concurrency.is_some(),
+            )
+            .to_string(),
+        ),
         common: metrum_ai_bench::args_common::EffectiveCommonArgs {
             scenario: Some(args.scenario.clone()),
             seed: args.seed.unwrap_or(0) as u64,

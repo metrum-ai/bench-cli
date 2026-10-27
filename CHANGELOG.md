@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- New `--arrival burst` mode (llm, vlm, asr, imagegen): native Offline-style
+  population burst — every request scheduled at t=0 and issued immediately,
+  unbounded in flight unless `--max-concurrency` caps the transport (the
+  wait is recorded as queue delay). The measured window runs first-send to
+  last-completion (full-batch tail drain included), and `effective_max_concurrency`
+  stamps the actual cap. Never an accepted MLPerf submission label; the
+  Endpoints adapter (#306) discloses non-burst Offline mappings (#309).
 - New `metrum-ai-bench-cli endpoints-export` subcommand: converts a completed
   run data log into an Endpoints-shaped, explicitly non-certifying bundle
   (point.yaml, declared-only system_desc.json, declared-only system_power.json,

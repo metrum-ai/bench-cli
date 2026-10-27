@@ -133,7 +133,7 @@ Options:
           Open-loop request rate (req/s). Omit for closed-loop concurrency
 
       --arrival <ARRIVAL>
-          Arrival process when --request-rate is set: constant|poisson
+          Arrival process when --request-rate is set: constant|poisson; 'burst' (standalone, no --request-rate) issues the whole population immediately (#309, native Offline-style)
 
           [default: constant]
 
@@ -372,7 +372,7 @@ Options:
           Open-loop request rate (req/s). Omit for closed-loop concurrency
 
       --arrival <ARRIVAL>
-          Arrival process when --request-rate is set: constant|poisson
+          Arrival process when --request-rate is set: constant|poisson; 'burst' (standalone, no --request-rate) issues the whole population immediately (#309, native Offline-style)
 
           [default: constant]
 
@@ -637,7 +637,7 @@ Options:
           Open-loop request rate (req/s). Omit for closed-loop concurrency
 
       --arrival <ARRIVAL>
-          Arrival process when --request-rate is set: constant|poisson
+          Arrival process when --request-rate is set: constant|poisson; 'burst' (standalone, no --request-rate) issues the whole population immediately (#309, native Offline-style)
 
           [default: constant]
 
@@ -883,7 +883,7 @@ Options:
 
       --arrival <ARRIVAL>
           [default: constant]
-          [possible values: constant, poisson]
+          [possible values: constant, poisson, burst]
 
       --max-concurrency <MAX_CONCURRENCY>
 
