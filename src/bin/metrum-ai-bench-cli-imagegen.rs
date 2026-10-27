@@ -383,11 +383,23 @@ struct Metrics {
     outcomes: Vec<RequestOutcome>,
 }
 
+fn print_version_only() {
+    println!("metrum-ai-bench-cli-imagegen version {VERSION}");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Standalone --version-only must not demand run arguments (#307):
+    // the run-required arguments are non-optional fields, so clap cannot
+    // waive them; check before parsing.
+    if metrum_ai_bench::version_only_invoked() {
+        print_version_only();
+        return Ok(());
+    }
+
     let args = Args::parse();
     if args.version_only {
-        println!("metrum-ai-bench-cli-imagegen version {}", VERSION);
+        print_version_only();
         return Ok(());
     }
     metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-imagegen", args.quiet);
