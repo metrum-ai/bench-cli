@@ -201,6 +201,14 @@ pub struct CommonBenchArgs {
 
     #[arg(
         long,
+        value_enum,
+        default_value = "standard",
+        help = "SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name"
+    )]
+    pub sut_profile: crate::sut::SutProfile,
+
+    #[arg(
+        long,
         default_value_t = false,
         env = "METRUM_AI_BENCH_REDACT_HOSTNAME",
         help = "Write environment.hostname as null"
@@ -317,7 +325,12 @@ impl CommonBenchArgs {
 
     /// Resolve `--sut` / `--require-sut` / `--redact-hostname` before any request.
     pub fn resolve_sut(&self) -> anyhow::Result<(Option<crate::sut::Sut>, bool)> {
-        crate::sut::resolve_sut_flags(self.sut.as_deref(), self.require_sut, self.redact_hostname)
+        crate::sut::resolve_sut_profile_flags(
+            self.sut.as_deref(),
+            self.require_sut,
+            self.redact_hostname,
+            self.sut_profile,
+        )
     }
 
     /// Prefix prompt with a run-scoped nonce when `--unique-prompts` is set.
@@ -417,6 +430,7 @@ mod tests {
             fail_on_error: false,
             fail_on_partial: false,
             ci_safety: false,
+            sut_profile: crate::sut::SutProfile::Standard,
             price_per_hour: None,
             isl_target: None,
             osl_target: None,

@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- New optional strict SUT publication profile (`--sut-profile strict`, implies
+  `--require-sut`): requires the exact model revision, weight/activation
+  quantization, KV dtype, operator-declared kernel/graph evidence (never
+  inferred from the model name), and a linked quality-evidence artifact
+  (URI + sha256 + n/errors/confidence). `examples/sut.strict.example.json`
+  demonstrates it. Quality evidence stays separate from throughput (#308).
 - New agent/CI safety preset `--ci-safety` (implies `--fail-on-error` and the
   new `--fail-on-partial`) on the llm, vlm, asr and imagegen binaries: all-error,
   endpoint-down and interrupted runs can no longer exit 0 for automated

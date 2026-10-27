@@ -217,6 +217,12 @@ Options:
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
 
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
+
       --redact-hostname
           Write environment.hostname as null
 
@@ -449,6 +455,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -708,6 +720,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact, and never infers kernel choice from the model name
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -1012,6 +1030,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Write environment.hostname as null
@@ -1396,6 +1420,12 @@ Options:
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
 
           [env: METRUM_AI_BENCH_REQUIRE_SUT=]
+
+      --sut-profile <SUT_PROFILE>
+          SUT validation profile (#308): standard is the --require-sut baseline; strict additionally requires model.revision, weight/activation quantization, kv_dtype, declared kernel/graph evidence, and a linked quality-evidence artifact
+
+          [default: standard]
+          [possible values: standard, strict]
 
       --redact-hostname
           Reserved for parity with modality binaries (strategic stamps SUT only)
