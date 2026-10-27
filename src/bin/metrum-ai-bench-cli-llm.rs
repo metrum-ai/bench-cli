@@ -263,7 +263,7 @@ async fn make_request(
 
     // Log request details in debug mode
     debug!("Making HTTP request:");
-    debug!("URL: {}", url);
+    debug!("URL: {}", metrum_ai_bench::endpoints::redact_url(url));
     debug!("Headers:");
     debug!("  Content-Type: application/json");
     debug!("  Authorization: Bearer {}", "*".repeat(8)); // Don't log the actual API key
@@ -288,7 +288,7 @@ async fn make_request(
             Err(e) => {
                 log_reqwest_error_details(&e, "HTTP Request Failed");
                 error!("Request context:");
-                error!("  URL: {}", url);
+                error!("  URL: {}", metrum_ai_bench::endpoints::redact_url(url));
                 error!(
                     "  Payload: {}",
                     serde_json::to_string_pretty(&payload).unwrap_or_default()
@@ -315,7 +315,7 @@ async fn make_request(
                 status, error_body
             );
             error!("Request context:");
-            error!("  URL: {}", url);
+            error!("  URL: {}", metrum_ai_bench::endpoints::redact_url(url));
             error!(
                 "  Payload: {}",
                 serde_json::to_string_pretty(&payload).unwrap_or_default()
@@ -1545,6 +1545,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 // Add helper function for word counting if not already present
+/// Error view with a redacted `Display`/`Debug` but the original source
+/// chain, for logging a reqwest error without the URL its own Display and
+/// Debug embed (#332).
+struct RedactedError<'a> {
+    text: String,
+    source: Option<&'a (dyn std::error::Error + 'static)>,
+}
+
+impl std::fmt::Display for RedactedError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.text)
+    }
+}
+
+impl std::fmt::Debug for RedactedError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RedactedError({:?})", self.text)
+    }
+}
+
+impl std::error::Error for RedactedError<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+    }
+}
+
 /// Comprehensive error logging function that extracts all available error details
 fn log_detailed_error(e: &dyn std::error::Error, context: &str) {
     error!("=== DETAILED ERROR REPORT ===");
@@ -1593,7 +1619,13 @@ fn log_detailed_error(e: &dyn std::error::Error, context: &str) {
 fn log_reqwest_error_details(e: &reqwest::Error, context: &str) {
     error!("=== REQWEST ERROR DETAILS ===");
     error!("Context: {}", context);
-    error!("Error: {}", e);
+    // reqwest's Display embeds the full request URL (userinfo, query), so
+    // route it through redaction instead of printing the error verbatim
+    // (#332).
+    error!(
+        "Error: {}",
+        metrum_ai_bench::endpoints::redact_reqwest_error(e)
+    );
 
     if e.is_timeout() {
         error!("Error Type: Timeout");
@@ -1614,14 +1646,26 @@ fn log_reqwest_error_details(e: &reqwest::Error, context: &str) {
         error!("Error Type: Request Error");
     }
     if let Some(url) = e.url() {
-        error!("Failed URL: {}", url);
+        error!(
+            "Failed URL: {}",
+            metrum_ai_bench::endpoints::redact_url(url.as_str())
+        );
     }
     if let Some(status) = e.status() {
         error!("HTTP Status: {}", status);
     }
 
-    // Log the full error chain
-    log_detailed_error(e, "Reqwest Error Chain");
+    // Log the full error chain. The wrapper replaces the reqwest error's
+    // Display and Debug (both embed the URL) with the redacted text while
+    // keeping the original source chain, so the detailed report cannot
+    // leak credentials either (#332).
+    log_detailed_error(
+        &RedactedError {
+            text: metrum_ai_bench::endpoints::redact_reqwest_error(e),
+            source: e.source(),
+        },
+        "Reqwest Error Chain",
+    );
     error!("=== END REQWEST ERROR DETAILS ===");
 }
 

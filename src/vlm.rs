@@ -81,9 +81,17 @@ impl ImageCache {
         reencode_jpeg: bool,
     ) -> Result<ImageData, Box<dyn Error + Send + Sync>> {
         // `data:` URLs are keyed (and logged) by digest so large inline images
-        // are not duplicated into the cache key or every log line.
+        // are not duplicated into the cache key or every log line. The cache
+        // key keeps the full reference, but the *label* used in every log
+        // and error message below is redacted for http(s) refs, which can
+        // carry credentials (userinfo, ?token=) like endpoints (#332).
         let key = crate::prompt_inputs::image_ref_key(path);
-        let label = key.as_str();
+        let label_owned = if path.starts_with("http://") || path.starts_with("https://") {
+            crate::endpoints::redact_url(path)
+        } else {
+            key.clone()
+        };
+        let label = label_owned.as_str();
         if let Some(data) = self.get(&key) {
             debug!("Cache hit for image: {}", label);
             return Ok(data);
@@ -107,18 +115,29 @@ impl ImageCache {
             declared_mime = Some(decoded.declared_mime);
             decoded.bytes
         } else if path.starts_with("http://") || path.starts_with("https://") {
-            // For URLs, use client with timeout (no unbounded reqwest::get)
-            debug!("Fetching image from URL: {}", path);
+            // For URLs, use client with timeout (no unbounded reqwest::get).
+            // Image URLs can carry credentials (userinfo, ?token=) just like
+            // endpoints, so every echo goes through redaction (#332).
+            debug!(
+                "Fetching image from URL: {}",
+                crate::endpoints::redact_url(path)
+            );
             let response = client
                 .get(path)
                 .timeout(Duration::from_secs(timeout_secs))
                 .send()
                 .await
-                .map_err(|e| format!("Failed to fetch image from URL '{}': {}", path, e))?;
+                .map_err(|e| {
+                    format!(
+                        "Failed to fetch image from URL '{}': {}",
+                        crate::endpoints::redact_url(path),
+                        crate::endpoints::redact_reqwest_error(&e)
+                    )
+                })?;
             if !response.status().is_success() {
                 return Err(format!(
                     "Failed to fetch image from URL '{}': HTTP {}",
-                    path,
+                    crate::endpoints::redact_url(path),
                     response.status()
                 )
                 .into());
@@ -126,7 +145,13 @@ impl ImageCache {
             response
                 .bytes()
                 .await
-                .map_err(|e| format!("Failed to read image data from URL '{}': {}", path, e))?
+                .map_err(|e| {
+                    format!(
+                        "Failed to read image data from URL '{}': {}",
+                        crate::endpoints::redact_url(path),
+                        crate::endpoints::redact_reqwest_error(&e)
+                    )
+                })?
                 .to_vec()
         } else {
             // For local files, use fs::read

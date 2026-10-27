@@ -307,7 +307,11 @@ async fn make_request(
     // The body arrives serialized: no JSON encoding inside the window (#242).
     let start_time = Instant::now();
 
-    debug!("Request URL: {} ({} body bytes)", url, payload.len());
+    debug!(
+        "Request URL: {} ({} body bytes)",
+        metrum_ai_bench::endpoints::redact_url(url),
+        payload.len()
+    );
 
     let response = match metrum_ai_bench::connect_timing::send(
         client
@@ -591,7 +595,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 {
                     warn!(
                         "Image preload failed for {}: {e}",
-                        metrum_ai_bench::prompt_inputs::image_ref_key(url)
+                        // Log the redacted ref: http(s) URLs can carry
+                        // credentials (#332).
+                        if url.starts_with("http://") || url.starts_with("https://") {
+                            metrum_ai_bench::endpoints::redact_url(url)
+                        } else {
+                            metrum_ai_bench::prompt_inputs::image_ref_key(url)
+                        }
                     );
                 }
             }
@@ -1368,7 +1378,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     rec.with_run_id(run_id_task)
                 }
                 Err(e) => {
-                    error!("Request failed: {:#}", e);
+                    // The error Display can embed the full request URL
+                    // (reqwest embeds it), so redact reqwest errors before
+                    // they reach the error log (#332).
+                    let primary = match e.downcast_ref::<reqwest::Error>() {
+                        Some(req_err) => metrum_ai_bench::endpoints::redact_reqwest_error(req_err),
+                        None => format!("{e}"),
+                    };
+                    error!("Request failed: {primary}");
                     let mut source_opt = e.source();
                     while let Some(source) = source_opt {
                         error!("Caused by: {}", source);
@@ -1379,13 +1396,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             error!("HTTP Status: {}", status);
                         }
                         if let Some(url) = req_err.url() {
-                            error!("URL: {}", url);
+                            error!(
+                                "URL: {}",
+                                metrum_ai_bench::endpoints::redact_url(url.as_str())
+                            );
                         }
                         if req_err.is_timeout() {
                             error!("Timeout occurred during request");
                         }
                         if req_err.is_body() {
-                            error!("Error reading body: {}", req_err);
+                            error!(
+                                "Error reading body: {}",
+                                metrum_ai_bench::endpoints::redact_reqwest_error(req_err)
+                            );
                         }
                     }
                     let latency = send_instant.elapsed();

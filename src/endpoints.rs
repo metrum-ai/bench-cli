@@ -228,6 +228,22 @@ pub fn redact_url(raw: &str) -> String {
     redact_url_string_level(trimmed)
 }
 
+/// Format a reqwest error for a log or report without leaking the URL it
+/// embeds (#332): reqwest's `Display` (and `Debug`) include the full request
+/// URL (userinfo, query values), so every occurrence of the URL in the error
+/// text is replaced with its redacted form. Errors without a URL are
+/// unchanged (their text cannot embed one).
+pub fn redact_reqwest_error(err: &reqwest::Error) -> String {
+    let text = err.to_string();
+    match err.url() {
+        Some(url) => {
+            let raw = url.as_str();
+            text.replace(raw, &redact_url(raw))
+        }
+        None => text,
+    }
+}
+
 /// Conservative fallback for URLs that do not parse into an authority:
 /// mask a userinfo-looking segment (with or without a scheme) and redact
 /// query values, keeping the keys.
@@ -564,6 +580,38 @@ mod tests {
             "non-http scheme URLs keep their shape but lose secrets: {out}"
         );
         assert!(out.contains("api_key=REDACTED"), "keys stay: {out}");
+    }
+
+    #[tokio::test]
+    async fn redact_reqwest_error_never_echoes_url_credentials() {
+        // A real reqwest error whose Display embeds the request URL
+        // (connection refused to a closed port; no external network).
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(500))
+            .build()
+            .expect("client");
+        let err = client
+            .get("http://user:sekrit-pw@127.0.0.1:1/v1/chat/completions?api_key=sekrit-key&token=sekrit-tok")
+            .send()
+            .await
+            .expect_err("closed port must fail");
+        let text = super::redact_reqwest_error(&err);
+        assert!(
+            !text.contains("sekrit-pw")
+                && !text.contains("sekrit-key")
+                && !text.contains("sekrit-tok"),
+            "redacted reqwest error must not echo credentials: {text}"
+        );
+        assert!(
+            text.contains("api_key=REDACTED") && text.contains("token=REDACTED"),
+            "keys stay visible for diagnosis: {text}"
+        );
+        // The raw Display is the negative control: it embeds the URL.
+        let raw = err.to_string();
+        assert!(
+            raw.contains("sekrit-pw") || raw.contains("sekrit-key"),
+            "fixture must embed credentials in raw Display, else the test proves nothing"
+        );
     }
 
     #[test]
