@@ -51,13 +51,15 @@ jobs:
         run: |
           set -euo pipefail
           bash -n runner.sh
-          ./runner.sh --plan q38-27b /bin/true /bin/true "${RUNNER_TEMP}/plan" 1 | tee plan.txt
+          # `bash runner.sh`, not `./runner.sh`: the API-pushed branch cannot
+          # carry an executable bit, so the file is 644 in CI.
+          bash runner.sh --plan q38-27b /bin/true /bin/true "${RUNNER_TEMP}/plan" 1 | tee plan.txt
           grep -q "RUNNER PLAN OK" plan.txt
           # The NVFP4 model tag carries its extra serve flags in the plan.
-          nvfp4_plan="$(./runner.sh --plan q38-27b-nvfp4 /bin/true /bin/true "${RUNNER_TEMP}/plan" 1)"
+          nvfp4_plan="$(bash runner.sh --plan q38-27b-nvfp4 /bin/true /bin/true "${RUNNER_TEMP}/plan" 1)"
           grep -Fq "cudagraph_mode" <<<"${nvfp4_plan}"
           # Unknown model tag is a usage error even in plan mode.
-          if ./runner.sh --plan nope /bin/true /bin/true "${RUNNER_TEMP}/plan" 1; then
+          if bash runner.sh --plan nope /bin/true /bin/true "${RUNNER_TEMP}/plan" 1; then
             echo "plan mode accepted an unknown model tag" >&2
             exit 1
           fi
