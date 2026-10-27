@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- New `metrum-ai-bench-cli endpoints-export` subcommand: converts a completed
+  run data log into an Endpoints-shaped, explicitly non-certifying bundle
+  (point.yaml, declared-only system_desc.json, declared-only system_power.json,
+  upstream-parser-compatible performance/result_summary.json + config.yaml,
+  crosscheck.json with record-vs-summary arithmetic checks, NONCOMPLIANCE.md
+  listing the checks that remain impossible). Offline/LoadStair/Pareto intents
+  are disclosed as unsupported mappings; TTFT/TPOT definition differences are
+  flagged per metric, never silently transformed (#306). See
+  docs/ENDPOINTS_ADAPTER.md.
 - New optional strict SUT publication profile (`--sut-profile strict`, implies
   `--require-sut`): requires the exact model revision, weight/activation
   quantization, KV dtype, operator-declared kernel/graph evidence (never
