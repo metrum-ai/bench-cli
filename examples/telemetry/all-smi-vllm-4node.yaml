@@ -1,0 +1,118 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Optional multi-node variant of the all-smi + vLLM preset (#311): four
+# lanes (one GPU box each), scraped through loopback forwarding.
+#
+# Placeholders only — NO host identities: every URL is 127.0.0.1 on a
+# per-node port. Establish local forwards before the run, e.g.
+#   ssh -L 19090:127.0.0.1:9090 -N <node-a>   # all-smi on node-a
+#   ssh -L 18000:127.0.0.1:8000 -N <node-a>   # vLLM on node-a
+# (repeat per node). Keep the forwards closed afterward.
+#
+# Source names carry the lane identity into every row's `src` field; use
+# your own lane labels (never hostnames, IPs or provider instance ids —
+# publishable runs keep generic labels).
+#
+# Notes:
+#   - The include patterns are the single-node preset's validated set
+#     (all-smi fork @ 3b6eaec + vLLM 0.32.0). The 2026-10-23 four-node
+#     observability demo used deliberately narrower include patterns and a
+#     2000 ms interval (kept distinct on purpose; its YAML lives in the
+#     study evidence bundle, not here). This file is the recommended
+#     per-point preset replicated across nodes at preset intervals
+#     (500/1000 ms); scale intervals up if the volume is a problem.
+#   - All the single-node caveats apply (see all-smi-vllm.yaml): /metrics
+#     path, exporter ~1 Hz freshness bound, millijoules→joules scaling,
+#     board power only (no whole-system power claim), startup probe gates
+#     zero-series sources (add allow_empty: true to tolerate them).
+default_interval_ms: 1000
+timeout_ms: 800
+sources:
+  - name: node-a/all-smi
+    url: http://127.0.0.1:19090/metrics
+    interval_ms: 500
+    include:
+      - '^all_smi_gpu_.*(power|energy|utilization|memory|temperature|clock|frequency)'
+      - '^all_smi_memory_'
+      - '^all_smi_cpu_(utilization|frequency_mhz|power_consumption_watts|temperature_celsius|socket_count|core_count|thread_count)$'
+      - '^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$'
+      - '^all_smi_chassis_.*(power|energy|temperature)'
+      - '^all_smi_energy_consumed_joules_total$'
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: node-a/vllm
+    url: http://127.0.0.1:18000/metrics
+    interval_ms: 1000
+    include:
+      - '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$'
+      - '^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_(bucket|sum|count)$'
+      - '^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$'
+
+  - name: node-b/all-smi
+    url: http://127.0.0.1:19091/metrics
+    interval_ms: 500
+    include:
+      - '^all_smi_gpu_.*(power|energy|utilization|memory|temperature|clock|frequency)'
+      - '^all_smi_memory_'
+      - '^all_smi_cpu_(utilization|frequency_mhz|power_consumption_watts|temperature_celsius|socket_count|core_count|thread_count)$'
+      - '^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$'
+      - '^all_smi_chassis_.*(power|energy|temperature)'
+      - '^all_smi_energy_consumed_joules_total$'
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: node-b/vllm
+    url: http://127.0.0.1:18001/metrics
+    interval_ms: 1000
+    include:
+      - '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$'
+      - '^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_(bucket|sum|count)$'
+      - '^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$'
+
+  - name: node-c/all-smi
+    url: http://127.0.0.1:19092/metrics
+    interval_ms: 500
+    include:
+      - '^all_smi_gpu_.*(power|energy|utilization|memory|temperature|clock|frequency)'
+      - '^all_smi_memory_'
+      - '^all_smi_cpu_(utilization|frequency_mhz|power_consumption_watts|temperature_celsius|socket_count|core_count|thread_count)$'
+      - '^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$'
+      - '^all_smi_chassis_.*(power|energy|temperature)'
+      - '^all_smi_energy_consumed_joules_total$'
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: node-c/vllm
+    url: http://127.0.0.1:18002/metrics
+    interval_ms: 1000
+    include:
+      - '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$'
+      - '^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_(bucket|sum|count)$'
+      - '^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$'
+
+  - name: node-d/all-smi
+    url: http://127.0.0.1:19093/metrics
+    interval_ms: 500
+    include:
+      - '^all_smi_gpu_.*(power|energy|utilization|memory|temperature|clock|frequency)'
+      - '^all_smi_memory_'
+      - '^all_smi_cpu_(utilization|frequency_mhz|power_consumption_watts|temperature_celsius|socket_count|core_count|thread_count)$'
+      - '^all_smi_cpu_socket_(utilization|frequency_mhz|temperature_celsius)$'
+      - '^all_smi_chassis_.*(power|energy|temperature)'
+      - '^all_smi_energy_consumed_joules_total$'
+    units:
+      all_smi_gpu_energy_hw_millijoules_total:
+        scale: 0.001
+        unit: J
+  - name: node-d/vllm
+    url: http://127.0.0.1:18003/metrics
+    interval_ms: 1000
+    include:
+      - '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_(running|waiting)|num_preemptions_total|prompt_tokens_total|generation_tokens_total)$'
+      - '^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_(bucket|sum|count)$'
+      - '^vllm:(prefix_cache_queries|prefix_cache_hits|external_prefix_cache_queries|external_prefix_cache_hits|prompt_tokens_cached)_total$'

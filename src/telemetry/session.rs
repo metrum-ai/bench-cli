@@ -10,19 +10,24 @@
 //! imagegen binaries all go through it, so every `telemetry.v1` file has the
 //! same kinds and one monotonic clock.
 
+use super::config::CompiledSource;
 use super::config::TelemetryConfig;
 use super::epoch::RunEpoch;
 use super::row::{
-    PhaseKind, RequestRow, Row, RunRow, StageRow, SummaryRow, TelemetrySourceStamp,
+    PhaseKind, RequestRow, Row, RunRow, ScrapeErrorRow, StageRow, SummaryRow, TelemetrySourceStamp,
     TELEMETRY_SCHEMA_VERSION,
 };
-use super::scraper::{build_telemetry_client, probe_sources, spawn_scrapers};
+use super::scraper::{
+    boundary_scrape_error, boundary_scrape_once, build_telemetry_client, probe_sources,
+    spawn_scrapers,
+};
 use super::writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats};
 use crate::record::{Phase, RequestRecord};
 use crate::runner::StopFlag;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -88,6 +93,20 @@ impl TelemetryArgs {
         stamp: RunStamp,
         abort: Option<StopFlag>,
     ) -> Result<Option<TelemetrySession>> {
+        self.start_session_with_timeout(config, stamp, abort, None)
+            .await
+    }
+
+    /// Start with an explicit request timeout for sizing the per-source
+    /// freshness history (#312 review). Modality binaries pass their
+    /// `--request-timeout`; omitting it assumes the 300 s CLI default.
+    pub async fn start_session_with_timeout(
+        &self,
+        config: Option<&TelemetryConfig>,
+        stamp: RunStamp,
+        abort: Option<StopFlag>,
+        request_timeout_s: Option<u64>,
+    ) -> Result<Option<TelemetrySession>> {
         let Some(path) = &self.ndjson else {
             return Ok(None);
         };
@@ -97,6 +116,7 @@ impl TelemetryArgs {
             require_telemetry: self.require_telemetry,
             require_failures: self.require_telemetry_failures,
             abort,
+            request_timeout_s,
         };
         TelemetrySession::start(None, stamp, options)
             .await
@@ -123,6 +143,39 @@ pub struct SessionOptions<'a> {
     /// Run stop flag tripped when a required source fails mid-run, so the
     /// binary stops issuing requests instead of benchmarking blind.
     pub abort: Option<StopFlag>,
+    /// The run's request timeout in seconds (None → 300, the CLI default).
+    /// Sizes the per-source freshness history (#312 review): the buffer
+    /// must span timeout + slack at each source's interval, or long
+    /// requests read false-missing at fast intervals.
+    pub request_timeout_s: Option<u64>,
+}
+
+/// Tag stamped on the synchronous boundary baseline rows (#312).
+pub const BOUNDARY_PRE_MEASURED: &str = "pre-measured";
+
+/// Request from the issuing loop to the record consumer for the
+/// synchronous pre-measured boundary sample (#312, post-#310 structure):
+/// the telemetry session lives in the consumer task, so the loop sends this
+/// request and **awaits the ack** before the first measured send. A
+/// fire-and-forget message would not guarantee baseline-before-send.
+/// `budget_ms` bounds the boundary scrape; the consumer answers even while
+/// busy processing records (biased select).
+pub struct BoundaryRequest {
+    /// Overall scrape budget in milliseconds; on overrun the consumer marks
+    /// the baseline as failed ([`TelemetrySession::note_boundary_timeout`]).
+    pub budget_ms: u64,
+    pub ack: tokio::sync::oneshot::Sender<BoundaryOutcome>,
+}
+
+/// Result of [`TelemetrySession::boundary_sample`] (#312).
+#[derive(Debug, Clone, Default)]
+pub struct BoundaryOutcome {
+    /// Every configured source scraped cleanly.
+    pub ok: bool,
+    /// Total matched series across sources.
+    pub matched_series: u64,
+    /// Sources whose boundary scrape failed (`name: error`).
+    pub failed_sources: Vec<String>,
 }
 
 /// Additive `summary.v3.telemetry` block: where the NDJSON went and how
@@ -179,6 +232,20 @@ pub struct TelemetrySession {
     /// rows are skipped and [`Self::finish`] reports it, so a dead writer
     /// never costs the run its `summary.v3`.
     write_error: Option<anyhow::Error>,
+    /// Retained scrape plan for the synchronous pre-measured boundary
+    /// sample (#312); `None` when no telemetry YAML configured any source.
+    boundary_plan: Option<(reqwest::Client, TelemetryConfig, Vec<CompiledSource>)>,
+    /// Run stop flag, retained only in `--require-telemetry` mode: a failed
+    /// required boundary sample trips it so measured issuance never starts
+    /// blind (#312); a later Ctrl-C still drains and writes the summary.
+    abort: Option<StopFlag>,
+    /// Required-mode boundary failure, surfaced by [`close_session`] as the
+    /// run verdict after the partial summary is written (#312).
+    boundary_failure: Option<String>,
+    /// Bounded per-source history of successful telemetry sample t_ns
+    /// (#312 review): the record consumer reads it to mark per-request
+    /// queue-sample freshness (age + stale flag), measured at SEND time.
+    sample_history: crate::telemetry::scraper::SampleHistory,
 }
 
 impl TelemetrySession {
@@ -201,6 +268,7 @@ impl TelemetrySession {
         let mut stamps: Vec<TelemetrySourceStamp> = Vec::new();
         let mut scrape_plan = None;
         let mut source_count = 0;
+        let mut history_caps = std::collections::BTreeMap::new();
         if let Some(cfg) = options.config {
             cfg.warn_fast_sources();
             let sources = cfg.compile()?;
@@ -211,6 +279,15 @@ impl TelemetrySession {
             )?;
             source_count = sources.len() as u64;
             stamps = probes.into_iter().map(|p| p.stamp).collect();
+            // #312 review: size each source's freshness history from its own
+            // interval and the run's request timeout (plus slack), clamped.
+            let timeout_s = options.request_timeout_s.unwrap_or(300);
+            for src in &sources {
+                history_caps.insert(
+                    src.name.clone(),
+                    super::scraper::sample_history_cap(src.interval_ms, timeout_s),
+                );
+            }
             scrape_plan = Some((client, cfg.clone(), sources));
         }
         let mut session = Self {
@@ -227,6 +304,10 @@ impl TelemetrySession {
             warmup: None,
             measure: None,
             write_error: None,
+            boundary_plan: None,
+            abort: None,
+            boundary_failure: None,
+            sample_history: super::scraper::new_sample_history(history_caps),
         };
         // The run row goes first so readers see the epoch before any sample.
         session
@@ -242,6 +323,8 @@ impl TelemetrySession {
             }))
             .await?;
         if let Some((client, cfg, sources)) = scrape_plan {
+            // Retain the plan for the synchronous boundary sample (#312).
+            session.boundary_plan = Some((client.clone(), cfg.clone(), sources.clone()));
             let handles = spawn_scrapers(
                 client,
                 cfg,
@@ -252,10 +335,14 @@ impl TelemetrySession {
                 Arc::clone(&session.stop_scrapers),
                 options.require_telemetry,
                 options.require_failures,
+                Arc::clone(&session.sample_history),
             );
             // Only a required source may stop the run; without
-            // --require-telemetry a scraper exit stays a warning.
+            // --require-telemetry a scraper exit stays a warning. The
+            // filtered flag is also retained for a failed required boundary
+            // sample (#312), which gates measured issuance the same way.
             let abort = options.abort.filter(|_| options.require_telemetry);
+            session.abort = abort.clone();
             session.scrapers = handles
                 .into_iter()
                 .map(|handle| {
@@ -312,6 +399,123 @@ impl TelemetrySession {
         self.load = Some(load);
     }
 
+    /// Synchronously scrape every configured source once, immediately
+    /// before the first measured request (#312), emitting normal telemetry
+    /// rows tagged `boundary: "pre-measured"` with the shared run epoch as
+    /// time anchor. No-op when no telemetry sources are configured.
+    ///
+    /// Contracts: every measured send then has a queue sample at-or-before
+    /// send and no older than the configured scrape interval (periodic
+    /// scrapes carry the rest of the run). A source that fails the boundary
+    /// scrape always emits a boundary-tagged `scrape_error` row — coverage
+    /// is marked missing/stale, never invented. Under `--require-telemetry`
+    /// a failed source additionally trips the run stop flag (gating
+    /// measured issuance) and is reported by `close_session` as the run
+    /// verdict after the partial summary is written; otherwise the failure
+    /// is recorded and the run proceeds.
+    pub async fn boundary_sample(&mut self) -> BoundaryOutcome {
+        let Some((client, cfg, sources)) = self.boundary_plan.take() else {
+            // No telemetry sources configured: no-op success.
+            return BoundaryOutcome {
+                ok: true,
+                ..BoundaryOutcome::default()
+            };
+        };
+        let mut outcome = BoundaryOutcome::default();
+        let mut failed: Vec<String> = Vec::new();
+        for src in &sources {
+            match boundary_scrape_once(
+                &client,
+                &cfg,
+                src,
+                &self.epoch,
+                &self.run_id,
+                &self.writer,
+                BOUNDARY_PRE_MEASURED,
+                &self.sample_history,
+            )
+            .await
+            {
+                Ok(matched) => {
+                    outcome.matched_series += matched;
+                }
+                Err(err) => {
+                    boundary_scrape_error(
+                        src,
+                        &self.epoch,
+                        &self.run_id,
+                        &self.writer,
+                        BOUNDARY_PRE_MEASURED,
+                        &err,
+                    )
+                    .await;
+                    failed.push(format!("{}: {err:#}", src.name));
+                }
+            }
+        }
+        // Put the plan back: a second boundary call (e.g. a future stage
+        // boundary) uses the same plan; the idempotence guard at the call
+        // site makes this a single shot today.
+        self.boundary_plan = Some((client, cfg, sources));
+        if failed.is_empty() {
+            outcome.ok = true;
+        } else if self.require_telemetry {
+            let message = format!(
+                "telemetry boundary sample failed before measured issuance: {}",
+                failed.join("; ")
+            );
+            self.boundary_failure = Some(message.clone());
+            if let Some(flag) = &self.abort {
+                flag.stop();
+            }
+            eprintln!("error: {message}");
+        } else {
+            eprintln!(
+                "warning: telemetry boundary sample failed for {}; proceeding without a pre-measured baseline for those sources",
+                failed.join("; ")
+            );
+        }
+        outcome.failed_sources = failed;
+        outcome
+    }
+
+    /// A boundary sample that exceeded its budget (#312): mark the missing
+    /// baseline exactly like a failed scrape — one boundary-tagged
+    /// `scrape_error` row (source name `boundary`; per-source attribution is
+    /// unknown after a timeout, never invented) — and under
+    /// `--require-telemetry` trip the run stop flag and record the failure
+    /// for the `close_session` verdict.
+    pub async fn note_boundary_timeout(&mut self, budget_ms: u64) -> BoundaryOutcome {
+        let message = format!(
+            "telemetry boundary sample exceeded the {budget_ms}ms budget before measured issuance"
+        );
+        let _ = self
+            .writer
+            .send_priority(Row::ScrapeError(ScrapeErrorRow {
+                run_id: (*self.run_id).clone(),
+                t_ns: self.epoch.elapsed_ns(),
+                src: "boundary".to_string(),
+                http_status: None,
+                error: message.clone(),
+                boundary: Some(BOUNDARY_PRE_MEASURED.to_string()),
+            }))
+            .await;
+        if self.require_telemetry {
+            self.boundary_failure = Some(message.clone());
+            if let Some(flag) = &self.abort {
+                flag.stop();
+            }
+            log::error!("{message}");
+        } else {
+            eprintln!("warning: {message}");
+        }
+        BoundaryOutcome {
+            ok: false,
+            matched_series: 0,
+            failed_sources: vec![message],
+        }
+    }
+
     /// Write one `request` row for a modality record and widen its phase
     /// window. `run_start` is the `Instant` that `send_offset_s` counts from.
     ///
@@ -324,7 +528,48 @@ impl TelemetrySession {
         let base_ns = run_start
             .saturating_duration_since(self.epoch.mono())
             .as_nanos() as u64;
-        let row = request_row(&self.run_id, record, base_ns, self.load.unwrap_or(0.0));
+        let mut row = request_row(&self.run_id, record, base_ns, self.load.unwrap_or(0.0));
+
+        // #312 review: per-request queue-sample freshness coverage. For
+        // each source, take the newest sample at-or-before the request's
+        // SEND from the bounded history — never the latest sample, which
+        // moved on while the request was in flight (2026-10-26 Blackwell
+        // finding: stamping against the latest sample read as missing for
+        // 100% of fast-interval sources). Mark stale when the age exceeds
+        // the scrape interval plus a documented jitter allowance (min(10%
+        // of the interval, 100 ms)) so near-bound scrapes are not
+        // false-positived. Requests with NO sample at-or-before send are
+        // marked missing (age ∞ → stale with "no sample").
+        if let Some(boundary_plan) = &self.boundary_plan {
+            let (_, _cfg, sources) = boundary_plan;
+            let mut ages = BTreeMap::new();
+            let mut stale = Vec::new();
+            for src in sources {
+                let interval_ms = src.interval_ms as f64;
+                let jitter_allowance_ms = (interval_ms * 0.10).min(100.0);
+                let bound_ms = interval_ms + jitter_allowance_ms;
+                let age_ms = match crate::telemetry::scraper::sample_at_or_before(
+                    &self.sample_history,
+                    &src.name,
+                    row.t_sent_ns,
+                ) {
+                    Some(t_ns) => (row.t_sent_ns - t_ns) as f64 / 1e6,
+                    // No sample at-or-before send: infinite age.
+                    None => f64::INFINITY,
+                };
+                ages.insert(src.name.clone(), age_ms);
+                if age_ms > bound_ms {
+                    stale.push(src.name.clone());
+                }
+            }
+            // Only stamp when telemetry is configured (boundary_plan is Some).
+            if !ages.is_empty() {
+                row.queue_sample_age_ms = Some(ages);
+                row.queue_sample_stale = Some(stale);
+            }
+        }
+
+        let row = row;
         let window = match record.phase {
             Phase::Warmup => Some(&mut self.warmup),
             Phase::Measure => Some(&mut self.measure),
@@ -441,7 +686,14 @@ pub async fn close_session(
     let Some(mut session) = session else {
         return (None, Ok(()));
     };
-    let verdict = session.join_scrapers().await;
+    let mut verdict = session.join_scrapers().await;
+    if let Some(message) = session.boundary_failure.take() {
+        // A failed required boundary sample is a run verdict (#312): the
+        // partial summary and logs were already written.
+        if verdict.is_ok() {
+            verdict = Err(anyhow::anyhow!("{message}"));
+        }
+    }
     match session.finish(stopped || verdict.is_err()).await {
         Ok(info) => (Some(info), verdict),
         Err(err) => (None, verdict.and(Err(err))),
@@ -495,6 +747,8 @@ pub fn request_row(run_id: &str, record: &RequestRecord, base_ns: u64, load: f64
         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
         error: record.error.as_ref().map(|e| e.to_string()),
         telemetry_at_done: None,
+        queue_sample_age_ms: None,
+        queue_sample_stale: None,
     }
 }
 
@@ -696,6 +950,7 @@ mod tests {
                 require_telemetry: require,
                 require_failures: 1,
                 abort: Some(stop.clone()),
+                request_timeout_s: None,
             },
         )
         .await
@@ -742,5 +997,797 @@ mod tests {
             "summary keeps the file name only"
         );
         assert_eq!(rows.last().expect("rows")["partial"], false);
+    }
+}
+
+#[cfg(test)]
+mod shared_test_helpers {
+    use super::*;
+    use std::net::SocketAddr;
+
+    /// Minimal two-source scrape server: serves a fixed exposition with a
+    /// queue gauge, and keeps the listener open until dropped.
+    pub fn boundary_yaml(live: SocketAddr, dead: &str, interval_ms: u64) -> String {
+        format!(
+            "default_interval_ms: {interval_ms}\ntimeout_ms: 500\nsources:\n  - name: live\n    url: http://{live}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n  - name: dead\n    url: http://{dead}/metrics\n    interval_ms: {interval_ms}\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n"
+        )
+    }
+
+    pub async fn spawn_metrics_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let app = axum::Router::new().route(
+                "/metrics",
+                axum::routing::get(|| async {
+                    "# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n"
+                }),
+            );
+            axum::serve(listener, app).await.unwrap();
+        });
+        (addr, handle)
+    }
+
+    pub fn write_yaml(dir: &tempfile::TempDir, yaml: String) -> std::path::PathBuf {
+        let path = dir.path().join("telemetry.yaml");
+        std::fs::write(&path, yaml).expect("write yaml");
+        path
+    }
+
+    pub fn stamp() -> RunStamp {
+        RunStamp {
+            run_id: "boundary-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        }
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::shared_test_helpers::*;
+    use super::*;
+
+    fn read_rows(path: &std::path::Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(path)
+            .expect("read ndjson")
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("json"))
+            .collect()
+    }
+
+    /// #312: the boundary sample emits pre-measured-tagged rows on the run
+    /// epoch before issuance, and a partial source failure is recorded as a
+    /// boundary-tagged scrape_error row without aborting the run (optional
+    /// mode).
+    #[tokio::test]
+    async fn boundary_sample_tags_rows_and_marks_missing_coverage() {
+        let (live, _server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        // A closed port as the second source: probe would fail it, so start
+        // with both sources live is impossible; instead put the dead source
+        // in allow-unprobed state? Startup probes run on every source, so
+        // for this test the "dead" source must die between start() and the
+        // boundary call.
+        let (dying_addr, dying_server) = spawn_metrics_server().await;
+        let yaml = boundary_yaml(live, &dying_addr.to_string(), 500);
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        // The source dies after the startup probe, before the boundary.
+        dying_server.abort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let outcome = session.boundary_sample().await;
+        assert!(!outcome.ok, "a dead source means partial boundary coverage");
+        assert_eq!(
+            outcome.failed_sources.len(),
+            1,
+            "{}",
+            outcome.failed_sources.join(";")
+        );
+        assert!(
+            outcome.failed_sources[0].starts_with("dead"),
+            "failed source is named: {:?}",
+            outcome.failed_sources
+        );
+        assert!(outcome.matched_series >= 1, "live source matched series");
+
+        // Stop scrapers so finish() closes cleanly; then inspect rows.
+        let mut session = session;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows = read_rows(&ndjson);
+        let boundary_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.get("boundary").and_then(|b| b.as_str()) == Some(BOUNDARY_PRE_MEASURED))
+            .collect();
+        assert!(
+            boundary_rows
+                .iter()
+                .any(|r| r["kind"] == "telemetry" && r["src"] == "live"),
+            "live source boundary row must be tagged pre-measured: {rows:?}"
+        );
+        assert!(
+            boundary_rows
+                .iter()
+                .any(|r| r["kind"] == "scrape_error" && r["src"] == "dead"),
+            "the missing baseline is a boundary-tagged scrape_error row, not silence: {rows:?}"
+        );
+        // Time anchor: boundary rows share the run epoch (t_ns present, small).
+        let boundary_t = boundary_rows
+            .iter()
+            .filter(|r| r["kind"] == "telemetry")
+            .map(|r| r["t_ns"].as_u64().unwrap())
+            .min()
+            .unwrap();
+        assert!(
+            boundary_t < 500_000_000,
+            "boundary near epoch: {boundary_t}"
+        );
+    }
+
+    /// #312: under --require-telemetry a failed boundary scrape trips the
+    /// run stop flag (gating measured issuance) and surfaces as the close
+    /// verdict after the partial summary is written.
+    #[tokio::test]
+    async fn boundary_failure_gates_issuance_in_required_mode() {
+        let (live, _server) = spawn_metrics_server().await;
+        let (dying_addr, dying_server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = boundary_yaml(live, &dying_addr.to_string(), 500);
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let stop = crate::runner::StopFlag::new();
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: true,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), Some(stop.clone()))
+            .await
+            .expect("start")
+            .expect("session");
+        dying_server.abort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let outcome = session.boundary_sample().await;
+        assert!(!outcome.ok);
+        assert!(
+            stop.is_stopped(),
+            "required boundary failure must trip the run stop flag"
+        );
+
+        let (info, verdict) = close_session(Some(session), true).await;
+        assert!(info.is_some(), "partial summary rows still written");
+        let err = verdict.expect_err("boundary failure is the run verdict");
+        assert!(
+            format!("{err:#}").contains("boundary sample failed"),
+            "verdict names the boundary failure: {err:#}"
+        );
+    }
+
+    /// #312: a clean boundary emits tagged rows and reports success; without
+    /// configured sources the call is a no-op.
+    #[tokio::test]
+    async fn boundary_sample_clean_and_noop_cases() {
+        let (live, _server) = spawn_metrics_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        // Single live source.
+        let yaml = format!(
+            "default_interval_ms: 500\ntimeout_ms: 300\nsources:\n  - name: live\n    url: http://{live}/metrics\n    interval_ms: 500\n    include:\n      - \"^vllm:(num_requests_waiting)$\"\n"
+        );
+        let yaml_path = write_yaml(&dir, yaml);
+        let ndjson = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(ndjson.clone()),
+            telemetry: Some(yaml_path),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        let outcome = session.boundary_sample().await;
+        assert!(outcome.ok && outcome.matched_series >= 1);
+        let mut session = session;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows = read_rows(&ndjson);
+        assert!(
+            rows.iter()
+                .any(|r| r.get("boundary").and_then(|b| b.as_str()) == Some(BOUNDARY_PRE_MEASURED)),
+            "clean boundary rows carry the tag: {rows:?}"
+        );
+
+        // No sources configured: boundary_sample is a no-op.
+        let dir2 = tempfile::tempdir().unwrap();
+        let ndjson2 = dir2.path().join("run2.ndjson");
+        let args2 = TelemetryArgs {
+            ndjson: Some(ndjson2),
+            telemetry: None,
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let mut session2 = args2
+            .start_session(None, stamp(), None)
+            .await
+            .expect("start")
+            .expect("session");
+        let outcome2 = session2.boundary_sample().await;
+        assert!(outcome2.ok && outcome2.matched_series == 0);
+    }
+}
+
+#[cfg(test)]
+mod freshness_tests {
+    use super::shared_test_helpers::*;
+    use super::*;
+
+    /// #312 review: per-request queue-sample coverage is stamped on request
+    /// rows when telemetry is configured: age per source, stale when past
+    /// the bound (interval + 10% jitter allowance), missing when no sample.
+    #[tokio::test]
+    async fn record_request_stamps_queue_sample_freshness() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "fresh-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // Simulate a scrape at t=0 from the engine source.
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0); // epoch t_ns = 0
+                                                                                      // Record a request sent at t=1.05s: age = 1050ms, bound = 1100ms → fresh.
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"].as_f64().expect("age");
+        assert!(age > 1000.0 && age < 1100.0, "age ~1050ms: {age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "within the bound: {req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_request_marks_stale_when_past_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "stale-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // Simulate a scrape at t=0; the request sends at t=2.5s.
+        // Age = 2500ms, bound = 1100ms → STALE.
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0);
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(2500));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        assert!(
+            req["queue_sample_stale"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("engine")),
+            "stale source named: {req}"
+        );
+        assert!(
+            req["queue_sample_age_ms"]["engine"].as_f64().unwrap() > 2000.0,
+            "age is the real age: {req}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_request_marks_missing_when_no_sample_before_send() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://127.0.0.1:1/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n",
+        )
+        .unwrap();
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "missing-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+        // NO sample-history entry for the source: the request must be
+        // marked stale with infinite age.
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(100));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        assert!(
+            req["queue_sample_stale"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("engine")),
+            "no sample → stale: {req}"
+        );
+        // Infinity serializes as null in JSON; the stale flag is the truth.
+        assert!(
+            req["queue_sample_age_ms"]["engine"].is_null()
+                || req["queue_sample_age_ms"]["engine"]
+                    .as_f64()
+                    .is_some_and(|v| v > 1e12),
+            "infinite age: {req}"
+        );
+    }
+
+    /// #312 review: samples that arrive AFTER a request's send must not
+    /// poison the stamp. The 2026-10-26 Blackwell run showed 100% false
+    /// missing when stamping against the latest sample at completion; the
+    /// stamp must use the newest sample at-or-before SEND from the history.
+    #[tokio::test]
+    async fn record_request_uses_send_time_sample_not_latest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "send-time-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // History: one sample at-or-before the send (t=1.000s), then three
+        // newer scrapes at 1.1s/1.2s/1.3s — a request completing after all
+        // of them must still stamp against the t=1.000s sample.
+        for t_ms in [1000u64, 1100, 1200, 1300] {
+            crate::telemetry::scraper::note_sample(
+                &session.sample_history,
+                "engine",
+                t_ms * 1_000_000,
+            );
+        }
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"].as_f64().expect("age");
+        assert!(
+            age > 40.0 && age < 60.0,
+            "age ~50ms from the t=1.000s sample: {age}"
+        );
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "send-time sample is fresh: {req}"
+        );
+    }
+
+    /// #312 review: every configured source is stamped from its own
+    /// history, with its own interval bound (both-sources pin).
+    #[tokio::test]
+    async fn record_request_stamps_both_sources_independently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 500\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 1000\n    include: [\"^vllm:\"]\n  - name: host\n    url: http://{addr}/metrics\n    interval_ms: 500\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "both-sources-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp, None)
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // engine sample at t=1.000s (bound 1100ms), host sample at t=0.6s
+        // (bound 550ms); request sent at t=1.05s → ages 50ms and 450ms,
+        // both fresh, each from its own buffer.
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 1_000_000_000);
+        crate::telemetry::scraper::note_sample(&session.sample_history, "host", 600_000_000);
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(1050));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let engine_age = req["queue_sample_age_ms"]["engine"]
+            .as_f64()
+            .expect("engine age");
+        let host_age = req["queue_sample_age_ms"]["host"]
+            .as_f64()
+            .expect("host age");
+        assert!(
+            engine_age > 40.0 && engine_age < 60.0,
+            "engine age: {engine_age}"
+        );
+        assert!(host_age > 440.0 && host_age < 460.0, "host age: {host_age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "both fresh: {req}"
+        );
+    }
+
+    /// #312 review: the per-source history is bounded and drops the oldest
+    /// sample; the at-or-before lookup never sees evicted entries.
+    #[test]
+    fn sample_history_is_bounded_and_drops_oldest() {
+        let cap = 256usize;
+        let history = crate::telemetry::scraper::new_sample_history(
+            std::collections::BTreeMap::from([("engine".to_string(), cap)]),
+        );
+        let total = cap as u64 + 44;
+        for i in 0..total {
+            crate::telemetry::scraper::note_sample(&history, "engine", i);
+        }
+        {
+            let map = history.lock().unwrap();
+            let deque = map.samples.get("engine").unwrap();
+            assert_eq!(deque.len(), cap, "bounded");
+            assert_eq!(deque.front(), Some(&44), "oldest 44 dropped");
+            assert_eq!(deque.back(), Some(&(total - 1)), "newest retained");
+        }
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", 100),
+            Some(100)
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", 43),
+            None,
+            "evicted"
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "engine", total * 10),
+            Some(total - 1),
+            "far-future send sees the newest retained sample"
+        );
+        assert_eq!(
+            crate::telemetry::scraper::sample_at_or_before(&history, "absent", total * 10),
+            None
+        );
+    }
+
+    /// #312 review (bound fix): the cap is per source, from the source's
+    /// interval and the run's request timeout, plus slack, clamped.
+    #[test]
+    fn sample_history_cap_is_sized_from_interval_and_timeout() {
+        use crate::telemetry::scraper::{sample_history_cap, SAMPLE_HISTORY_MAX_CAP};
+        // 100 ms interval, 300 s timeout: (300+60)*1000/100 + 2 = 3602.
+        assert_eq!(sample_history_cap(100, 300), 3602);
+        assert_eq!(sample_history_cap(500, 300), 722);
+        assert_eq!(sample_history_cap(1000, 300), 362);
+        assert_eq!(
+            sample_history_cap(100, 1_000_000),
+            SAMPLE_HISTORY_MAX_CAP,
+            "clamped"
+        );
+        assert_eq!(
+            sample_history_cap(0, 300),
+            sample_history_cap(1, 300),
+            "zero interval floored"
+        );
+    }
+
+    /// #312 review (bound fix, 2026-10-26): at a 100 ms interval a 256-entry
+    /// buffer covers only 25.6 s — a request sent 30 s before stamping
+    /// would lose its at-or-before-send sample and read false-missing
+    /// again. With the timeout-sized cap the sample survives.
+    #[tokio::test]
+    async fn record_request_at_100ms_interval_survives_30s_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let (addr, _server) = spawn_metrics_server().await;
+        let yaml = dir.path().join("telemetry.yaml");
+        std::fs::write(
+            &yaml,
+            format!(
+                "timeout_ms: 100\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    interval_ms: 100\n    include: [\"^vllm:\"]\n"
+            ),
+        )
+        .unwrap();
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            telemetry: Some(yaml),
+            require_telemetry: false,
+            require_telemetry_failures: 3,
+        };
+        let cfg = args.resolve_config().expect("cfg");
+        let stamp = RunStamp {
+            run_id: "long-flight-run".into(),
+            tool_version: "0.0.0".into(),
+            sut: None,
+            config: serde_json::json!({"binary": "test"}),
+        };
+        // 300 s request timeout → cap 3602 at the 100 ms interval.
+        let mut session = args
+            .start_session_with_timeout(cfg.as_ref(), stamp, None, Some(300))
+            .await
+            .expect("start")
+            .expect("session");
+        let run_start = session.run_start();
+
+        // One sample at t=0, then 300 scrapes over the next 30 s (100 ms
+        // interval) — 301 entries total, evicting t=0 under the old
+        // fixed 256 cap. The request was sent at t=50 ms (age 50 ms).
+        crate::telemetry::scraper::note_sample(&session.sample_history, "engine", 0);
+        for i in 1..=300u64 {
+            crate::telemetry::scraper::note_sample(
+                &session.sample_history,
+                "engine",
+                i * 100_000_000,
+            );
+        }
+        let rec = RequestRecord::success(
+            0,
+            Phase::Measure,
+            "default".into(),
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            std::time::Duration::from_secs_f64(0.1),
+            Some(std::time::Duration::from_secs_f64(0.05)),
+            None,
+            Vec::new(),
+            5,
+            10,
+            15,
+        )
+        .with_send_offset(std::time::Duration::from_millis(50));
+        session.record_request(&rec, run_start).await;
+        let _ = session.join_scrapers().await;
+        let _ = session.finish(false).await;
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let req = rows
+            .iter()
+            .find(|r| r["kind"] == "request")
+            .expect("request row");
+        let age = req["queue_sample_age_ms"]["engine"]
+            .as_f64()
+            .expect("age must not be missing");
+        assert!(age > 40.0 && age < 60.0, "age ~50ms: {age}");
+        assert!(
+            req["queue_sample_stale"].as_array().unwrap().is_empty(),
+            "not stale, not missing: {req}"
+        );
     }
 }

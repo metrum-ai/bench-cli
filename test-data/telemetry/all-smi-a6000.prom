@@ -1,0 +1,185 @@
+# HELP all_smi_up 1 once the exporter has completed a collection cycle, 0 before that
+# TYPE all_smi_up gauge
+all_smi_up{instance="REDACTED", hostname="REDACTED"} 1
+# HELP all_smi_build_info Build information for the running all-smi binary; always 1
+# TYPE all_smi_build_info gauge
+all_smi_build_info{instance="REDACTED", hostname="REDACTED", version="0.27.1", os="linux", arch="x86_64"} 1
+# HELP all_smi_gpu_utilization GPU utilization percentage (omitted when the device reports no utilization)
+# TYPE all_smi_gpu_utilization gauge
+all_smi_gpu_utilization{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_memory_used_bytes GPU memory used in bytes
+# TYPE all_smi_gpu_memory_used_bytes gauge
+all_smi_gpu_memory_used_bytes{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 47652601856
+# HELP all_smi_gpu_memory_total_bytes GPU memory total in bytes
+# TYPE all_smi_gpu_memory_total_bytes gauge
+all_smi_gpu_memory_total_bytes{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 51527024640
+# HELP all_smi_gpu_temperature_celsius GPU temperature in celsius (omitted when no sensor reports one)
+# TYPE all_smi_gpu_temperature_celsius gauge
+all_smi_gpu_temperature_celsius{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 31
+# HELP all_smi_gpu_power_consumption_watts GPU power consumption in watts (omitted when the device reports no power)
+# TYPE all_smi_gpu_power_consumption_watts gauge
+all_smi_gpu_power_consumption_watts{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 22.557
+# HELP all_smi_gpu_frequency_mhz GPU frequency in MHz (omitted when the device exposes no clock probe)
+# TYPE all_smi_gpu_frequency_mhz gauge
+all_smi_gpu_frequency_mhz{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 210
+# HELP all_smi_ane_utilization ANE utilization in mW (omitted when the native metrics source is unavailable)
+# TYPE all_smi_ane_utilization gauge
+all_smi_ane_utilization{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_info GPU/NPU device information
+# TYPE all_smi_gpu_info gauge
+all_smi_gpu_info{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", type="GPU", architecture="Ampere", brand="NvidiaRTX", compute_mode="Default", cuda_version="12.8", driver_version="570.195.03", ecc_mode_current="Disabled", lib_name="CUDA", lib_version="12.8", pcie_gen_max="4", pcie_width_max="16", performance_state="Eight", power_limit_current="300.00", power_limit_default="300.00", power_limit_max="300.00", power_limit_min="100.00", vbios_version="94.02.5C.00.02"} 1
+# HELP all_smi_gpu_pcie_gen_current Current PCIe generation
+# TYPE all_smi_gpu_pcie_gen_current gauge
+all_smi_gpu_pcie_gen_current{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 1
+# HELP all_smi_gpu_pcie_width_current Current PCIe link width
+# TYPE all_smi_gpu_pcie_width_current gauge
+all_smi_gpu_pcie_width_current{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 16
+# HELP all_smi_gpu_power_limit_current_watts Current power limit in watts
+# TYPE all_smi_gpu_power_limit_current_watts gauge
+all_smi_gpu_power_limit_current_watts{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 300
+# HELP all_smi_gpu_power_limit_max_watts Maximum power limit in watts
+# TYPE all_smi_gpu_power_limit_max_watts gauge
+all_smi_gpu_power_limit_max_watts{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 300
+# HELP all_smi_gpu_performance_state GPU performance state (0=P0 fastest, 15=P15 idlest; metric is omitted when the device does not report a P-state)
+# TYPE all_smi_gpu_performance_state gauge
+all_smi_gpu_performance_state{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 8
+# HELP all_smi_gpu_temperature_threshold_slowdown_celsius GPU slowdown temperature threshold in Celsius
+# TYPE all_smi_gpu_temperature_threshold_slowdown_celsius gauge
+all_smi_gpu_temperature_threshold_slowdown_celsius{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 95
+# HELP all_smi_gpu_temperature_threshold_shutdown_celsius GPU shutdown temperature threshold in Celsius
+# TYPE all_smi_gpu_temperature_threshold_shutdown_celsius gauge
+all_smi_gpu_temperature_threshold_shutdown_celsius{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 98
+# HELP all_smi_gpu_temperature_threshold_max_operating_celsius GPU maximum operating temperature threshold in Celsius
+# TYPE all_smi_gpu_temperature_threshold_max_operating_celsius gauge
+all_smi_gpu_temperature_threshold_max_operating_celsius{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 93
+# HELP all_smi_gpu_temperature_threshold_acoustic_celsius GPU acoustic (noise) temperature threshold in Celsius
+# TYPE all_smi_gpu_temperature_threshold_acoustic_celsius gauge
+all_smi_gpu_temperature_threshold_acoustic_celsius{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 84
+# HELP all_smi_cpu_info CPU device information
+# TYPE all_smi_cpu_info gauge
+all_smi_cpu_info{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0", architecture="x86_64", platform_type="Amd"} 1
+# HELP all_smi_cpu_utilization CPU utilization percentage
+# TYPE all_smi_cpu_utilization gauge
+all_smi_cpu_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0"} 0.05845218524336815
+# HELP all_smi_cpu_socket_count Number of CPU sockets
+# TYPE all_smi_cpu_socket_count gauge
+all_smi_cpu_socket_count{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0"} 1
+# HELP all_smi_cpu_core_count Total number of CPU cores
+# TYPE all_smi_cpu_core_count gauge
+all_smi_cpu_core_count{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0"} 28
+# HELP all_smi_cpu_thread_count Total number of CPU threads
+# TYPE all_smi_cpu_thread_count gauge
+all_smi_cpu_thread_count{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0"} 28
+# HELP all_smi_cpu_frequency_mhz CPU frequency in MHz
+# TYPE all_smi_cpu_frequency_mhz gauge
+all_smi_cpu_frequency_mhz{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", index="0"} 2445
+# HELP all_smi_cpu_socket_utilization Per-socket CPU utilization percentage
+# TYPE all_smi_cpu_socket_utilization gauge
+all_smi_cpu_socket_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", cpu_index="0", socket_id="0"} 0.05845218524336815
+# HELP all_smi_cpu_socket_frequency_mhz Per-socket CPU frequency in MHz
+# TYPE all_smi_cpu_socket_frequency_mhz gauge
+all_smi_cpu_socket_frequency_mhz{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", cpu_index="0", socket_id="0"} 2445
+# HELP all_smi_cpu_core_utilization Per-core CPU utilization percentage
+# TYPE all_smi_cpu_core_utilization gauge
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="0", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="1", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="2", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="3", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="4", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="5", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="6", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="7", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="8", core_type="C"} 0.32679739594459534
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="9", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="10", core_type="C"} 0.32679739594459534
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="11", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="12", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="13", core_type="C"} 0.32894736528396606
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="14", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="15", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="16", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="17", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="18", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="19", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="20", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="21", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="22", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="23", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="24", core_type="C"} 0.6535947918891907
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="25", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="26", core_type="C"} 0
+all_smi_cpu_core_utilization{cpu_model="AMD EPYC 7763 64-Core Processor", instance="REDACTED", hostname="REDACTED", core_id="27", core_type="C"} 0.32679739594459534
+# HELP all_smi_memory_total_bytes Total system memory in bytes
+# TYPE all_smi_memory_total_bytes gauge
+all_smi_memory_total_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 61179551744
+# HELP all_smi_memory_used_bytes Used system memory in bytes
+# TYPE all_smi_memory_used_bytes gauge
+all_smi_memory_used_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 6880759808
+# HELP all_smi_memory_available_bytes Available system memory in bytes
+# TYPE all_smi_memory_available_bytes gauge
+all_smi_memory_available_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 54298791936
+# HELP all_smi_memory_free_bytes Free system memory in bytes
+# TYPE all_smi_memory_free_bytes gauge
+all_smi_memory_free_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 4877746176
+# HELP all_smi_memory_utilization Memory utilization percentage
+# TYPE all_smi_memory_utilization gauge
+all_smi_memory_utilization{instance="REDACTED", hostname="REDACTED", index="0"} 11.24682939291854
+# HELP all_smi_memory_buffers_bytes Memory used for buffers in bytes
+# TYPE all_smi_memory_buffers_bytes gauge
+all_smi_memory_buffers_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 441315328
+# HELP all_smi_memory_cached_bytes Memory used for cache in bytes
+# TYPE all_smi_memory_cached_bytes gauge
+all_smi_memory_cached_bytes{instance="REDACTED", hostname="REDACTED", index="0"} 47382646784
+# HELP all_smi_disk_total_bytes Total disk space in bytes
+# TYPE all_smi_disk_total_bytes gauge
+all_smi_disk_total_bytes{instance="REDACTED", mount_point="/", index="0"} 103865303040
+# HELP all_smi_disk_available_bytes Available disk space in bytes
+# TYPE all_smi_disk_available_bytes gauge
+all_smi_disk_available_bytes{instance="REDACTED", mount_point="/", index="0"} 21647077376
+# HELP all_smi_chassis_info Chassis/node identification information
+# TYPE all_smi_chassis_info gauge
+all_smi_chassis_info{hostname="REDACTED", instance="REDACTED", product_name="OpenStack Nova", vendor="REDACTED", version="24.2.2", bios_version="1.15.0-1", platform="Linux"} 1
+# HELP all_smi_chassis_power_watts Total chassis power consumption in watts
+# TYPE all_smi_chassis_power_watts gauge
+all_smi_chassis_power_watts{hostname="REDACTED", instance="REDACTED"} 22.56
+# HELP all_smi_gpu_gsp_firmware_mode GSP firmware mode (0=disabled, 1=enabled, 2=default); omitted when the driver does not expose the GSP firmware API
+# TYPE all_smi_gpu_gsp_firmware_mode gauge
+all_smi_gpu_gsp_firmware_mode{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 2
+# HELP all_smi_gpu_gsp_firmware_version_info GSP firmware version, encoded as a constant 1 with the version in a `version` label; omitted when unsupported
+# TYPE all_smi_gpu_gsp_firmware_version_info gauge
+all_smi_gpu_gsp_firmware_version_info{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", version="570.195.03"} 1
+# HELP all_smi_gpu_pcie_tx_bytes_per_second PCIe transmit throughput in bytes/sec; DCGM field 1009
+# TYPE all_smi_gpu_pcie_tx_bytes_per_second gauge
+all_smi_gpu_pcie_tx_bytes_per_second{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", source="nvml"} 449536
+# HELP all_smi_gpu_pcie_rx_bytes_per_second PCIe receive throughput in bytes/sec; DCGM field 1010
+# TYPE all_smi_gpu_pcie_rx_bytes_per_second gauge
+all_smi_gpu_pcie_rx_bytes_per_second{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", source="nvml"} 349184
+# HELP all_smi_gpu_throttle_reason Active NVML clock-throttle reason (1 when set)
+# TYPE all_smi_gpu_throttle_reason gauge
+all_smi_gpu_throttle_reason{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", reason="gpu_idle"} 1
+# HELP all_smi_gpu_energy_hw_millijoules_total NVML hardware energy counter (millijoules since driver load); distinct from software-integrated all_smi_energy_consumed_joules_total
+# TYPE all_smi_gpu_energy_hw_millijoules_total counter
+all_smi_gpu_energy_hw_millijoules_total{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 191008895
+# HELP all_smi_gpu_remapped_rows HBM remapped row counts by cause
+# TYPE all_smi_gpu_remapped_rows gauge
+all_smi_gpu_remapped_rows{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", cause="correctable"} 0
+all_smi_gpu_remapped_rows{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0", cause="uncorrectable"} 0
+# HELP all_smi_gpu_remapping_pending 1 when row remapping is pending a reset
+# TYPE all_smi_gpu_remapping_pending gauge
+all_smi_gpu_remapping_pending{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_remapping_failed 1 when row remapping failed
+# TYPE all_smi_gpu_remapping_failed gauge
+all_smi_gpu_remapping_failed{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_utilization_sample_p50 p50 of recent NVML GpuUtilization samples (percent)
+# TYPE all_smi_gpu_utilization_sample_p50 gauge
+all_smi_gpu_utilization_sample_p50{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_utilization_sample_p95 p95 of recent NVML GpuUtilization samples (percent)
+# TYPE all_smi_gpu_utilization_sample_p95 gauge
+all_smi_gpu_utilization_sample_p95{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_gpu_utilization_sample_max max of recent NVML GpuUtilization samples (percent)
+# TYPE all_smi_gpu_utilization_sample_max gauge
+all_smi_gpu_utilization_sample_max{gpu="NVIDIA RTX A6000", instance="REDACTED", gpu_uuid="REDACTED", gpu_index="0"} 0
+# HELP all_smi_energy_consumed_joules_total Cumulative energy consumption in Joules.
+# TYPE all_smi_energy_consumed_joules_total counter
+all_smi_energy_consumed_joules_total{host="shadecloud", scope="gpu", gpu_index="0", gpu_uuid="REDACTED"} 167138.500
+all_smi_energy_consumed_joules_total{host="shadecloud", scope="chassis"} 167138.500

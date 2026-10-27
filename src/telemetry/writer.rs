@@ -14,7 +14,12 @@ use tokio::task::JoinHandle;
 /// Bounded channel capacity for all NDJSON rows.
 pub const TELEMETRY_CHANNEL_CAPACITY: usize = 8192;
 
+/// Rows per batched flush under sustained load.
 const FLUSH_EVERY: u64 = 64;
+/// Maximum delay before buffered rows reach the file (#310): sparse runs
+/// (low rate, few requests) must still become visible to a tailing reader
+/// promptly, so the 64-row batch bound is paired with a time bound.
+const FLUSH_INTERVAL_MS: u64 = 250;
 
 #[derive(Debug, Default, Clone)]
 pub struct WriterStats {
@@ -183,17 +188,92 @@ async fn writer_loop(
 ) -> Result<WriterStats> {
     let mut out = BufWriter::new(file);
     let mut since_flush = 0u64;
-    while let Some(row) = rx.recv().await {
-        counters.classify(&row);
-        serde_json::to_writer(&mut out, &row).context("serialize telemetry row")?;
-        out.write_all(b"\n").context("write telemetry newline")?;
-        counters.written.fetch_add(1, Ordering::Relaxed);
-        since_flush += 1;
-        if since_flush >= FLUSH_EVERY {
-            out.flush().context("flush telemetry NDJSON")?;
-            since_flush = 0;
+    let flush_interval = tokio::time::Duration::from_millis(FLUSH_INTERVAL_MS);
+    let mut flush_tick = tokio::time::interval(flush_interval);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // The first tick fires immediately; it is a no-op (nothing buffered).
+    loop {
+        tokio::select! {
+            row = rx.recv() => {
+                let Some(row) = row else { break };
+                counters.classify(&row);
+                serde_json::to_writer(&mut out, &row).context("serialize telemetry row")?;
+                out.write_all(b"\n").context("write telemetry newline")?;
+                counters.written.fetch_add(1, Ordering::Relaxed);
+                since_flush += 1;
+                // Sustained load flushes in FLUSH_EVERY batches without
+                // waiting for a tick.
+                if since_flush >= FLUSH_EVERY {
+                    out.flush().context("flush telemetry NDJSON")?;
+                    since_flush = 0;
+                }
+            }
+            _ = flush_tick.tick() => {
+                // Time bound (#310): anything buffered reaches the file
+                // within the interval, even when rows are sparse and the
+                // batch bound would never trigger.
+                if since_flush > 0 {
+                    out.flush().context("flush telemetry NDJSON")?;
+                    since_flush = 0;
+                }
+            }
         }
     }
     out.flush().context("final flush telemetry NDJSON")?;
     Ok(counters.snapshot())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telemetry::row::{Row, RunRow};
+
+    /// #310: a sparse run (far fewer rows than FLUSH_EVERY) must still see
+    /// its rows reach the file within the time bound, so a tailing reader
+    /// can join mid-run; only the 250 ms interval can surface this row.
+    #[tokio::test]
+    async fn sparse_rows_flush_to_disk_within_the_time_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse.ndjson");
+        let (writer, handle) = NdjsonWriter::spawn(path.clone()).unwrap();
+        writer
+            .send_priority(Row::Run(RunRow {
+                run_id: "run-flush-bound".into(),
+                t0_wall: "2026-01-01T00:00:00Z".into(),
+                tool_version: "test".into(),
+                schema_version: "telemetry.v1".into(),
+                sut: None,
+                config: serde_json::json!({}),
+                telemetry_sources: vec![],
+            }))
+            .await
+            .unwrap();
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut observed = false;
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if text.contains("\"kind\":\"run\"") {
+                    observed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            observed,
+            "a single row must reach the file without waiting for FLUSH_EVERY rows or shutdown"
+        );
+
+        // Both sender clones (writer + handle) must drop before the writer
+        // task exits; otherwise shutdown waits on a channel that is never
+        // closed (#310 hang review).
+        drop(writer);
+        let stats = tokio::time::timeout(std::time::Duration::from_secs(5), handle.shutdown())
+            .await
+            .expect("writer shutdown must finish once all senders are dropped")
+            .unwrap();
+        assert_eq!(stats.run_rows, 1);
+        assert_eq!(stats.written_rows, 1);
+    }
 }

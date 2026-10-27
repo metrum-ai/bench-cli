@@ -19,6 +19,11 @@ pub struct EffectiveRunConfig {
     /// Cap actually used for outstanding requests (`max_concurrency` or
     /// closed-loop `--concurrency` when the former is unset) (F-09).
     pub effective_max_concurrency: u32,
+    /// Where the cap came from (#309 review): "max-concurrency" (explicit),
+    /// "uncapped-burst" (whole population in flight), or "concurrency"
+    /// (the closed-loop --concurrency flag). Optional and additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_max_concurrency_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_system_prompt: Option<String>,
     pub body_template: serde_json::Value,
@@ -1428,6 +1433,7 @@ mod tests {
                 run_id: "run-1".into(),
                 common: sample_common(),
                 effective_max_concurrency: 8,
+                effective_max_concurrency_source: None,
                 effective_system_prompt: Some("You are a helpful assistant.".into()),
                 body_template: serde_json::json!({"prompt": "{{prompt}}"}),
                 unique_prompt_nonce_template: None,

@@ -183,6 +183,66 @@ impl WarmupBarrier {
     }
 }
 
+/// Client-side guard for an uncapped burst (#309 review): an Offline-style
+/// burst with no `--max-concurrency` holds one socket per outstanding
+/// request, so a population past the process fd budget turns the run into a
+/// client benchmark (or a socket failure) before the server is measured.
+/// Reads the soft RLIMIT_NOFILE from /proc/self/limits (safe Rust, no
+/// libc/unsafe); falls back to a documented conservative constant.
+pub fn fd_soft_limit() -> u64 {
+    const FALLBACK: u64 = 1024;
+    let Ok(limits) = std::fs::read_to_string("/proc/self/limits") else {
+        return FALLBACK;
+    };
+    for line in limits.lines() {
+        if line.starts_with("Max open files") {
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            // "Max open files <soft> <hard> files"
+            if tokens.len() >= 5 {
+                if tokens[3] == "unlimited" {
+                    return u64::MAX;
+                }
+                if let Ok(soft) = tokens[3].parse::<u64>() {
+                    return soft;
+                }
+            }
+        }
+    }
+    FALLBACK
+}
+
+/// Headroom subtracted from the fd budget: files, logs, listeners, plus
+/// keep-alive churn. Documented constant; not a tuning knob.
+pub const BURST_FD_HEADROOM: u64 = 128;
+
+/// Validate an uncapped burst population against the fd budget (#309
+/// review). Returns the refusal message when the population exceeds
+/// `fd_soft_limit() - BURST_FD_HEADROOM`.
+pub fn uncapped_burst_fd_guard(population: u64) -> Result<(), String> {
+    let budget = fd_soft_limit().saturating_sub(BURST_FD_HEADROOM);
+    if population > budget {
+        return Err(format!(
+            "--arrival burst without --max-concurrency would hold {population} sockets at once, past the client fd budget ({budget} = soft RLIMIT_NOFILE {} minus {BURST_FD_HEADROOM} headroom); set --max-concurrency N or raise the fd limit (ulimit -n)",
+            fd_soft_limit()
+        ));
+    }
+    Ok(())
+}
+
+/// Source label for the effective concurrency cap, stamped into the summary
+/// config (#309 review): "uncapped-burst" (burst, no --max-concurrency),
+/// "max-concurrency" (explicit cap), or "concurrency" (the --concurrency
+/// flag default in non-burst modes).
+pub fn effective_max_concurrency_source(kind: ArrivalKind, explicit_cap: bool) -> &'static str {
+    if explicit_cap {
+        "max-concurrency"
+    } else if matches!(kind, ArrivalKind::Burst) {
+        "uncapped-burst"
+    } else {
+        "concurrency"
+    }
+}
+
 /// Open-loop queue delay after the scheduled arrival; closed-loop is always zero.
 pub fn queue_delay_for_slot(
     kind: ArrivalKind,
@@ -191,12 +251,18 @@ pub fn queue_delay_for_slot(
 ) -> Duration {
     match kind {
         ArrivalKind::ClosedLoop => Duration::ZERO,
-        ArrivalKind::Constant | ArrivalKind::Poisson => run_elapsed.saturating_sub(scheduled_delay),
+        // Burst (#309): scheduled at t=0, so the queue delay is the
+        // wait-for-capacity time under an explicit --max-concurrency cap.
+        ArrivalKind::Burst | ArrivalKind::Constant | ArrivalKind::Poisson => {
+            run_elapsed.saturating_sub(scheduled_delay)
+        }
     }
 }
 
 /// Whether schedule fields should appear on the record.
 pub fn should_record_schedule(kind: ArrivalKind) -> bool {
+    // Burst records schedule fields: the queue delay is the transport-cap
+    // wait, and the record must not read as a paced run (#309).
     !matches!(kind, ArrivalKind::ClosedLoop)
 }
 
@@ -245,6 +311,7 @@ pub fn completed_at_from_start(started_at: DateTime<Utc>, latency: Duration) -> 
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::record::RequestRecord;
     use chrono::TimeZone;
@@ -390,6 +457,41 @@ mod tests {
                 Duration::ZERO
             ),
             Duration::ZERO
+        );
+    }
+}
+
+#[cfg(test)]
+mod fd_guard_tests {
+    use super::*;
+
+    #[test]
+    fn fd_soft_limit_returns_a_positive_budget() {
+        assert!(fd_soft_limit() >= 1024);
+    }
+
+    #[test]
+    fn uncapped_burst_guard_rejects_population_past_budget() {
+        let budget = fd_soft_limit().saturating_sub(BURST_FD_HEADROOM);
+        let err = uncapped_burst_fd_guard(budget + 1).expect_err("past budget must refuse");
+        assert!(err.contains("--max-concurrency"), "{err}");
+        assert!(err.contains("ulimit"), "{err}");
+        assert!(uncapped_burst_fd_guard(budget.min(64)).is_ok());
+    }
+
+    #[test]
+    fn cap_source_labels_are_distinct() {
+        assert_eq!(
+            effective_max_concurrency_source(ArrivalKind::Burst, false),
+            "uncapped-burst"
+        );
+        assert_eq!(
+            effective_max_concurrency_source(ArrivalKind::Burst, true),
+            "max-concurrency"
+        );
+        assert_eq!(
+            effective_max_concurrency_source(ArrivalKind::ClosedLoop, false),
+            "concurrency"
         );
     }
 }

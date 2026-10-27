@@ -84,6 +84,35 @@ enum Commands {
         #[command(subcommand)]
         command: SutCommands,
     },
+    /// Convert a completed bench run data log into an Endpoints-shaped,
+    /// explicitly non-certifying artifact bundle (#306).
+    EndpointsExport {
+        /// Bench run data log (JSONL; must contain exactly one complete summary).
+        #[arg(long)]
+        data_log: PathBuf,
+        /// Output directory for the bundle (point.yaml, system_desc.json,
+        /// system_power.json, performance/result_summary.json, config.yaml,
+        /// crosscheck.json, NONCOMPLIANCE.md).
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Operator-declared SUT file (JSON/YAML) for system_desc.json.
+        #[arg(long)]
+        sut: Option<PathBuf>,
+        /// Operator workload label for the point (e.g. "W1").
+        #[arg(long)]
+        workload: String,
+        /// Declared scenario intent; loadstair/pareto and non-burst offline
+        /// are emitted with an explicit unsupported-scenario disclosure.
+        #[arg(long, value_enum)]
+        scenario: metrum_ai_bench::endpoints_export::ScenarioKind,
+        /// Optional operator-declared power descriptor JSON (passed through
+        /// with its sha256 recorded; never synthesized when absent).
+        #[arg(long)]
+        power_desc: Option<PathBuf>,
+        /// Free-form operator notes recorded in point.yaml.
+        #[arg(long)]
+        notes: Option<String>,
+    },
     /// Compare two or more strategic sweep summaries or request CSVs.
     Compare {
         /// Strategic stdout JSON files (`points[]`) and/or request CSVs.
@@ -308,6 +337,52 @@ fn run_sut(command: SutCommands) -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_endpoints_export(
+    data_log: PathBuf,
+    out_dir: PathBuf,
+    sut: Option<PathBuf>,
+    workload: String,
+    scenario: metrum_ai_bench::endpoints_export::ScenarioKind,
+    power_desc: Option<PathBuf>,
+    notes: Option<String>,
+) -> ExitCode {
+    let options = metrum_ai_bench::endpoints_export::ExportOptions {
+        data_log,
+        out_dir,
+        sut,
+        workload,
+        scenario,
+        power_desc,
+        notes,
+    };
+    match metrum_ai_bench::endpoints_export::export_bundle(&options) {
+        Ok(summary) => {
+            println!(
+                "endpoints-export: wrote {} files for run {} ({} successful requests)",
+                summary.files.len(),
+                summary.run_id,
+                summary.sample_count
+            );
+            if let Some(disclosure) = &summary.scenario_disclosure {
+                println!("endpoints-export scenario disclosure: {disclosure}");
+            }
+            for warning in &summary.warnings {
+                println!("endpoints-export warning: {warning}");
+            }
+            println!(
+                "endpoints-export: {}",
+                metrum_ai_bench::endpoints_export::DISCLAIMER
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("endpoints-export failed: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn run_compare(
     inputs: Vec<PathBuf>,
     labels: Option<Vec<String>>,
@@ -355,6 +430,17 @@ fn main() -> ExitCode {
         },
         cmd @ Commands::Preflight { .. } => run_preflight(cmd),
         Commands::Sut { command } => run_sut(command),
+        Commands::EndpointsExport {
+            data_log,
+            out_dir,
+            sut,
+            workload,
+            scenario,
+            power_desc,
+            notes,
+        } => run_endpoints_export(
+            data_log, out_dir, sut, workload, scenario, power_desc, notes,
+        ),
         Commands::Compare {
             inputs,
             labels,
