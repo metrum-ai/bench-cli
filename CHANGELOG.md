@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Security
+- Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
+  unique per-test `tempfile` directories instead of predictable paths under
+  the shared temp directory (#337).
 - The release workflow's live-gate call now passes only the Hugging Face
   token (`HF_TOKEN`) to the reusable smoke workflow instead of
   `secrets: inherit`, and the reusable workflow declares that single-secret
