@@ -1,0 +1,65 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+name: perf-validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/validation/perf/**"
+      - ".github/workflows/perf-validation.yml"
+  pull_request:
+    paths:
+      - "scripts/validation/perf/**"
+      - ".github/workflows/perf-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: spec lint, compare tests, runner plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: install pyyaml
+        run: python3 -m pip install --quiet pyyaml
+      - name: py_compile
+        working-directory: scripts/validation/perf
+        run: python3 -m py_compile compare.py lint_spec.py test_compare.py
+      - name: spec lint
+        working-directory: scripts/validation/perf
+        run: python3 lint_spec.py spec.yaml
+      - name: spec lint negative self-test
+        working-directory: scripts/validation/perf
+        run: |
+          set -euo pipefail
+          # A broken spec (out-of-range tolerance) must fail the linter.
+          sed 's/tolerance_pct: 5/tolerance_pct: 500/' spec.yaml > /tmp/broken.yaml
+          if python3 lint_spec.py /tmp/broken.yaml; then
+            echo "linter accepted an out-of-range tolerance" >&2
+            exit 1
+          fi
+      - name: compare.py unit tests (tolerances, noise floor, missing points)
+        working-directory: scripts/validation/perf
+        run: python3 -m unittest -v test_compare.py
+      - name: runner.sh syntax and plan mode (no GPU, no docker)
+        working-directory: scripts/validation/perf
+        run: |
+          set -euo pipefail
+          bash -n runner.sh
+          ./runner.sh --plan q38-27b /bin/true /bin/true "${RUNNER_TEMP}/plan" 1 | tee plan.txt
+          grep -q "RUNNER PLAN OK" plan.txt
+          # The NVFP4 model tag carries its extra serve flags in the plan.
+          nvfp4_plan="$(./runner.sh --plan q38-27b-nvfp4 /bin/true /bin/true "${RUNNER_TEMP}/plan" 1)"
+          grep -Fq "cudagraph_mode" <<<"${nvfp4_plan}"
+          # Unknown model tag is a usage error even in plan mode.
+          if ./runner.sh --plan nope /bin/true /bin/true "${RUNNER_TEMP}/plan" 1; then
+            echo "plan mode accepted an unknown model tag" >&2
+            exit 1
+          fi
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
