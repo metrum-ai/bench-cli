@@ -22,7 +22,7 @@ build, test and submit changes.
 ## Building
 
 Requirements: a stable Rust toolchain (see rust-toolchain.toml) and, for the
-end-to-end tests, Go as pinned in `.github/workflows/ci.yml` (currently 1.26.6)
+end-to-end tests, Go as pinned in `.github/workflows/ci.yml` (currently 1.26.10)
 to build the dummy model server.
 
 ```bash

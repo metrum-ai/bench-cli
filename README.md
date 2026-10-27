@@ -75,14 +75,14 @@ the agent and operator entry point; the rules below are a short checklist.
 
 One publishable LLM run against the local dummy server. From a GitHub Release
 tarball, start `bin/dummy-model-server` (no Go required). From source, the
-dummy server needs Go 1.26.6+; the benchmark binaries themselves do not.
+dummy server needs Go 1.26.10+; the benchmark binaries themselves do not.
 
 ```bash
 # 1. Build (or unpack a release tarball; see Install)
 cargo build --release
 
 # 2. Start a local OpenAI-compatible server that needs no credentials.
-#    From source (needs Go 1.26.6+):
+#    From source (needs Go 1.26.10+):
 (cd dummy-model-server && go run ./cmd/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms) &
 #    From a release tarball:
 # bin/dummy-model-server -port 18321 -latency 100ms -chunk-interval 20ms &
