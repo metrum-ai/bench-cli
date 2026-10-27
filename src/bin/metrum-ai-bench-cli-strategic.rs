@@ -1547,6 +1547,12 @@ async fn main() -> Result<()> {
         .url
         .clone()
         .ok_or_else(|| anyhow::anyhow!("--url is required"))?;
+    // Fail fast on malformed URLs before any benchmark traffic (#304).
+    // Invalid URLs exit 2 (the configuration/usage code clap uses).
+    if let Err(err) = metrum_ai_bench::endpoints::validate_endpoint_url(&url) {
+        eprintln!("Error: {err}");
+        std::process::exit(2);
+    }
     let model = args
         .model
         .clone()

@@ -1,0 +1,80 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM 0.32.0 `/metrics` exposition sample for the telemetry preset test
+# (#311): one representative sample per target series plus known
+# non-target series the preset must NOT select. Synthetic single-request
+# server state; series names mirror the validated 2026-10-23 study host.
+
+# --- Target series: gauges and counters ---
+# HELP vllm:gpu_cache_usage_perc GPU KV-cache usage. 1.0 means 100 percent usage.
+# TYPE vllm:gpu_cache_usage_perc gauge
+vllm:gpu_cache_usage_perc{engine="0",model_name="test-model"} 0.021
+# HELP vllm:kv_cache_usage_perc KV-cache usage. 1.0 means 100 percent usage.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{engine="0",model_name="test-model"} 0.021
+# HELP vllm:num_requests_running Number of requests currently running on GPU.
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="test-model"} 3
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="test-model"} 1
+# HELP vllm:num_preemptions_total Cumulative number of preemptions from the engine.
+# TYPE vllm:num_preemptions_total counter
+vllm:num_preemptions_total{engine="0",model_name="test-model"} 0
+# HELP vllm:prompt_tokens_total Number of prefill tokens processed.
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{engine="0",model_name="test-model"} 2048
+# HELP vllm:generation_tokens_total Number of generation tokens processed.
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{engine="0",model_name="test-model"} 512
+# HELP vllm:prefix_cache_queries_total Prefix cache queries, in terms of number of cached tokens.
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{engine="0",model_name="test-model"} 4096
+# HELP vllm:prefix_cache_hits_total Prefix cache hits, in terms of number of cached tokens.
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{engine="0",model_name="test-model"} 1024
+# HELP vllm:external_prefix_cache_queries_total External prefix cache queries, in terms of number of cached tokens.
+# TYPE vllm:external_prefix_cache_queries_total counter
+vllm:external_prefix_cache_queries_total{engine="0",model_name="test-model"} 0
+# HELP vllm:external_prefix_cache_hits_total External prefix cache hits, in terms of number of cached tokens.
+# TYPE vllm:external_prefix_cache_hits_total counter
+vllm:external_prefix_cache_hits_total{engine="0",model_name="test-model"} 0
+# HELP vllm:prompt_tokens_cached_total The number of cached tokens.
+# TYPE vllm:prompt_tokens_cached_total counter
+vllm:prompt_tokens_cached_total{engine="0",model_name="test-model"} 1024
+
+# --- Target series: latency histograms (bucket/sum/count) ---
+# HELP vllm:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{engine="0",le="0.005",model_name="test-model"} 0
+vllm:time_to_first_token_seconds_bucket{engine="0",le="0.01",model_name="test-model"} 1
+vllm:time_to_first_token_seconds_bucket{engine="0",le="+Inf",model_name="test-model"} 4
+vllm:time_to_first_token_seconds_sum{engine="0",model_name="test-model"} 0.123
+vllm:time_to_first_token_seconds_count{engine="0",model_name="test-model"} 4
+# HELP vllm:inter_token_latency_seconds Histogram of time between tokens in seconds.
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{engine="0",le="0.005",model_name="test-model"} 300
+vllm:inter_token_latency_seconds_bucket{engine="0",le="+Inf",model_name="test-model"} 512
+vllm:inter_token_latency_seconds_sum{engine="0",model_name="test-model"} 2.5
+vllm:inter_token_latency_seconds_count{engine="0",model_name="test-model"} 512
+# HELP vllm:e2e_request_latency_seconds Histogram of end to end request latency in seconds.
+# TYPE vllm:e2e_request_latency_seconds histogram
+vllm:e2e_request_latency_seconds_bucket{engine="0",le="1.0",model_name="test-model"} 3
+vllm:e2e_request_latency_seconds_bucket{engine="0",le="+Inf",model_name="test-model"} 4
+vllm:e2e_request_latency_seconds_sum{engine="0",model_name="test-model"} 3.7
+vllm:e2e_request_latency_seconds_count{engine="0",model_name="test-model"} 4
+
+# --- Non-target series the preset must NOT select ---
+# HELP vllm:request_queue_time_seconds Histogram of time spent in WAITING phase for request.
+# TYPE vllm:request_queue_time_seconds histogram
+vllm:request_queue_time_seconds_bucket{engine="0",le="0.005",model_name="test-model"} 1
+vllm:request_queue_time_seconds_bucket{engine="0",le="+Inf",model_name="test-model"} 4
+vllm:request_queue_time_seconds_sum{engine="0",model_name="test-model"} 0.01
+vllm:request_queue_time_seconds_count{engine="0",model_name="test-model"} 4
+# HELP vllm:request_success_total Count of successfully processed requests.
+# TYPE vllm:request_success_total counter
+vllm:request_success_total{engine="0",finished_reason="stop",model_name="test-model"} 4
+# HELP vllm:cache_config_info Information of the LLM Engine CacheConfig
+# TYPE vllm:cache_config_info gauge
+vllm:cache_config_info{engine="0",model_name="test-model"} 1

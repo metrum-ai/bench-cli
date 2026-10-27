@@ -140,7 +140,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key."
+        help = "URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -174,6 +174,14 @@ struct Args {
 
     #[arg(long, help = "Path to the data log file")]
     data_log: String,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
 
     #[command(flatten)]
     common: metrum_ai_bench::args_common::CommonBenchArgs,
@@ -421,7 +429,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    args.common.apply_ci_safety_preset();
 
     // Check for version-only flag first
     if args.version_only {
@@ -440,11 +450,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let telemetry_cfg = args.telemetry.resolve_config()?;
 
     // Resolve endpoints (single url+api_key or multi from file)
-    let resolved_endpoints = resolve_endpoints(
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // traffic (#304 review).
+    let resolved_endpoints = match resolve_endpoints(
         args.url.as_deref(),
         args.api_key.as_deref(),
         args.endpoints_file.as_deref(),
-    )?;
+    ) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(resolved_endpoints.urls());
 
     // Validate ramp-up period if specified
@@ -571,7 +589,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let endpoint_selector = Arc::new(metrum_ai_bench::endpoints::EndpointSelector::new(
         &resolved_endpoints,
     ));
-    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    // Explicit output collision policy (#305), resolved before any traffic.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately; any
+    // pre-traffic validation must run BEFORE this call.
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
+        &effective_data_log,
+    )?);
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
@@ -595,7 +626,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_cap,
                     "request_rate": args.common.request_rate,
                     "warmup_requests": args.common.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },
@@ -1540,6 +1571,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .count();
     if args.common.fail_on_error && measure_errors > 0 {
         Err("Test completed with errors".into())
+    } else if args.common.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        Err("Run was interrupted before completing all planned requests (rejected by --fail-on-partial / --ci-safety)".into())
     } else {
         Ok(())
     }
