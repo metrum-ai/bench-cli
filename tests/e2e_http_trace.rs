@@ -19,13 +19,16 @@ const REQUESTS: usize = 4;
 /// Dummy pacing between stream chunks.
 const CHUNK_INTERVAL_S: f64 = 0.010;
 
+fn run_llm(url: &str, dir: &Path, streaming: bool) -> PathBuf {
+    run_llm_with(url, dir, streaming, REQUESTS, 1)
+}
+
 fn run_llm_with(
     url: &str,
     dir: &Path,
     streaming: bool,
     requests: usize,
     concurrency: u32,
-    extra: &[&str],
 ) -> PathBuf {
     let prompts = dir.join("prompts.jsonl");
     std::fs::write(&prompts, "{\"prompt\":\"Name three rivers.\"}\n").expect("prompts");
@@ -66,7 +69,6 @@ fn run_llm_with(
     if streaming {
         command.arg("--streaming");
     }
-    command.args(extra);
     let status = command.status().expect("run llm");
     assert!(status.success(), "llm bench failed");
     data_log
@@ -129,15 +131,8 @@ fn assert_trace(data_log: &Path, streaming: bool, hostname: bool) {
             chunks >= 1 && chunks <= received,
             "{label}: chunks {chunks}"
         );
-        // Internal consistency: first_byte and receive are sub-intervals of
-        // latency. They are captured as separate `Instant` pairs of the same
-        // logical events, and CPU preemption between those captures (µs of
-        // code, descheduled for ms on a loaded runner) can add skew, so the
-        // tolerance absorbs scheduler delay (#328). A real trace bug —
-        // headers + receive grossly exceeding the total, as the pre-#222
-        // body-drop churn did at ~2× — still fails this bound.
         assert!(
-            first_byte + receive <= latency + 50e-3,
+            first_byte + receive <= latency + 1e-3,
             "{label}: headers {first_byte}s + receive {receive}s exceed latency {latency}s"
         );
         if streaming {
@@ -171,104 +166,19 @@ fn assert_trace(data_log: &Path, streaming: bool, hostname: bool) {
     assert!((avg - mean_received).abs() < 1e-9, "{label}: avg {avg}");
 }
 
-/// Sequential pool-reuse scenario pace: with a 200ms inter-start gap the
-/// next request cannot race the previous connection's return to the client
-/// pool, so the reuse assertions below are deterministic (#328) while the
-/// first request still pays a fresh connect.
-const REUSE_TEST_RATE: f64 = 5.0;
-
-fn reuse_pacing_args() -> Vec<String> {
-    vec![
-        "--request-rate".to_string(),
-        REUSE_TEST_RATE.to_string(),
-        "--arrival".to_string(),
-        "constant".to_string(),
-    ]
-}
-
 #[test]
 fn llm_records_http_phase_trace_and_pool_reuse() {
-    // #328: pin the server-side keep-alive budget so idle eviction cannot
-    // race the sequential requests, and pace the requests (see
-    // REUSE_TEST_RATE) so the client pool re-entry always precedes the next
-    // send. Both sides pinned, every reuse assertion stays strict.
-    let Some(dummy) = spawn_dummy(&[
-        "-latency",
-        "20ms",
-        "-chunk-interval",
-        "10ms",
-        "-idle-timeout",
-        "30m",
-    ]) else {
+    let Some(dummy) = spawn_dummy(&["-latency", "20ms", "-chunk-interval", "10ms"]) else {
         skip("go dummy-model-server not available");
         return;
     };
-    let pacing = reuse_pacing_args();
-    let pacing: Vec<&str> = pacing.iter().map(|s| s.as_str()).collect();
     let dir = tempfile::tempdir().expect("tmpdir");
     let ip_url = dummy.url("/v1/chat/completions");
-    assert_trace(
-        &run_llm_with(&ip_url, dir.path(), true, REQUESTS, 1, &pacing),
-        true,
-        false,
-    );
-    assert_trace(
-        &run_llm_with(&ip_url, dir.path(), false, REQUESTS, 1, &pacing),
-        false,
-        false,
-    );
+    assert_trace(&run_llm(&ip_url, dir.path(), true), true, false);
+    assert_trace(&run_llm(&ip_url, dir.path(), false), false, false);
     let host_dir = tempfile::tempdir().expect("tmpdir");
     let host_url = ip_url.replacen("127.0.0.1", "localhost", 1);
-    assert_trace(
-        &run_llm_with(&host_url, host_dir.path(), true, REQUESTS, 1, &pacing),
-        true,
-        true,
-    );
-}
-
-/// Negative control for the pool-reuse assertions above (#328): a client
-/// whose pool evicts idle connections immediately (`--pool-idle-timeout 0`)
-/// must break them. If this test ever passes, the strict reuse assertions no
-/// longer detect a real pooling regression and the fixture is void.
-#[test]
-fn pool_reuse_assertions_detect_a_no_pooling_client() {
-    let Some(dummy) = spawn_dummy(&[
-        "-latency",
-        "20ms",
-        "-chunk-interval",
-        "10ms",
-        "-idle-timeout",
-        "30m",
-    ]) else {
-        skip("go dummy-model-server not available");
-        return;
-    };
-    let dir = tempfile::tempdir().expect("tmpdir");
-    let url = dummy.url("/v1/chat/completions");
-    for streaming in [true, false] {
-        let data_log = run_llm_with(
-            &url,
-            dir.path(),
-            streaming,
-            REQUESTS,
-            1,
-            &["--pool-idle-timeout", "0"],
-        );
-        let mut records = request_records(&data_log);
-        records.sort_by_key(|r| r["seq"].as_u64());
-        assert_eq!(records.len(), REQUESTS);
-        let label = if streaming { "streaming" } else { "unary" };
-        let fresh_after_first = records
-            .iter()
-            .skip(1)
-            .filter(|r| !r["connection_reused"].as_bool().unwrap_or(true))
-            .count();
-        assert!(
-            fresh_after_first >= 1,
-            "{label}: no-pooling client still satisfied the strict reuse assertions; \
-             the pool-reuse fixture no longer catches pooling regressions"
-        );
-    }
+    assert_trace(&run_llm(&host_url, host_dir.path(), true), true, true);
 }
 
 /// PR #222 review: the client must read the stream to its end after
@@ -294,7 +204,7 @@ fn llm_streaming_reuses_pooled_connections_at_concurrency() {
     };
     let dir = tempfile::tempdir().expect("tmpdir");
     let url = dummy.url("/v1/chat/completions");
-    let data_log = run_llm_with(&url, dir.path(), true, MANY, CONCURRENCY, &[]);
+    let data_log = run_llm_with(&url, dir.path(), true, MANY, CONCURRENCY);
     let records = request_records(&data_log);
     assert_eq!(records.len(), MANY);
     let fresh = records

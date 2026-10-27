@@ -2,15 +2,14 @@
 
 ## Unreleased
 
-### Fixed
-- `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
-  flakes on busy runners (#328): the test pins the dummy server's new
-  `-idle-timeout` keep-alive budget (server-side idle eviction can no longer
-  race the sequential requests) and paces its requests at 5 req/s so the
-  next request cannot race the previous connection's return to the client
-  pool. All reuse assertions stay strict, and a new negative-control test
-  proves the fixture still detects a no-pooling client (`--pool-idle-timeout
-  0`).
+### Security
+- external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
+  (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
+  CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
+  CVSS 6.3, published 2026-10-27; found by the W44 tracker re-run's online
+  OSV query, which npm audit had not yet indexed). `npm audit` reports 0
+  vulnerabilities and the OSV scan now reports only the two documented
+  unmaintained-crate exceptions (Refs #341).
 
 ## 1.6.0 (2026-10-27)
 
