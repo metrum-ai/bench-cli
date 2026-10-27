@@ -71,7 +71,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML, curl-style). Mutually exclusive with --url/--api-key
@@ -178,6 +178,12 @@ Options:
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
 
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
+
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
@@ -271,6 +277,12 @@ Options:
 
           [default: 60]
 
+      --validate-model
+          Opt-in preflight (#304): validate the model against the server's /v1/models list before any benchmark traffic; exits 2 on failure
+
+      --model-alias <MODEL_ALIAS>
+          Model id to check instead of --model for --validate-model (alias/proxy setups); the run still uses --model
+
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
@@ -303,7 +315,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key.
+          URL of the AI model endpoint (use --endpoints-file for multiple). Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           Path to endpoints config file (YAML). Mutually exclusive with --url/--api-key
@@ -398,6 +410,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
@@ -555,7 +573,7 @@ Options:
           Descriptor for the scenario being run
 
       --url <URL>
-          URL of the audio transcription API endpoint. Required with --api-key.
+          URL of the audio transcription API endpoint. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --num-requests <NUM_REQUESTS>
           Number of requests to send (must be >= 1 when set)
@@ -651,6 +669,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
@@ -796,13 +820,13 @@ Options:
 
 
       --url <URL>
-          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key.
+          OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic.
 
       --api-key <API_KEY>
           API key sent as a Bearer token. Required with --url. Use any placeholder such as "dummy" for servers that do not check it. Use --endpoints-file for multiple endpoints.
 
       --endpoint <ENDPOINT>
-          Repeatable endpoint URL for multi-endpoint mode
+          Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic.
 
       --endpoints-file <ENDPOINTS_FILE>
           JSON or JSONL endpoint file
@@ -971,6 +995,12 @@ Options:
 
       --fail-on-error
           Exit non-zero if any measured request failed (default: exit 0 after writing results)
+
+      --fail-on-partial
+          Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)
+
+      --ci-safety
+          Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption
 
       --price-per-hour <USD_PER_HOUR>
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens

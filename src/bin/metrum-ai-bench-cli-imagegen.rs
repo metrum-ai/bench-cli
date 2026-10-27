@@ -77,7 +77,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -88,7 +88,10 @@ struct Args {
     )]
     api_key: Option<String>,
 
-    #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
+    #[arg(
+        long,
+        help = "Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic."
+    )]
     endpoint: Vec<String>,
 
     #[arg(long, help = "JSON or JSONL endpoint file")]
@@ -272,6 +275,20 @@ struct Args {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)"
+    )]
+    fail_on_partial: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption"
+    )]
+    ci_safety: bool,
+
+    #[arg(
+        long,
         value_name = "USD_PER_HOUR",
         help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
     )]
@@ -405,7 +422,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    if args.ci_safety {
+        args.fail_on_error = true;
+        args.fail_on_partial = true;
+    }
     if args.version_only {
         print_version_only();
         return Ok(());
@@ -429,7 +451,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
-    let endpoints = resolve_endpoints(&args)?;
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // any traffic (#304 review).
+    let endpoints = match resolve_endpoints(&args) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));
     let runtime = endpoints
         .iter()
@@ -825,6 +855,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if args.fail_on_error && failed > 0 {
         return Err(anyhow::anyhow!("Test completed with {failed} errors").into());
     }
+    if args.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        return Err(anyhow::anyhow!(
+            "Run was interrupted before completing all planned requests (rejected by --fail-on-partial / --ci-safety)"
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -866,6 +905,9 @@ fn prepare_artifacts(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send + Sync>> {
     if let Some(url) = &args.url {
+        // Fail fast on malformed URLs before any benchmark traffic (#304).
+        // The typed error lets the caller exit with the usage code 2.
+        metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
         return Ok(vec![Endpoint {
             name: endpoint_name(url, 0),
             url: normalize_base_url(url),
@@ -877,6 +919,9 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         }]);
     }
     if !args.endpoint.is_empty() {
+        for url in &args.endpoint {
+            metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
+        }
         return Ok(args
             .endpoint
             .iter()
@@ -906,6 +951,14 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         };
         if records.is_empty() {
             return Err(anyhow::anyhow!("endpoints file contains no endpoints").into());
+        }
+        for rec in &records {
+            if let Err(err) = metrum_ai_bench::endpoints::validate_endpoint_url(&rec.url) {
+                return Err(metrum_ai_bench::endpoints::UrlValidationError(format!(
+                    "{err} (endpoints file '{path}')"
+                ))
+                .into());
+            }
         }
         return Ok(records
             .into_iter()
