@@ -1,0 +1,93 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Performance-number validation spec (issue #333).
+# Versioned pins for the standard "did the numbers move?" test. Every value
+# below is a measured pin from the 2026-10-23 MLPerf-endpoints study
+# (docs/evidence/mlperf-endpoints/2026-10-23/summary.json) unless noted.
+spec_version: 1
+name: llm-server-perf-validation
+
+sut:
+  gpu: NVIDIA RTX PRO 6000 Blackwell Server Edition (96 GB), 1 per run
+  driver: "580.126.09"            # study driver; record the actual one per run
+  vllm_image: vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+  vllm_version: "0.32.0"
+  serve_common_flags:
+    - --max-model-len 16384
+    - --max-num-seqs 128
+    - --gpu-memory-utilization 0.90
+    - --default-chat-template-kwargs '{"enable_thinking": false}'
+    - --no-enable-prefix-caching
+
+models:
+  q38-27b:
+    checkpoint: Qwen/Qwen3.8-27B
+    revision: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+    extra_serve_flags: []
+  q38-27b-nvfp4:
+    checkpoint: nvidia/Qwen3.8-27B-NVFP4
+    revision: 482ca0f3832238542f8f5295dde86b5f22711d80
+    extra_serve_flags:
+      - --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+    expected_kernel: FlashInferCutlassNvFp4LinearKernel  # from the startup log
+
+datasets:
+  W1:
+    max_tokens: 128
+    source: abisee/cnn_dailymail 3.0.0 validation @ 96df5e686bee6baa90b8bee7c28b81fa3fa6223d
+    generation: python3 freeze_w1.py --output W1.jsonl (Python seed-42 shuffle, 512 prompts)
+    canonical_sha256: 4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7
+    study_sha256: 44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340
+    # The prior study freeze script was not published. The 2026-10-26 W1
+    # baseline used a different hash and is not an apples-to-apples comparison.
+  W2:
+    max_tokens: 512
+    source: metrum-ai/prompt-library @ 0666f62e581b482838ae2e17b333ee36ff3d01b0
+    generation: >-
+      metrum-ai-bench-cli-prompts --config full --profile code-medium
+      --count 512 --count-slack 0 --seed 42
+    study_sha256: eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b
+
+points:
+  workloads: [W1, W2]
+  concurrency: [1, 8, 32]
+  warmup_seconds: 30        # separate warm-server run, then drain
+  measure_seconds: 180      # issuance window, then drain
+  request:
+    mode: chat
+    streaming: true
+    temperature: 0
+    seed: 42
+    extra_body_json: '{"seed": 42}'
+    api_key: dummy          # loopback only; never a real credential
+
+builds:
+  baseline: release v1.5.4 (metrum-ai-bench-cli-v1.5.4-x86_64-unknown-linux-gnu.tar.gz,
+    sha256 185c0fd9f7b8f6f18d1c7a383866d8d5a24940cdc23a6f618093bb63d5fec36a)
+  candidate: cargo build --release --locked of the branch under test
+  order: interleave baseline/candidate per point; repeat passes when budget allows
+
+telemetry:
+  config: docs/telemetry presets (#311); all-smi fork @ 3b6eaec3364d3c2eb897bf1433ee93eef609c6a9
+  power: GPU board power mean per point (all-smi), nvidia-smi CSV cross-check
+
+gates:
+  # candidate vs baseline on the same box: the regression verdict.
+  regression:
+    metrics: [system_output_tok_s, tpot_p50_ms]
+    tolerance_pct: 5        # or the point's study noise floor, if wider
+    ttft: reported with the #313 cohort caveats; never a gate
+  # both builds vs the study numbers: box/day drift report, not a code verdict.
+  drift:
+    metrics: [system_output_tok_s, tpot_p50_ms, ttft_p50_ms, requests_s, power_mean_w]
+    note: deltas vs study are informational; flag |delta| > 10% for review
+
+reference:
+  # study bench-rel pass 1 (2026-10-23), sanity anchor
+  q38-27b:
+    W1: {c1: {tok_s: 25.6, tpot_p50_ms: 37.90}, c8: {tok_s: 165.6, tpot_p50_ms: 45.79}, c32: {tok_s: 405.7, tpot_p50_ms: 74.72}}
+    W2: {c1: {tok_s: 26.2, tpot_p50_ms: 37.92}, c8: {tok_s: 178.4, tpot_p50_ms: 40.08}, c32: {tok_s: 533.9, tpot_p50_ms: 52.32}}
+  q38-27b-nvfp4:
+    W1: {c1: {tok_s: 57.1, tpot_p50_ms: 16.67}, c8: {tok_s: 351.6, tpot_p50_ms: 21.55}, c32: {tok_s: 797.4, tpot_p50_ms: 38.69}}
+    W2: {c1: {tok_s: 59.7, tpot_p50_ms: 16.59}, c8: {tok_s: 400.9, tpot_p50_ms: 18.87}, c32: {tok_s: 1103.8, tpot_p50_ms: 27.05}}

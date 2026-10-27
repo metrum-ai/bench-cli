@@ -53,6 +53,12 @@ type Config struct {
 	AllowAnyModel bool
 	// StrictMedia rejects media payloads real servers reject (see internal/media).
 	StrictMedia bool
+	// IdleTimeout pins the server-side keep-alive budget: how long an idle
+	// keep-alive connection stays open between requests. The default matches
+	// the previous hard-coded http.Server value; tests that assert connection
+	// reuse pin a large budget so server-side idle eviction cannot race the
+	// sequential requests (#328).
+	IdleTimeout time.Duration
 }
 
 // ParseFlags defines and parses CLI flags.
@@ -83,6 +89,7 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.IntVar(&cfg.MaxImages, "max-images", 4, "Maximum n for image generations")
 	fs.BoolVar(&cfg.AllowAnyModel, "allow-any-model", true, "Accept any model name on image generations")
 	fs.BoolVar(&cfg.StrictMedia, "strict-media", false, "Reject invalid image data: URLs and audio uploads with HTTP 400, like real servers")
+	idleTimeout := fs.String("idle-timeout", "60s", "Keep-alive budget: how long an idle HTTP connection stays open between requests (e.g. 30m; 0 = fall back to ReadTimeout, 30s)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -107,6 +114,12 @@ func ParseFlags(args []string) (*Config, error) {
 		cfg.DoneTail = d
 	} else if *doneTail != "0" && *doneTail != "" {
 		return nil, fmt.Errorf("invalid -done-tail %q", *doneTail)
+	}
+
+	if d, err := time.ParseDuration(*idleTimeout); err == nil && d >= 0 {
+		cfg.IdleTimeout = d
+	} else if *idleTimeout != "" {
+		return nil, fmt.Errorf("invalid -idle-timeout %q", *idleTimeout)
 	}
 
 	c := Compat(strings.ToLower(strings.TrimSpace(*compat)))
