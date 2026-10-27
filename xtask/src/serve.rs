@@ -386,127 +386,6 @@ fn wait_ready(client: &Client, port: u16, name: &str, timeout: Duration) -> Resu
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_args(modality: &str) -> ServeArgs {
-        ServeArgs {
-            modality: modality.to_owned(),
-            operation: "sut".to_owned(),
-            root: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .to_path_buf(),
-            model: None,
-            image: None,
-            args: None,
-            notes: None,
-            sources: Vec::new(),
-            port: 8000,
-            ready_timeout_seconds: 1,
-            logs_output: None,
-        }
-    }
-
-    #[test]
-    fn serving_defaults_generate_valid_sut_for_all_modalities_offline() {
-        for modality in ["llm", "vlm", "asr", "imagegen"] {
-            let args = test_args(modality);
-            let config = load_config(&args).unwrap();
-            let docker = docker_args(
-                &config,
-                &config.image,
-                &config.model,
-                &config.args,
-                args.port,
-            );
-            let sut = sut_json(SutInput {
-                config: &config,
-                image: &config.image,
-                model: &config.model,
-                args: &config.args,
-                docker: &docker,
-                sources: &config.sources,
-                notes: &config.notes,
-                revision: None,
-            })
-            .unwrap();
-            assert_eq!(sut["provenance"], "declared");
-            assert_eq!(sut["model"]["id"], config.model);
-            assert!(sut["runtime"]["config"]
-                .as_str()
-                .unwrap()
-                .contains(&config.image));
-            assert_eq!(sut["extra"]["image"], config.image);
-            assert!(!config.sources.is_empty());
-        }
-    }
-
-    #[test]
-    fn serving_overrides_require_both_researched_notes_and_sources() {
-        let config = load_config(&test_args("llm")).unwrap();
-        assert!(validate_overrides(
-            &config,
-            &config.model,
-            &config.image,
-            &config.args,
-            None,
-            &[]
-        )
-        .is_ok());
-        assert!(
-            validate_overrides(&config, "org/other", &config.image, &config.args, None, &[])
-                .is_err()
-        );
-        assert!(validate_overrides(
-            &config,
-            "org/other",
-            &config.image,
-            &config.args,
-            Some("researched"),
-            &[]
-        )
-        .is_err());
-        assert!(validate_overrides(
-            &config,
-            "org/other",
-            &config.image,
-            &config.args,
-            Some("researched"),
-            &["https://example.invalid".into()]
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn quantization_markers_match_existing_serve_sut_contract() {
-        for (model, expected) in [
-            ("x/Model_W8A8", Some("w8a8")),
-            ("x/Model-W8A16", Some("w8a16")),
-            ("x/Model-w4a16g128", Some("w4a16")),
-            ("x/Model-W4A16-G128", Some("w4a16")),
-            ("x/Model-NVFP4A16", Some("nvfp4a16")),
-            ("x/Model-FP8E4M3", Some("fp8")),
-            ("x/Model-Int4wo", Some("int4wo")),
-            ("x/Model-GPTQ-Int4", Some("gptq")),
-            ("nvidia/Model-FP4", Some("fp4")),
-            ("x/Model-FP8-to-BF16", None),
-            ("x/awqward-fp80", None),
-        ] {
-            assert_eq!(
-                quantization(model, &[]).unwrap().0.as_deref(),
-                expected,
-                "{model}"
-            );
-        }
-        assert_eq!(
-            quantization("org/Model-FP8/", &[]).unwrap().0.as_deref(),
-            Some("fp8")
-        );
-    }
-}
-
 pub fn run(args: ServeArgs) -> Result<()> {
     let config = load_config(&args)?;
     let model = args.model.as_deref().unwrap_or(&config.model);
@@ -635,4 +514,125 @@ pub fn run(args: ServeArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_args(modality: &str) -> ServeArgs {
+        ServeArgs {
+            modality: modality.to_owned(),
+            operation: "sut".to_owned(),
+            root: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .to_path_buf(),
+            model: None,
+            image: None,
+            args: None,
+            notes: None,
+            sources: Vec::new(),
+            port: 8000,
+            ready_timeout_seconds: 1,
+            logs_output: None,
+        }
+    }
+
+    #[test]
+    fn serving_defaults_generate_valid_sut_for_all_modalities_offline() {
+        for modality in ["llm", "vlm", "asr", "imagegen"] {
+            let args = test_args(modality);
+            let config = load_config(&args).unwrap();
+            let docker = docker_args(
+                &config,
+                &config.image,
+                &config.model,
+                &config.args,
+                args.port,
+            );
+            let sut = sut_json(SutInput {
+                config: &config,
+                image: &config.image,
+                model: &config.model,
+                args: &config.args,
+                docker: &docker,
+                sources: &config.sources,
+                notes: &config.notes,
+                revision: None,
+            })
+            .unwrap();
+            assert_eq!(sut["provenance"], "declared");
+            assert_eq!(sut["model"]["id"], config.model);
+            assert!(sut["runtime"]["config"]
+                .as_str()
+                .unwrap()
+                .contains(&config.image));
+            assert_eq!(sut["extra"]["image"], config.image);
+            assert!(!config.sources.is_empty());
+        }
+    }
+
+    #[test]
+    fn serving_overrides_require_both_researched_notes_and_sources() {
+        let config = load_config(&test_args("llm")).unwrap();
+        assert!(validate_overrides(
+            &config,
+            &config.model,
+            &config.image,
+            &config.args,
+            None,
+            &[]
+        )
+        .is_ok());
+        assert!(
+            validate_overrides(&config, "org/other", &config.image, &config.args, None, &[])
+                .is_err()
+        );
+        assert!(validate_overrides(
+            &config,
+            "org/other",
+            &config.image,
+            &config.args,
+            Some("researched"),
+            &[]
+        )
+        .is_err());
+        assert!(validate_overrides(
+            &config,
+            "org/other",
+            &config.image,
+            &config.args,
+            Some("researched"),
+            &["https://example.invalid".into()]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn quantization_markers_match_existing_serve_sut_contract() {
+        for (model, expected) in [
+            ("x/Model_W8A8", Some("w8a8")),
+            ("x/Model-W8A16", Some("w8a16")),
+            ("x/Model-w4a16g128", Some("w4a16")),
+            ("x/Model-W4A16-G128", Some("w4a16")),
+            ("x/Model-NVFP4A16", Some("nvfp4a16")),
+            ("x/Model-FP8E4M3", Some("fp8")),
+            ("x/Model-Int4wo", Some("int4wo")),
+            ("x/Model-GPTQ-Int4", Some("gptq")),
+            ("nvidia/Model-FP4", Some("fp4")),
+            ("x/Model-FP8-to-BF16", None),
+            ("x/awqward-fp80", None),
+        ] {
+            assert_eq!(
+                quantization(model, &[]).unwrap().0.as_deref(),
+                expected,
+                "{model}"
+            );
+        }
+        assert_eq!(
+            quantization("org/Model-FP8/", &[]).unwrap().0.as_deref(),
+            Some("fp8")
+        );
+    }
 }

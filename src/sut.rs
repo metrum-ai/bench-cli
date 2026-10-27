@@ -712,9 +712,9 @@ mod tests {
 
     #[test]
     fn load_json_and_yaml_parity() {
-        let dir = std::env::temp_dir();
-        let json_path = dir.join("sut_test.json");
-        let yaml_path = dir.join("sut_test.yaml");
+        let dir = tempfile::tempdir().unwrap();
+        let json_path = dir.path().join("sut_test.json");
+        let yaml_path = dir.path().join("sut_test.yaml");
         let json = r#"{"name":"box","gpu":{"model":"L40S","count":1},"provenance":"declared"}"#;
         let yaml = "name: box\ngpu:\n  model: L40S\n  count: 1\n";
         std::fs::write(&json_path, json).unwrap();
@@ -728,7 +728,8 @@ mod tests {
 
     #[test]
     fn unknown_field_errors() {
-        let path = std::env::temp_dir().join("sut_unknown.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut_unknown.json");
         let mut f = std::fs::File::create(&path).unwrap();
         write!(f, r#"{{"typo_field":1}}"#).unwrap();
         let err = load_sut(&path).unwrap_err().to_string();
@@ -759,7 +760,8 @@ mod tests {
 
     #[test]
     fn require_sut_implies_redact() {
-        let path = std::env::temp_dir().join("sut_req.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut_req.json");
         let complete = r#"{
             "name":"n",
             "gpu":{"model":"L40S","count":1},
@@ -774,7 +776,8 @@ mod tests {
 
     #[test]
     fn require_sut_rejects_incomplete_declaration() {
-        let path = std::env::temp_dir().join("sut_incomplete.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut_incomplete.json");
         std::fs::write(&path, r#"{}"#).unwrap();
         let err = resolve_sut_flags(Some(&path), true, false)
             .unwrap_err()
@@ -791,7 +794,8 @@ mod tests {
 
     #[test]
     fn require_sut_rejects_blank_and_zero_count() {
-        let path = std::env::temp_dir().join("sut_blank.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut_blank.json");
         std::fs::write(
             &path,
             r#"{
@@ -824,7 +828,8 @@ mod tests {
 
     #[test]
     fn load_cost_block() {
-        let path = std::env::temp_dir().join("sut_cost.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sut_cost.json");
         std::fs::write(
             &path,
             r#"{"name":"box","cost":{"price_per_hour":3.6,"currency":"USD"}}"#,
