@@ -74,3 +74,36 @@ func TestParseFlagsDoneTail(t *testing.T) {
 		t.Fatal("negative -done-tail must be rejected")
 	}
 }
+
+func TestParseFlagsIdleTimeout(t *testing.T) {
+	cfg, err := config.ParseFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default must match the previous hard-coded http.Server value.
+	if cfg.IdleTimeout != 60*time.Second {
+		t.Fatalf("IdleTimeout default = %v, want 60s", cfg.IdleTimeout)
+	}
+	cfg, err = config.ParseFlags([]string{"-idle-timeout", "30m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IdleTimeout != 30*time.Minute {
+		t.Fatalf("IdleTimeout = %v, want 30m", cfg.IdleTimeout)
+	}
+	// 0 pins an unlimited budget (Go http.Server semantics: never close idle
+	// connections).
+	cfg, err = config.ParseFlags([]string{"-idle-timeout", "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IdleTimeout != 0 {
+		t.Fatalf("IdleTimeout = %v, want 0", cfg.IdleTimeout)
+	}
+	if _, err := config.ParseFlags([]string{"-idle-timeout", "soon"}); err == nil {
+		t.Fatal("invalid -idle-timeout must be rejected")
+	}
+	if _, err := config.ParseFlags([]string{"-idle-timeout", "-1s"}); err == nil {
+		t.Fatal("negative -idle-timeout must be rejected")
+	}
+}

@@ -48,6 +48,7 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 | `-seed` | 0 | RNG / image seed |
 | `-compat` | openai | `openai` \| `vllm` \| `sglang` |
 | `-strict-media` | false | Reject invalid image `data:` URLs and audio uploads with HTTP 400 (see below) |
+| `-idle-timeout` | 60s | Keep-alive budget: how long an idle HTTP connection stays open between requests (`0` = never close idle connections). Tests that assert connection reuse pin a large budget (#328) |
 
 ## Strict media (`-strict-media`)
 

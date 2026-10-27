@@ -38,8 +38,10 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB
+		// Server-side keep-alive budget, pinnable per test so idle eviction
+		// cannot race sequential connection-reuse assertions (#328).
+		IdleTimeout:    cfg.IdleTimeout,
+		MaxHeaderBytes: 1 << 20, // 1 MiB
 	}
 	log.Printf("dummy-model-server listening on %s compat=%s model=%q latency=%v chunk=%v req/s=%.2f tokens/s=%.2f",
 		addr, cfg.Compat, cfg.Model, cfg.Latency, cfg.ChunkInterval, cfg.ReqPerSec, cfg.TokensPerSec)
