@@ -13,6 +13,13 @@
   credentialed endpoint URL for all four modality binaries and assert that
   neither `error.log`, `debug.log` nor stderr contains the secret parts
   (#332).
+- external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
+  (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
+  CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
+  CVSS 6.3, published 2026-10-27; found by the W44 tracker re-run's online
+  OSV query, which npm audit had not yet indexed). `npm audit` reports 0
+  vulnerabilities and the OSV scan now reports only the two documented
+  unmaintained-crate exceptions (Refs #341).
 
 ## 1.6.0 (2026-10-27)
 
