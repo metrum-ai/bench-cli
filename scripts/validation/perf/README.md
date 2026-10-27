@@ -50,6 +50,21 @@ CI: `.github/workflows/perf-validation.yml` lints the spec, runs the unit
   datasets regenerated, hashes differ from the study freeze — see the header).
 - Never put hostnames, IPs or GPU UUIDs in committed files or PR text.
 
+## Freezing W1
+
+The canonical W1 file is generated from the pinned CNN/DailyMail validation
+split by `freeze_w1.py`. With Python 3.12.16, install
+`huggingface_hub==2.3.0` and `pyarrow==26.0.0`, then run:
+
+```sh
+python3 freeze_w1.py --output W1.jsonl
+```
+
+The script checks the canonical SHA256 in `spec.yaml` before writing. This is
+not the unpublished study generator: the 2026-10-26 baseline has a different
+W1 hash, so historical W1 comparisons are not apples-to-apples. Use the same
+frozen file for both builds of each same-box comparison.
+
 ## First baseline
 
 `baselines/blackwell-se-2026-10-26.json` — RTX PRO 6000 Blackwell SE (96 GB),

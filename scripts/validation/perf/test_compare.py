@@ -90,6 +90,20 @@ def run_compare(baseline, candidate, *extra):
         return proc.returncode, proc.stdout + proc.stderr, data
 
 
+class ComparePower(unittest.TestCase):
+    def test_nvidia_smi_power_header_and_units(self):
+        with tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as k:
+            write_grid(b, lambda w, c: 100.0, lambda w, c: 40.0)
+            write_grid(k, lambda w, c: 100.0, lambda w, c: 40.0)
+            path = pathlib.Path(b) / "1" / "W1" / "c1" / "nvidia.csv"
+            path.write_text("timestamp, power.draw [W]\nnow, 100.00 W\nlater, 200.00 W\n")
+            # csv.DictReader preserves the leading space after the delimiter.
+            # Actual nvidia-smi emits the same spacing.
+            rc, out, data = run_compare(b, k)
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(data["points"][0]["baseline"]["power_mean_w"], 150.0)
+
+
 class CompareToleranceVerdicts(unittest.TestCase):
     def test_within_tolerance_passes(self):
         with tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as k:

@@ -80,6 +80,8 @@ def lint(path):
                 raise SpecError(f"{where}.max_tokens: must be a positive integer")
             if not HEX64.match(str(entry["study_sha256"])):
                 raise SpecError(f"{where}.study_sha256: not a sha256 hex digest")
+            if w == "W1" and not HEX64.match(str(require(entry, "canonical_sha256", where))):
+                raise SpecError(f"{where}.canonical_sha256: not a sha256 hex digest")
 
     def points(p):
         for key in ("workloads", "concurrency", "warmup_seconds", "measure_seconds"):

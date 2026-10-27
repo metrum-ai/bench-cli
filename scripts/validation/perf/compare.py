@@ -105,9 +105,9 @@ def extract_point(folder):
     power = folder / "nvidia.csv"
     if power.exists():
         vals = []
-        for x in csv.DictReader(power.open()):
+        for x in csv.DictReader(power.open(), skipinitialspace=True):
             try:
-                vals.append(float(x["power.draw"].split()[0]))
+                vals.append(float((x.get("power.draw [W]") or x["power.draw"]).split()[0]))
             except (ValueError, KeyError, IndexError):
                 pass
         r["power_mean_w"] = statistics.mean(vals) if vals else None

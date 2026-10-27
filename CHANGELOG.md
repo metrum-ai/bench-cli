@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Standard performance-validation harness (#333): pinned workload and model
+  spec, reproducible W1 freeze, interleaved runner and offline plan mode,
+  comparison gates with noise floors and missing-point failures, documented
+  baselines, unit tests, CI lint, and a pre-release validation step.
+
 ### Security
 - Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
   values) are now redacted in every per-request log path: the llm binary's

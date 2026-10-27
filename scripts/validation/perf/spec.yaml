@@ -36,11 +36,11 @@ datasets:
   W1:
     max_tokens: 128
     source: abisee/cnn_dailymail 3.0.0 validation @ 96df5e686bee6baa90b8bee7c28b81fa3fa6223d
-    generation: CNNDailyMail.generate(seed=42, max_samples=512), prompt column only
+    generation: python3 freeze_w1.py --output W1.jsonl (Python seed-42 shuffle, 512 prompts)
+    canonical_sha256: 4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7
     study_sha256: 44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340
-    # 2026-10-26: the study freeze script was not published; the regenerated
-    # file (same recipe) hashes differently. Record the sha256 actually used
-    # per run in the baseline file header.
+    # The prior study freeze script was not published. The 2026-10-26 W1
+    # baseline used a different hash and is not an apples-to-apples comparison.
   W2:
     max_tokens: 512
     source: metrum-ai/prompt-library @ 0666f62e581b482838ae2e17b333ee36ff3d01b0

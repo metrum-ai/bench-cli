@@ -26,10 +26,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: install pyyaml
-        run: python3 -m pip install --quiet pyyaml
+        run: python3 -m pip install --quiet pyyaml==6.0.3
       - name: py_compile
         working-directory: scripts/validation/perf
-        run: python3 -m py_compile compare.py lint_spec.py test_compare.py
+        run: python3 -m py_compile compare.py freeze_w1.py lint_spec.py test_compare.py
       - name: spec lint
         working-directory: scripts/validation/perf
         run: python3 lint_spec.py spec.yaml
