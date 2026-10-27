@@ -2,17 +2,14 @@
 
 ## Unreleased
 
-### Added
-- Perf-validation harness hardening for the standard pre-release
-  performance-number test (#333): `runner.sh --plan` dry-run mode (no GPU,
-  no docker, CI-safe); `compare.py` gains `--noise-floor` (per-point,
-  per-metric repeat-noise floors widen the gate) and treats a missing
-  point as a FAIL verdict; new `lint_spec.py` structural spec check and
-  offline `test_compare.py` unit tests (tolerance verdicts, noise floor,
-  missing points, study-reference columns); new CI workflow
-  `perf-validation.yml` (spec lint + negative self-test, unit tests,
-  plan mode); `docs/RELEASING.md` documents the A/B gate as a required
-  pre-release step.
+### Security
+- external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
+  (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
+  CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
+  CVSS 6.3, published 2026-10-27; found by the W44 tracker re-run's online
+  OSV query, which npm audit had not yet indexed). `npm audit` reports 0
+  vulnerabilities and the OSV scan now reports only the two documented
+  unmaintained-crate exceptions (Refs #341).
 
 ## 1.6.0 (2026-10-27)
 
