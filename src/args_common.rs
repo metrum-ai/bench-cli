@@ -123,6 +123,20 @@ pub struct CommonBenchArgs {
 
     #[arg(
         long,
+        default_value_t = false,
+        help = "Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)"
+    )]
+    pub fail_on_partial: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption"
+    )]
+    pub ci_safety: bool,
+
+    #[arg(
+        long,
         value_name = "USD_PER_HOUR",
         help = "Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens"
     )]
@@ -297,6 +311,18 @@ impl EffectiveCommonArgs {
 }
 
 impl CommonBenchArgs {
+    /// Expand the `--ci-safety` preset (#303) into its component flags.
+    ///
+    /// Idempotent; call once right after `Args::parse()` so every later
+    /// reader (`--fail-on-error`, `--fail-on-partial` gates and the summary
+    /// config stamp) sees the effective values.
+    pub fn apply_ci_safety_preset(&mut self) {
+        if self.ci_safety {
+            self.fail_on_error = true;
+            self.fail_on_partial = true;
+        }
+    }
+
     /// Resolve `--sut` / `--require-sut` / `--redact-hostname` before any request.
     pub fn resolve_sut(&self) -> anyhow::Result<(Option<crate::sut::Sut>, bool)> {
         crate::sut::resolve_sut_profile_flags(
@@ -402,6 +428,8 @@ mod tests {
             ca_cert: None,
             insecure: false,
             fail_on_error: false,
+            fail_on_partial: false,
+            ci_safety: false,
             sut_profile: crate::sut::SutProfile::Standard,
             price_per_hour: None,
             isl_target: None,

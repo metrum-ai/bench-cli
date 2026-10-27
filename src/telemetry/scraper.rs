@@ -104,12 +104,17 @@ async fn fetch_body(
     src: &CompiledSource,
     timeout: Duration,
     max_body_bytes: u64,
+    boundary_tag: Option<&str>,
 ) -> Result<(String, Option<i64>, u16)> {
     let headers = auth_headers(src)?;
-    let response = client
-        .get(&src.url)
-        .headers(headers)
-        .timeout(timeout)
+    let mut request = client.get(&src.url).headers(headers).timeout(timeout);
+    // Boundary requests carry a marker header so a test fixture (or a
+    // server's logging) can tell the synchronous pre-measured baseline from
+    // a periodic scrape (#312 review).
+    if let Some(tag) = boundary_tag {
+        request = request.header("x-metrum-telemetry-boundary", tag);
+    }
+    let response = request
         .send()
         .await
         .with_context(|| format!("GET {} ({})", src.url, src.name))?;
@@ -153,7 +158,8 @@ pub async fn probe_sources(
     let mut out = Vec::with_capacity(sources.len());
     for src in sources {
         let started = Instant::now();
-        let (text, offset, _status) = fetch_body(client, src, timeout, cfg.max_body_bytes).await?;
+        let (text, offset, _status) =
+            fetch_body(client, src, timeout, cfg.max_body_bytes, None).await?;
         let parsed = parse_exposition(&text, &src.include);
         let matched = parsed.samples.len() as u64;
         eprintln!(
@@ -181,6 +187,157 @@ pub async fn probe_sources(
     Ok(out)
 }
 
+/// Synchronously scrape one source once for the pre-measured boundary
+/// (#312). Boundary rows are priority-sent (never dropped) and tagged
+/// `boundary`, so the baseline is always visible in the stream. Returns the
+/// number of matched series on success.
+#[allow(clippy::too_many_arguments)]
+pub async fn boundary_scrape_once(
+    client: &reqwest::Client,
+    cfg: &TelemetryConfig,
+    src: &CompiledSource,
+    epoch: &RunEpoch,
+    run_id: &str,
+    writer: &NdjsonWriter,
+    boundary: &str,
+    sample_history: &SampleHistory,
+) -> Result<u64> {
+    let timeout = Duration::from_millis(cfg.timeout_ms.min(src.interval_ms).max(1));
+    let started = Instant::now();
+    let t_ns = epoch.elapsed_ns();
+    // Boundary requests are tagged so a fixture can distinguish the
+    // baseline from periodic scrapes (#312 review).
+    let (text, _offset, _status) =
+        fetch_body(client, src, timeout, cfg.max_body_bytes, Some(boundary)).await?;
+    let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let parsed = parse_exposition(&text, &src.include);
+    let matched = parsed.samples.len() as u64;
+    if matched > 0 {
+        // The boundary baseline is a real at-or-before-send sample for the
+        // requests issued right after it (#312 review: freshness history).
+        note_sample(sample_history, &src.name, t_ns);
+    }
+    for sample in parsed.samples {
+        let (value, unit, raw) = apply_units(src, &sample.metric, sample.value);
+        writer
+            .send_priority(Row::Telemetry(TelemetryRow {
+                run_id: run_id.to_string(),
+                t_ns,
+                src: src.name.clone(),
+                metric: sample.metric,
+                labels: sample.labels,
+                value,
+                unit,
+                mtype: sample.mtype,
+                scrape_ms,
+                raw,
+                boundary: Some(boundary.to_string()),
+            }))
+            .await
+            .map_err(|err| anyhow::anyhow!("boundary scrape write failed: {err:#}"))?;
+    }
+    Ok(matched)
+}
+
+/// Emit the boundary-tagged scrape_error row for a failed boundary scrape
+/// (#312): the missing baseline is explicit coverage, not an invented value.
+pub async fn boundary_scrape_error(
+    src: &CompiledSource,
+    epoch: &RunEpoch,
+    run_id: &str,
+    writer: &NdjsonWriter,
+    boundary: &str,
+    err: &anyhow::Error,
+) {
+    let _ = writer
+        .send_priority(Row::ScrapeError(ScrapeErrorRow {
+            run_id: run_id.to_string(),
+            t_ns: epoch.elapsed_ns(),
+            src: src.name.clone(),
+            http_status: extract_http_status(err),
+            error: err.to_string(),
+            boundary: Some(boundary.to_string()),
+        }))
+        .await;
+}
+
+/// Per-source ring buffer of epoch ns timestamps of successfully written
+/// telemetry rows (#312 review). The record consumer uses it to compute
+/// per-request queue-sample freshness measured at SEND time — the latest
+/// sample alone is wrong, because a request that completes after a newer
+/// scrape would read as missing (found on the 2026-10-26 Blackwell run:
+/// 100% false missing on a 500 ms-interval source). The epoch clock is
+/// monotonic, so each buffer stays sorted and a reverse scan finds the
+/// newest sample at-or-before a given time. Buffers MUST stay bounded: the
+/// cap is per source, sized from the run's request timeout and the source's
+/// own interval by [`sample_history_cap`], and hard-clamped to
+/// [`SAMPLE_HISTORY_MAX_CAP`].
+#[derive(Debug, Default)]
+pub struct SampleHistoryMap {
+    pub(crate) samples: std::collections::BTreeMap<String, std::collections::VecDeque<u64>>,
+    caps: std::collections::BTreeMap<String, usize>,
+}
+
+/// Shared handle to the per-source sample histories.
+pub type SampleHistory = std::sync::Arc<std::sync::Mutex<SampleHistoryMap>>;
+
+/// Fallback per-source cap when a source has no computed cap (tests and
+/// defensive paths). NOT sufficient for a 100 ms interval with long
+/// requests — real runs always get a computed cap.
+pub const SAMPLE_HISTORY_FALLBACK_CAP: usize = 256;
+
+/// Hard upper bound for any per-source cap (u64 timestamps: 8 bytes each,
+/// so even the clamp is ~0.5 MB per source).
+pub const SAMPLE_HISTORY_MAX_CAP: usize = 65_536;
+
+/// Per-source history cap (#312 review): enough samples to span the run's
+/// request timeout plus one minute of slack at the source's interval, plus
+/// two, clamped to [`SAMPLE_HISTORY_MAX_CAP`]. A request that spends the
+/// whole timeout in flight must still find its at-or-before-send sample at
+/// completion.
+pub fn sample_history_cap(interval_ms: u64, request_timeout_s: u64) -> usize {
+    let interval_ms = interval_ms.max(1) as u128;
+    let span_ms = (request_timeout_s as u128 + 60) * 1000;
+    let cap = (span_ms.div_ceil(interval_ms) as usize).saturating_add(2);
+    cap.min(SAMPLE_HISTORY_MAX_CAP)
+}
+
+/// Create a history with per-source caps computed by the session.
+pub fn new_sample_history(caps: std::collections::BTreeMap<String, usize>) -> SampleHistory {
+    std::sync::Arc::new(std::sync::Mutex::new(SampleHistoryMap {
+        samples: std::collections::BTreeMap::new(),
+        caps,
+    }))
+}
+
+/// Record one successful sample time for a source, dropping the oldest
+/// beyond the source's cap (#312 review).
+pub fn note_sample(history: &SampleHistory, source: &str, t_ns: u64) {
+    if let Ok(mut history) = history.lock() {
+        let cap = history
+            .caps
+            .get(source)
+            .copied()
+            .unwrap_or(SAMPLE_HISTORY_FALLBACK_CAP);
+        let deque = history.samples.entry(source.to_string()).or_default();
+        deque.push_back(t_ns);
+        while deque.len() > cap {
+            deque.pop_front();
+        }
+    }
+}
+
+/// Newest recorded sample at-or-before `t_ns` for a source, if any (#312
+/// review: freshness is measured against the request's SEND time).
+pub fn sample_at_or_before(history: &SampleHistory, source: &str, t_ns: u64) -> Option<u64> {
+    history.lock().ok().and_then(|history| {
+        history
+            .samples
+            .get(source)
+            .and_then(|dq| dq.iter().rev().copied().find(|t| *t <= t_ns))
+    })
+}
+
 struct SourceRuntime {
     consecutive_failures: AtomicU32,
 }
@@ -197,6 +354,7 @@ pub fn spawn_scrapers(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
+    sample_history: SampleHistory,
 ) -> Vec<tokio::task::JoinHandle<Result<()>>> {
     let require_failures = require_failures.max(1);
     sources
@@ -208,6 +366,7 @@ pub fn spawn_scrapers(
             let run_id = Arc::clone(&run_id);
             let writer = writer.clone();
             let stop = Arc::clone(&stop);
+            let sample_history = Arc::clone(&sample_history);
             tokio::spawn(async move {
                 scrape_loop(
                     client,
@@ -219,6 +378,7 @@ pub fn spawn_scrapers(
                     stop,
                     require_telemetry,
                     require_failures,
+                    sample_history,
                 )
                 .await
             })
@@ -237,6 +397,7 @@ async fn scrape_loop(
     stop: Arc<AtomicBool>,
     require_telemetry: bool,
     require_failures: u32,
+    sample_history: SampleHistory,
 ) -> Result<()> {
     let runtime = SourceRuntime {
         consecutive_failures: AtomicU32::new(0),
@@ -254,11 +415,20 @@ async fn scrape_loop(
                 }
                 let started = Instant::now();
                 let t_ns = epoch.elapsed_ns();
-                match fetch_body(&client, &src, timeout, cfg.max_body_bytes).await {
+                match fetch_body(&client, &src, timeout, cfg.max_body_bytes, None).await {
                     Ok((text, _offset, _status)) => {
                         let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
                         let parsed = parse_exposition(&text, &src.include);
                         runtime.consecutive_failures.store(0, Ordering::Relaxed);
+                        if !parsed.samples.is_empty() {
+                            // #312 review: record the sample time ONCE per
+                            // scrape in the bounded per-source history for
+                            // freshness coverage (age is measured at
+                            // request SEND, not completion). Once per
+                            // scrape: per-series inserts would fill the
+                            // ring buffer with duplicate timestamps.
+                            note_sample(&sample_history, &src.name, t_ns);
+                        }
                         for sample in parsed.samples {
                             let (value, unit, raw) = apply_units(&src, &sample.metric, sample.value);
                             let _ = writer.try_send_telemetry(Row::Telemetry(TelemetryRow {
@@ -272,6 +442,7 @@ async fn scrape_loop(
                                 mtype: sample.mtype,
                                 scrape_ms,
                                 raw,
+                                boundary: None,
                             }));
                         }
                     }
@@ -285,6 +456,7 @@ async fn scrape_loop(
                                 src: src.name.clone(),
                                 http_status,
                                 error: err.to_string(),
+                                boundary: None,
                             }))
                             .await;
                         if require_telemetry && failures >= require_failures {
@@ -475,6 +647,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
+        let sample_history = new_sample_history(std::collections::BTreeMap::new());
         let epoch = Arc::new(RunEpoch::new());
         let run_id = Arc::new("run-probe".to_string());
         let handles = spawn_scrapers(
@@ -487,6 +660,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             false,
             3,
+            sample_history.clone(),
         );
         tokio::time::sleep(Duration::from_millis(350)).await;
         stop.store(true, Ordering::Relaxed);
@@ -499,6 +673,19 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let text = std::fs::read_to_string(file.path()).expect("read");
         assert!(text.contains("\"kind\":\"telemetry\""));
         assert!(text.contains("DCGM_FI_DEV_POWER_USAGE"));
+        // #312 review: the freshness history gets ONE entry per scrape,
+        // not one per series (the fixture has >= 2 series; per-series
+        // inserts would triple the entry count and fill the ring buffer
+        // with duplicate timestamps).
+        let history = sample_history.lock().unwrap();
+        let entries = history.samples.get("dcgm").expect("dcgm history");
+        assert!(
+            !entries.is_empty() && entries.len() <= 6,
+            "one history entry per scrape (100 ms interval, 350 ms window): {entries:?}"
+        );
+        let mut sorted = entries.clone();
+        sorted.make_contiguous().sort();
+        assert_eq!(&sorted, entries, "monotonic append order");
     }
 
     #[tokio::test]
@@ -540,6 +727,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
         let file = NamedTempFile::new().expect("tmp");
         let (writer, handle) = NdjsonWriter::spawn(file.path().to_path_buf()).expect("spawn");
         let stop = Arc::new(AtomicBool::new(false));
+        let sample_history = new_sample_history(std::collections::BTreeMap::new());
         let handles = spawn_scrapers(
             client,
             cfg,
@@ -550,6 +738,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             Arc::clone(&stop),
             true,
             2,
+            sample_history.clone(),
         );
         let join = handles.into_iter().next().unwrap();
         let result = tokio::time::timeout(Duration::from_secs(3), join)
@@ -577,9 +766,15 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             max_body_bytes: 8,
             sources: vec![],
         };
-        let err = fetch_body(&client, &src, Duration::from_secs(1), cfg.max_body_bytes)
-            .await
-            .expect_err("oversized");
+        let err = fetch_body(
+            &client,
+            &src,
+            Duration::from_secs(1),
+            cfg.max_body_bytes,
+            None,
+        )
+        .await
+        .expect_err("oversized");
         assert!(err.to_string().contains("max_body_bytes"));
         src.allow_empty = true;
         let _ = src;
@@ -640,6 +835,7 @@ DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{gpu="0"} 1000000
             &src,
             Duration::from_secs(1),
             DEFAULT_MAX_BODY_BYTES,
+            None,
         )
         .await
         .expect_err("missing bearer");

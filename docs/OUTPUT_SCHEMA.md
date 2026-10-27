@@ -527,9 +527,9 @@ before any telemetry sample, and the `summary` row is the last. See
 |--------|-----------------|----------|
 | `run` | `run_id`, `t0_wall`, `tool_version`, `schema_version` (`metrum-ai-bench-cli.telemetry.v1`), `config` | `sut`, `telemetry_sources` (`name`, `url`, `interval_ms`, `clock_offset_ms`, `matched_series`) |
 | `stage` | `run_id`, `stage`, `load`, `phase` (`warmup` \| `measure`), `t_start_ns`, `t_end_ns` | |
-| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`) |
-| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `reasoning_tokens` (integer tokens, server-reported; omitted when not reported, #192), `telemetry_at_done` (last-seen map; sugar, not truth) |
-| `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status` |
+| `telemetry` | `run_id`, `t_ns`, `src`, `metric`, `value`, `unit`, `mtype`, `scrape_ms` | `labels` (string map), `raw` (pre-scale value when `units.scale != 1`), `boundary` (baseline tag; `pre-measured` rows are the synchronous scrape immediately before the first measured send, #312) |
+| `request` | `run_id`, `seq`, `stage`, `warmup`, `t_sched_ns`, `t_sent_ns`, `t_done_ns`, `success`, `input_tokens`, `output_tokens`, `latency_s`, `queue_delay_s`, `service_latency_s` | `t_first_ns`, `ttft_s`, `error`, `reasoning_tokens` (integer tokens, server-reported; omitted when not reported, #192), `telemetry_at_done` (last-seen map; sugar, not truth), `queue_sample_age_ms` (per-source age of the latest telemetry sample at-or-before send, ms, #312 review), `queue_sample_stale` (sources whose newest at-or-before-send sample exceeded interval + 10% jitter allowance, or that had no such sample; analysis may exclude these requests' queue evidence) |
+| `scrape_error` | `run_id`, `t_ns`, `src`, `error` | `http_status`, `boundary` (baseline tag; marks an explicit missing pre-measured sample, never an invented value, #312) |
 | `summary` | `run_id`, `partial`, `dropped_telemetry_rows`, `request_rows`, `telemetry_rows`, `scrape_error_rows`, `stage_rows` | |
 
 `mtype` is `counter`, `gauge`, `histogram_bucket`, `summary`, or `unknown`.
