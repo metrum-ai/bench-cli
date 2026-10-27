@@ -9,6 +9,10 @@
   contract with a `contents: read` grant (#291).
 
 ### Changed
+- Fix three xtask-only Clippy lints (`chunks_exact_to_as_chunks` in
+  `fixtures`, `items_after_test_module` in `local_smoke` and `serve`) so the
+  workspace-wide Clippy gate `cargo clippy --workspace --all-targets -- -D
+  warnings` exits 0 (#338).
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
 ## 1.5.5 (2026-10-23)
