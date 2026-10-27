@@ -746,8 +746,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ));
 
     let mut handles = vec![];
-    let mut completed = 0;
-    let mut last_percentage = 0;
 
     // Telemetry starts before the run clock so source probes are not timed.
     let mut telemetry = args
@@ -785,8 +783,109 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .as_ref()
         .map_or_else(Instant::now, |session| session.run_start());
     let ramp_up_start = start_time;
-    let (record_tx, mut record_rx) =
+    let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+
+    // Record consumer (#310): runs concurrently with issuance so tagged
+    // request rows are emitted to the NDJSON stream as requests complete,
+    // interleaved with live telemetry scrapes on the same writer, instead
+    // of only after the issuing loop finishes. Emission order is channel
+    // receive order (per-request completion order, not seq order); the
+    // ordered summary termination is unchanged. The task finishes when all
+    // request tasks have sent (all channel senders dropped) and returns the
+    // session, collected records, and counters.
+    let consumer_num_requests = args.num_requests;
+    let consumer = tokio::spawn(async move {
+        let mut record_rx = record_rx;
+        let mut telemetry = telemetry;
+        let mut metrics_started = false;
+        let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
+        let mut completed: usize = 0;
+        let mut errors: usize = 0;
+        let mut last_percentage: usize = 0;
+        while let Some(rec) = record_rx.recv().await {
+            if let Some(session) = telemetry.as_mut() {
+                session.record_request(&rec, start_time).await;
+            }
+            let _endpoint_name = rec.endpoint.clone();
+            let phase = rec.phase;
+            if rec.is_success() {
+                let response_time = Duration::from_secs_f64(rec.latency_s);
+                let ttft = rec.ttft_s.map(Duration::from_secs_f64);
+                let _prompt_tokens = rec.prompt_tokens;
+                let completion_tokens = rec.completion_tokens;
+                let total_tokens = rec.total_tokens;
+                let _prompt_words = rec
+                    .modality_metrics
+                    .get("prompt_words")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let _completion_words = rec
+                    .modality_metrics
+                    .get("completion_words")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+
+                if let Some(ramp_up) = effective_ramp_up {
+                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
+                        metrics_started = true;
+                        info!("Ramp-up complete. Starting metrics collection...");
+                    }
+                    if !metrics_started {
+                        records.push(rec);
+                        continue;
+                    }
+                }
+                if phase == metrum_ai_bench::record::Phase::Warmup {
+                    records.push(rec);
+                    continue;
+                }
+
+                let _tpot = match ttft {
+                    Some(ttft) if completion_tokens > 1 => {
+                        response_time.checked_sub(ttft).and_then(|gen_time| {
+                            if gen_time.is_zero() {
+                                None
+                            } else {
+                                Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
+                            }
+                        })
+                    }
+                    _ => None,
+                };
+                completed += 1;
+
+                debug!(
+                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
+                    response_time, ttft, total_tokens
+                );
+
+                let percentage = (completed * 100) / (consumer_num_requests as usize);
+                if percentage >= last_percentage + 10 {
+                    info!(
+                        "{}% complete ({}/{} requests)",
+                        percentage, completed, consumer_num_requests
+                    );
+                    last_percentage = (percentage / 10) * 10;
+                }
+
+                if completed.is_multiple_of(100) {
+                    info!("Completed {} requests...", completed);
+                }
+                records.push(rec);
+            } else {
+                let err_msg = rec
+                    .error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown".into());
+                error!("Request failed: {err_msg}");
+                errors += 1;
+                records.push(rec);
+            }
+        }
+        (telemetry, records, completed, errors)
+    });
 
     let mut warmup_barrier =
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
@@ -992,91 +1091,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     info!("All requests launched. Waiting for completion...");
 
-    let mut errors = 0;
-    let mut metrics_started = false;
-    let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
-
-    while let Some(rec) = record_rx.recv().await {
-        if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, start_time).await;
+    // Join the record consumer (#310): it returns once every request task
+    // has finished sending, with the session, records and counters.
+    let (telemetry, records, completed, mut errors) = match consumer.await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            error!("Record consumer task failed: {e}");
+            return Err(anyhow::anyhow!("record consumer task failed: {e}").into());
         }
-        let _endpoint_name = rec.endpoint.clone();
-        let phase = rec.phase;
-        if rec.is_success() {
-            let response_time = Duration::from_secs_f64(rec.latency_s);
-            let ttft = rec.ttft_s.map(Duration::from_secs_f64);
-            let _prompt_tokens = rec.prompt_tokens;
-            let completion_tokens = rec.completion_tokens;
-            let total_tokens = rec.total_tokens;
-            let _prompt_words = rec
-                .modality_metrics
-                .get("prompt_words")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let _completion_words = rec
-                .modality_metrics
-                .get("completion_words")
-                .copied()
-                .unwrap_or(0.0) as usize;
-
-            if let Some(ramp_up) = effective_ramp_up {
-                if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
-                    metrics_started = true;
-                    info!("Ramp-up complete. Starting metrics collection...");
-                }
-                if !metrics_started {
-                    records.push(rec);
-                    continue;
-                }
-            }
-            if phase == metrum_ai_bench::record::Phase::Warmup {
-                records.push(rec);
-                continue;
-            }
-
-            let _tpot = match ttft {
-                Some(ttft) if completion_tokens > 1 => {
-                    response_time.checked_sub(ttft).and_then(|gen_time| {
-                        if gen_time.is_zero() {
-                            None
-                        } else {
-                            Some(gen_time.as_secs_f64() / (completion_tokens - 1) as f64)
-                        }
-                    })
-                }
-                _ => None,
-            };
-            completed += 1;
-
-            debug!(
-                "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
-                response_time, ttft, total_tokens
-            );
-
-            let percentage = (completed * 100) / (args.num_requests as usize);
-            if percentage >= last_percentage + 10 {
-                info!(
-                    "{}% complete ({}/{} requests)",
-                    percentage, completed, args.num_requests
-                );
-                last_percentage = (percentage / 10) * 10;
-            }
-
-            if completed.is_multiple_of(100) {
-                info!("Completed {} requests...", completed);
-            }
-            records.push(rec);
-        } else {
-            let err_msg = rec
-                .error
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "unknown".into());
-            error!("Request failed: {err_msg}");
-            errors += 1;
-            records.push(rec);
-        }
-    }
+    };
 
     // Ensure spawned tasks finished (channel already drained when all senders dropped).
     errors += warmup_barrier.join_errors();

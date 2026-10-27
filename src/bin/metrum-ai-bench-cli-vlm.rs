@@ -607,9 +607,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     let arrival_kind = args.common.arrival_kind();
     let mut handles = vec![];
-    let mut completed = 0;
-    let mut last_percentage = 0;
-    let mut metrics_started = false;
 
     // Telemetry starts before the run clock so source probes are not timed.
     let mut telemetry = args
@@ -651,8 +648,120 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .map_or_else(Instant::now, |session| session.run_start());
     let ramp_up_start = start_time;
     let mut current_concurrency;
-    let (record_tx, mut record_rx) =
+    let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+
+    // Record consumer (#310): runs concurrently with issuance so tagged
+    // request rows are emitted to the NDJSON stream as requests complete,
+    // interleaved with live telemetry scrapes on the same writer, instead
+    // of only after the issuing loop finishes. Emission order is channel
+    // receive order (per-request completion order, not seq order); the
+    // ordered summary termination is unchanged. Returns the session,
+    // records and counters once all request tasks have sent.
+    let consumer_num_requests = args.num_requests;
+    let consumer_ramp_up = args.ramp_up_seconds;
+    let consumer = tokio::spawn(async move {
+        let mut record_rx = record_rx;
+        let mut telemetry = telemetry;
+        let mut metrics_started = false;
+        let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
+        let mut completed: usize = 0;
+        let mut errors: usize = 0;
+        let mut last_percentage: usize = 0;
+        while let Some(rec) = record_rx.recv().await {
+            if let Some(session) = telemetry.as_mut() {
+                session.record_request(&rec, start_time).await;
+            }
+            let _endpoint_name = rec.endpoint.clone();
+            let phase = rec.phase;
+            if rec.is_success() {
+                let response_time = Duration::from_secs_f64(rec.latency_s);
+                let ttft = rec.ttft_s.map(Duration::from_secs_f64);
+                let _prompt_tokens = rec.prompt_tokens;
+                let completion_tokens = rec.completion_tokens;
+                let total_tokens = rec.total_tokens;
+                let image_count = rec
+                    .modality_metrics
+                    .get("image_count")
+                    .copied()
+                    .unwrap_or(0.0) as usize;
+                let mut image_stats = Vec::with_capacity(image_count);
+                for idx in 0..image_count {
+                    let size = rec
+                        .modality_metrics
+                        .get(&format!("image_{idx}_bytes"))
+                        .copied()
+                        .unwrap_or(0.0) as u64;
+                    let w = rec
+                        .modality_metrics
+                        .get(&format!("image_{idx}_width"))
+                        .copied()
+                        .unwrap_or(0.0) as u32;
+                    let h = rec
+                        .modality_metrics
+                        .get(&format!("image_{idx}_height"))
+                        .copied()
+                        .unwrap_or(0.0) as u32;
+                    image_stats.push((size, (w, h)));
+                }
+
+                if let Some(ramp_up) = consumer_ramp_up {
+                    if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
+                        metrics_started = true;
+                        info!("Ramp-up complete. Starting metrics collection...");
+                    }
+                    if !metrics_started {
+                        records.push(rec);
+                        continue;
+                    }
+                }
+                if phase == metrum_ai_bench::record::Phase::Warmup {
+                    records.push(rec);
+                    continue;
+                }
+
+                let _tpot = match ttft {
+                    Some(ttft) if completion_tokens > 1 => {
+                        response_time.checked_sub(ttft).and_then(|d| {
+                            if d.is_zero() {
+                                None
+                            } else {
+                                Some(d / (completion_tokens as u32 - 1))
+                            }
+                        })
+                    }
+                    _ => None,
+                };
+                completed += 1;
+                debug!(
+                    "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
+                    response_time, ttft, total_tokens
+                );
+                let percentage = (completed * 100) / (consumer_num_requests as usize);
+                if percentage >= last_percentage + 10 {
+                    info!(
+                        "{}% complete ({}/{} requests)",
+                        percentage, completed, consumer_num_requests
+                    );
+                    last_percentage = (percentage / 10) * 10;
+                }
+                if completed.is_multiple_of(100) {
+                    info!("Completed {} requests...", completed);
+                }
+                records.push(rec);
+            } else {
+                let err_msg = rec
+                    .error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown".into());
+                error!("Request failed: {err_msg}");
+                errors += 1;
+                records.push(rec);
+            }
+        }
+        (telemetry, records, completed, errors)
+    });
 
     let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
     let slots = metrum_ai_bench::load::schedule(
@@ -1192,100 +1301,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     info!("All requests launched. Waiting for completion...");
 
-    let mut errors = 0;
-    let mut records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
-    while let Some(rec) = record_rx.recv().await {
-        if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, start_time).await;
+    // Join the record consumer (#310): it returns once every request task
+    // has finished sending, with the session, records and counters.
+    let (telemetry, records, completed, mut errors) = match consumer.await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            error!("Record consumer task failed: {e}");
+            return Err(anyhow::anyhow!("record consumer task failed: {e}").into());
         }
-        let _endpoint_name = rec.endpoint.clone();
-        let phase = rec.phase;
-        if rec.is_success() {
-            let response_time = Duration::from_secs_f64(rec.latency_s);
-            let ttft = rec.ttft_s.map(Duration::from_secs_f64);
-            let _prompt_tokens = rec.prompt_tokens;
-            let completion_tokens = rec.completion_tokens;
-            let total_tokens = rec.total_tokens;
-            let image_count = rec
-                .modality_metrics
-                .get("image_count")
-                .copied()
-                .unwrap_or(0.0) as usize;
-            let mut image_stats = Vec::with_capacity(image_count);
-            for idx in 0..image_count {
-                let size = rec
-                    .modality_metrics
-                    .get(&format!("image_{idx}_bytes"))
-                    .copied()
-                    .unwrap_or(0.0) as u64;
-                let w = rec
-                    .modality_metrics
-                    .get(&format!("image_{idx}_width"))
-                    .copied()
-                    .unwrap_or(0.0) as u32;
-                let h = rec
-                    .modality_metrics
-                    .get(&format!("image_{idx}_height"))
-                    .copied()
-                    .unwrap_or(0.0) as u32;
-                image_stats.push((size, (w, h)));
-            }
-
-            if let Some(ramp_up) = args.ramp_up_seconds {
-                if !metrics_started && ramp_up_start.elapsed().as_secs() >= ramp_up {
-                    metrics_started = true;
-                    info!("Ramp-up complete. Starting metrics collection...");
-                }
-                if !metrics_started {
-                    records.push(rec);
-                    continue;
-                }
-            }
-            if phase == metrum_ai_bench::record::Phase::Warmup {
-                records.push(rec);
-                continue;
-            }
-
-            let _tpot = match ttft {
-                Some(ttft) if completion_tokens > 1 => {
-                    response_time.checked_sub(ttft).and_then(|d| {
-                        if d.is_zero() {
-                            None
-                        } else {
-                            Some(d / (completion_tokens as u32 - 1))
-                        }
-                    })
-                }
-                _ => None,
-            };
-            completed += 1;
-            debug!(
-                "Request completed - RT: {:?}, TTFT: {:?}, Tokens: {}",
-                response_time, ttft, total_tokens
-            );
-            let percentage = (completed * 100) / (args.num_requests as usize);
-            if percentage >= last_percentage + 10 {
-                info!(
-                    "{}% complete ({}/{} requests)",
-                    percentage, completed, args.num_requests
-                );
-                last_percentage = (percentage / 10) * 10;
-            }
-            if completed.is_multiple_of(100) {
-                info!("Completed {} requests...", completed);
-            }
-            records.push(rec);
-        } else {
-            let err_msg = rec
-                .error
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "unknown".into());
-            error!("Request failed: {err_msg}");
-            errors += 1;
-            records.push(rec);
-        }
-    }
+    };
 
     errors += warmup_barrier.join_errors();
     for handle in handles {

@@ -58,6 +58,14 @@
   exit 2, the configuration/usage code clap already uses, and URLs echoed in
   errors, logs and the preflight report have userinfo and query values
   redacted (#304).
+- Tagged NDJSON request rows now stream as requests complete on the llm, vlm,
+  asr and imagegen binaries: the completed-record channel is consumed
+  concurrently with issuance (previously only drained after the issuing loop
+  finished), and the NDJSON writer gains a 250 ms time-bound flush next to
+  the 64-row batch bound so sparse runs become visible to tailing readers
+  promptly (#310). Emission order is per-request completion order; the
+  ordered summary termination is unchanged. `metrum-ai-bench-cli-strategic`
+  already emitted request rows at completion and is unchanged.
 
 ### Added
 - Ready telemetry presets for the Metrum all-smi fork plus vLLM:

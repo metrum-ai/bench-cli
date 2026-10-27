@@ -154,7 +154,11 @@ A modality run is one stage. Its NDJSON holds:
 - One `run` row first. `config.binary` names the binary; `config` never holds
   API keys.
 - One `request` row per `request.v3` record, written as each request
-  completes, joined on `seq` and `run_id`. `t_sent_ns` is the record's
+  completes, joined on `seq` and `run_id`. Emission order is per-request
+  completion order (the record channel's receive order), not `seq` order,
+  and rows become visible to a tailing reader within the writer flush bound:
+  every 64 buffered rows or every 250 ms, whichever comes first (#310).
+  `t_sent_ns` is the record's
   `send_offset_s` in nanoseconds (the run clock starts at the NDJSON epoch,
   after the telemetry probes, so both share one origin), `t_done_ns = t_sent_ns + latency_s`,
   `t_first_ns` is response headers (`first_byte_s`) as on strategic rows,

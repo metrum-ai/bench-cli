@@ -561,8 +561,29 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         (Some(_), "poisson") => metrum_ai_bench::load::ArrivalKind::Poisson,
         (Some(_), _) => metrum_ai_bench::load::ArrivalKind::Constant,
     };
-    let (record_tx, mut record_rx) =
+    let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
+
+    // Record consumer (#310): runs concurrently with issuance so tagged
+    // request rows are emitted to the NDJSON stream as requests complete,
+    // interleaved with live telemetry scrapes on the same writer, instead
+    // of only after the issuing loop finishes. Emission order is channel
+    // receive order (per-request completion order, not seq order); the
+    // ordered summary termination is unchanged. Returns the session and
+    // records once all request tasks have sent.
+    let consumer = tokio::spawn(async move {
+        let mut record_rx = record_rx;
+        let mut telemetry = telemetry;
+        let mut shared_records: Vec<metrum_ai_bench::record::RequestRecord> = Vec::new();
+        while let Some(rec) = record_rx.recv().await {
+            if let Some(session) = telemetry.as_mut() {
+                session.record_request(&rec, run_start).await;
+            }
+            shared_records.push(rec);
+        }
+        (telemetry, shared_records)
+    });
+
     let slots = metrum_ai_bench::load::schedule(
         arrival_kind,
         u64::from(args.num_requests),
@@ -727,13 +748,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     drop(record_tx);
 
-    let mut shared_records = Vec::new();
-    while let Some(rec) = record_rx.recv().await {
-        if let Some(session) = telemetry.as_mut() {
-            session.record_request(&rec, run_start).await;
+    // Join the record consumer (#310): it returns the session and records
+    // once every request task has finished sending.
+    let (telemetry, shared_records) = match consumer.await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            let _ = write_error(&error_log, &format!("record_consumer_join_error: {}", e)).await;
+            return Err(anyhow::anyhow!("record consumer task failed: {e}").into());
         }
-        shared_records.push(rec);
-    }
+    };
+
     for h in handles {
         h.await?;
     }
