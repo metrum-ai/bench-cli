@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Security
+- The release workflow's live-gate call now passes only the Hugging Face
+  token (`HF_TOKEN`) to the reusable smoke workflow instead of
+  `secrets: inherit`, and the reusable workflow declares that single-secret
+  contract with a `contents: read` grant (#291).
+
 ### Changed
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
