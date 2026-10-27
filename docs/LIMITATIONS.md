@@ -42,7 +42,15 @@ Headline outputs are latency, throughput, goodput under SLOs, and related
 distributions. The only built-in **quality** scores are ASR **WER/CER** (with
 `--normalizer`). There is no general task accuracy, judge score, or agent
 success metric in 1.0. When `sut.model.quantization` is set, the CLI prints a
-stderr warning that the run measures performance, not answer quality. For
+stderr warning that the run measures performance, not answer quality (this
+warning also fires under `--sut-profile strict`). To publish a
+quantized-model throughput number, gate it with the strict SUT publication
+profile (`--sut-profile strict`, [#308](https://github.com/metrum-ai/bench-cli/issues/308)):
+exact checkpoint revision, weight/activation quantization, KV dtype,
+operator-declared kernel/graph evidence, and a linked quality-evidence
+artifact (`examples/sut.strict.example.json`) are required before traffic,
+which links the separate quality run instead of pretending throughput is
+quality. For
 thinking-model timing (TTFT vs first reasoning, `--max-tokens`,
 `reasoning_effort`), see [REASONING_MODELS.md](REASONING_MODELS.md).
 

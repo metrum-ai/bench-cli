@@ -157,6 +157,7 @@ cargo test --all-targets
 | `metrum-ai-bench-cli imagegen` / `metrum-ai-bench-cli-imagegen` | Image generation latency and artifact hashes | `/v1/images/generations` |
 | `metrum-ai-bench-cli prompts` / `metrum-ai-bench-cli-prompts` | ISL/OSL mix selection from `metrum-ai/prompt-library` | Build a JSONL prompt set with target mean/median lengths |
 | `metrum-ai-bench-cli selftest` | Local sanity check of the install | After build or release unpack |
+| `metrum-ai-bench-cli endpoints-export` | Convert a completed run into an Endpoints-shaped, non-certifying bundle | Cross-checking bench results against the upstream result parser |
 | `metrum-ai-bench-cli preflight` | Serving URL reachability, chat, stream smoke | Before long GPU runs |
 | `metrum-ai-bench-cli sut init` | SUT JSON template / local `--probe` | Scaffold publishable inventory |
 | `metrum-ai-bench-cli compare` | Labeled delta table across strategic runs | Diff two of our own strategic summaries |
@@ -231,6 +232,16 @@ partial declaration. `--require-sut` rejects a block missing `gpu.model`,
   "notes": "Example only: replace with your declared inventory."
 }
 ```
+
+For quantization-sensitive results there is a stricter gate:
+`--sut-profile strict` (implies `--require-sut`) additionally requires
+`model.revision` (exact checkpoint), `model.quantization` (weight/activation
+scheme), `model.kv_dtype`, `model.kernel_evidence` (operator-declared kernel
+and CUDA-graph mode with its evidence source — the CLI **never infers kernel
+choice from the model name**), and `model.quality_evidence` (URI + sha256 +
+n/errors/confidence methodology linking a separate quality-run artifact).
+Quality evidence stays separate from throughput claims. Example:
+[examples/sut.strict.example.json](examples/sut.strict.example.json).
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
 must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v3`
@@ -400,6 +411,33 @@ Every completed request is flushed incrementally to JSONL. A graceful Ctrl-C
 stops issuance, drains already-started work, and emits a `partial: true`
 summary. Warmup records remain auditable but are excluded from measured
 distributions.
+
+**Exit semantics and the CI/agent preset.** By default these binaries are
+exploratory: a run exits 0 after writing results and summaries **even if
+every request failed, the endpoint was down, or a Ctrl-C/SIGTERM interrupted
+it**. Automated callers can mistake that exit 0 for benchmark success. The
+`--ci-safety` preset (llm, vlm, asr, imagegen) implies `--fail-on-error`
+(all-error, endpoint-down and HTTP-5xx runs exit non-zero) and
+`--fail-on-partial` (interrupted runs exit non-zero). Data logs, summaries
+and error logs are always written first, regardless of the exit verdict.
+
+**Data log collision policy.** By default the run data log (`--data-log`)
+**appends**: a repeated command adds a second run to the same file. That is
+valid NDJSON — every row and summary carries its unique `run_id` so runs
+stay attributable — but it surprises unattended consumers that expect one
+run per file. Make the policy explicit with `--data-log-mode` on the llm,
+vlm, asr and imagegen binaries:
+
+| Mode | Behavior when the data log already exists |
+|------|-------------------------------------------|
+| `append` (default) | New run's rows are appended; unique run IDs keep everything attributable. |
+| `refuse-existing` | Atomically claims the path (two concurrent runs cannot both win); exit 2 before any traffic if it exists. The safe CI/agent default. |
+| `overwrite` | **Truncates the previous log at run start — it is gone even if the new run is interrupted or all-errors.** Runs never mix. |
+| `new-dir` | `--data-log` names a directory (created if missing); each run writes `<run_id>.jsonl` inside it. |
+
+The policy is applied as the **last configuration step before traffic**
+(when a validation such as `--validate-model` fails first, an existing log
+is never touched).
 
 ## Metrics (summary)
 

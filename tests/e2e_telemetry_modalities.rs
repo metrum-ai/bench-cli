@@ -533,7 +533,10 @@ fn llm_sigint_after_telemetry_abort_still_writes_summaries() {
 
     // Slow requests keep the drain open long enough to signal into it.
     let mock = spawn_mock(&["--latency-ms", "3000"]);
-    let source = common::spawn_flaky_metrics(1);
+    // ok=2, not 1: since #312 the synchronous pre-measured boundary sample
+    // (#312) consumes the fetch right after the startup probe; the flaky
+    // source starts failing from the third fetch (the periodic scrapes).
+    let source = common::spawn_flaky_metrics(2);
     let run = new_run();
     let yaml = common::flaky_telemetry_yaml(run._dir.path(), source);
     // warn level, so the stop handler's "Ctrl-C received" line is logged.
