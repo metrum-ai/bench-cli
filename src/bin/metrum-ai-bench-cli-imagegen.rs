@@ -77,7 +77,7 @@ struct Args {
     #[arg(
         long,
         requires = "api_key",
-        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key."
+        help = "OpenAI-compatible base URL, usually ending in /v1. Required with --api-key. Invalid URLs exit 2 before traffic."
     )]
     url: Option<String>,
 
@@ -88,7 +88,10 @@ struct Args {
     )]
     api_key: Option<String>,
 
-    #[arg(long, help = "Repeatable endpoint URL for multi-endpoint mode")]
+    #[arg(
+        long,
+        help = "Repeatable endpoint URL for multi-endpoint mode. Invalid URLs exit 2 before traffic."
+    )]
     endpoint: Vec<String>,
 
     #[arg(long, help = "JSON or JSONL endpoint file")]
@@ -231,6 +234,14 @@ struct Args {
     #[arg(long)]
     data_log: String,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value = "append",
+        help = "Collision policy for --data-log (#305): append (default), refuse-existing (atomically claims the path, exit 2 if it exists), overwrite (truncates the previous log at run start, even if the new run fails), new-dir (per-run files named by run_id)"
+    )]
+    data_log_mode: metrum_ai_bench::jsonl::DataLogMode,
+
     #[command(flatten)]
     telemetry: metrum_ai_bench::telemetry::TelemetryArgs,
 
@@ -261,6 +272,20 @@ struct Args {
         help = "Exit non-zero if any measured request failed (default: exit 0 after writing results)"
     )]
     fail_on_error: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Exit non-zero if the run was interrupted before completing all planned requests; the partial summary and logs are still written (default: interrupted runs exit 0 after writing results)"
+    )]
+    fail_on_partial: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Agent/CI preset (#303): implies --fail-on-error and --fail-on-partial, so all-error, endpoint-down and interrupted runs cannot exit 0. Exploratory default: runs exit 0 after writing results and summaries, even with errors or interruption"
+    )]
+    ci_safety: bool,
 
     #[arg(
         long,
@@ -397,7 +422,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Ok(());
     }
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // Agent/CI preset (#303): expand before anything reads the gate flags.
+    if args.ci_safety {
+        args.fail_on_error = true;
+        args.fail_on_partial = true;
+    }
     if args.version_only {
         print_version_only();
         return Ok(());
@@ -421,7 +451,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let telemetry_cfg = args.telemetry.resolve_config()?;
     prepare_artifacts(&args)?;
 
-    let endpoints = resolve_endpoints(&args)?;
+    // Invalid URLs exit 2 (the configuration/usage code clap uses) before
+    // any traffic (#304 review).
+    let endpoints = match resolve_endpoints(&args) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            metrum_ai_bench::endpoints::exit_2_if_url_validation_error(err.as_ref());
+            return Err(err);
+        }
+    };
     metrum_ai_bench::sut::warn_remote_benchmark_urls(endpoints.iter().map(|ep| ep.url.as_str()));
     let runtime = endpoints
         .iter()
@@ -447,7 +485,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let prompts = Arc::new(load_prompts(&args)?);
-    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(&args.data_log)?);
+    // Explicit output collision policy (#305), resolved before any traffic.
+    // Ordering contract (#305 review): this is the LAST configuration step
+    // before traffic because overwrite truncates immediately; any
+    // pre-traffic validation must run BEFORE this call.
+    // run_id is generated first so new-dir can name the per-run file.
+    let run_id = metrum_ai_bench::unique_id::generate_uuid();
+    let effective_data_log =
+        metrum_ai_bench::jsonl::prepare_data_log(args.data_log_mode, &args.data_log, &run_id)
+            .unwrap_or_else(|e| {
+                // Configuration error: exit 2, the code clap uses (#304, #305).
+                eprintln!("Error: data log collision: {e}");
+                std::process::exit(2);
+            });
+    let sink = Arc::new(metrum_ai_bench::jsonl::JsonlSink::create(
+        &effective_data_log,
+    )?);
     let error_log = Arc::new(Mutex::new(
         OpenOptions::new()
             .create(true)
@@ -462,7 +515,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency_cap,
     ));
-    let run_id = metrum_ai_bench::unique_id::generate_uuid();
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
     // Telemetry starts before the run clock so source probes are not timed.
@@ -484,7 +536,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "concurrency": concurrency_cap,
                     "request_rate": args.request_rate,
                     "warmup_requests": args.warmup_requests,
-                    "data_log": args.data_log,
+                    "data_log": effective_data_log,
                     "telemetry": args.telemetry.telemetry,
                 }),
             },
@@ -827,6 +879,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if args.fail_on_error && failed > 0 {
         return Err(anyhow::anyhow!("Test completed with {failed} errors").into());
     }
+    if args.fail_on_partial && stop.is_stopped() {
+        // Interrupted run rejected by the agent/CI preset (#303). The
+        // partial summary and data log were already written; only the exit
+        // verdict changes.
+        return Err(anyhow::anyhow!(
+            "Run was interrupted before completing all planned requests (rejected by --fail-on-partial / --ci-safety)"
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -868,6 +929,9 @@ fn prepare_artifacts(args: &Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send + Sync>> {
     if let Some(url) = &args.url {
+        // Fail fast on malformed URLs before any benchmark traffic (#304).
+        // The typed error lets the caller exit with the usage code 2.
+        metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
         return Ok(vec![Endpoint {
             name: endpoint_name(url, 0),
             url: normalize_base_url(url),
@@ -879,6 +943,9 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         }]);
     }
     if !args.endpoint.is_empty() {
+        for url in &args.endpoint {
+            metrum_ai_bench::endpoints::validate_endpoint_url(url)?;
+        }
         return Ok(args
             .endpoint
             .iter()
@@ -908,6 +975,14 @@ fn resolve_endpoints(args: &Args) -> Result<Vec<Endpoint>, Box<dyn Error + Send 
         };
         if records.is_empty() {
             return Err(anyhow::anyhow!("endpoints file contains no endpoints").into());
+        }
+        for rec in &records {
+            if let Err(err) = metrum_ai_bench::endpoints::validate_endpoint_url(&rec.url) {
+                return Err(metrum_ai_bench::endpoints::UrlValidationError(format!(
+                    "{err} (endpoints file '{path}')"
+                ))
+                .into());
+            }
         }
         return Ok(records
             .into_iter()

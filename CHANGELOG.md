@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+- New agent/CI safety preset `--ci-safety` (implies `--fail-on-error` and the
+  new `--fail-on-partial`) on the llm, vlm, asr and imagegen binaries: all-error,
+  endpoint-down and interrupted runs can no longer exit 0 for automated
+  callers. Exploratory default exit semantics are unchanged and now documented
+  in the flag help and README (#303).
+- New `--data-log-mode` collision policy for the llm, vlm, asr and imagegen
+  data logs: `append` (default, unchanged), `refuse-existing` (atomic
+  O_EXCL claim of the path; exit 2 before traffic if it exists),
+  `overwrite` (truncates the previous log at run start), and `new-dir`
+  (per-run files named by run_id inside a directory). The default append
+  semantics are now documented prominently, and the policy resolves as the
+  last configuration step before traffic (#305).
+
 ### Security
 - The `examples/agent/build_prompt_pool.py` helper no longer depends on the
   unpinned `requests` package: its JSON POST helpers now use the standard
@@ -33,6 +47,17 @@
   without traffic, matching asr, strategic and prompts. Every distributed
   binary's `--version` and `--version-only` behavior is now pinned by tests
   (#307).
+- Invalid absolute endpoint URLs (missing scheme, non-http schemes) are now
+  rejected as configuration errors before any benchmark traffic, across llm,
+  vlm, asr, imagegen and strategic; proxy path prefixes remain valid (#304).
+- New opt-in `--validate-model` preflight for `metrum-ai-bench-cli-llm`: it
+  checks the model against the server's `/v1/models` list before any
+  benchmark traffic, reports the server's actual response, and supports a
+  `--model-alias` override for proxy/alias setups (#304).
+- Both the invalid-URL rejection and the failed `--validate-model` preflight
+  exit 2, the configuration/usage code clap already uses, and URLs echoed in
+  errors, logs and the preflight report have userinfo and query values
+  redacted (#304).
 - Tagged NDJSON request rows now stream as requests complete on the llm, vlm,
   asr and imagegen binaries: the completed-record channel is consumed
   concurrently with issuance (previously only drained after the issuing loop
