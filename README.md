@@ -401,6 +401,15 @@ stops issuance, drains already-started work, and emits a `partial: true`
 summary. Warmup records remain auditable but are excluded from measured
 distributions.
 
+**Exit semantics and the CI/agent preset.** By default these binaries are
+exploratory: a run exits 0 after writing results and summaries **even if
+every request failed, the endpoint was down, or a Ctrl-C/SIGTERM interrupted
+it**. Automated callers can mistake that exit 0 for benchmark success. The
+`--ci-safety` preset (llm, vlm, asr, imagegen) implies `--fail-on-error`
+(all-error, endpoint-down and HTTP-5xx runs exit non-zero) and
+`--fail-on-partial` (interrupted runs exit non-zero). Data logs, summaries
+and error logs are always written first, regardless of the exit verdict.
+
 ## Metrics (summary)
 
 | Metric | Meaning |

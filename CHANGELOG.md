@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- New agent/CI safety preset `--ci-safety` (implies `--fail-on-error` and the
+  new `--fail-on-partial`) on the llm, vlm, asr and imagegen binaries: all-error,
+  endpoint-down and interrupted runs can no longer exit 0 for automated
+  callers. Exploratory default exit semantics are unchanged and now documented
+  in the flag help and README (#303).
+
 ### Security
 - The `examples/agent/build_prompt_pool.py` helper no longer depends on the
   unpinned `requests` package: its JSON POST helpers now use the standard
