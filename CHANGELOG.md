@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 1.6.0 (2026-10-27)
+
+### Security
+- Update `zstd` to 0.14.3 (zstd-safe 8.2.0, zstd-sys 2.1.2) to
+  address RUSTSEC-2026-0391, RUSTSEC-2026-0398, RUSTSEC-2026-0403 and
+  RUSTSEC-2026-0410 (#334).
+- The `examples/agent/build_prompt_pool.py` helper no longer depends on the
+  unpinned `requests` package: its JSON POST helpers now use the standard
+  library (`urllib.request`), removing the unmanifested Python dependency
+  that pip-audit could not assess (#340).
+- Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
+  unique per-test `tempfile` directories instead of predictable paths under
+  the shared temp directory (#337).
+- The external-docs dependency lockfile now resolves `launch-editor` 2.14.2
+  (CVE-2026-112942/112943/112944), `serialize-javascript` 7.1.4
+  (CVE-2026-115897) and `http-cache-semantics` 4.3.0 (CVE-2026-93748), with
+  npm override floors preventing the lockfile from regressing below the
+  fixed versions (#336).
+- The release workflow's live-gate call now passes only the Hugging Face
+  token (`HF_TOKEN`) to the reusable smoke workflow instead of
+  `secrets: inherit`, and the reusable workflow declares that single-secret
+  contract with a `contents: read` grant (#291).
+- The self-hosted runner image (`deploy/github-runners-bench-cli`) now ends
+  as the non-root `runner` account with `RUN_AS_ROOT=false`, installs the
+  Rust toolchain under runner-owned `/opt/rust` instead of `/root`, and adds
+  a runner-listener `HEALTHCHECK` (#292).
+- Dependabot applies a seven-day cooldown to routine version updates in all
+  three ecosystems (cargo, gomod, github-actions); security updates are never
+  delayed (#293).
+
 ### Added
 - Prompt-sequence and issuance comparability on the llm binary (#313):
   `--prompt-sequence-log` emits the effective canonical sequence
@@ -55,31 +85,12 @@
   `--require-telemetry` it also gates measured issuance and fails the run
   verdict. `boundary` is an additive optional field on `telemetry` and
   `scrape_error` rows (schema stays `metrum-ai-bench-cli.telemetry.v1`).
-
-### Security
-- The `examples/agent/build_prompt_pool.py` helper no longer depends on the
-  unpinned `requests` package: its JSON POST helpers now use the standard
-  library (`urllib.request`), removing the unmanifested Python dependency
-  that pip-audit could not assess (#340).
-- Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
-  unique per-test `tempfile` directories instead of predictable paths under
-  the shared temp directory (#337).
-- The external-docs dependency lockfile now resolves `launch-editor` 2.14.2
-  (CVE-2026-112942/112943/112944), `serialize-javascript` 7.1.4
-  (CVE-2026-115897) and `http-cache-semantics` 4.3.0 (CVE-2026-93748), with
-  npm override floors preventing the lockfile from regressing below the
-  fixed versions (#336).
-- The release workflow's live-gate call now passes only the Hugging Face
-  token (`HF_TOKEN`) to the reusable smoke workflow instead of
-  `secrets: inherit`, and the reusable workflow declares that single-secret
-  contract with a `contents: read` grant (#291).
-- The self-hosted runner image (`deploy/github-runners-bench-cli`) now ends
-  as the non-root `runner` account with `RUN_AS_ROOT=false`, installs the
-  Rust toolchain under runner-owned `/opt/rust` instead of `/root`, and adds
-  a runner-listener `HEALTHCHECK` (#292).
-- Dependabot applies a seven-day cooldown to routine version updates in all
-  three ecosystems (cargo, gomod, github-actions); security updates are never
-  delayed (#293).
+- Ready telemetry presets for the Metrum all-smi fork plus vLLM:
+  `examples/telemetry/all-smi-vllm.yaml` (validated single-node include set,
+  pinned exporter/engine versions, loopback URLs and the operational
+  caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
+  (four lanes with source labels and loopback forwarding placeholders), with
+  a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
 
 ### Fixed
 - Standalone `--version-only` no longer fails with required-argument errors on
@@ -106,14 +117,6 @@
   promptly (#310). Emission order is per-request completion order; the
   ordered summary termination is unchanged. `metrum-ai-bench-cli-strategic`
   already emitted request rows at completion and is unchanged.
-
-### Added
-- Ready telemetry presets for the Metrum all-smi fork plus vLLM:
-  `examples/telemetry/all-smi-vllm.yaml` (validated single-node include set,
-  pinned exporter/engine versions, loopback URLs and the operational
-  caveats in its header) and `examples/telemetry/all-smi-vllm-4node.yaml`
-  (four lanes with source labels and loopback forwarding placeholders), with
-  a selected-series fixture test and a vLLM 0.32.0 exposition fixture (#311).
 
 ### Changed
 - Fix three xtask-only Clippy lints (`chunks_exact_to_as_chunks` in
