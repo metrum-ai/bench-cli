@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Security
+- Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
+  unique per-test `tempfile` directories instead of predictable paths under
+  the shared temp directory (#337).
 - The external-docs dependency lockfile now resolves `launch-editor` 2.14.2
   (CVE-2026-112942/112943/112944), `serialize-javascript` 7.1.4
   (CVE-2026-115897) and `http-cache-semantics` 4.3.0 (CVE-2026-93748), with
