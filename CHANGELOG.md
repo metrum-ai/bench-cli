@@ -7,12 +7,31 @@
   unpinned `requests` package: its JSON POST helpers now use the standard
   library (`urllib.request`), removing the unmanifested Python dependency
   that pip-audit could not assess (#340).
+- Unit tests in `src/prompt_inputs.rs` and `src/sut.rs` now write fixtures to
+  unique per-test `tempfile` directories instead of predictable paths under
+  the shared temp directory (#337).
+- The external-docs dependency lockfile now resolves `launch-editor` 2.14.2
+  (CVE-2026-112942/112943/112944), `serialize-javascript` 7.1.4
+  (CVE-2026-115897) and `http-cache-semantics` 4.3.0 (CVE-2026-93748), with
+  npm override floors preventing the lockfile from regressing below the
+  fixed versions (#336).
 - The release workflow's live-gate call now passes only the Hugging Face
   token (`HF_TOKEN`) to the reusable smoke workflow instead of
   `secrets: inherit`, and the reusable workflow declares that single-secret
   contract with a `contents: read` grant (#291).
+- The self-hosted runner image (`deploy/github-runners-bench-cli`) now ends
+  as the non-root `runner` account with `RUN_AS_ROOT=false`, installs the
+  Rust toolchain under runner-owned `/opt/rust` instead of `/root`, and adds
+  a runner-listener `HEALTHCHECK` (#292).
+- Dependabot applies a seven-day cooldown to routine version updates in all
+  three ecosystems (cargo, gomod, github-actions); security updates are never
+  delayed (#293).
 
 ### Changed
+- Fix three xtask-only Clippy lints (`chunks_exact_to_as_chunks` in
+  `fixtures`, `items_after_test_module` in `local_smoke` and `serve`) so the
+  workspace-wide Clippy gate `cargo clippy --workspace --all-targets -- -D
+  warnings` exits 0 (#338).
 - Raise the minimum supported Rust version (MSRV) to 1.89, required by `uuid` 1.28.0 and `sha2` 0.11.1.
 
 ## 1.5.5 (2026-10-23)
