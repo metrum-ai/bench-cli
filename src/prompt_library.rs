@@ -764,15 +764,33 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
         })
         .unwrap_or(0);
     let start_work = work_used;
-    for step in start_work..if exact || optimal {
+    let mut stagnant = 0usize;
+    let mut perturb_restart = true;
+    for _ in start_work..if exact || optimal {
         work_used
     } else {
         req.work_limit
     } {
         work_used += 1;
-        if step > 0 && step % 256 == 0 {
-            mix = seed_mix(&cands, req, &mut rng);
+        // Keep climbing while the global best is improving. A restart is only
+        // useful after a length-scaled stretch without progress.
+        if stagnant >= 256usize.max(8usize.saturating_mul(mix.len())) {
+            mix = if perturb_restart && best_eval.is_some() {
+                let mut perturbed = best_mix.clone();
+                for _ in 0..4 {
+                    let trial = try_move(&perturbed, &cands, req, &mut rng, nearest);
+                    if multiplicity_ok(&trial, req.max_repeats) {
+                        perturbed = trial;
+                    }
+                }
+                perturbed
+            } else {
+                seed_mix(&cands, req, &mut rng)
+            };
+            perturb_restart = !perturb_restart;
+            stagnant = 0;
         }
+        stagnant += 1;
         let trial = try_move(&mix, &cands, req, &mut rng, nearest);
         if !multiplicity_ok(&trial, req.max_repeats) {
             continue;
@@ -785,6 +803,7 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
             Some(best) => eval.0.better_than(best.0),
         };
         if improve {
+            stagnant = 0;
             mix = trial;
             best_mix = mix.clone();
             best_eval = Some(eval);
@@ -1543,6 +1562,33 @@ mod tests {
                 assert!(mix.osl_gap.abs() <= req.osl_tolerance);
             }
         }
+    }
+
+    #[test]
+    fn large_mean_mix_can_climb_for_more_than_256_steps() {
+        // Distinct joint buckets make exact enumeration exceed the budget;
+        // the desired mean requires many replacements from a random seed.
+        let rows: Vec<_> = (0..256)
+            .map(|i| {
+                let isl = if i < 128 { 100 + i } else { 900 + i - 128 };
+                row(i as u64, "x", isl, 10, 1, false)
+            })
+            .collect();
+        let mut req = base_req();
+        req.count = 128;
+        req.count_slack = 0;
+        req.seed = 42;
+        req.isl_target = 800.0;
+        req.isl_tolerance = 5.0;
+        req.osl_target = 10.0;
+        req.max_repeats = 1;
+        req.work_limit = 50_000;
+        let mix = select_mix(&rows, &req).expect("large mean mix");
+        assert_eq!(mix.rows.len(), 128);
+        assert_eq!(mix.extra_copies, 0);
+        assert!(mix.isl_gap.abs() <= req.isl_tolerance);
+        assert!(mix.osl_gap.abs() <= req.osl_tolerance);
+        assert!(mix.work_used > 256);
     }
 
     #[test]

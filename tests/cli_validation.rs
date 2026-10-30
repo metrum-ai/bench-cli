@@ -723,6 +723,46 @@ fn metrum_ai_bench_prompts_writes_failure_report_when_impossible() {
 }
 
 #[test]
+fn metrum_ai_bench_prompts_reports_count_infeasibility() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("lib.jsonl");
+    let output = dir.path().join("mix.jsonl");
+    let report = dir.path().join("report.json");
+    std::fs::write(
+        &input,
+        r#"{"prompt":"only","target_output_length":20,"reasoning":false,"target_input_tokens":32,"target_output_tokens":32,"source_ordinal":0}
+"#,
+    )
+    .unwrap();
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args([
+            "--local-jsonl",
+            input.to_str().unwrap(),
+            "--count",
+            "4",
+            "--count-slack",
+            "0",
+            "--no-repeats",
+            "--isl-target",
+            "32",
+            "--osl-target",
+            "32",
+            "--output",
+            output.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run metrum-ai-bench-cli-prompts");
+    assert!(!out.status.success());
+    assert!(!output.exists(), "must not write JSONL on failure");
+    let failure: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report).expect("failure report written")).unwrap();
+    assert_eq!(failure["status"], "proven_infeasible");
+    assert_eq!(failure["best_composition"], serde_json::json!([]));
+}
+
+#[test]
 fn llm_rejects_warmup_that_consumes_all_requests() {
     let tmp = tempfile::tempdir().unwrap();
     let prompts = tmp.path().join("prompts.jsonl");
