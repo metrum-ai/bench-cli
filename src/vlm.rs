@@ -387,11 +387,10 @@ pub fn build_request_body(
     }
     if let Some(extra) = extra_body_json {
         let extra_val: Value = serde_json::from_str(extra)?;
-        if let (Some(base), Some(extra_map)) = (body.as_object_mut(), extra_val.as_object()) {
-            for (k, v) in extra_map {
-                base.insert(k.clone(), v.clone());
-            }
-        }
+        crate::request::merge_extra_body(
+            body.as_object_mut().expect("request body is an object"),
+            &extra_val,
+        )?;
     }
 
     // Pretty-printing a body with base64 images is costly; only when logged.
@@ -528,6 +527,31 @@ pub fn build_request_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn extra_body_removes_overrides_and_rejects_non_objects() {
+        let build = |extra| {
+            super::build_request_body(
+                "m",
+                256,
+                0.0,
+                "hi",
+                &[],
+                "auto",
+                false,
+                true,
+                false,
+                None,
+                Some(extra),
+                None,
+            )
+        };
+        let body = build(r#"{"max_tokens":null,"max_completion_tokens":256}"#).unwrap();
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["max_completion_tokens"], 256);
+        assert_eq!(build(r#"{"max_tokens":64}"#).unwrap()["max_tokens"], 64);
+        assert!(build("[1,2]").is_err());
+        assert!(build(r#""x""#).is_err());
+    }
     use super::*;
 
     fn image(url: &str, bytes: u64) -> ImageData {

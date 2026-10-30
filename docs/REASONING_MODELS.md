@@ -70,6 +70,13 @@ reasoning tokens; use `visible_completion_tokens` for answer-only counts.
 
 ## Passing `reasoning_effort` and related parameters
 
+A `null` value in `--extra-body-json` removes that key from the request body.
+For models requiring the newer limit field, use
+`--extra-body-json '{"max_tokens":null,"max_completion_tokens":256}'` together
+with `--max-tokens 256`. Set `--osl-target 256` when validating output
+length; the override does not change the OSL target. This is a top-level
+merge; explicit top-level nulls cannot be sent.
+
 `--extra-body-json` merges a JSON object into the request body (LLM, VLM, and
 imagegen). Example for OpenAI-style effort:
 

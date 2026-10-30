@@ -12,16 +12,17 @@ import (
 )
 
 type chatRequest struct {
-	Model         string          `json:"model"`
-	Messages      []chatMessage   `json:"messages"`
-	MaxTokens     int             `json:"max_tokens"`
-	Stream        bool            `json:"stream"`
-	StreamOptions *streamOptions  `json:"stream_options"`
-	IgnoreEOS     bool            `json:"ignore_eos"`
-	Temperature   *float64        `json:"temperature"`
-	Seed          *int64          `json:"seed"`
-	TopP          *float64        `json:"top_p"`
-	Extra         json.RawMessage `json:"-"`
+	Model               string          `json:"model"`
+	Messages            []chatMessage   `json:"messages"`
+	MaxTokens           int             `json:"max_tokens"`
+	MaxCompletionTokens int             `json:"max_completion_tokens"`
+	Stream              bool            `json:"stream"`
+	StreamOptions       *streamOptions  `json:"stream_options"`
+	IgnoreEOS           bool            `json:"ignore_eos"`
+	Temperature         *float64        `json:"temperature"`
+	Seed                *int64          `json:"seed"`
+	TopP                *float64        `json:"top_p"`
+	Extra               json.RawMessage `json:"-"`
 }
 
 type streamOptions struct {

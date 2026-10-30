@@ -53,9 +53,8 @@ impl GenerationBody<'_> {
             body.insert("true_cfg_scale".to_string(), json!(v));
         }
         if let Some(extra) = self.extra {
-            for (k, v) in extra {
-                body.insert(k.clone(), v.clone());
-            }
+            crate::request::merge_extra_body(&mut body, &Value::Object(extra.clone()))
+                .expect("image extra body is an object");
         }
         Value::Object(body)
     }
@@ -143,6 +142,7 @@ mod tests {
         let mut extra = Map::new();
         extra.insert("n".into(), json!(2));
         extra.insert("quality".into(), json!("hd"));
+        extra.insert("seed".into(), Value::Null);
         let body = GenerationBody {
             model: "m",
             prompt: "a cat",
@@ -154,7 +154,7 @@ mod tests {
             ..Default::default()
         }
         .to_json();
-        assert_eq!(body["seed"], 7);
+        assert!(body.get("seed").is_none());
         assert_eq!(body["n"], 2, "extra overrides");
         assert_eq!(body["quality"], "hd");
         assert!(body.get("negative_prompt").is_none());

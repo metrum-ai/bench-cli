@@ -77,6 +77,126 @@ fn run_llm_against(url: &str) {
 }
 
 #[test]
+fn completion_tokens_only_with_preflight_and_osl_gate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let received = tmp.path().join("received.jsonl");
+    let Some(dummy) = spawn_dummy(&[
+        "-strict-completion-tokens",
+        "-record-bodies",
+        received.to_str().unwrap(),
+    ]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let url = dummy.url("/v1/chat/completions");
+    let extra = r#"{"max_tokens":null,"max_completion_tokens":16}"#;
+    let preflight = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli"))
+        .args([
+            "preflight",
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--model",
+            "dummy",
+            "--latency-samples",
+            "1",
+            "--extra-body-json",
+            extra,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        preflight.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&preflight.stdout),
+        String::from_utf8_lossy(&preflight.stderr)
+    );
+    let prompts = tmp.path().join("prompts.jsonl");
+    std::fs::write(&prompts, "{\"prompt\":\"Hi\"}\n").unwrap();
+    for (override_body, target) in [(false, "16"), (true, "16"), (true, "32")] {
+        let log = tmp.path().join(format!("{override_body}-{target}.jsonl"));
+        let mut cmd = Command::new(llm_bin());
+        cmd.args([
+            "--url",
+            &url,
+            "--api-key",
+            "dummy",
+            "--scenario",
+            "e2e",
+            "--num-requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--prompts",
+            prompts.to_str().unwrap(),
+            "--mode",
+            "chat",
+            "--streaming",
+            "--model",
+            "dummy",
+            "--max-tokens",
+            target,
+            "--osl-target",
+            target,
+            "--fail-on-osl-mismatch",
+            "--warmup-requests",
+            "0",
+            "--data-log",
+            log.to_str().unwrap(),
+            "--debug-log",
+            tmp.path().join("debug.log").to_str().unwrap(),
+            "--error-log",
+            tmp.path().join("error.log").to_str().unwrap(),
+            "--log-level",
+            "error",
+        ]);
+        if override_body {
+            cmd.args(["--extra-body-json", extra]);
+        }
+        let output = cmd.output().unwrap();
+        let records = request_records(&log);
+        assert_eq!(records.len(), 1);
+        if !override_body {
+            assert_eq!(records[0]["error"]["kind"], "http_status");
+        } else {
+            assert_eq!(records[0]["completion_tokens"], 16);
+            assert_eq!(
+                output.status.success(),
+                target == "16",
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let summary = common::summary_record(&log).unwrap();
+            assert!(summary["config"]["body_template"]
+                .get("max_tokens")
+                .is_none());
+            assert_eq!(
+                summary["config"]["body_template"]["max_completion_tokens"],
+                16
+            );
+        }
+    }
+    let bodies: Vec<serde_json::Value> = std::fs::read_to_string(received)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(bodies.iter().any(|body| body.get("max_tokens").is_some()));
+    assert!(
+        bodies
+            .iter()
+            .filter(|body| body["max_completion_tokens"] == 16)
+            .count()
+            >= 5
+    );
+    assert!(bodies
+        .iter()
+        .filter(|body| body["max_completion_tokens"] == 16)
+        .all(|body| body.get("max_tokens").is_none()));
+}
+
+#[test]
 fn llm_streaming_dummy_timing() {
     let Some(dummy) = spawn_dummy(&["-latency", "100ms", "-chunk-interval", "20ms"]) else {
         skip("go dummy-model-server not available");
