@@ -44,6 +44,8 @@ and macOS (`x86_64` and `aarch64`). Unpacking a release does not require Go.
 | `-reasoning` | false | Emit `delta.reasoning_content` before content |
 | `-reasoning-tokens` | 0 | Emit N reasoning chunks, add N to `completion_tokens`, and report `usage.completion_tokens_details.reasoning_tokens` (non-streaming too); 0 = off |
 | `-reasoning-only` | false | Stream `max_tokens` `delta.reasoning_content` chunks, no content, `finish_reason` `length` (a thinking model cut off mid-reasoning); `-role-only` wins if both are set, and `-error-rate` does not inject mid-stream errors here |
+| `-strict-completion-tokens` | false | Reject chat requests containing `max_tokens` with an OpenAI-style `invalid_type` error; use `max_completion_tokens` instead. |
+| `-record-bodies` | empty | Append chat request bodies as JSONL for local tests. Do not enable for sensitive data. |
 | `-include-usage` | true | Default usage on final stream chunk |
 | `-seed` | 0 | RNG / image seed |
 | `-compat` | openai | `openai` \| `vllm` \| `sglang` |

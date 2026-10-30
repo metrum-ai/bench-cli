@@ -27,6 +27,32 @@ func testCfg(mods ...func(*config.Config)) *config.Config {
 	return cfg
 }
 
+func TestStrictCompletionTokens(t *testing.T) {
+	h := server.New(testCfg(func(c *config.Config) { c.StrictCompletionTokens = true }))
+	for _, value := range []string{"null", "16"} {
+		body := `{"model":"dummy","messages":[],"max_tokens":` + value + `}`
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+		var response map[string]map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest || response["error"]["code"] != "invalid_type" || response["error"]["param"] != "max_tokens" {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	body := `{"model":"dummy","messages":[],"max_completion_tokens":16}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || response["usage"].(map[string]any)["completion_tokens"] != float64(16) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestChatNonStream(t *testing.T) {
 	h := server.New(testCfg())
 	body := `{"model":"dummy","messages":[{"role":"user","content":"Hi there friend"}],"max_tokens":5,"stream":false}`

@@ -513,12 +513,12 @@ fn build_request_body(
     }
     if let Some(extra) = extra_body_json {
         let extra_val: Value = serde_json::from_str(extra)?;
-        if let (Some(base), Some(extra_map)) = (base_payload.as_object_mut(), extra_val.as_object())
-        {
-            for (k, v) in extra_map {
-                base.insert(k.clone(), v.clone());
-            }
-        }
+        metrum_ai_bench::request::merge_extra_body(
+            base_payload
+                .as_object_mut()
+                .expect("request body is an object"),
+            &extra_val,
+        )?;
     }
     Ok(base_payload)
 }
@@ -1688,6 +1688,35 @@ mod tests {
         choice_output_text as stream_choice_output_text,
     };
     use serde_json::json;
+
+    #[test]
+    fn extra_body_removes_and_overrides_in_both_modes() {
+        use super::{build_request_body, MetrumAiBenchLLMMode};
+        for mode in [MetrumAiBenchLLMMode::Chat, MetrumAiBenchLLMMode::Completion] {
+            let build = |extra| {
+                build_request_body(
+                    mode,
+                    "m",
+                    256,
+                    0.0,
+                    "hi",
+                    true,
+                    false,
+                    None,
+                    Some(extra),
+                    None,
+                )
+            };
+            let body = build(r#"{"max_tokens":null,"max_completion_tokens":256,"temperature":null,"stream_options":null,"foo":null}"#).unwrap();
+            for key in ["max_tokens", "temperature", "stream_options", "foo"] {
+                assert!(body.get(key).is_none());
+            }
+            assert_eq!(body["max_completion_tokens"], 256);
+            assert_eq!(build(r#"{"max_tokens":64}"#).unwrap()["max_tokens"], 64);
+            assert!(build("[1,2]").is_err());
+            assert!(build(r#""x""#).is_err());
+        }
+    }
 
     #[test]
     fn zero_ramp_up_is_treated_as_no_ramp_up() {

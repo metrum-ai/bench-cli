@@ -490,12 +490,7 @@ fn apply_chat_controls(
         let Some(dst) = body.as_object_mut() else {
             bail!("chat body must be a JSON object");
         };
-        let Some(src) = extra.as_object() else {
-            bail!("--extra-body-json must be a JSON object");
-        };
-        for (key, value) in src {
-            dst.insert(key.clone(), value.clone());
-        }
+        metrum_ai_bench::request::merge_extra_body(dst, extra)?;
     }
     Ok(())
 }
@@ -2200,6 +2195,18 @@ mod tests {
         assert!(parse_sweep("1,0").is_err());
         assert!(parse_sweep("2,1").is_err());
         assert!(parse_sweep("x").is_err());
+    }
+
+    #[test]
+    fn generation_overrides_remove_or_replace_max_tokens() {
+        for (extra, expected) in [
+            (json!({"max_tokens":null,"max_completion_tokens":256}), None),
+            (json!({"max_tokens":64}), Some(json!(64))),
+        ] {
+            let mut body = json!({});
+            apply_chat_controls(&mut body, Some(256), false, None, None, Some(&extra)).unwrap();
+            assert_eq!(body.get("max_tokens"), expected.as_ref());
+        }
     }
 
     #[test]

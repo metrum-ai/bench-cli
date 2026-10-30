@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math/rand"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/metrum-ai/bench-cli/dummy-model-server/internal/config"
@@ -44,6 +45,36 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if h.Cfg.RecordBodies != "" {
+		var compact json.RawMessage = raw
+		line, err := json.Marshal(compact)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		f, err := os.OpenFile(h.Cfg.RecordBodies, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot record request")
+			return
+		}
+		_, err = f.Write(append(line, '\n'))
+		_ = f.Close()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot record request")
+			return
+		}
+	}
+	if h.Cfg.StrictCompletionTokens {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if _, exists := fields["max_tokens"]; exists {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "Unsupported parameter: max_tokens", "type": "invalid_request_error", "param": "max_tokens", "code": "invalid_type"}})
+			return
+		}
+	}
 	var req chatRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
@@ -60,6 +91,9 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxTokens := req.MaxTokens
+	if h.Cfg.StrictCompletionTokens {
+		maxTokens = req.MaxCompletionTokens
+	}
 	if maxTokens <= 0 {
 		maxTokens = 64
 	}

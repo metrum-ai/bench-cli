@@ -53,6 +53,10 @@ type Config struct {
 	AllowAnyModel bool
 	// StrictMedia rejects media payloads real servers reject (see internal/media).
 	StrictMedia bool
+	// StrictCompletionTokens rejects the legacy max_tokens field, even if null.
+	StrictCompletionTokens bool
+	// RecordBodies appends chat request JSON lines for local tests only.
+	RecordBodies string
 	// IdleTimeout pins the server-side keep-alive budget: how long an idle
 	// keep-alive connection stays open between requests. The default matches
 	// the previous hard-coded http.Server value; tests that assert connection
@@ -89,6 +93,8 @@ func ParseFlags(args []string) (*Config, error) {
 	fs.IntVar(&cfg.MaxImages, "max-images", 4, "Maximum n for image generations")
 	fs.BoolVar(&cfg.AllowAnyModel, "allow-any-model", true, "Accept any model name on image generations")
 	fs.BoolVar(&cfg.StrictMedia, "strict-media", false, "Reject invalid image data: URLs and audio uploads with HTTP 400, like real servers")
+	fs.BoolVar(&cfg.StrictCompletionTokens, "strict-completion-tokens", false, "Reject max_tokens in chat requests")
+	fs.StringVar(&cfg.RecordBodies, "record-bodies", "", "Append chat request bodies to a JSONL file (test only)")
 	idleTimeout := fs.String("idle-timeout", "60s", "Keep-alive budget: how long an idle HTTP connection stays open between requests (e.g. 30m; 0 = fall back to ReadTimeout, 30s)")
 
 	if err := fs.Parse(args); err != nil {

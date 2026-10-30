@@ -23,6 +23,7 @@ pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
 pub mod record;
+pub mod request;
 pub mod runner;
 pub mod sse;
 pub mod stats;

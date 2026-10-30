@@ -28,6 +28,10 @@
   unmaintained-crate exceptions (Refs #341).
 
 ### Fixed
+- Metrum AI: `--extra-body-json` null values now remove top-level keys rather
+  than sending explicit nulls, which can no longer be sent this way; non-object
+  extra bodies now produce an error. This permits `max_completion_tokens`-only
+  models without changing output-token accounting or OSL validation (#357).
 - `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
   flakes on busy runners (#328): the test pins the dummy server's new
   `-idle-timeout` keep-alive budget (server-side idle eviction can no longer

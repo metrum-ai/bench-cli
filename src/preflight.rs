@@ -258,6 +258,9 @@ pub async fn run_preflight(
     latency_samples: u32,
     extra_body: Option<&serde_json::Value>,
 ) -> Result<PreflightReport> {
+    if extra_body.is_some_and(|extra| !extra.is_object()) {
+        anyhow::bail!("--extra-body-json must be a JSON object");
+    }
     let chat_url = normalize_chat_url(url);
     let client = build_http_client(HttpClientOptions {
         request_timeout: Some(request_timeout),
@@ -392,13 +395,12 @@ fn chat_body(
         "messages": [{"role": "user", "content": "ping"}]
     });
     if let Some(extra) = extra_body {
-        if let Some(obj) = extra.as_object() {
-            if let Some(map) = body.as_object_mut() {
-                for (k, v) in obj {
-                    map.insert(k.clone(), v.clone());
-                }
-            }
-        }
+        // The public preflight entry point validates the extra body before probes run.
+        crate::request::merge_extra_body(
+            body.as_object_mut().expect("chat body is an object"),
+            extra,
+        )
+        .expect("preflight extra body was validated");
     }
     body
 }
@@ -904,6 +906,10 @@ mod tests {
         let body = chat_body("m", true, 8, Some(&extra));
         assert_eq!(body["stream"], true);
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        let extra = json!({"max_tokens":null,"max_completion_tokens":8});
+        let body = chat_body("m", false, 8, Some(&extra));
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["max_completion_tokens"], 8);
     }
 
     #[test]

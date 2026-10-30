@@ -151,7 +151,7 @@ Options:
           min_tokens (vLLM / compatible servers)
 
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
+          Extra JSON object merged into the request body. A null value removes that key, e.g. '{"max_tokens":null,"max_completion_tokens":256}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
           Optional system prompt for chat (omit for none; empty string also disables)
@@ -405,7 +405,7 @@ Options:
           min_tokens (vLLM / compatible servers)
 
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
+          Extra JSON object merged into the request body. A null value removes that key, e.g. '{"max_tokens":null,"max_completion_tokens":256}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
           Optional system prompt for chat (omit for none; empty string also disables)
@@ -670,7 +670,7 @@ Options:
           min_tokens (vLLM / compatible servers)
 
       --extra-body-json <EXTRA_BODY_JSON>
-          Extra JSON object merged into the request body, e.g. '{"reasoning_effort":"medium"}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
+          Extra JSON object merged into the request body. A null value removes that key, e.g. '{"max_tokens":null,"max_completion_tokens":256}'. Recorded in the run manifest. See docs/REASONING_MODELS.md.
 
       --system-prompt <SYSTEM_PROMPT>
           Optional system prompt for chat (omit for none; empty string also disables)
