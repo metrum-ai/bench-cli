@@ -32,6 +32,8 @@
   than sending explicit nulls, which can no longer be sent this way; non-object
   extra bodies now produce an error. This permits `max_completion_tokens`-only
   models without changing output-token accounting or OSL validation (#357).
+- Metrum AI prompt selection searches bounded joint-length compositions for
+  mixed medians and writes diagnostic reports on selection failure (#358).
 - `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
   flakes on busy runners (#328): the test pins the dummy server's new
   `-idle-timeout` keep-alive budget (server-side idle eviction can no longer
