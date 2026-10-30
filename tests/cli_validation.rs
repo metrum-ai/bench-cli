@@ -670,7 +670,7 @@ fn metrum_ai_bench_prompts_selects_from_local_jsonl() {
 }
 
 #[test]
-fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
+fn metrum_ai_bench_prompts_writes_failure_report_when_impossible() {
     let dir = tempfile::tempdir().expect("tempdir");
     let input = dir.path().join("lib.jsonl");
     let output = dir.path().join("mix.jsonl");
@@ -687,7 +687,7 @@ fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
             "--local-jsonl",
             input.to_str().unwrap(),
             "--count",
-            "4",
+            "1",
             "--count-slack",
             "0",
             "--no-repeats",
@@ -710,7 +710,11 @@ fn metrum_ai_bench_prompts_fails_before_writing_when_impossible() {
         .expect("run metrum-ai-bench-cli-prompts");
     assert!(!out.status.success());
     assert!(!output.exists(), "must not write JSONL on failure");
-    assert!(!report.exists(), "must not write report on failure");
+    let failure: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+    assert_eq!(failure["status"], "proven_infeasible");
+    assert_eq!(failure["best_composition"][0]["count"], 1);
+    assert_eq!(failure["best_composition"][0]["row_ids"][0], 0);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("no mix within ISL/OSL") || stderr.contains("kind:"),

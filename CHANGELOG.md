@@ -28,6 +28,8 @@
   unmaintained-crate exceptions (Refs #341).
 
 ### Fixed
+- Metrum AI prompt selection searches bounded joint-length compositions for
+  mixed medians and writes diagnostic reports on selection failure (#358).
 - `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
   flakes on busy runners (#328): the test pins the dummy server's new
   `-idle-timeout` keep-alive budget (server-side idle eviction can no longer

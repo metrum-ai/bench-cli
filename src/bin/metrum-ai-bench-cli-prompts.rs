@@ -7,9 +7,9 @@
 use clap::Parser;
 use metrum_ai_bench::prompt_library::{
     default_cache_dir, format_select_failure, load_hub_dataset, load_jsonl, load_parquet_files,
-    recommended_max_tokens, resolve_revision, select_mix, selection_report_with_profile,
-    write_jsonl, DatasetRef, IslTokenBasis, LengthStat, LengthUnit, ReasoningFilter, SelectRequest,
-    WorkloadProfile, DEFAULT_DATASET,
+    recommended_max_tokens, resolve_revision, select_mix, selection_failure_report,
+    selection_report_with_profile, write_jsonl, DatasetRef, IslTokenBasis, LengthStat, LengthUnit,
+    ReasoningFilter, SelectRequest, WorkloadProfile, DEFAULT_DATASET,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -343,6 +343,15 @@ fn run(args: Args) -> anyhow::Result<()> {
     let mix = match select_mix(&rows, &req) {
         Ok(mix) => mix,
         Err(err) => {
+            if let Some(parent) = report_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            std::fs::write(
+                &report_path,
+                serde_json::to_vec_pretty(&selection_failure_report(&err, &req))?,
+            )?;
             anyhow::bail!("{}", format_select_failure(&err, &req));
         }
     };

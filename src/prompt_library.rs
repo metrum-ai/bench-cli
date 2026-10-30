@@ -207,7 +207,7 @@ pub struct SelectedMix {
 
 #[derive(Clone, Debug)]
 pub struct SelectFailure {
-    pub message: String,
+    pub message: Box<str>,
     pub isl_achieved: Option<f64>,
     pub osl_achieved: Option<f64>,
     pub isl_gap: Option<f64>,
@@ -216,6 +216,8 @@ pub struct SelectFailure {
     pub candidate_count: usize,
     pub work_used: u32,
     pub proven_empty: bool,
+    /// Best candidate's source rows, including repeats.
+    pub best_rows: Box<[LibraryRow]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -363,12 +365,18 @@ fn seed_mix(cands: &[Cand], req: &SelectRequest, rng: &mut StdRng) -> Vec<usize>
     mix
 }
 
-fn try_move(mix: &[usize], cands: &[Cand], req: &SelectRequest, rng: &mut StdRng) -> Vec<usize> {
+fn try_move(
+    mix: &[usize],
+    cands: &[Cand],
+    req: &SelectRequest,
+    rng: &mut StdRng,
+    nearest: usize,
+) -> Vec<usize> {
     let n = cands.len();
     let min_len = req.count.saturating_sub(req.count_slack).max(1);
     let max_len = req.count.saturating_add(req.count_slack).max(min_len);
     let mut trial = mix.to_vec();
-    match rng.random_range(0..5) {
+    match rng.random_range(0..6) {
         0 => {
             let slot = rng.random_range(0..trial.len());
             trial[slot] = rng.random_range(0..n);
@@ -384,17 +392,15 @@ fn try_move(mix: &[usize], cands: &[Cand], req: &SelectRequest, rng: &mut StdRng
             let slot = rng.random_range(0..trial.len());
             trial.swap_remove(slot);
         }
+        4 => {
+            // Coordinated changes can cross a median plateau.
+            for _ in 0..2 {
+                let slot = rng.random_range(0..trial.len());
+                trial[slot] = rng.random_range(0..n);
+            }
+        }
         _ => {
             let slot = rng.random_range(0..trial.len());
-            let nearest = (0..n)
-                .min_by(|&a, &b| {
-                    let da = (cands[a].isl - req.isl_target).abs()
-                        + (cands[a].osl - req.osl_target).abs();
-                    let db = (cands[b].isl - req.isl_target).abs()
-                        + (cands[b].osl - req.osl_target).abs();
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .unwrap_or(0);
             trial[slot] = nearest;
         }
     }
@@ -522,9 +528,162 @@ fn try_homogeneous_bucket(
     })
 }
 
+fn consider_composition(
+    best: &mut Option<(Score, Vec<usize>)>,
+    mix: Vec<usize>,
+    cands: &[Cand],
+    req: &SelectRequest,
+) {
+    if let Some((score, ..)) = evaluate(&mix, cands, req) {
+        if best.as_ref().is_none_or(|(old, _)| score.better_than(*old)) {
+            *best = Some((score, mix));
+        }
+    }
+}
+
+/// Search compositions of joint-length buckets. A unit of work is one evaluated
+/// composition, just as the fallback charges one unit per proposed move.
+fn search_compositions(
+    cands: &[Cand],
+    req: &SelectRequest,
+    rng: &mut StdRng,
+) -> (Option<Vec<usize>>, u32, bool) {
+    let mut grouped: BTreeMap<(u64, u64), Vec<usize>> = BTreeMap::new();
+    for (i, cand) in cands.iter().enumerate() {
+        grouped
+            .entry((cand.isl.to_bits(), cand.osl.to_bits()))
+            .or_default()
+            .push(i);
+    }
+    let mut buckets: Vec<Vec<usize>> = grouped.into_values().collect();
+    // Seeded ordering chooses unique rows before any additional copies.
+    for bucket in &mut buckets {
+        for i in (1..bucket.len()).rev() {
+            let j = rng.random_range(0..=i);
+            bucket.swap(i, j);
+        }
+    }
+    let min_len = req.count.saturating_sub(req.count_slack).max(1);
+    let max_len = req.count.saturating_add(req.count_slack).max(min_len);
+    let caps: Vec<_> = buckets
+        .iter()
+        .map(|b| b.len().saturating_mul(req.max_repeats).min(max_len))
+        .collect();
+    let capacity = caps
+        .iter()
+        .fold(0usize, |sum, &cap| sum.saturating_add(cap));
+    let max_len = max_len.min(capacity);
+    if max_len < min_len {
+        return (None, 0, true);
+    }
+    let cap = u64::from(req.work_limit) + 1;
+    let mut dp = vec![0u64; max_len + 1];
+    dp[0] = 1;
+    for &capacity in &caps {
+        let mut next = vec![0; max_len + 1];
+        let mut window = 0u128;
+        for n in 0..=max_len {
+            window += u128::from(dp[n]);
+            if n > capacity {
+                window -= u128::from(dp[n - capacity - 1]);
+            }
+            next[n] = window.min(u128::from(cap)) as u64;
+        }
+        dp = next;
+        // Adding more buckets cannot reduce the number of compositions.
+        if dp[min_len..=max_len]
+            .iter()
+            .fold(0u64, |sum, &n| sum.saturating_add(n).min(cap))
+            == cap
+        {
+            break;
+        }
+    }
+    let total = dp[min_len..=max_len]
+        .iter()
+        .fold(0u64, |sum, &n| sum.saturating_add(n).min(cap));
+    let exact = total <= u64::from(req.work_limit);
+    let mut best: Option<(Score, Vec<usize>)> = None;
+    let mut work = 0u32;
+    if exact {
+        // Iterative bounded DFS avoids recursion proportional to bucket count.
+        let mut suffix = vec![0usize; caps.len() + 1];
+        for i in (0..caps.len()).rev() {
+            suffix[i] = suffix[i + 1].saturating_add(caps[i]);
+        }
+        for (n, &ways) in dp.iter().enumerate().take(max_len + 1).skip(min_len) {
+            if ways == 0 {
+                continue;
+            }
+            let mut counts = vec![0usize; caps.len()];
+            let mut next = vec![0usize; caps.len()];
+            let mut remaining = vec![0usize; caps.len() + 1];
+            remaining[0] = n;
+            let mut i = 0;
+            loop {
+                if i == caps.len() {
+                    if remaining[i] == 0 {
+                        let mut mix = Vec::with_capacity(n);
+                        for (bucket, &count) in buckets.iter().zip(&counts) {
+                            for slot in 0..count {
+                                mix.push(bucket[slot % bucket.len()]);
+                            }
+                        }
+                        consider_composition(&mut best, mix, cands, req);
+                        work += 1;
+                    }
+                    i -= 1;
+                    continue;
+                }
+                let low = remaining[i].saturating_sub(suffix[i + 1]);
+                let high = caps[i].min(remaining[i]);
+                let value = next[i].max(low);
+                if value > high {
+                    next[i] = 0;
+                    if i == 0 {
+                        break;
+                    }
+                    i -= 1;
+                } else {
+                    counts[i] = value;
+                    next[i] = value + 1;
+                    remaining[i + 1] = remaining[i] - value;
+                    i += 1;
+                }
+            }
+        }
+    } else if req.isl_stat == LengthStat::Median && req.osl_stat == LengthStat::Median {
+        // Even-size medians often require coordinated swaps across two cells.
+        // Try balanced pairs before resorting to the existing local search.
+        let n = req.count.clamp(min_len, max_len);
+        let half = n / 2;
+        let mut pair_work = 0u32;
+        'pairs: for a in 0..buckets.len() {
+            for b in a + 1..buckets.len() {
+                if pair_work >= req.work_limit / 2 {
+                    break 'pairs;
+                }
+                if half <= caps[a] && n - half <= caps[b] {
+                    let mut mix = Vec::with_capacity(n);
+                    for (idx, count) in [(a, half), (b, n - half)] {
+                        for slot in 0..count {
+                            mix.push(buckets[idx][slot % buckets[idx].len()]);
+                        }
+                    }
+                    consider_composition(&mut best, mix, cands, req);
+                    pair_work += 1;
+                    work += 1;
+                }
+            }
+        }
+    }
+    (best.map(|(_, mix)| mix), work, exact)
+}
+
 pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMix, SelectFailure> {
     if req.count == 0 {
         return Err(SelectFailure {
+            best_rows: Box::default(),
             message: "--count must be at least 1".into(),
             isl_achieved: None,
             osl_achieved: None,
@@ -538,6 +697,7 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
     }
     if req.max_repeats == 0 {
         return Err(SelectFailure {
+            best_rows: Box::default(),
             message: "--max-repeats must be at least 1".into(),
             isl_achieved: None,
             osl_achieved: None,
@@ -552,6 +712,7 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
     let cands = filter_candidates(rows, req);
     if cands.is_empty() {
         return Err(SelectFailure {
+            best_rows: Box::default(),
             message: "no rows remain after the reasoning filter".into(),
             isl_achieved: None,
             osl_achieved: None,
@@ -567,13 +728,52 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
     if let Some(exact) = try_homogeneous_bucket(&cands, req, &mut rng) {
         return Ok(exact);
     }
-    let mut mix = seed_mix(&cands, req, &mut rng);
+    let (composition, mut work_used, exact) = search_compositions(&cands, req, &mut rng);
+    let mut mix = composition.unwrap_or_else(|| seed_mix(&cands, req, &mut rng));
     let mut best_mix = mix.clone();
-    let mut best_eval = evaluate(&mix, &cands, req);
-    let mut work_used = 0u32;
-    for _ in 0..req.work_limit {
+    let mut best_eval = if multiplicity_ok(&mix, req.max_repeats)
+        && mix.len() >= req.count.saturating_sub(req.count_slack).max(1)
+    {
+        evaluate(&mix, &cands, req)
+    } else {
+        None
+    };
+    if exact && best_eval.is_none() {
+        return Err(SelectFailure {
+            message: "no mix within the allowed count and repeat limits".into(),
+            isl_achieved: None,
+            osl_achieved: None,
+            isl_gap: None,
+            osl_gap: None,
+            selected_count: 0,
+            candidate_count: cands.len(),
+            work_used,
+            proven_empty: true,
+            best_rows: Box::default(),
+        });
+    }
+    let optimal = best_eval.is_some_and(|(score, ..)| {
+        score.excess == 0.0 && score.count_dev == 0 && score.extra_copies == 0
+    });
+    let nearest = (0..cands.len())
+        .min_by(|&a, &b| {
+            let distance = |i: usize| {
+                (cands[i].isl - req.isl_target).abs() + (cands[i].osl - req.osl_target).abs()
+            };
+            distance(a).total_cmp(&distance(b))
+        })
+        .unwrap_or(0);
+    let start_work = work_used;
+    for step in start_work..if exact || optimal {
+        work_used
+    } else {
+        req.work_limit
+    } {
         work_used += 1;
-        let trial = try_move(&mix, &cands, req, &mut rng);
+        if step > 0 && step % 256 == 0 {
+            mix = seed_mix(&cands, req, &mut rng);
+        }
+        let trial = try_move(&mix, &cands, req, &mut rng, nearest);
         if !multiplicity_ok(&trial, req.max_repeats) {
             continue;
         }
@@ -612,7 +812,7 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
                 "no mix within ISL/OSL tolerances (best ISL gap {isl_gap:+.4}, OSL gap {osl_gap:+.4}, n={}, preferred {})",
                 best_mix.len(),
                 req.count
-            ),
+            ).into(),
             isl_achieved: Some(isl_achieved),
             osl_achieved: Some(osl_achieved),
             isl_gap: Some(isl_gap),
@@ -620,9 +820,11 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
             selected_count: best_mix.len(),
             candidate_count: cands.len(),
             work_used,
-            proven_empty: false,
+            proven_empty: exact,
+            best_rows: best_mix.iter().map(|&i| cands[i].row.clone()).collect::<Vec<_>>().into_boxed_slice(),
         }),
         None => Err(SelectFailure {
+            best_rows: Box::default(),
             message: "selector produced an empty mix".into(),
             isl_achieved: None,
             osl_achieved: None,
@@ -631,7 +833,7 @@ pub fn select_mix(rows: &[LibraryRow], req: &SelectRequest) -> Result<SelectedMi
             selected_count: 0,
             candidate_count: cands.len(),
             work_used,
-            proven_empty: true,
+            proven_empty: exact,
         }),
     }
 }
@@ -1200,11 +1402,44 @@ fn verify_cached_checksums(dir: &Path, config: &str) -> Result<()> {
     Ok(())
 }
 
+/// A diagnostic report for unsuccessful selections; never a usable mix report.
+pub fn selection_failure_report(err: &SelectFailure, req: &SelectRequest) -> Value {
+    let mut buckets: BTreeMap<(u64, u64), Vec<u64>> = BTreeMap::new();
+    for row in err.best_rows.iter() {
+        buckets
+            .entry((
+                row.isl(req.isl_unit, req.isl_token_basis).to_bits(),
+                row.osl(req.osl_unit).to_bits(),
+            ))
+            .or_default()
+            .push(row.ordinal);
+    }
+    let composition: Vec<_> = buckets
+        .into_iter()
+        .map(|((isl, osl), row_ids)| {
+            json!({
+                "isl": f64::from_bits(isl), "osl": f64::from_bits(osl),
+                "count": row_ids.len(), "row_ids": row_ids
+            })
+        })
+        .collect();
+    json!({
+        "schema_version": "metrum-ai-bench-cli.prompt-selection-failure.v1",
+        "status": if err.proven_empty { "proven_infeasible" } else { "budget_exhausted" },
+        "message": err.message, "candidate_count": err.candidate_count,
+        "selected_count": err.selected_count, "preferred_count": req.count,
+        "work_used": err.work_used, "work_limit": req.work_limit,
+        "isl_achieved": err.isl_achieved, "osl_achieved": err.osl_achieved,
+        "isl_gap": err.isl_gap, "osl_gap": err.osl_gap,
+        "best_composition": composition
+    })
+}
+
 pub fn format_select_failure(err: &SelectFailure, req: &SelectRequest) -> String {
     let kind = if err.proven_empty {
-        "proven impossibility"
+        "proven infeasible"
     } else {
-        "search budget exhausted or no mix inside tolerances"
+        "search budget exhausted"
     };
     format!(
         "{}\n  kind: {}\n  candidates: {}\n  best_n: {}\n  preferred_count: {}\n  count_slack: {}\n  ISL target {} {:?} {:?} ±{} achieved {:?} gap {:?}\n  OSL target {} {:?} {:?} ±{} achieved {:?} gap {:?}\n  work_used: {}\n  reasoning: {:?}",
@@ -1271,6 +1506,162 @@ mod tests {
             max_repeats: 8,
             work_limit: 20_000,
             osl_tokens_per_word: None,
+        }
+    }
+
+    #[test]
+    fn mixed_median_survives_distractors_for_all_seeds() {
+        let mut req = base_req();
+        req.count = 8;
+        req.count_slack = 0;
+        req.isl_stat = LengthStat::Median;
+        req.osl_stat = LengthStat::Median;
+        req.isl_target = 4096.0;
+        req.osl_target = 512.0;
+        req.isl_tolerance = 256.0;
+        req.osl_tolerance = 64.0;
+        req.max_repeats = 8;
+        req.work_limit = 50_000;
+        let mut rows: Vec<_> = (0..8)
+            .map(|i| {
+                let (isl, osl) = if i < 4 { (1024, 32) } else { (7000, 1000) };
+                row(i, "fixture", isl, osl, 1, true)
+            })
+            .collect();
+        // Every prefix preserves the original witness; this exercises many
+        // different distractor insertions in addition to the 8/16 controls.
+        for distractors in 0..=8 {
+            if distractors > 0 {
+                rows.push(row(7 + distractors, "distractor", 2048, 512, 1, true));
+            }
+            for seed in 0..100 {
+                req.seed = seed;
+                let mix = select_mix(&rows, &req).expect("known feasible mix");
+                assert_eq!(mix.rows.len(), 8);
+                assert_eq!(mix.extra_copies, 0);
+                assert!(mix.isl_gap.abs() <= req.isl_tolerance);
+                assert!(mix.osl_gap.abs() <= req.osl_tolerance);
+            }
+        }
+    }
+
+    #[test]
+    fn limited_search_does_not_claim_infeasibility() {
+        let rows = vec![row(0, "x", 1, 1, 1, true), row(1, "y", 2, 2, 1, true)];
+        let mut req = base_req();
+        req.count = 1;
+        req.count_slack = 0;
+        req.isl_target = 100.0;
+        req.osl_target = 100.0;
+        req.work_limit = 0;
+        let err = select_mix(&rows, &req).expect_err("outside tolerances");
+        assert!(!err.proven_empty);
+        assert_eq!(
+            selection_failure_report(&err, &req)["status"],
+            "budget_exhausted"
+        );
+        assert_eq!(err.best_rows.len(), 1);
+    }
+
+    #[test]
+    fn infeasible_median_is_proven() {
+        let rows: Vec<_> = (0..8)
+            .map(|i| {
+                let (isl, osl) = if i < 4 { (1024, 32) } else { (7000, 1000) };
+                row(i, "fixture", isl, osl, 1, true)
+            })
+            .collect();
+        let mut req = base_req();
+        req.count = 8;
+        req.count_slack = 0;
+        req.max_repeats = 1;
+        req.isl_stat = LengthStat::Median;
+        req.osl_stat = LengthStat::Median;
+        req.isl_target = 4096.0;
+        req.isl_tolerance = 1024.0;
+        req.osl_target = 256.0;
+        req.osl_tolerance = 64.0;
+        let err = select_mix(&rows, &req).expect_err("infeasible");
+        assert!(err.proven_empty);
+        assert_eq!(
+            selection_failure_report(&err, &req)["status"],
+            "proven_infeasible"
+        );
+        assert_eq!(err.best_rows.len(), 8);
+    }
+
+    #[test]
+    fn small_random_instances_match_row_level_brute_force() {
+        fn brute(cands: &[Cand], req: &SelectRequest, mix: &mut Vec<usize>, start: usize) -> bool {
+            let min = req.count.saturating_sub(req.count_slack).max(1);
+            let max = req.count + req.count_slack;
+            if mix.len() >= min && evaluate(mix, cands, req).is_some_and(|e| e.0.excess == 0.0) {
+                return true;
+            }
+            if mix.len() == max {
+                return false;
+            }
+            for i in start..cands.len() {
+                if mix.iter().filter(|&&x| x == i).count() < req.max_repeats {
+                    mix.push(i);
+                    if brute(cands, req, mix, i) {
+                        return true;
+                    }
+                    mix.pop();
+                }
+            }
+            false
+        }
+        let mut rng = StdRng::seed_from_u64(358);
+        for case in 0..300 {
+            let size = rng.random_range(1..=6);
+            let rows: Vec<_> = (0..size)
+                .map(|i| {
+                    row(
+                        i as u64,
+                        "x",
+                        rng.random_range(1..=6),
+                        rng.random_range(1..=6),
+                        1,
+                        true,
+                    )
+                })
+                .collect();
+            let mut req = base_req();
+            req.count = rng.random_range(1..=4);
+            req.count_slack = rng.random_range(0..=2);
+            req.max_repeats = rng.random_range(1..=3);
+            req.isl_target = rng.random_range(1..=6) as f64;
+            req.osl_target = rng.random_range(1..=6) as f64;
+            req.isl_stat = if case % 2 == 0 {
+                LengthStat::Median
+            } else {
+                LengthStat::Mean
+            };
+            req.osl_stat = LengthStat::Median;
+            req.work_limit = 50_000;
+            let cands = filter_candidates(&rows, &req);
+            let possible = brute(&cands, &req, &mut Vec::new(), 0);
+            match select_mix(&rows, &req) {
+                Ok(mix) => {
+                    assert!(possible, "case {case}");
+                    assert!(mix.rows.len() >= req.count.saturating_sub(req.count_slack).max(1));
+                    assert!(mix.rows.len() <= req.count + req.count_slack);
+                    let mut counts = HashMap::new();
+                    for row in &mix.rows {
+                        *counts.entry(row.ordinal).or_insert(0) += 1;
+                    }
+                    assert!(counts.values().all(|&n| n <= req.max_repeats));
+                    assert!(
+                        mix.isl_gap.abs() <= req.isl_tolerance
+                            && mix.osl_gap.abs() <= req.osl_tolerance
+                    );
+                }
+                Err(err) => {
+                    assert!(!possible, "case {case}: {err:?}");
+                    assert!(err.proven_empty);
+                }
+            }
         }
     }
 
@@ -1391,7 +1782,7 @@ mod tests {
         req.count_slack = 0;
         req.max_repeats = 1;
         let err = select_mix(&rows, &req).expect_err("should fail");
-        assert!(!err.proven_empty);
+        assert!(err.proven_empty);
     }
 
     #[test]
