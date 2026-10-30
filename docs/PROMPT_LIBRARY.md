@@ -210,10 +210,15 @@ curl --fail --silent "$MOCK_URL/v1/models" | grep -q 'metrum-ai-bench-cli-mock'
 
 ## Failures
 
-If no mix in the allowed size band hits both tolerances, the tool exits
-nonzero **before** writing `--output` / `--report`. Diagnostics include best
-ISL/OSL gaps, preferred vs best `n`, candidate count, work used, and whether
-the failure is a proven empty candidate set vs search/tolerance miss.
+If selection fails, Metrum AI Bench exits nonzero without writing `--output`,
+but writes a separate diagnostic JSON to `--report`. Its `schema_version` is
+`metrum-ai-bench-cli.prompt-selection-failure.v1`; it is not a usable mix
+report. `status` is `proven_infeasible` only after exhaustive search (or an
+empty eligible set), otherwise `budget_exhausted`. `best_composition` lists
+joint length buckets with `isl`, `osl`, `count`, and `row_ids` (including
+repeats). It can be empty if no valid candidate was evaluated. The report also
+includes the message, candidate and selected counts, preferred count, achieved
+statistics and gaps, and work used and limit.
 
 ## See also
 
