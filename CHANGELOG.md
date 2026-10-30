@@ -28,6 +28,10 @@
   unmaintained-crate exceptions (Refs #341).
 
 ### Fixed
+- Metrum AI: live serving and performance validation create the Hugging Face
+  bind-mount source before Docker starts, avoiding root-created cache parents
+  on fresh hosts. Prompt cache creation errors now name the affected path
+  (#365). Existing unwritable caches still require operator repair.
 - Metrum AI: strategic CSV exports retain a cell for absent TTFT provenance,
   including failed requests; the JSON summary is printed before exports so it
   survives export errors (#362). JSON record omission remains unchanged.

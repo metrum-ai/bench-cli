@@ -1275,7 +1275,8 @@ fn hf_download(url: &str, dest: &Path) -> Result<()> {
         return Ok(());
     }
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create prompt cache directory {}", parent.display()))?;
     }
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -1289,8 +1290,10 @@ fn hf_download(url: &str, dest: &Path) -> Result<()> {
     }
     let bytes = resp.bytes()?;
     let tmp = dest.with_extension("download");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, dest)?;
+    std::fs::write(&tmp, &bytes)
+        .with_context(|| format!("write prompt cache file {}", tmp.display()))?;
+    std::fs::rename(&tmp, dest)
+        .with_context(|| format!("install prompt cache file {}", dest.display()))?;
     Ok(())
 }
 
@@ -1305,7 +1308,8 @@ pub fn load_hub_dataset(
         .join(&sha)
         .join(&spec.config)
         .join(&spec.split);
-    std::fs::create_dir_all(&base)?;
+    std::fs::create_dir_all(&base)
+        .with_context(|| format!("create prompt cache directory {}", base.display()))?;
     if !offline {
         let tree_url = format!(
             "https://huggingface.co/api/datasets/{}/tree/{}/data/{}",

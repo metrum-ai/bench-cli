@@ -29,7 +29,7 @@ jobs:
         run: python3 -m pip install --quiet pyyaml==6.0.3
       - name: py_compile
         working-directory: scripts/validation/perf
-        run: python3 -m py_compile compare.py freeze_w1.py lint_spec.py test_compare.py
+        run: python3 -m py_compile compare.py freeze_w1.py lint_spec.py test_compare.py test_runner.py
       - name: spec lint
         working-directory: scripts/validation/perf
         run: python3 lint_spec.py spec.yaml
@@ -43,9 +43,9 @@ jobs:
             echo "linter accepted an out-of-range tolerance" >&2
             exit 1
           fi
-      - name: compare.py unit tests (tolerances, noise floor, missing points)
+      - name: comparison and runner unit tests
         working-directory: scripts/validation/perf
-        run: python3 -m unittest -v test_compare.py
+        run: python3 -m unittest -v test_compare.py test_runner.py
       - name: runner.sh syntax and plan mode (no GPU, no docker)
         working-directory: scripts/validation/perf
         run: |
