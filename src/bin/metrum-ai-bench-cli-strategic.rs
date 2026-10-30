@@ -1898,6 +1898,30 @@ async fn main() -> Result<()> {
             eprintln!("note: {note}");
         }
     }
+    drop(ndjson_writer);
+    let dropped_telemetry_rows = match telemetry_session {
+        Some(session) => session.finish(partial).await?.dropped_telemetry_rows,
+        None => 0,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "schema_version": "metrum-ai-bench-cli.strategic.v1",
+            "tool_version": VERSION,
+            "environment": environment,
+            "config": redacted_config,
+            "points": points,
+            "knee": knee.index.map(|index| &points[index]),
+            "knee_detection": knee,
+            "server_metrics": server,
+            "sut": sut_json,
+            "records_csv": args.csv,
+            "html_report": args.html,
+            "partial": partial,
+            "ndjson": args.ndjson,
+            "dropped_telemetry_rows": dropped_telemetry_rows,
+        }))?
+    );
     export_csv(&args.csv, &all_records)?;
     export_html(
         &args.html,
@@ -1935,30 +1959,6 @@ async fn main() -> Result<()> {
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
     }
-    drop(ndjson_writer);
-    let dropped_telemetry_rows = match telemetry_session {
-        Some(session) => session.finish(partial).await?.dropped_telemetry_rows,
-        None => 0,
-    };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json!({
-            "schema_version": "metrum-ai-bench-cli.strategic.v1",
-            "tool_version": VERSION,
-            "environment": environment,
-            "config": redacted_config,
-            "points": points,
-            "knee": knee.index.map(|index| &points[index]),
-            "knee_detection": knee,
-            "server_metrics": server,
-            "sut": sut_json,
-            "records_csv": args.csv,
-            "html_report": args.html,
-            "partial": partial,
-            "ndjson": args.ndjson,
-            "dropped_telemetry_rows": dropped_telemetry_rows,
-        }))?
-    );
     if let Some(ref validation) = any_osl_validation {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.fail_on_osl_mismatch)?;
     }

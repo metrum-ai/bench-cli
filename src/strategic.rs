@@ -1258,10 +1258,60 @@ impl Validity {
     }
 }
 
+// Separate representation: JSON omits absent ttft_source, whereas CSV must
+// always emit a cell for every field, including absent optional values.
+#[derive(Serialize)]
+#[serde(remote = "BenchRecord")]
+struct CsvBenchRecord {
+    seq: u64,
+    stage: f64,
+    endpoint: String,
+    scheduled_unix_ns: u128,
+    sent_unix_ns: u128,
+    latency_s: f64,
+    queue_delay_s: f64,
+    service_latency_s: f64,
+    first_byte_s: Option<f64>,
+    connect_s: Option<f64>,
+    ttft_s: Option<f64>,
+    ttft_source: Option<crate::measurement::TtftSource>,
+    prefill_s: Option<f64>,
+    decode_s: Option<f64>,
+    decode_tok_s: Option<f64>,
+    #[serde(serialize_with = "serialize_itl_s")]
+    itl_s: Vec<f64>,
+    in_flight_at_send: Option<u64>,
+    success: bool,
+    valid: Option<bool>,
+    input_tokens: u64,
+    output_tokens: u64,
+    session_id: Option<String>,
+    turn: Option<usize>,
+    error: Option<String>,
+    warmup: bool,
+    first_reasoning_s: Option<f64>,
+    reasoning_tokens: Option<u64>,
+    connection_reused: Option<bool>,
+    dns_s: Option<f64>,
+    bytes_sent: Option<u64>,
+    receive_s: Option<f64>,
+    bytes_received: Option<u64>,
+    chunks_received: Option<u64>,
+    send_offset_s: Option<f64>,
+}
+
+struct CsvRow<'a>(&'a BenchRecord);
+
+impl Serialize for CsvRow<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        CsvBenchRecord::serialize(self.0, serializer)
+    }
+}
+
 pub fn export_csv(path: &Path, records: &[BenchRecord]) -> Result<()> {
     let mut writer = csv::Writer::from_path(path)?;
     for record in records {
-        writer.serialize(record)?;
+        writer.serialize(CsvRow(record))?;
     }
     writer.flush()?;
     Ok(())
@@ -2326,6 +2376,78 @@ mod tests {
         assert!(validator.validate(&response("lookup", r#"{"id":1}"#)));
         assert!(!validator.validate(&response("lookup", r#"{"id":"1"}"#)));
         assert!(!validator.validate(&response("other", r#"{"id":1}"#)));
+    }
+
+    #[test]
+    fn csv_records_have_stable_width_and_all_fields() {
+        let success = BenchRecord {
+            seq: 1,
+            stage: 1.0,
+            endpoint: "chat".into(),
+            scheduled_unix_ns: 1,
+            sent_unix_ns: 2,
+            latency_s: 1.0,
+            queue_delay_s: 1.0,
+            service_latency_s: 1.0,
+            first_byte_s: Some(1.0),
+            connect_s: Some(1.0),
+            ttft_s: Some(1.0),
+            ttft_source: Some(crate::measurement::TtftSource::Stream),
+            prefill_s: Some(1.0),
+            decode_s: Some(1.0),
+            decode_tok_s: Some(1.0),
+            itl_s: vec![1.0],
+            in_flight_at_send: Some(1),
+            success: true,
+            valid: Some(true),
+            input_tokens: 1,
+            output_tokens: 1,
+            session_id: Some("session".into()),
+            turn: Some(1),
+            error: Some("error".into()),
+            warmup: true,
+            first_reasoning_s: Some(1.0),
+            reasoning_tokens: Some(1),
+            connection_reused: Some(true),
+            dns_s: Some(1.0),
+            bytes_sent: Some(1),
+            receive_s: Some(1.0),
+            bytes_received: Some(1),
+            chunks_received: Some(1),
+            send_offset_s: Some(1.0),
+        };
+        let failure = BenchRecord {
+            error: Some("failed".into()),
+            ..Default::default()
+        };
+        assert!(serde_json::to_value(&failure)
+            .unwrap()
+            .get("ttft_source")
+            .is_none());
+        for records in [
+            [success.clone(), failure.clone()],
+            [failure.clone(), success.clone()],
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("records.csv");
+            export_csv(&path, &records).unwrap();
+            let mut reader = csv::Reader::from_path(path).unwrap();
+            let headers = reader.headers().unwrap().clone();
+            let keys = serde_json::to_value(&success).unwrap();
+            let keys = keys.as_object().unwrap();
+            assert_eq!(headers.len(), keys.len());
+            for header in &headers {
+                assert!(keys.contains_key(header), "{header}");
+            }
+            let rows: Vec<_> = reader.records().collect::<Result<_, _>>().unwrap();
+            assert_eq!(rows.len(), 2);
+            assert!(rows
+                .iter()
+                .all(|row: &csv::StringRecord| row.len() == headers.len()));
+            let source = headers.iter().position(|h| h == "ttft_source").unwrap();
+            assert!(rows.iter().any(|row| &row[source] == "stream"));
+            assert!(rows.iter().any(|row| row[source].is_empty()));
+        }
     }
 
     #[test]

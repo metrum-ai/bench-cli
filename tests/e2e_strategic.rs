@@ -313,6 +313,61 @@ fn strategic_ignore_eos_stamped_in_config() {
 }
 
 #[test]
+fn strategic_failed_requests_export_and_preserve_summary_on_csv_error() {
+    let Some(dummy) = common::spawn_dummy(&["-error-rate", "1"]) else {
+        common::skip("go dummy-model-server not available");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let csv = dir.path().join("records.csv");
+    for csv_path in [&csv, &dir.path().join("missing").join("records.csv")] {
+        let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+            .args([
+                "--url",
+                &dummy.url("/v1/chat/completions"),
+                "--model",
+                "dummy",
+                "--streaming",
+                "--sweep",
+                "1",
+                "--requests-per-stage",
+                "2",
+            ])
+            .arg("--csv")
+            .arg(csv_path)
+            .arg("--html")
+            .arg(dir.path().join("report.html"))
+            .output()
+            .expect("run strategic");
+        assert_eq!(
+            output.status.success(),
+            csv_path == &csv,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let summary_path = dir.path().join("summary.json");
+        fs::write(&summary_path, &output.stdout).unwrap();
+        let summary: Value =
+            serde_json::from_slice(&fs::read(summary_path).unwrap()).expect("non-empty summary");
+        assert!(!summary["points"].as_array().unwrap().is_empty());
+    }
+    let mut reader = csv::Reader::from_path(csv).unwrap();
+    let width = reader.headers().unwrap().len();
+    let rows: Vec<_> = reader.records().collect::<Result<_, _>>().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.len() == width));
+    let records: Vec<metrum_ai_bench::strategic::BenchRecord> =
+        csv::Reader::from_path(dir.path().join("records.csv"))
+            .unwrap()
+            .deserialize()
+            .collect::<Result<_, _>>()
+            .unwrap();
+    assert!(records
+        .iter()
+        .all(|record| !record.success && record.error.is_some()));
+}
+
+#[test]
 fn strategic_sessions_measure_ttft_only_when_streaming() {
     let Some(dummy) = common::spawn_dummy(&["-latency", "20ms", "-chunk-interval", "2ms"]) else {
         common::skip("go dummy-model-server not available");

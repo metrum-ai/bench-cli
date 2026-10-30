@@ -28,6 +28,9 @@
   unmaintained-crate exceptions (Refs #341).
 
 ### Fixed
+- Metrum AI: strategic CSV exports retain a cell for absent TTFT provenance,
+  including failed requests; the JSON summary is printed before exports so it
+  survives export errors (#362). JSON record omission remains unchanged.
 - Metrum AI: `--extra-body-json` null values now remove top-level keys rather
   than sending explicit nulls, which can no longer be sent this way; non-object
   extra bodies now produce an error. This permits `max_completion_tokens`-only

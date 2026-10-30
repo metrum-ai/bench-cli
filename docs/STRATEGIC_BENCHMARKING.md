@@ -201,8 +201,10 @@ Optional `--price-per-hour` (or `sut.cost.price_per_hour`) stamps
 
 The HTTP client is shared across stages (warm connection pool).
 
-The CSV contains one row per request; HTML is self-contained (inline SVG and
-CSS). MLPerf LoadGen-style exports contain `mlperf_log_summary.txt`,
+The CSV contains one fixed-width row per request, including failures; HTML is
+self-contained (inline SVG and CSS). Metrum AI writes the JSON summary to
+stdout before exporting CSV and HTML. An export failure exits non-zero but
+leaves the summary available; failed requests alone do not force a non-zero exit. MLPerf LoadGen-style exports contain `mlperf_log_summary.txt`,
 `mlperf_log_detail.txt`, and `mlperf_log_accuracy.json` for Server or Offline
 scenarios. Every export file begins with an **UNOFFICIAL** disclaimer; the
 summary never prints a bare `Result is : VALID` without that disclaimer.
