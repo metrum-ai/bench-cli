@@ -23,8 +23,6 @@
   },
   "run_shape": "One pass interleaved baseline/candidate per point; 30 s warmup and 180 s issuance then drain; streaming chat temperature 0 seed 42.",
   "power": "nvidia-smi per-second mean; all-smi telemetry not collected",
-  "cost_usd": 4.35,
-  "cost_note": "Shadeform post-delete cost_estimate reports 4.351237553 USD, rounded to cents; final invoice not independently verified. Cost covers A/B and attempted LLM live cell.",
   "teardown": "API instance info status deleted; targeted registered key info HTTP 404.",
   "live_gate": "LLM prompt extraction failed before benchmark launch; no result; other modalities not run."
  },
