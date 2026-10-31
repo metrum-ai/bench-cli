@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 (2026-10-30)
+
+### Highlights
+- Metrum AI adds a reproducible performance-validation harness (#333).
+- Request-body, prompt-selection and strategic export behaviour changes are
+  detailed below (#357, #358, #362).
+- Endpoint credential redaction and external-docs dependency security fixes
+  protect logs and dependencies (#332, #341).
 
 ### Added
 - Standard performance-validation harness (#333): pinned workload and model
@@ -27,11 +34,7 @@
   vulnerabilities and the OSV scan now reports only the two documented
   unmaintained-crate exceptions (Refs #341).
 
-### Fixed
-- Metrum AI: live serving and performance validation create the Hugging Face
-  bind-mount source before Docker starts, avoiding root-created cache parents
-  on fresh hosts. Prompt cache creation errors now name the affected path
-  (#365). Existing unwritable caches still require operator repair.
+### Behaviour changes
 - Metrum AI: strategic CSV exports retain a cell for absent TTFT provenance,
   including failed requests; the JSON summary is printed before exports so it
   survives export errors (#362). JSON record omission remains unchanged.
@@ -41,6 +44,12 @@
   models without changing output-token accounting or OSL validation (#357).
 - Metrum AI prompt selection searches bounded joint-length compositions for
   mixed medians and writes diagnostic reports on selection failure (#358).
+
+### Fixed
+- Metrum AI: live serving and performance validation create the Hugging Face
+  bind-mount source before Docker starts, avoiding root-created cache parents
+  on fresh hosts. Prompt cache creation errors now name the affected path
+  (#365). Existing unwritable caches still require operator repair.
 - `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
   flakes on busy runners (#328): the test pins the dummy server's new
   `-idle-timeout` keep-alive budget (server-side idle eviction can no longer
