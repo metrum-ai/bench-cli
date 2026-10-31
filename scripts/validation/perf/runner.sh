@@ -81,6 +81,9 @@ fi
 mkdir -p "$OUT"
 
 serve() {
+  # Create the host mount as the invoking user before the Docker daemon can
+  # create a root-owned ~/.cache on a fresh machine.
+  mkdir -p "$HOME/.cache/huggingface"
   docker rm -f perfval-vllm >/dev/null 2>&1 || true
   docker run -d --name perfval-vllm --gpus all --ipc=host \
     -p 127.0.0.1:8000:8000 -e HF_TOKEN \

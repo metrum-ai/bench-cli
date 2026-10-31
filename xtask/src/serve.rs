@@ -114,16 +114,27 @@ fn shell_quote(value: &str) -> String {
     }
 }
 
+fn hf_cache_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_owned());
+    env::var_os("HF_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(home).join(".cache/huggingface"))
+}
+
+fn prepare_hf_cache(cache: &std::path::Path) -> Result<()> {
+    fs::create_dir_all(cache)
+        .with_context(|| format!("create Hugging Face cache directory {}", cache.display()))
+}
+
 fn docker_args(
     config: &Config,
     image: &str,
     model: &str,
     args: &[String],
     port: u16,
+    cache: &std::path::Path,
 ) -> Vec<String> {
     let name = format!("metrum-live-{}", config.modality);
-    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_owned());
-    let cache = env::var("HF_HOME").unwrap_or_else(|_| format!("{home}/.cache/huggingface"));
     let mut command = vec![
         "run".into(),
         "-d".into(),
@@ -135,7 +146,7 @@ fn docker_args(
         "-p".into(),
         format!("{port}:8000"),
         "-v".into(),
-        format!("{cache}:/root/.cache/huggingface"),
+        format!("{}:/root/.cache/huggingface", cache.display()),
     ];
     if env::var_os("HF_TOKEN").is_some() {
         command.extend(["-e".into(), "HF_TOKEN".into()]);
@@ -414,7 +425,8 @@ pub fn run(args: ServeArgs) -> Result<()> {
     } else {
         &args.sources
     };
-    let docker = docker_args(&config, image, model, &server_args, args.port);
+    let cache = hf_cache_path();
+    let docker = docker_args(&config, image, model, &server_args, args.port, &cache);
     let container = format!("metrum-live-{}", config.modality);
     match args.operation.as_str() {
         "print" => println!(
@@ -462,6 +474,8 @@ pub fn run(args: ServeArgs) -> Result<()> {
             }
         }
         "start" => {
+            // Docker otherwise creates a missing bind source as root on the host.
+            prepare_hf_cache(&cache)?;
             let output = env::var("SERVE_OUT")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
@@ -540,6 +554,32 @@ mod tests {
     }
 
     #[test]
+    fn cache_mount_source_is_created_before_docker_and_errors_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("fresh-home/.cache/huggingface");
+        prepare_hf_cache(&cache).unwrap();
+        assert!(cache.is_dir());
+        // mkdir is idempotent for an existing source.
+        prepare_hf_cache(&cache).unwrap();
+        let config = load_config(&test_args("llm")).unwrap();
+        let docker = docker_args(
+            &config,
+            &config.image,
+            &config.model,
+            &config.args,
+            8000,
+            &cache,
+        );
+        assert!(docker.contains(&format!("{}:/root/.cache/huggingface", cache.display())));
+
+        let file = dir.path().join("file");
+        fs::write(&file, "not a directory").unwrap();
+        let bad = file.join("huggingface");
+        let error = prepare_hf_cache(&bad).unwrap_err();
+        assert!(format!("{error:#}").contains(&bad.display().to_string()));
+    }
+
+    #[test]
     fn serving_defaults_generate_valid_sut_for_all_modalities_offline() {
         for modality in ["llm", "vlm", "asr", "imagegen"] {
             let args = test_args(modality);
@@ -550,6 +590,7 @@ mod tests {
                 &config.model,
                 &config.args,
                 args.port,
+                &hf_cache_path(),
             );
             let sut = sut_json(SutInput {
                 config: &config,

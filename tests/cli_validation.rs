@@ -605,6 +605,35 @@ fn metrum_ai_bench_strategic_version_flags() {
 }
 
 #[test]
+fn metrum_ai_bench_prompts_cache_creation_error_names_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked = dir.path().join("not-a-directory");
+    std::fs::write(&blocked, "file").unwrap();
+    let out = Command::new(metrum_ai_bench_prompts_bin())
+        .args([
+            "--cache-dir",
+            blocked.to_str().unwrap(),
+            "--revision",
+            "0666f62e581b482838ae2e17b333ee36ff3d01b0",
+            "--offline",
+            "--count",
+            "16",
+            "--profile",
+            "chat-short",
+            "--output",
+            dir.path().join("mix.jsonl").to_str().unwrap(),
+            "--report",
+            dir.path().join("report.json").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run prompts");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("create prompt cache directory"), "{stderr}");
+    assert!(stderr.contains(blocked.to_str().unwrap()), "{stderr}");
+}
+
+#[test]
 fn metrum_ai_bench_prompts_selects_from_local_jsonl() {
     let dir = tempfile::tempdir().expect("tempdir");
     let input = dir.path().join("lib.jsonl");
