@@ -7,6 +7,7 @@
   spec, reproducible W1 freeze, interleaved runner and offline plan mode,
   comparison gates with noise floors and missing-point failures, documented
   baselines, unit tests, CI lint, and a pre-release validation step.
+- Pin Python performance-helper dependencies and audit them in CI (Refs #341).
 
 ### Security
 - Refresh the external docs dependency lockfile to address the joi and

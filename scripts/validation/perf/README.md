@@ -53,10 +53,11 @@ CI: `.github/workflows/perf-validation.yml` lints the spec, runs the unit
 ## Freezing W1
 
 The canonical W1 file is generated from the pinned CNN/DailyMail validation
-split by `freeze_w1.py`. With Python 3.12.16, install
-`huggingface_hub==2.3.0` and `pyarrow==26.0.0`, then run:
+split by `freeze_w1.py`. With Python 3.12.16, from this directory install
+the pinned helper dependencies and run:
 
 ```sh
+python3 -m pip install -r requirements.txt
 python3 freeze_w1.py --output W1.jsonl
 ```
 
