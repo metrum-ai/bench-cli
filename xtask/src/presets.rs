@@ -4,7 +4,7 @@
 //! Validate the checked-in campaign preset catalog before it reaches a live run.
 
 use anyhow::{bail, Context, Result};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::{
     fs,
     io::Write,
@@ -44,14 +44,12 @@ fn validate(path: &Path, text: &str) -> Result<()> {
         bail!("{}: missing provenance comment", path.display());
     }
     let document: Value =
-        serde_yaml::from_str(text).with_context(|| format!("parse preset {}", path.display()))?;
+        serde_saphyr::from_str(text).with_context(|| format!("parse preset {}", path.display()))?;
     let object = document
-        .as_mapping()
+        .as_object()
         .context("preset root must be a mapping")?;
-    if let Some(workloads) = object.get(Value::String("workloads".into())) {
-        let workloads = workloads
-            .as_sequence()
-            .context("workloads must be a list")?;
+    if let Some(workloads) = object.get("workloads") {
+        let workloads = workloads.as_array().context("workloads must be a list")?;
         if workloads.is_empty()
             || workloads.iter().any(|workload| {
                 workload.as_str().is_none_or(|name| {
@@ -72,9 +70,9 @@ fn validate(path: &Path, text: &str) -> Result<()> {
     ) {
         bail!("{}: workloads is required", path.display());
     }
-    if let Some(concurrency) = object.get(Value::String("concurrency".into())) {
+    if let Some(concurrency) = object.get("concurrency") {
         let values = concurrency
-            .as_sequence()
+            .as_array()
             .context("concurrency must be a list")?;
         if values.is_empty() || values.iter().any(|value| !positive_int(value)) {
             bail!(
@@ -83,7 +81,7 @@ fn validate(path: &Path, text: &str) -> Result<()> {
             );
         }
     }
-    if let Some(requests) = object.get(Value::String("requests".into())) {
+    if let Some(requests) = object.get("requests") {
         if !positive_int(requests) && requests.as_str().is_none() {
             bail!(
                 "{}: requests must be a positive integer or an expression string",
@@ -92,7 +90,7 @@ fn validate(path: &Path, text: &str) -> Result<()> {
         }
     }
     for key in ["warmup", "seed", "max_tokens", "budget"] {
-        if let Some(value) = object.get(Value::String(key.into())) {
+        if let Some(value) = object.get(key) {
             if !positive_int(value) && value.as_str().is_none() {
                 bail!(
                     "{}: {key} must be a positive integer or documented expression",
@@ -135,7 +133,7 @@ fn workload_args(
         _ => bail!("no runnable mock command for workload {workload}"),
     };
     let concurrency = preset["concurrency"]
-        .as_sequence()
+        .as_array()
         .and_then(|values| values.first())
         .and_then(Value::as_u64)
         .unwrap_or(1);
@@ -281,8 +279,8 @@ fn run_mock_commands(root: &Path) -> Result<()> {
             let text =
                 fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
             validate(&path, &text)?;
-            let preset: Value = serde_yaml::from_str(&text)?;
-            let workloads = if let Some(values) = preset["workloads"].as_sequence() {
+            let preset: Value = serde_saphyr::from_str(&text)?;
+            let workloads = if let Some(values) = preset["workloads"].as_array() {
                 values.iter().filter_map(Value::as_str).collect::<Vec<_>>()
             } else if *name == "smoke-cell" {
                 vec!["llm", "vlm", "asr", "imagegen"]

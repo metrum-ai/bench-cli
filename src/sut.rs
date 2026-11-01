@@ -419,7 +419,7 @@ pub fn load_sut(path: &Path) -> anyhow::Result<Sut> {
     let sut: Sut = match ext.as_str() {
         "json" => serde_json::from_str(&raw)
             .map_err(|e| anyhow::anyhow!("--sut: invalid JSON in {}: {e}", path.display()))?,
-        "yaml" | "yml" => serde_yaml::from_str(&raw)
+        "yaml" | "yml" => serde_saphyr::from_str(&raw)
             .map_err(|e| anyhow::anyhow!("--sut: invalid YAML in {}: {e}", path.display()))?,
         _ => anyhow::bail!(
             "--sut: unsupported extension for {} (use .json, .yaml, or .yml)",
@@ -724,6 +724,26 @@ mod tests {
         assert_eq!(a.name, b.name);
         assert_eq!(a.gpu, b.gpu);
         assert_eq!(a.provenance, "declared");
+    }
+
+    #[test]
+    fn sut_yaml_fixture_round_trip() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/sut.example.yaml");
+        let original = load_sut(&path).unwrap();
+        use sha2::{Digest, Sha256};
+        let expected = include_str!("../test-data/yaml-fixture-baselines.txt")
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .find_map(|(name, hash)| (name == "examples/sut.example.yaml").then_some(hash))
+            .expect("SUT fixture baseline");
+        let actual = Sha256::digest(serde_json::to_vec(&original).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(actual, expected);
+        let yaml = serde_saphyr::to_string(&original).unwrap();
+        let round_trip: Sut = serde_saphyr::from_str(&yaml).unwrap();
+        assert_eq!(original, round_trip);
     }
 
     #[test]

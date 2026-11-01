@@ -344,7 +344,7 @@ pub fn load_endpoints_file(
 ) -> Result<(WeightedEndpoints, EndpointWeights), Box<dyn Error + Send + Sync>> {
     let contents = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read endpoints file '{}': {}", path, e))?;
-    let configs: Vec<EndpointConfig> = serde_yaml::from_str(&contents)
+    let configs: Vec<EndpointConfig> = serde_saphyr::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("Invalid YAML in endpoints file '{}': {}", path, e))?;
     if configs.is_empty() {
         return Err(anyhow::anyhow!(
