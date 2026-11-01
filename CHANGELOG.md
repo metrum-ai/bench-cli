@@ -9,6 +9,8 @@
   baselines, unit tests, CI lint, and a pre-release validation step.
 
 ### Security
+- Harden Dockerfile pipeline failure handling and health checks, and lint the
+  Dockerfiles and Rust path-filter scripts in CI (#372).
 - Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
   values) are now redacted in every per-request log path: the llm binary's
   streaming request-failure report and context blocks, the vlm/asr request
