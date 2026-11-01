@@ -25,9 +25,14 @@ case "$event" in
     else
       while IFS= read -r path; do
         case "$path" in
-          docs/*|external-docs/*|*.md|llms.txt|LICENSE|NOTICE|TRADEMARKS.md|THIRD_PARTY_LICENSES)
+          *.md|llms.txt|LICENSE|NOTICE|THIRD_PARTY_LICENSES)
             ;;
-          *) rust=true; break ;;
+          *)
+            case "$path" in
+              docs/*|external-docs/*) ;;
+              *) rust=true; break ;;
+            esac
+            ;;
         esac
         rust=false
       done < <(git diff --name-only "$base" "$head")

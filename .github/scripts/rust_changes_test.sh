@@ -43,6 +43,9 @@ assert_filter false TRADEMARKS.md
 assert_filter false THIRD_PARTY_LICENSES
 assert_filter true dummy-model-server/main.go
 assert_filter false docs/guide.md
+assert_filter false external-docs/nested/guide.md
+assert_filter false nested/guide.md
+assert_filter true nested/guide.txt
 assert_filter true deny.toml
 assert_filter true .github/workflows/ci.yml
 
