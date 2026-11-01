@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-ARG GO_BASE_IMAGE=golang:1.26.6-alpine
+ARG GO_BASE_IMAGE=golang:1.26.10-alpine
 ARG ALPINE_BASE_IMAGE=alpine:3.20
 
 FROM ${GO_BASE_IMAGE} AS builder
