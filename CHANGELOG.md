@@ -31,6 +31,8 @@
   OSV query, which npm audit had not yet indexed). `npm audit` reports 0
   vulnerabilities and the OSV scan now reports only the two documented
   unmaintained-crate exceptions (Refs #341).
+- Harden Dockerfile pipeline failure handling and health checks, and lint the
+  Dockerfiles and Rust path-filter scripts in CI (#372).
 
 ### Fixed
 - Metrum AI: live serving and performance validation create the Hugging Face
