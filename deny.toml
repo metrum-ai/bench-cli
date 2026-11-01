@@ -13,6 +13,11 @@ confidence-threshold = 0.8
 
 [advisories]
 yanked = "deny"
+# `paste` is unmaintained and pulled in by optional `tokenizers` with all
+# features enabled; track RUSTSEC-2024-0436 until upstream removes it.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; pulled in by tokenizers only" },
+]
 
 [bans]
 multiple-versions = "allow"
