@@ -21,6 +21,47 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  container-lint:
+    name: container and shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install hadolint
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/hadolint" https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+          echo 'c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507  '"$RUNNER_TEMP/hadolint" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/hadolint"
+      - name: Lint Dockerfiles and scripts
+        run: |
+          "$RUNNER_TEMP/hadolint" deploy/github-runners-bench-cli/Dockerfile dummy-model-server/Dockerfile
+          shellcheck .github/scripts/*.sh
+      - name: Build images and check health probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t bench-runner-test -f deploy/github-runners-bench-cli/Dockerfile .
+          docker build -t bench-dummy-test dummy-model-server
+          trap 'docker rm -f bench-runner-health bench-dummy-health >/dev/null 2>&1 || true' EXIT
+          # A stand-in process exercises the probe without registering a runner.
+          docker run -d --name bench-runner-health --health-interval=2s --health-start-period=0s \
+            --entrypoint /bin/bash bench-runner-test -c 'exec -a Runner.Listener sleep 120'
+          docker run -d --name bench-dummy-health --health-interval=2s --health-start-period=0s \
+            bench-dummy-test -port=8000
+          for container in bench-runner-health bench-dummy-health; do
+            healthy=false
+            for attempt in {1..30}; do
+              if [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" == healthy ]]; then
+                healthy=true; break
+              fi
+              sleep 2
+            done
+            if [[ "$healthy" != true ]]; then
+              docker inspect --format '{{json .State.Health}}' "$container"
+              exit 1
+            fi
+          done
+
   changes:
     name: detect Rust changes
     runs-on: ubuntu-latest

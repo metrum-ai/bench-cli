@@ -7,8 +7,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{SecondsFormat, Utc};
 use clap::Args;
 use reqwest::blocking::Client;
+use serde_json::Value as YamlValue;
 use serde_json::{json, Value};
-use serde_yaml::Value as YamlValue;
 use std::{
     env, fs,
     path::PathBuf,
@@ -57,7 +57,7 @@ fn load_config(args: &ServeArgs) -> Result<Config> {
     let path = args
         .root
         .join(".claude/skills/campaign/serving/ci-smoke.yaml");
-    let document: YamlValue = serde_yaml::from_slice(
+    let document: YamlValue = serde_saphyr::from_slice(
         &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
     )?;
     let entry = &document[&args.modality];
@@ -70,7 +70,7 @@ fn load_config(args: &ServeArgs) -> Result<Config> {
     }
     let strings = |key: &str| -> Result<Vec<String>> {
         entry[key]
-            .as_sequence()
+            .as_array()
             .context(format!("{key} must be a list"))?
             .iter()
             .map(|value| {

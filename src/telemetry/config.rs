@@ -111,7 +111,7 @@ impl TelemetryConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("read telemetry config {}", path.display()))?;
-        let cfg: Self = serde_yaml::from_str(&text)
+        let cfg: Self = serde_saphyr::from_str(&text)
             .with_context(|| format!("parse telemetry YAML {}", path.display()))?;
         cfg.validate()?;
         Ok(cfg)
@@ -229,11 +229,51 @@ sources:
     include:
       - "^all_smi_(gpu|cpu|memory)_"
 "#;
-        let cfg: TelemetryConfig = serde_yaml::from_str(yaml).expect("yaml");
+        let cfg: TelemetryConfig = serde_saphyr::from_str(yaml).expect("yaml");
         cfg.validate().expect("valid");
         let compiled = cfg.compile().expect("compile");
         assert_eq!(compiled[0].name, "all-smi");
         assert_eq!(compiled[0].interval_ms, 500);
+    }
+
+    #[test]
+    fn telemetry_yaml_fixtures_round_trip() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files: Vec<_> = std::fs::read_dir(root.join("docs/telemetry/examples"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+            .collect();
+        files.extend([
+            root.join("examples/telemetry/all-smi-vllm.yaml"),
+            root.join("examples/telemetry/all-smi-vllm-4node.yaml"),
+            root.join("test-data/telemetry/analysis/mock-telemetry.yaml"),
+        ]);
+        assert!(files.len() > 3);
+        for path in files {
+            let config = TelemetryConfig::load(&path).unwrap();
+            use sha2::{Digest, Sha256};
+            let canonical = serde_json::to_vec(&config).unwrap();
+            let relative = path.strip_prefix(root).unwrap().to_str().unwrap();
+            let expected = include_str!("../../test-data/yaml-fixture-baselines.txt")
+                .lines()
+                .filter_map(|line| line.split_once(' '))
+                .find_map(|(name, hash)| (name == relative).then_some(hash))
+                .expect("fixture baseline");
+            let actual = Sha256::digest(&canonical)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            assert_eq!(actual, expected, "{relative}");
+            let yaml = serde_saphyr::to_string(&config).unwrap();
+            let round_trip: TelemetryConfig = serde_saphyr::from_str(&yaml).unwrap();
+            assert_eq!(
+                serde_json::to_value(&config).unwrap(),
+                serde_json::to_value(round_trip).unwrap(),
+                "{}",
+                path.display()
+            );
+        }
     }
 
     #[test]

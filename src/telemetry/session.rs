@@ -922,7 +922,7 @@ mod tests {
     }
 
     fn flaky_config(addr: std::net::SocketAddr) -> TelemetryConfig {
-        serde_yaml::from_str(&format!(
+        serde_saphyr::from_str(&format!(
             "timeout_ms: 500\nsources:\n  - name: flaky\n    url: http://{addr}/metrics\n    interval_ms: 100\n    include: [\"^all_smi_\"]\n"
         ))
         .expect("yaml")

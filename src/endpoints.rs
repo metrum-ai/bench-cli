@@ -344,7 +344,7 @@ pub fn load_endpoints_file(
 ) -> Result<(WeightedEndpoints, EndpointWeights), Box<dyn Error + Send + Sync>> {
     let contents = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read endpoints file '{}': {}", path, e))?;
-    let configs: Vec<EndpointConfig> = serde_yaml::from_str(&contents)
+    let configs: Vec<EndpointConfig> = serde_saphyr::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("Invalid YAML in endpoints file '{}': {}", path, e))?;
     if configs.is_empty() {
         return Err(anyhow::anyhow!(
@@ -424,6 +424,61 @@ mod tests {
     use crate::args_common::LoadBalancer;
     use std::io::Write;
     use std::time::Duration;
+
+    #[test]
+    fn endpoint_yaml_fixtures_round_trip() {
+        use sha2::{Digest, Sha256};
+        use std::path::Path;
+
+        fn values(configs: &[super::EndpointConfig]) -> Vec<serde_json::Value> {
+            configs
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "url": c.url, "api_key": c.api_key, "name": c.name, "weight": c.weight
+                    })
+                })
+                .collect()
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for name in [
+            "test-data/endpoints-4servers.yaml",
+            "test-data/dummy-endpoints-4.yaml",
+        ] {
+            let path = root.join(name);
+            // This fixture is deliberately excluded from published crates.
+            if !path.exists()
+                && name == "test-data/endpoints-4servers.yaml"
+                && !root.join(".git").exists()
+            {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let configs: Vec<super::EndpointConfig> = serde_saphyr::from_str(&text).unwrap();
+            let value = values(&configs);
+            let hash = Sha256::digest(serde_json::to_vec(&value).unwrap())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            let expected = include_str!("../test-data/yaml-fixture-baselines.txt")
+                .lines()
+                .filter_map(|line| line.split_once(' '))
+                .find_map(|(file, hash)| (file == name).then_some(hash))
+                .expect("endpoint baseline");
+            assert_eq!(hash, expected, "{name}");
+            let yaml = serde_saphyr::to_string(&value).unwrap();
+            let round_trip: Vec<super::EndpointConfig> = serde_saphyr::from_str(&yaml).unwrap();
+            assert_eq!(values(&round_trip), value, "{name}");
+            let dir = tempfile::tempdir().unwrap();
+            let copy = dir.path().join("endpoints.yaml");
+            std::fs::write(&copy, yaml).unwrap();
+            assert_eq!(
+                load_endpoints_file(path.to_str().unwrap()).unwrap(),
+                load_endpoints_file(copy.to_str().unwrap()).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn least_inflight_ejects_after_connect_failure() {

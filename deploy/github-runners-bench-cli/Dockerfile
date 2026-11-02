@@ -22,9 +22,12 @@
 
 FROM myoung34/github-runner:ubuntu-noble
 
-USER root
+USER 0
 ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Track Ubuntu Noble's security updates rather than pinning transient package versions.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -92,4 +95,4 @@ USER 1001:121
 # Runner.Listener under the runner account (uid 1001); a dead listener is an
 # unhealthy container even though the entrypoint itself is still alive.
 HEALTHCHECK --interval=5m --timeout=10s --start-period=2m --retries=3 \
-    CMD pgrep -u 1001 -f Runner.Listener >/dev/null || exit 1
+    CMD ["pgrep", "-u", "1001", "-f", "Runner.Listener"]

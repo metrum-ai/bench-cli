@@ -25,8 +25,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
-      - name: install pyyaml
-        run: python3 -m pip install --quiet pyyaml==6.0.3
+      - name: install helper dependencies and pip-audit
+        run: python3 -m pip install --quiet -r scripts/validation/perf/requirements.txt pip-audit==2.10.1
+      - name: audit helper dependencies
+        run: pip-audit -r scripts/validation/perf/requirements.txt
+      - name: verify freeze helper imports
+        run: python3 scripts/validation/perf/freeze_w1.py --help
       - name: py_compile
         working-directory: scripts/validation/perf
         run: python3 -m py_compile compare.py freeze_w1.py lint_spec.py test_compare.py test_runner.py

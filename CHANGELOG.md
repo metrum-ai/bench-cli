@@ -14,8 +14,11 @@
   spec, reproducible W1 freeze, interleaved runner and offline plan mode,
   comparison gates with noise floors and missing-point failures, documented
   baselines, unit tests, CI lint, and a pre-release validation step.
+- Pin Python performance-helper dependencies and audit them in CI (Refs #341).
 
 ### Security
+- Refresh the external docs dependency lockfile to address the joi and
+  follow-redirects advisories (#370).
 - Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
   values) are now redacted in every per-request log path: the llm binary's
   streaming request-failure report and context blocks, the vlm/asr request
@@ -26,6 +29,9 @@
   credentialed endpoint URL for all four modality binaries and assert that
   neither `error.log`, `debug.log` nor stderr contains the secret parts
   (#332).
+- Replace deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
+  dependency with the pure-Rust `serde-saphyr` parser (#371). YAML parsing
+  semantics can differ; existing telemetry and SUT fixture output is pinned.
 - external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
   (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
   CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
@@ -33,6 +39,8 @@
   OSV query, which npm audit had not yet indexed). `npm audit` reports 0
   vulnerabilities and the OSV scan now reports only the two documented
   unmaintained-crate exceptions (Refs #341).
+- Harden Dockerfile pipeline failure handling and health checks, and lint the
+  Dockerfiles and Rust path-filter scripts in CI (#372).
 
 ### Behaviour changes
 - Metrum AI: strategic CSV exports retain a cell for absent TTFT provenance,
