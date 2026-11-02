@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 (2026-11-02)
+
+### Highlights
+- Metrum AI adds a reproducible performance-validation harness (#333).
+- Request-body, prompt-selection and strategic export behaviour changes are
+  detailed below (#357, #358, #362).
+- Endpoint credential redaction and external-docs dependency security fixes
+  protect logs and dependencies (#332, #341).
 
 ### Added
 - Standard performance-validation harness (#333): pinned workload and model
@@ -11,7 +18,8 @@
 
 ### Security
 - Refresh the external docs dependency lockfile to address the joi and
-  follow-redirects advisories (#370).
+  follow-redirects advisories (#370, #373). The current audit has no high or
+  critical findings; lower-severity findings and exceptions remain.
 - Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
   values) are now redacted in every per-request log path: the llm binary's
   streaming request-failure report and context blocks, the vlm/asr request
@@ -24,22 +32,20 @@
   (#332).
 - Replace deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
   dependency with the pure-Rust `serde-saphyr` parser (#371). YAML parsing
-  semantics can differ; existing telemetry and SUT fixture output is pinned.
+  semantics and diagnostics can differ outside the pinned telemetry, SUT and
+  endpoint fixtures; dynamically inspected xtask mappings require string keys
+  and JSON-compatible values (#375).
 - external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
   (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
   CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
   CVSS 6.3, published 2026-10-27; found by the W44 tracker re-run's online
-  OSV query, which npm audit had not yet indexed). `npm audit` reports 0
-  vulnerabilities and the OSV scan now reports only the two documented
-  unmaintained-crate exceptions (Refs #341).
+  OSV query, which npm audit had not yet indexed). At the time of that update,
+  `npm audit` reported 0 vulnerabilities; later findings are noted above
+  (Refs #341).
 - Harden Dockerfile pipeline failure handling and health checks, and lint the
   Dockerfiles and Rust path-filter scripts in CI (#372).
 
-### Fixed
-- Metrum AI: live serving and performance validation create the Hugging Face
-  bind-mount source before Docker starts, avoiding root-created cache parents
-  on fresh hosts. Prompt cache creation errors now name the affected path
-  (#365). Existing unwritable caches still require operator repair.
+### Behaviour changes
 - Metrum AI: strategic CSV exports retain a cell for absent TTFT provenance,
   including failed requests; the JSON summary is printed before exports so it
   survives export errors (#362). JSON record omission remains unchanged.
@@ -49,6 +55,12 @@
   models without changing output-token accounting or OSL validation (#357).
 - Metrum AI prompt selection searches bounded joint-length compositions for
   mixed medians and writes diagnostic reports on selection failure (#358).
+
+### Fixed
+- Metrum AI: live serving and performance validation create the Hugging Face
+  bind-mount source before Docker starts, avoiding root-created cache parents
+  on fresh hosts. Prompt cache creation errors now name the affected path
+  (#365). Existing unwritable caches still require operator repair.
 - `e2e_http_trace::llm_records_http_phase_trace_and_pool_reuse` no longer
   flakes on busy runners (#328): the test pins the dummy server's new
   `-idle-timeout` keep-alive budget (server-side idle eviction can no longer
