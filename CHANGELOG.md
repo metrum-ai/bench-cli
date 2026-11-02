@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0 (2026-10-30)
+## 1.7.0 (2026-11-02)
 
 ### Highlights
 - Metrum AI adds a reproducible performance-validation harness (#333).
