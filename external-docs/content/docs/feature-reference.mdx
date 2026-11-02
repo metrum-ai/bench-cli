@@ -1,6 +1,6 @@
 ---
 title: Feature Reference
-description: Per-feature configuration lookup for Metrum AI Bench CLI 1.5.5.
+description: Per-feature configuration lookup for Metrum AI Bench CLI.
 sidebar_label: Feature Reference
 sidebar_position: 3
 ---
@@ -10,9 +10,9 @@ sidebar_position: 3
 
 # Feature Reference
 
-This page is a configuration reference for features shipping in Metrum AI Bench CLI
-**1.5.5**. Each section covers purpose, key parameters, and where to go
-next. Live `--help` remains authoritative for the full flag set.
+This page is a configuration reference for Metrum AI Bench CLI. Each section
+covers purpose, key parameters, and where to go next. Live `--help` remains
+authoritative for the full flag set.
 
 If you are new to a feature, the [User Guide](./user-guide) covers the workflow
 first - this page is the lookup, not the tutorial.
@@ -24,6 +24,7 @@ Features documented here:
 - [Prompt library extractor](#prompt-library-extractor)
 - [Strategic runner](#strategic-runner)
 - [SUT and redaction](#sut-and-redaction)
+- [Endpoints export](#endpoints-export)
 - [Selftest](#selftest)
 
 ---
@@ -59,7 +60,10 @@ Shared load parameters (non-exhaustive): `--url` / `--endpoints-file`,
 `--max-concurrency`, `--slo`, `--streaming`, `--system-prompt`,
 `--insecure`, `--ca-cert`. Shared telemetry flags (same names as strategic):
 `--ndjson`, `--telemetry`, `--require-telemetry`,
-`--require-telemetry-failures`.
+`--require-telemetry-failures`. Modality clients also support `--ci-safety`
+for strict error/partial exit behavior and `--data-log-mode` for collision
+handling. `--arrival burst` schedules the measured population at once; an
+explicit `--max-concurrency` can cap in-flight work.
 
 `--tokenizer` requires a build with Cargo feature `tokenizer`. GitHub Release
 binaries are built with `--features otlp` only (not `tokenizer`). Local
@@ -83,7 +87,9 @@ Walkthroughs: [Modalities](./modalities). Flag lists: [CLI Reference](./cli-refe
 | `--isl-*` / `--osl-*` | Target, unit (`tokens` / `words`), stat (`mean` / `median`), tolerance |
 | `--output` / `--report` | JSONL mix and selection report |
 
-Success = statistics within tolerance, not exact `--count`. Details:
+Success = statistics within tolerance, not exact `--count`. Mixed-median
+selection searches bounded joint-length compositions and can write diagnostic
+reports on failure. Cache creation failures name the affected path. Details:
 [Prompt library](./prompt-library).
 
 ---
@@ -115,7 +121,25 @@ repository `docs/TELEMETRY.md`).
 | `--require-sut` / `METRUM_AI_BENCH_REQUIRE_SUT=1` | Refuse incomplete SUT (gpu, driver, runtime, host_os); implies hostname redaction |
 | `--redact-hostname` / `METRUM_AI_BENCH_REDACT_HOSTNAME=1` | Write `environment.hostname: null` |
 
+Endpoint URL userinfo and `api_key` / `token` query values are redacted in
+per-request diagnostics; avoid storing credentials in configuration files.
+YAML config parsing uses `serde-saphyr`: semantics and diagnostics may differ
+outside the tested fixtures, and dynamically inspected xtask mappings require
+string keys and JSON-compatible values. `--sut-profile strict` adds model,
+quantization, kernel and quality-evidence requirements to `--require-sut`.
+
 For publication requirements, see [Publishing-oriented runs](./user-guide#publishing-oriented-runs).
+
+---
+
+## Endpoints export {#endpoints-export}
+
+`metrum-ai-bench-cli endpoints-export` converts a completed data log to an
+Endpoints-shaped bundle with declared system metadata, a performance summary,
+and arithmetic cross-checks. It is explicitly non-certifying: unsupported
+Offline/LoadStair/Pareto mappings and TTFT/TPOT definition differences are
+reported in the bundle rather than silently converted. See the repository's
+`docs/ENDPOINTS_ADAPTER.md`.
 
 ---
 

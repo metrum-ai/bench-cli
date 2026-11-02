@@ -106,6 +106,14 @@ the cell as "all-error measurements" in a results document is not triage.
 Campaign `matrix-20260915-195537` (0 of 472 ASR transcriptions succeeded) is
 the example this rule exists for.
 
+## Update external-docs release notes
+
+Before each release, update `external-docs/content/docs/release-notes.mdx`
+with a section matching the root Cargo package version. The external-docs
+home page derives its current-release label from the documentation build
+version. Run `python3 scripts/check_external_docs_version.py` and build the
+site with `make -C external-docs build` to check both content and rendering.
+
 ## Data-point counts in the release notes
 
 Every release states how many data points it tracks.

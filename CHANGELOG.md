@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1 (2026-11-02)
+
+### Documentation
+- Refresh the external docs for the 1.6.0 and 1.7.0 features and fixes; derive
+  the current-release label from the documentation build version.
+- Require matching external release notes and reject stale current-release
+  labels in CI; add the release-notes update to the release checklist.
+
 ## 1.7.0 (2026-11-02)
 
 ### Highlights

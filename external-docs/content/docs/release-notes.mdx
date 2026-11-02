@@ -13,7 +13,59 @@ in the repository `CHANGELOG.md`.
 
 ---
 
-## Unreleased
+## Metrum AI Bench CLI 1.7.1
+
+This documentation patch brings the external site up to date with 1.6.0 and
+1.7.0, derives the displayed release from the build version, and adds a CI
+check that requires matching release notes and rejects stale current-version
+labels. No benchmark runtime behavior changes.
+
+---
+
+## Metrum AI Bench CLI 1.7.0
+
+- A reproducible [performance-validation harness](./performance-methodology#release-performance-validation)
+  pins the workload and serving stack and compares release and candidate
+  output throughput and TPOT p50 on a same-GPU grid. Missing points fail;
+  TTFT is informational (#333).
+- For supported request bodies, `--extra-body-json` must be an object and
+  top-level null values remove keys rather than sending explicit nulls (#357).
+- Prompt selection searches bounded joint-length compositions for mixed
+  medians and writes a diagnostic report on selection failure (#358).
+- Strategic JSON summary is printed before exports; CSV preserves missing
+  TTFT-provenance cells, including failed requests (#362).
+- Live-serving and performance helpers create Hugging Face bind-mount sources
+  before Docker; prompt-cache creation errors identify the path. Existing
+  unwritable caches still require repair (#365).
+- Endpoint credentials are redacted in per-request logs and error paths (#332).
+  The maintained pure-Rust `serde-saphyr` parser replaces `serde_yaml`; YAML
+  semantics and diagnostics can differ outside tested fixtures (#375).
+- Dependency security updates, audited Python performance helpers, and
+  hardened container checks improve maintenance (#341, #373, #374, #376).
+
+---
+
+## Metrum AI Bench CLI 1.6.0
+
+- Prompt sequence logging and replay, seeded issuance jitter and bounded SSE
+  traces support comparable LLM runs; visible-token and first-any-token TTFT
+  remain distinct (#313).
+- `--arrival burst` schedules an Offline-style population at once, optionally
+  capped by `--max-concurrency`; it is not an MLPerf submission (#309).
+- `endpoints-export` produces a non-certifying Endpoints-shaped bundle with
+  explicit unsupported mappings and definition differences (#306).
+- `--sut-profile strict` adds model, quantization, kernel and linked quality
+  evidence requirements for publication (#308).
+- Modality `--ci-safety` fails on errors or partial runs, and `--data-log-mode`
+  offers append, refuse-existing, overwrite, and new-dir policies (#303, #305).
+- Modality telemetry has a pre-measurement boundary scrape and streaming
+  completed-request rows; example telemetry presets are available (#310–#312).
+- Invalid endpoint URLs fail before traffic, `--validate-model` adds an
+  optional LLM preflight, and standalone `--version-only` works for the
+  distributed binaries (#304, #307).
+- Security maintenance updated dependencies and made the self-hosted runner
+  image non-root with a health check; the live-gate secret contract was
+  narrowed (#291–#293, #334, #336, #337, #340). Rust 1.89 is the MSRV.
 
 ---
 
@@ -62,9 +114,8 @@ in the repository `CHANGELOG.md`.
 | **Previous version** | 1.5.2 |
 | **Release Date** | October 2, 2026 |
 
-- Four-modality live validation on Shadeform (campaign
-  `publish-20261002T162512Z`): LLM, VLM, ASR, and ImageGen gates PASS with
-  `--sut` / `--require-sut` and all-smi `/metrics` telemetry.
+- Four-modality live validation: LLM, VLM, ASR, and imagegen gates passed
+  with `--sut` / `--require-sut` and all-smi `/metrics` telemetry.
 - VLM accepts inline `data:` base64 image URLs in prompt files.
 - Imagegen `--seed-mode increment` works with a single `--prompt` (unique
   seeds per request).
@@ -127,7 +178,7 @@ in the repository `CHANGELOG.md`.
   all-smi fork on `/metric`. Offline analysis recipes in `docs/queries/` (no
   in-binary SQL).
 - Mock server `--telemetry-fixture` for CI without a GPU.
-- Shadeform e2e requires a pinned Hugging Face `metrum-ai/prompt-library` mix
+- Live e2e requires a pinned Hugging Face `metrum-ai/prompt-library` mix
   (no synthetic prompt fallback).
 
 ---

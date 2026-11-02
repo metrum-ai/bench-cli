@@ -9,10 +9,9 @@ sidebar_position: 4
 # CLI Reference
 
 Live `--help` on each binary is authoritative. The repository regenerates a
-modality/prompts dump with `cargo xtask render-cli-help` into `docs/CLI.md`
-(llm/vlm/asr/imagegen/prompts only). If this page and `--help` ever disagree,
-trust `--help`. Strategic, mock-server, unified dispatcher, and selftest are
-**not** covered by that dump.
+command dump with `cargo xtask render-cli-help` into `docs/CLI.md` for the
+unified dispatcher, modality clients, prompts, strategic and mock server. If
+this page and `--help` disagree, trust `--help`.
 
 ---
 
@@ -69,18 +68,21 @@ API-key pair patterns described in `--help`).
 | `--url` | Single endpoint URL |
 | `--endpoints-file` | Multi-endpoint YAML (curl-style); mutually exclusive with `--url` / `--api-key` |
 | `--api-key` | Bearer / API key for the single-URL path |
-| `--num-requests` | Requests to send (â‰¥ 1) |
-| `--concurrency` | Concurrent requests (â‰¥ 1) |
+| `--num-requests` | Requests to send (at least 1) |
+| `--concurrency` | Concurrent requests (at least 1) |
 | `--warmup-requests` | Warmup count (excluded from measured distributions) |
 | `--seed` | Determinism for scheduling / cycling |
 | `--request-rate` | Open-loop rate |
-| `--arrival` | `poisson` or `constant` |
+| `--arrival` | `poisson`, `constant`, or `burst` |
 | `--max-concurrency` | Outstanding-work cap |
 | `--slo` | Repeatable thresholds, e.g. `ttft=250ms`, `e2e=2s` |
 | `--streaming` | Stream responses (needed for TTFT) |
 | `--tokenizer` | Path to `tokenizer.json` (**requires** Cargo feature `tokenizer`; not in GitHub Release builds) |
 | `--log-level` | `error`/`warn`/`info`/`debug`/`trace` on llm/vlm (default `warn`) and asr (default `info`); not on imagegen |
-| `--data-log` | JSONL output path |
+| `--data-log` | JSONL output path; append is the default |
+| `--data-log-mode` | `append`, `refuse-existing`, `overwrite`, or `new-dir` |
+| `--ci-safety` | Fail automated runs on errors or partial results |
+| `--extra-body-json` | Object merged into supported request bodies; top-level null removes a key and non-object JSON is rejected |
 | `--ndjson` | Tagged telemetry NDJSON path (`telemetry.v1`) |
 | `--telemetry` | Prometheus scrape YAML; requires `--ndjson` |
 | `--require-telemetry` | Abort after consecutive scrape failures |
@@ -136,7 +138,7 @@ dispatcher, modality binaries, prompts, strategic, and mock-server. Live
 
 ```bash
 # from a checkout (after cargo build --bins)
-./cargo xtask render-cli-help
+cargo xtask render-cli-help
 ```
 
 Or inspect `docs/CLI.md` in the repository for the last generated dump.

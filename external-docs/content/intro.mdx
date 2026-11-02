@@ -8,6 +8,13 @@ sidebar_position: 1
 <!-- Copyright (c) 2026 Metrum AI, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+
+export function CurrentRelease() {
+  const {siteConfig} = useDocusaurusContext();
+  return <strong>{siteConfig.customFields.docsVersion}</strong>;
+}
+
 # Metrum AI Bench CLI Documentation
 
 Metrum AI Bench CLI is Apache-2.0 licensed load and performance measurement for
@@ -17,7 +24,7 @@ process measures one environment and writes a result with a manifest.
 Metrum AI Bench Platform (commercial) remembers, compares, governs, and
 attests. This documentation covers the open-source CLI only.
 
-Current release: **1.5.5**.
+Current release: <CurrentRelease />.
 
 ## Getting started
 
@@ -51,5 +58,5 @@ New to Metrum AI Bench CLI? Start here.
   lookup.
 - [CLI Reference](./docs/cli-reference.mdx): flags and entry points.
 - [Output schema](./docs/output-schema.mdx): JSONL request and summary shapes.
-- [Known limitations](./docs/limitations.mdx): honest scope for the 1.0 line.
+- [Known limitations](./docs/limitations.mdx): current scope and caveats.
 - [Release Notes](./docs/release-notes.mdx): what is new and changed.

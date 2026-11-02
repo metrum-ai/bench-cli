@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 SHELL := /bin/bash
-VERSION ?= 0.1.0
+VERSION ?= v$(shell python3 -c 'import tomllib; print(tomllib.load(open("../Cargo.toml", "rb"))["package"]["version"])')
 DOCS_LATEST_VERSION ?= $(VERSION)
 DOCS_RELEASE_VERSIONS ?= $(VERSION)
 PRODUCT_SLUG := metrum-ai-bench-cli

@@ -126,7 +126,10 @@ audit but are excluded from summary distributions.
 `metrum-ai-bench-cli-strategic`, `-llm`, `-vlm`, `-asr`, and `-imagegen` each
 write the same tagged `telemetry.v1` file with `--ndjson` (kinds `run`,
 `stage`, `telemetry`, `request`, `scrape_error`, and `summary`). It is not the
-modality `--data-log`. Join telemetry samples to measured stages by
-monotonic `t_ns`. Offline analysis only (Python/DuckDB recipes in the
+modality `--data-log`. With configured telemetry, modality binaries scrape
+sources immediately before measured issuance after warmup; samples or failures
+are tagged `boundary: "pre-measured"`. Completed modality request rows stream
+in completion order, with a time-bounded writer flush. Join telemetry samples
+to measured stages by monotonic `t_ns`. Offline analysis only (Python/DuckDB recipes in the
 repository). Full field tables: repository `docs/OUTPUT_SCHEMA.md` and
 `docs/TELEMETRY.md`.
