@@ -53,6 +53,12 @@ metrum-ai-bench-cli-llm \
 `--mode` is `chat` or `completion`. LLM uses one global `--max-tokens`
 (per-request caps are out of scope).
 
+`--extra-body-json` merges a JSON object into supported request bodies. A
+top-level null removes that key rather than sending explicit null; arrays,
+scalars, and other non-object JSON are rejected. For example, removing
+`max_tokens` allows a server-specific `max_completion_tokens` field. Output
+token accounting and length validation remain unchanged.
+
 For corpus mixes selected by ISL/OSL statistics, see
 [Prompt library](./prompt-library).
 

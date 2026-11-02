@@ -21,6 +21,16 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  external-docs-version:
+    name: external docs version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check release notes and current version
+        run: |
+          python3 scripts/check_external_docs_version.py
+          python3 -m unittest scripts.tests.test_external_docs_version
+
   container-lint:
     name: container and shell lint
     runs-on: ubuntu-latest

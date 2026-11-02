@@ -139,6 +139,10 @@ Optional `--price-per-hour` (or `sut.cost.price_per_hour`) stamps
 `cost_per_million_output_tokens` on each stage when output tok/s is known.
 
 The HTTP client is shared across stages (warm connection pool).
+`--extra-body-json` must be a JSON object for supported request kinds; a
+top-level null removes that key from the generated body rather than sending
+an explicit null. This supports APIs that reject `max_tokens` in favor of
+`max_completion_tokens`. It does not change output-token accounting.
 
 ---
 
@@ -149,6 +153,11 @@ The HTTP client is shared across stages (warm connection pool).
 | `--csv` | One row per request |
 | `--html` | Self-contained report (inline SVG and CSS) |
 | `--mlperf-dir` | LoadGen-shaped text for parser-oriented interoperability |
+
+The JSON summary is written to stdout before exports are attempted, so it
+remains available if an export fails. Strategic CSV keeps a cell for missing
+TTFT provenance on every row, including failed requests; absent fields in JSON
+remain omitted as before.
 
 MLPerf-shaped exports contain `mlperf_log_summary.txt`, `mlperf_log_detail.txt`,
 and `mlperf_log_accuracy.json` for Server or Offline scenarios. Every export

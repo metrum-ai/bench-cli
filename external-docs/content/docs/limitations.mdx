@@ -1,6 +1,6 @@
 ---
 title: Known limitations
-description: Honest scope for Metrum AI Bench CLI at the 1.0 line.
+description: Current scope and limitations of Metrum AI Bench CLI.
 sidebar_label: Known limitations
 sidebar_position: 7
 ---
@@ -8,7 +8,7 @@ sidebar_position: 7
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Known limitations
 
-Honest scope for Metrum AI Bench CLI at the 1.0 line. See also
+Current scope and limitations for Metrum AI Bench CLI. See also
 [Performance Methodology](./performance-methodology).
 
 ---
@@ -49,7 +49,7 @@ probed, not remotely verified.
 Headline outputs are latency, throughput, goodput under SLOs, and related
 distributions. The only built-in **quality** scores are ASR **WER/CER** (with
 `--normalizer`). There is no general task accuracy, judge score, or agent
-success metric in 1.0.
+success metric.
 
 ---
 
@@ -65,8 +65,10 @@ Code, Codex, OpenCode, and similar); see
 
 ## No cost per accepted task
 
-Token, dollar, or “accepted task” cost accounting is not in 1.0 (roadmap: next
-release, no date).
+There is no built-in cost per accepted task or general task-quality score.
+The strategic runner can optionally report cost per million output tokens when
+an hourly price and output-token throughput are supplied; this is not a cost
+per accepted task.
 
 ---
 

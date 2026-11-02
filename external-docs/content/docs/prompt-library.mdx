@@ -115,8 +115,9 @@ metrum-ai-bench-cli-prompts \
 | `--local-jsonl` / `--local-parquet` | Offline / test inputs (skip Hub) |
 | `--cache-dir` / `--offline` | Hub cache control |
 
-When several mixes all sit inside tolerance, the selector prefers solutions
-closer to `--count` and with fewer repeats.
+The selector searches bounded joint ISL/OSL length compositions, including
+mixed-median cases. When several mixes sit inside tolerance, it prefers
+solutions closer to `--count` and with fewer repeats.
 
 ### Outputs
 
@@ -165,6 +166,11 @@ statistics, not a claim about prompt diversity or answer quality.
 ## Failures
 
 If no mix in the allowed size band hits both tolerances, the tool exits
-nonzero **before** writing `--output` / `--report`. Diagnostics include best
+nonzero without writing the selected `--output` JSONL. It writes a diagnostic
+failure JSON to `--report`, not a usable mix report. Diagnostics include best
 ISL/OSL gaps, preferred vs best `n`, candidate count, work used, and whether
 the failure is a proven empty candidate set vs search/tolerance miss.
+
+The prompt cache is created under the user cache directory (or `--cache-dir`);
+creation errors identify the failing path. Fix an existing unwritable cache's
+ownership or permissions before retrying.

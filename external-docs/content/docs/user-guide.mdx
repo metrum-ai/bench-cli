@@ -106,18 +106,21 @@ Shared across modality binaries (exact lists: [CLI Reference](./cli-reference)):
 | Control | Role |
 | --- | --- |
 | `--url` / `--endpoints-file` | Single endpoint or multi-endpoint pool |
-| `--num-requests` | Measured issuance count (must be â‰¥ 1) |
-| `--concurrency` | Closed-loop parallelism (â‰¥ 1) |
+| `--num-requests` | Total requests, including warmup (at least 1) |
+| `--concurrency` | Closed-loop parallelism (at least 1) |
 | `--warmup-requests` | Issued before measure; excluded from measured distributions |
 | `--seed` | Deterministic scheduling / prompt cycling where applicable |
-| `--request-rate` / `--arrival` | Open-loop scheduling |
+| `--request-rate` / `--arrival` | Open-loop scheduling; `burst` schedules the measured population at once |
 | `--max-concurrency` | Cap on outstanding work |
 | `--slo` | Thresholds that define goodput (`ttft=`, `tpot=`, `e2e=`) |
 | `--data-log` | JSONL output path |
 | `--streaming` | Required for meaningful TTFT on LLM/VLM chat |
 
-Secrets never appear in stamped summary config. Do not commit API keys in
-endpoint files.
+Secrets never appear in stamped summary config. Endpoint URL credentials and
+sensitive query values are redacted from per-request diagnostics, but do not
+commit API keys in endpoint files. `--ci-safety` opts automated modality runs
+into failing on errors and partial results. `--data-log-mode` controls output
+collisions; `append` is the default.
 
 ---
 

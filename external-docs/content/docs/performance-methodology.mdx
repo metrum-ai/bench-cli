@@ -16,6 +16,36 @@ zero.
 
 ---
 
+## Release performance validation
+
+The versioned [performance-validation harness](https://github.com/metrum-ai/bench-cli/tree/main/scripts/validation/perf)
+compares a previous release and a candidate on the same reference GPU and
+serving stack. `spec.yaml` pins the serving image, model revisions, workload,
+request parameters, and W1/W2 at concurrency 1, 8, and 32. The runner
+interleaves the two binaries at each point (30 s warmup and 180 s measured
+issuance). The GPU run is a pre-release gate, not a normal CI test.
+
+From a checkout, prepare the datasets and binaries as documented in the
+harness README; first inspect the plan without GPU traffic:
+
+```bash
+bash scripts/validation/perf/runner.sh --plan q38-27b /path/to/baseline-llm /path/to/candidate-llm /path/to/results 1
+# After preparing W1.jsonl and W2.jsonl and the pinned serving stack:
+export DATASETS_DIR=/path/to/datasets
+bash scripts/validation/perf/runner.sh q38-27b /path/to/baseline-llm /path/to/candidate-llm /path/to/results 1
+python3 scripts/validation/perf/compare.py --baseline-root /path/to/results/bench-rel --candidate-root /path/to/results/bench-src --model q38-27b --pass 1
+```
+
+Repeat with `q38-27b-nvfp4` for the quantized model. The default gate requires
+system output tokens/s and TPOT p50 within 5% at each point, or the recorded
+per-point noise floor if wider. Missing points fail; TTFT is informational,
+not a gate. Use the same dataset bytes, hardware, serving configuration, and
+measurement method for each pair. A comparison is not a quality assessment or
+an MLPerf submission; TTFT differences require cohort and issuance caveats.
+See the harness README for dataset freezing, setup, and limitations.
+
+---
+
 ## Latency
 
 | Metric | Definition |

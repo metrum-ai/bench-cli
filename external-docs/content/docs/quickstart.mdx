@@ -57,6 +57,8 @@ shasum -a 256 -c metrum-ai-bench-cli-vVERSION-TARGET.tar.gz.sha256
 # Optional: Sigstore keyless verify (requires cosign)
 cosign verify-blob \
   --bundle metrum-ai-bench-cli-vVERSION-TARGET.tar.gz.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/metrum-ai/bench-cli/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   metrum-ai-bench-cli-vVERSION-TARGET.tar.gz
 ```
 
