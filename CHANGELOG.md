@@ -18,7 +18,8 @@
 
 ### Security
 - Refresh the external docs dependency lockfile to address the joi and
-  follow-redirects advisories (#370).
+  follow-redirects advisories (#370, #373). The current audit has no high or
+  critical findings; lower-severity findings and exceptions remain.
 - Endpoint URL credentials (userinfo, `?api_key=` / `?token=` query
   values) are now redacted in every per-request log path: the llm binary's
   streaming request-failure report and context blocks, the vlm/asr request
@@ -31,14 +32,16 @@
   (#332).
 - Replace deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
   dependency with the pure-Rust `serde-saphyr` parser (#371). YAML parsing
-  semantics can differ; existing telemetry and SUT fixture output is pinned.
+  semantics and diagnostics can differ outside the pinned telemetry, SUT and
+  endpoint fixtures; dynamically inspected xtask mappings require string keys
+  and JSON-compatible values (#375).
 - external-docs dependency lockfile: new npm override floor `qs ^6.16.1`
   (lockfile resolves 6.17.0) for GHSA-6pq8-jhm2-2vcw /
   CVE-2026-110816 (`qs.stringify` comma-arrayFormat uncaught TypeError,
   CVSS 6.3, published 2026-10-27; found by the W44 tracker re-run's online
-  OSV query, which npm audit had not yet indexed). `npm audit` reports 0
-  vulnerabilities and the OSV scan now reports only the two documented
-  unmaintained-crate exceptions (Refs #341).
+  OSV query, which npm audit had not yet indexed). At the time of that update,
+  `npm audit` reported 0 vulnerabilities; later findings are noted above
+  (Refs #341).
 - Harden Dockerfile pipeline failure handling and health checks, and lint the
   Dockerfiles and Rust path-filter scripts in CI (#372).
 
