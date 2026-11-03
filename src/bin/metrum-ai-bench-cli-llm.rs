@@ -97,6 +97,15 @@ struct Args {
     )]
     infer_ttft_from_first_byte: bool,
 
+    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful")]
+    ttft_fallback: Option<String>,
+
+    #[arg(
+        long,
+        help = "Allow missing TTFT in exploratory runs; request errors and safety gates still apply"
+    )]
+    allow_missing_ttft: bool,
+
     #[arg(
         long,
         default_value = "warn",
@@ -228,6 +237,8 @@ struct StreamMetrics {
     completion_tokens: u64,
     total_tokens: u64,
     reasoning_tokens: Option<u64>,
+    output_error: Option<metrum_ai_bench::error::RequestError>,
+    finish_reason: Option<String>,
     prompt_words: usize,
     completion_words: usize,
     prompt_text: String,
@@ -244,7 +255,6 @@ async fn make_request(
     streaming: bool,
     request_timeout: u64,
     api_key: &str,
-    allow_missing_ttft: bool,
     // trace_sse: record the bounded/redacted SSE event timeline (#313).
     trace_sse: bool,
 ) -> Result<StreamMetrics, Box<dyn Error + Send + Sync>> {
@@ -327,10 +337,11 @@ async fn make_request(
         let stream = metrum_ai_bench::chat_stream::consume_with_options(
             metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
-            allow_missing_ttft,
+            true,
             trace_sse,
         )
         .await?;
+        let output_error = stream.output_error();
         let completion_text = stream.completion_text;
         trace!("Request completed successfully");
         let completion_word_count = count_words(&completion_text);
@@ -344,6 +355,8 @@ async fn make_request(
             completion_tokens: stream.completion_tokens,
             total_tokens: stream.total_tokens,
             reasoning_tokens: stream.reasoning_tokens,
+            output_error,
+            finish_reason: stream.finish_reason,
             prompt_words: prompt_word_count,
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
@@ -438,6 +451,8 @@ async fn make_request(
             completion_tokens,
             total_tokens,
             reasoning_tokens,
+            output_error: None,
+            finish_reason: None,
             prompt_words: prompt_word_count,
             completion_words: completion_word_count,
             prompt_text: prompt.to_string(),
@@ -540,6 +555,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut args = Args::parse();
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
+    if args.ttft_fallback.is_some()
+        && (!args.streaming || !matches!(args.mode, MetrumAiBenchLLMMode::Chat))
+    {
+        return Err("--ttft-fallback requires streaming chat".into());
+    }
 
     // Check for version-only flag first (kept for parity with the other
     // binaries; the pre-parse check above normally handles it).
@@ -1194,6 +1214,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mode = args.mode;
         let streaming = args.streaming;
         let infer_ttft = args.infer_ttft_from_first_byte;
+        let first_token_fallback = args.ttft_fallback.is_some();
         let seq = slot.seq;
         // #313: the bounded/redacted SSE trace covers the first N requests
         // (warmup included) — never prompt text, content, or secrets.
@@ -1221,7 +1242,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     streaming,
                     request_timeout,
                     &api_key,
-                    infer_ttft,
                     trace_sse,
                 ),
             )
@@ -1252,11 +1272,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let tokenized_completion_tokens =
                         tokenizer.count(&sm.completion_text).ok().flatten();
                     let usage_missing = sm.completion_tokens == 0 && !sm.completion_text.is_empty();
-                    let resolved = metrum_ai_bench::measurement::resolve_ttft(
+                    let resolved = metrum_ai_bench::measurement::resolve_ttft_with_fallback(
                         streaming,
                         sm.ttft.map(|d| d.as_secs_f64()),
+                        sm.first_reasoning.map(|d| d.as_secs_f64()),
                         Some(sm.first_byte.as_secs_f64()),
                         infer_ttft,
+                        first_token_fallback,
                     );
                     let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         seq,
@@ -1265,7 +1287,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         sm.latency,
-                        None,
+                        sm.ttft,
                         sm.first_reasoning,
                         sm.itl,
                         sm.prompt_tokens,
@@ -1275,12 +1297,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_reasoning_tokens(sm.reasoning_tokens)
                     .with_first_byte(sm.first_byte)
                     .with_resolved_ttft(resolved)
-                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
+                    rec.error = sm.output_error;
+                    rec.finish_reason = sm.finish_reason;
+                    rec = rec.with_http_trace(http_trace);
                     rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
                     rec.tokenized_completion_tokens = tokenized_completion_tokens;
                     rec.usage_missing = usage_missing;
@@ -1432,6 +1456,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if let Some(fallback) = &args.ttft_fallback {
+                map.insert("ttft_fallback".into(), serde_json::json!(fallback));
+            }
+            if args.allow_missing_ttft {
+                map.insert("allow_missing_ttft".into(), serde_json::json!(true));
+            }
+            if args.infer_ttft_from_first_byte {
+                map.insert("infer_ttft_from_first_byte".into(), serde_json::json!(true));
+            }
             if let Some(ms) = args.start_jitter_ms.filter(|ms| *ms > 0) {
                 map.insert("start_jitter_ms".into(), serde_json::json!(ms));
                 map.insert(
@@ -1462,47 +1495,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let isl_osl_targets = args.common.resolve_isl_osl_targets()?;
     let isl_osl = metrum_ai_bench::isl_osl::validate_records(&records, &isl_osl_targets);
-    let measure_successes: Vec<_> = records
-        .iter()
-        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success())
-        .collect();
-    let missing_ttft = measure_successes
-        .iter()
-        .filter(|r| r.ttft_s.is_none())
-        .count();
-    let approx_count = measure_successes
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.ttft_source,
-                Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
-            )
-        })
-        .count();
-    let no_output_token_errors = records
-        .iter()
-        .filter(|r| {
-            r.phase == metrum_ai_bench::record::Phase::Measure
-                && matches!(
-                    r.error,
-                    Some(metrum_ai_bench::error::RequestError::NoOutputToken)
-                )
-        })
-        .count();
     let ttft_audit = if matches!(args.mode, MetrumAiBenchLLMMode::Chat) {
-        metrum_ai_bench::measurement::audit_chat_ttft(
+        metrum_ai_bench::measurement::audit_chat_request_records(
+            &records,
             args.streaming,
             args.infer_ttft_from_first_byte,
-            measure_successes.len(),
-            missing_ttft,
-            approx_count,
-            no_output_token_errors,
-        )?
+            args.ttft_fallback.is_some(),
+            args.allow_missing_ttft,
+        )
     } else {
-        metrum_ai_bench::measurement::TtftAudit {
+        Ok(metrum_ai_bench::measurement::TtftAudit {
             approx_count: 0,
             warning: None,
-        }
+        })
     };
     run_summary = run_summary
         .with_sut(sut_block)
@@ -1510,11 +1515,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .with_price(price)
         .with_observed_concurrency(Some(inflight_tracker.snapshot()))
         .with_isl_osl(isl_osl.clone())
-        .with_ttft_audit(ttft_audit.approx_count, ttft_audit.warning);
+        .with_ttft_audit(
+            ttft_audit.as_ref().map_or(0, |a| a.approx_count),
+            ttft_audit.as_ref().ok().and_then(|a| a.warning.clone()),
+        );
     if let Err(e) = sink.write(&run_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+    ttft_audit?;
     telemetry_verdict?;
 
     if let Some(ref validation) = isl_osl {

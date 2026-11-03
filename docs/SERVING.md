@@ -69,6 +69,13 @@ LLM prompts come from Hugging Face [`metrum-ai/prompt-library`](https://huggingf
 
 ## Telemetry
 
-Run the Metrum all-smi fork (https://github.com/chetan-metrum-ai/all-smi) on the serving host with `all-smi api --port 9090`, and scrape it with `--ndjson --telemetry` on `metrum-ai-bench-cli-strategic`, `-llm`, `-vlm`, `-asr`, or `-imagegen`. See [TELEMETRY.md](TELEMETRY.md).
+> **Strong recommendation — system telemetry:** install the Metrum AI
+> [all-smi fork](https://github.com/metrum-ai/all-smi/releases) from a GitHub
+> release (latest recorded tag `v0.28.1-metrum.3`); verify its SHA-256 and
+> record the tag. Start `all-smi api --port 9090`, then pass
+> `--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml` to
+> Bench. Power, utilization, memory and deep GPM metrics for supported
+> GPU/NPU/APU hardware are recorded on the same run clock as requests.
+> See [TELEMETRY.md](TELEMETRY.md) for installation and sampling caveats.
 
 Check which path your installed binary serves before you rely on the example YAML. On 2026-10-02, v0.26.3-metrum.4 served `/metrics`, and `/metric` returned 404.

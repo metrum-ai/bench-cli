@@ -177,6 +177,69 @@ fn role_only_stream_is_reported_as_no_output_token() {
     }
 }
 
+#[test]
+fn empty_stream_requires_allow_missing_even_with_fallback() {
+    let Some(dummy) = spawn_dummy(&["-role-only"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let url = dummy.url("/v1/chat/completions");
+    for (extra, expected) in [
+        (vec!["--ttft-fallback", "first-token"], false),
+        (
+            vec!["--ttft-fallback", "first-token", "--allow-missing-ttft"],
+            true,
+        ),
+    ] {
+        let fixture = fixture();
+        assert_eq!(run_llm(&fixture, &url, 1, &extra), expected);
+        let rows = request_records(&fixture.data_log);
+        assert_eq!(error_kind(&rows[0]["error"]), "no_output_token");
+        assert!(rows[0]["ttft_s"].is_null());
+        let summary = summary_record(&fixture.data_log).expect("summary");
+        assert_eq!(summary["successes"], 0);
+        assert_eq!(summary["ttft_coverage"]["no_token"], 1);
+    }
+}
+
+/// A token-time fallback permits exploratory runs without turning a truncated
+/// reasoning-only response into a successful answer.
+#[test]
+fn reasoning_only_fallback_preserves_failure_and_observations() {
+    let Some(dummy) = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let url = dummy.url("/v1/chat/completions");
+    for (extra, expected_ok) in [
+        (vec![], false),
+        (vec!["--ttft-fallback", "first-token"], true),
+        (vec!["--ttft-fallback", "first-token", "--ci-safety"], false),
+        (vec!["--allow-missing-ttft"], true),
+        (vec!["--infer-ttft-from-first-byte"], true),
+    ] {
+        let fixture = fixture();
+        assert_eq!(run_llm(&fixture, &url, 2, &extra), expected_ok, "{extra:?}");
+        let records = request_records(&fixture.data_log);
+        assert_eq!(records.len(), 2);
+        for record in &records {
+            assert_eq!(error_kind(&record["error"]), "reasoning_truncated");
+            assert!(record["first_reasoning_s"].as_f64().is_some());
+            assert_eq!(record["reasoning_tokens"], 10);
+            if extra.contains(&"first-token") {
+                assert_eq!(record["ttft_source"], "first_token_fallback");
+                assert_eq!(record["ttft_s"], record["first_reasoning_s"]);
+            }
+        }
+        let summary = summary_record(&fixture.data_log).expect("summary despite missing answer");
+        assert_eq!(summary["successes"], 0);
+        assert_eq!(summary["ttft_coverage"]["reasoning_truncated"], 2);
+        assert_eq!(summary["first_reasoning_s"]["n"], 2);
+        assert_eq!(summary["ttft_first_any_s"]["n"], 2);
+        assert_eq!(summary["observed_reasoning_tokens_total"], 20);
+    }
+}
+
 /// Reasoning deltas are timed separately and must not be mistaken for the
 /// first visible token.
 #[test]

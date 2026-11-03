@@ -24,12 +24,15 @@ Definitions (from [METRICS.md](METRICS.md)):
 
 - **TTFT** (`ttft_s` on each request; summary distribution `ttft_s`): first
   **visible** output delta minus send. Role and reasoning-only deltas do not
-  count. Missing visible output is recorded as error kind `no_output_token`
-  and appears in summary `errors_by_type.no_output_token`.
+  count. A completed stream without visible output is an error under **every**
+  TTFT flag, including `--infer-ttft-from-first-byte`; reasoning-only with
+  `finish_reason: length` is `reasoning_truncated`, while other no-answer
+  streams are `no_output_token`. A labelled fallback does not make an answer
+  arrive.
 - **First reasoning** (`first_reasoning_s` on each request): first non-empty
   `reasoning_content` / `reasoning` delta minus send, reported separately from
-  TTFT. The summary carries a `first_reasoning_s` distribution over measured
-  successes that streamed a reasoning delta.
+  TTFT. `first_reasoning_s` and `ttft_first_any_s` summarize measured streams
+  with observed deltas, including completed no-answer streams.
 - **Reasoning tokens** (`reasoning_tokens` and `visible_completion_tokens` on
   each request; summary distributions plus `reasoning_tokens_total` and
   `visible_completion_tokens_total`): the server-reported reasoning count
@@ -52,18 +55,16 @@ See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 
 The two answer different questions:
 
-- `no_output_token` is a request failure: the stream ended with no visible
-  answer delta, usually because `--max-tokens` ran out during reasoning.
-  These rows are excluded from summary distributions and their
-  `reasoning_tokens` is `null` (the request errored), so they never show up
-  in the reasoning token summary.
-- `reasoning_tokens` describes successful requests: how much of each
-  answer's `completion_tokens` went to thinking.
+- `reasoning_truncated` is a no-answer request failure where the token limit
+  ended reasoning; other no-answer streams are `no_output_token`. Observed
+  clocks and server-reported usage are retained even on failure.
+- `reasoning_tokens` describes successful requests only. The separate
+  `observed_reasoning_tokens` and `observed_reasoning_tokens_total` also
+  include reporting no-answer streams; absent usage remains null.
 
-So a run with many `no_output_token` errors and a modest
-`reasoning_tokens` p50 means the cap cut off the long tail, and the
-distribution is biased low. Fix the cap first (see below). Once
-`no_output_token` is zero, compare `reasoning_tokens` p99 with
+A run with many `reasoning_truncated` errors can have a biased success-only
+`reasoning_tokens` distribution. Fix the cap first (see below). Once no-answer
+errors are zero, compare `reasoning_tokens` p99 with
 `--max-tokens` to see the remaining headroom. `completion_tokens`,
 `completion_tokens_per_second`, and cost per million output tokens include
 reasoning tokens; use `visible_completion_tokens` for answer-only counts.
@@ -77,8 +78,8 @@ with `--max-tokens 256`. Set `--osl-target 256` when validating output
 length; the override does not change the OSL target. This is a top-level
 merge; explicit top-level nulls cannot be sent.
 
-`--extra-body-json` merges a JSON object into the request body (LLM, VLM, and
-imagegen). Example for OpenAI-style effort:
+`--extra-body-json` merges a JSON object into the request body (LLM, VLM,
+strategic chat/VLM, and imagegen). Example for OpenAI-style effort:
 
 ```bash
 --extra-body-json '{"reasoning_effort":"medium"}'
@@ -96,22 +97,55 @@ explicitly on every run, including when you intend the model default, so the
 manifest carries it.
 
 `--extra-body-file` exists on `metrum-ai-bench-cli-imagegen` (JSON object from a
-file). LLM/VLM use `--extra-body-json` only. Strategic has neither flag.
+file). LLM/VLM and strategic chat/VLM use `--extra-body-json`.
 
 ## `--max-tokens` for thinking models
 
 A cap smaller than the model's typical reasoning length at the chosen effort
-produces `no_output_token` on every request and a null / empty TTFT
-distribution. Do not guess a number from this page.
+can produce `reasoning_truncated` on every request and a null / empty visible
+TTFT distribution. Do not guess a number from this page.
 
 Probe procedure:
 
 1. Run `--num-requests 4 --concurrency 1` with your intended
    `--extra-body-json` and a candidate `--max-tokens`.
 2. Inspect the summary line: raise the cap until
-   `errors_by_type.no_output_token` is absent or zero.
+   both `errors_by_type.reasoning_truncated` and `errors_by_type.no_output_token` are absent or zero.
 3. Record that cap on the manifest (it is already in `config.body_template`
    as `max_tokens`) and use it for the full sweep.
+
+## Unattended harnesses running thinking models
+
+Report both visible-answer `ttft_s` and the separately labelled
+`first_reasoning_s` / `ttft_first_any_s`, with `ttft_coverage` and errors. The
+first-token time measures when generation began, not when an answer appeared.
+Do not always substitute `--infer-ttft-from-first-byte`: it uses HTTP response
+headers, which can arrive before any token. Sources and fallback counts make
+such approximations explicit.
+
+For exploratory streaming runs, `--ttft-fallback first-token` substitutes an
+observed reasoning token only when visible TTFT is absent. The row's
+`ttft_source` is `first_token_fallback`, while a visible token always wins.
+`--allow-missing-ttft` instead leaves missing times null; it also covers empty
+streams. These flags relax only the TTFT audit, never request outcomes.
+On LLM/VLM, `--ci-safety` / `--fail-on-error` still fail on missing answers.
+Strategic has different gates and reports errors per stage. An all-error
+exploratory run can exit zero with an applicable opt-in: inspect counts, not
+just exit code. Keep success-only throughput separate from observed token
+counts; completion throughput includes reasoning, and visible counts require
+server reasoning usage.
+
+When answers are required, increase `--max-tokens` and `--request-timeout`
+(strategic: `--timeout-seconds`) enough for the workload. Alternatively, turn
+thinking off only when the model/server supports it and the different behavior
+is intended:
+
+```bash
+--extra-body-json '{"chat_template_kwargs":{"enable_thinking":false}}'
+```
+
+The streaming measurements use choice index 0. Separate models and thinking
+settings in comparisons; never interpret a fallback as visible-answer latency.
 
 ## Preflight on thinking models
 

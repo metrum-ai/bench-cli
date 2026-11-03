@@ -77,13 +77,16 @@ API-key pair patterns described in `--help`).
 | `--max-concurrency` | Outstanding-work cap |
 | `--slo` | Repeatable thresholds, e.g. `ttft=250ms`, `e2e=2s` |
 | `--streaming` | Stream responses (needed for TTFT) |
+| `--ttft-fallback first-token` | LLM chat/VLM: labelled real first-token fallback when visible TTFT is missing; does not turn failures into successes |
+| `--allow-missing-ttft` | LLM/VLM: relax only the missing-TTFT audit; strict error gates still apply |
+| `--infer-ttft-from-first-byte` | LLM/VLM: approximate missing TTFT from HTTP response headers, not a token |
 | `--tokenizer` | Path to `tokenizer.json` (**requires** Cargo feature `tokenizer`; not in GitHub Release builds) |
 | `--log-level` | `error`/`warn`/`info`/`debug`/`trace` on llm/vlm (default `warn`) and asr (default `info`); not on imagegen |
 | `--data-log` | JSONL output path; append is the default |
 | `--data-log-mode` | `append`, `refuse-existing`, `overwrite`, or `new-dir` |
 | `--ci-safety` | Fail automated runs on errors or partial results |
 | `--extra-body-json` | Object merged into supported request bodies; top-level null removes a key and non-object JSON is rejected |
-| `--ndjson` | Tagged telemetry NDJSON path (`telemetry.v1`) |
+| `--ndjson` | Tagged telemetry NDJSON path (`telemetry.v2`) |
 | `--telemetry` | Prometheus scrape YAML; requires `--ndjson` |
 | `--require-telemetry` | Abort after consecutive scrape failures |
 | `--require-telemetry-failures` | Consecutive failures before `--require-telemetry` aborts (default 3) |
@@ -115,6 +118,7 @@ API-key pair patterns described in `--help`).
 | --- | --- |
 | `--sweep` / `--sweep-by` | Stage list and axis (`concurrency` / `rate`) |
 | `--requests-per-stage` | Requests per sweep stage |
+| `--ttft-fallback first-token` / `--allow-missing-ttft` | Streaming chat/VLM fallback or missing-TTFT audit opt-in; request errors remain errors |
 | `--ndjson` | Tagged telemetry NDJSON path |
 | `--telemetry` | Prometheus scrape YAML |
 | `--require-telemetry` | Abort after consecutive scrape failures |

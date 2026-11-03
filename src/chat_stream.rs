@@ -17,6 +17,8 @@ pub struct ChatStreamResult {
     /// visible content (reasoning-only or empty completion).
     pub ttft: Option<Duration>,
     pub first_reasoning: Option<Duration>,
+    /// Finish reason for choice index 0, when supplied by the server.
+    pub finish_reason: Option<String>,
     pub itl: Vec<Duration>,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
@@ -28,6 +30,20 @@ pub struct ChatStreamResult {
     /// per event — never prompt text, content or secrets. `Some` only when
     /// the caller enabled tracing (`--sse-trace-first-n`).
     pub trace: Option<Vec<StreamEventTrace>>,
+}
+
+impl ChatStreamResult {
+    /// Classify a completed stream independently of the TTFT fallback policy.
+    pub fn output_error(&self) -> Option<RequestError> {
+        if self.ttft.is_some() {
+            None
+        } else if self.first_reasoning.is_some() && self.finish_reason.as_deref() == Some("length")
+        {
+            Some(RequestError::ReasoningTruncated)
+        } else {
+            Some(RequestError::NoOutputToken)
+        }
+    }
 }
 
 /// One SSE event in a traced request (#313): categories and timing only.
@@ -55,6 +71,7 @@ struct Consumer {
     reasoning_tokens: Option<u64>,
     done: bool,
     saw_finish: bool,
+    finish_reason: Option<String>,
     completion_text: String,
 }
 
@@ -75,7 +92,7 @@ impl Consumer {
                         categories.push("usage");
                     }
                     if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
-                        for choice in choices {
+                        for choice in measured_choices(choices) {
                             if crate::sse::choice_finish_reason(choice).is_some() {
                                 categories.push("finish");
                             }
@@ -126,9 +143,10 @@ impl Consumer {
                             crate::usage::reasoning_tokens(usage).or(self.reasoning_tokens);
                     }
                     if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
-                        for choice in choices {
-                            if crate::sse::choice_finish_reason(choice).is_some() {
+                        for choice in measured_choices(choices) {
+                            if let Some(reason) = crate::sse::choice_finish_reason(choice) {
                                 self.saw_finish = true;
+                                self.finish_reason = Some(reason.to_owned());
                             }
                             if self.first_reasoning_time.is_none()
                                 && crate::sse::choice_has_reasoning_token(choice)
@@ -171,6 +189,7 @@ impl Consumer {
             latency,
             ttft: self.first_token_time,
             first_reasoning: self.first_reasoning_time,
+            finish_reason: self.finish_reason,
             itl: self.itl,
             prompt_tokens: self.prompt_tokens,
             completion_tokens: self.completion_tokens,
@@ -180,6 +199,17 @@ impl Consumer {
             trace: self.trace,
         })
     }
+}
+
+/// Select choice index 0; servers omitting indices are interpreted by position.
+fn measured_choices(choices: &[serde_json::Value]) -> impl Iterator<Item = &serde_json::Value> {
+    choices.iter().enumerate().filter_map(|(position, choice)| {
+        let selected = choice
+            .get("index")
+            .and_then(|index| index.as_u64())
+            .map_or(position == 0, |index| index == 0);
+        selected.then_some(choice)
+    })
 }
 
 /// Consume an HTTP body after the caller checks its status. `started` is the
@@ -339,6 +369,62 @@ mod tests {
                 .finish(Duration::from_millis(20), true)
                 .expect("allowed missing ttft");
             assert!(result.ttft.is_none());
+        }
+    }
+
+    #[test]
+    fn measures_only_choice_index_zero() {
+        let mut consumer = Consumer::default();
+        event(
+            &mut consumer,
+            json!({"choices":[
+                {"index":1,"delta":{"content":"ignored"},"finish_reason":"stop"},
+                {"index":0,"delta":{"reasoning_content":"thinking"}}
+            ]}),
+            10,
+        )
+        .unwrap();
+        event(
+            &mut consumer,
+            json!({"choices":[{"index":0,"finish_reason":"length"}]}),
+            20,
+        )
+        .unwrap();
+        let result = consumer.finish(Duration::from_millis(30), true).unwrap();
+        assert_eq!(result.first_reasoning, Some(Duration::from_millis(10)));
+        assert_eq!(result.ttft, None);
+        assert_eq!(result.finish_reason.as_deref(), Some("length"));
+        assert_eq!(
+            result.output_error(),
+            Some(RequestError::ReasoningTruncated)
+        );
+        assert_eq!(result.completion_text, "");
+    }
+
+    #[test]
+    fn no_answer_outcome_requires_reasoning_and_length() {
+        for (reasoning, finish, expected) in [
+            (true, "length", RequestError::ReasoningTruncated),
+            (true, "stop", RequestError::NoOutputToken),
+            (false, "length", RequestError::NoOutputToken),
+        ] {
+            let mut consumer = Consumer::default();
+            if reasoning {
+                event(
+                    &mut consumer,
+                    json!({"choices":[{"delta":{"reasoning":"think"}}]}),
+                    10,
+                )
+                .unwrap();
+            }
+            event(
+                &mut consumer,
+                json!({"choices":[{"finish_reason":finish}]}),
+                20,
+            )
+            .unwrap();
+            let result = consumer.finish(Duration::from_millis(30), true).unwrap();
+            assert_eq!(result.output_error(), Some(expected));
         }
     }
 

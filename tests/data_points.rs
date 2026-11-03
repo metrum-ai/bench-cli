@@ -176,13 +176,17 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("input_tokens_per_second", &[Usage, Tokenizer]),
     ("isl_osl", &[IslOslTargets]),
     ("observed_concurrency", &[HttpPath]),
+    ("observed_reasoning_tokens_total", &[ReasoningUsage]),
+    (
+        "observed_visible_completion_tokens_total",
+        &[ReasoningUsage],
+    ),
     ("price_per_hour", &[Price]),
     ("prompt_tokens_total", &[Usage, Tokenizer]),
     ("reasoning_tokens_total", &[ReasoningUsage]),
     ("telemetry", &[Ndjson]),
     ("total_tokens_per_second", &[Usage, Tokenizer]),
     ("ttft_approx_count", &[TtftApprox]),
-    ("ttft_first_any_s", &[ReasoningStream]),
     ("visible_completion_tokens_total", &[ReasoningUsage]),
 ];
 
@@ -206,6 +210,7 @@ const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("send_offset_s", &[HttpPath]),
     ("tokenized_completion_tokens", &[Tokenizer]),
     ("tokenized_prompt_tokens", &[Tokenizer]),
+    ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
     ("visible_completion_tokens", &[ReasoningUsage]),
 ];
@@ -222,6 +227,11 @@ const SWEEP_ROWS: &[(&str, &[Condition])] = &[
     ("input_tokens_per_second", &[Usage]),
     ("isl_osl", &[IslOslTargets]),
     ("observed_concurrency", &[HttpPath]),
+    ("observed_reasoning_tokens_total", &[ReasoningUsage]),
+    (
+        "observed_visible_completion_tokens_total",
+        &[ReasoningUsage],
+    ),
     ("p50_s", &[MeasuredSuccess]),
     ("p95_s", &[MeasuredSuccess]),
     ("p99_s", &[MeasuredSuccess]),
@@ -238,8 +248,10 @@ const SWEEP_ROWS: &[(&str, &[Condition])] = &[
 
 /// Optional telemetry NDJSON `request` row numeric fields and when they fire.
 const REQUEST_ROW_ROWS: &[(&str, &[Condition])] = &[
+    ("first_reasoning_s", &[ReasoningStream]),
     ("reasoning_tokens", &[ReasoningUsage]),
     ("t_first_ns", &[HttpPath]),
+    ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
 ];
 
@@ -351,7 +363,7 @@ fn isl_osl() -> IslOslValidation {
 
 fn telemetry_info() -> TelemetryRunInfo {
     TelemetryRunInfo {
-        schema_version: "metrum-ai-bench-cli.telemetry.v1",
+        schema_version: "metrum-ai-bench-cli.telemetry.v2",
         ndjson: "run.ndjson".into(),
         sources: 1,
         request_rows: 8,
@@ -408,6 +420,12 @@ fn summary_max() -> RunSummary {
         errors: 1,
         error_rate: 0.125,
         errors_by_type: BTreeMap::from([("timeout".to_string(), 1)]),
+        ttft_coverage: Default::default(),
+        observed_reasoning_tokens: d(),
+        observed_reasoning_tokens_total: Some(50),
+        observed_visible_completion_tokens: d(),
+        observed_visible_completion_tokens_total: Some(150),
+        fallback_ttft_s: d(),
         window_seconds: 2.0,
         requests_per_second: 3.5,
         usage_missing_count: 1,
@@ -429,7 +447,7 @@ fn summary_max() -> RunSummary {
         first_byte_s: d(),
         queue_delay_s: d(),
         first_reasoning_s: d(),
-        ttft_first_any_s: Some(d()),
+        ttft_first_any_s: d(),
         dns_s: d(),
         receive_s: d(),
         bytes_sent: d(),
@@ -482,6 +500,12 @@ fn summary_min() -> RunSummary {
         errors: 0,
         error_rate: 0.0,
         errors_by_type: BTreeMap::new(),
+        ttft_coverage: Default::default(),
+        observed_reasoning_tokens: d(),
+        observed_reasoning_tokens_total: None,
+        observed_visible_completion_tokens: d(),
+        observed_visible_completion_tokens_total: None,
+        fallback_ttft_s: d(),
         window_seconds: 0.0,
         requests_per_second: 0.0,
         usage_missing_count: 0,
@@ -503,7 +527,7 @@ fn summary_min() -> RunSummary {
         first_byte_s: d(),
         queue_delay_s: d(),
         first_reasoning_s: d(),
-        ttft_first_any_s: None,
+        ttft_first_any_s: d(),
         dns_s: d(),
         receive_s: d(),
         bytes_sent: d(),
@@ -575,6 +599,8 @@ fn request_max() -> RequestRecord {
         decode_s: Some(0.3),
         decode_tok_s: Some(100.0),
         first_reasoning_s: Some(0.08),
+        ttft_first_any_s: Some(0.08),
+        finish_reason: Some("stop".into()),
         itl_s: vec![0.01, 0.01],
         in_flight_at_send: Some(4),
         prompt_tokens: 50,
@@ -620,6 +646,8 @@ fn request_min() -> RequestRecord {
         decode_s: None,
         decode_tok_s: None,
         first_reasoning_s: None,
+        ttft_first_any_s: None,
+        finish_reason: None,
         itl_s: Vec::new(),
         in_flight_at_send: None,
         prompt_tokens: 0,
@@ -642,6 +670,13 @@ fn sweep_max() -> SweepPoint {
     let thresholds = metrum_ai_bench::strategic::summarize_stage(1.0, &[], 1.0, &all_slos(), None)
         .slo_thresholds_s;
     SweepPoint {
+        ttft_coverage: Default::default(),
+        ttft_first_any_s: d(),
+        fallback_ttft_s: d(),
+        observed_reasoning_tokens: d(),
+        observed_reasoning_tokens_total: Some(50),
+        observed_visible_completion_tokens: d(),
+        observed_visible_completion_tokens_total: Some(150),
         load: 4.0,
         n: 8,
         errors: 0,
@@ -709,6 +744,13 @@ fn sweep_max() -> SweepPoint {
 fn sweep_min() -> SweepPoint {
     let d = dist_empty;
     SweepPoint {
+        ttft_coverage: Default::default(),
+        ttft_first_any_s: d(),
+        fallback_ttft_s: d(),
+        observed_reasoning_tokens: d(),
+        observed_reasoning_tokens_total: None,
+        observed_visible_completion_tokens: d(),
+        observed_visible_completion_tokens_total: None,
         load: 4.0,
         n: 0,
         errors: 0,
@@ -785,6 +827,8 @@ fn request_row_max() -> RequestRow {
         service_latency_s: 0.4,
         ttft_s: Some(0.1),
         ttft_source: Some("stream".into()),
+        first_reasoning_s: Some(0.08),
+        ttft_first_any_s: Some(0.08),
         error: Some("timeout".into()),
         queue_sample_age_ms: Some(std::collections::BTreeMap::from([("engine".into(), 42.0)])),
         queue_sample_stale: Some(vec!["engine".to_string()]),
@@ -811,6 +855,8 @@ fn request_row_min() -> RequestRow {
         service_latency_s: 0.4,
         ttft_s: None,
         ttft_source: None,
+        first_reasoning_s: None,
+        ttft_first_any_s: None,
         error: None,
         queue_sample_age_ms: None,
         queue_sample_stale: None,
@@ -1017,8 +1063,8 @@ fn render(s: &Schemas) -> String {
 <!-- Generated by cargo xtask render-data-points from tests/data_points.rs. Do not edit by hand. -->
 
 How many data points Metrum AI Bench reports, derived from the serde schemas
-in this release (`summary.v3`, `request.v3`, the strategic sweep point, and
-the `telemetry.v1` NDJSON `request` row). `tests/data_points.rs` builds every
+in this release (`summary.v4`, `request.v4`, the strategic sweep point, and
+the `telemetry.v2` NDJSON `request` row). `tests/data_points.rs` builds every
 schema struct with every optional field set and with every optional field
 unset, serializes both, and counts the JSON. CI fails when this file is stale,
 and the release workflow publishes it in the release notes.
@@ -1027,21 +1073,21 @@ and the release workflow publishes it in the release notes.
 
 | Output | Quantities | Distributions | Blocks | Scalars | Values | Always | Optional |
 |---|---|---|---|---|---|---|---|
-| `summary.v3` run summary | {sq} | {sd} | {sb} | {ss} | {sv} | {sa} | {so} |
-| `summary.v3` `per_endpoint`, each endpoint | {eq} | {ed} | {eb} | {es} | {ev} | {ea} | {eo} |
+| `summary.v4` run summary | {sq} | {sd} | {sb} | {ss} | {sv} | {sa} | {so} |
+| `summary.v4` `per_endpoint`, each endpoint | {eq} | {ed} | {eb} | {es} | {ev} | {ea} | {eo} |
 | Strategic sweep point (`points[]`) | {pq} | {pd} | {pb} | {ps} | {pv} | {pa} | {po} |
 
 | Per-request output | Numeric fields | Always | Optional |
 |---|---|---|---|
-| `request.v3` (`--data-log`), schema fields | {rq} | {ra} | {ro} |
-| `telemetry.v1` `request` row (`--ndjson`) | {wq} | {wa} | {wo} |
+| `request.v4` (`--data-log`), schema fields | {rq} | {ra} | {ro} |
+| `telemetry.v2` `request` row (`--ndjson`) | {wq} | {wa} | {wo} |
 
 - **Telemetry series** are selected by the YAML `include` patterns of each
   `--telemetry` source at run time. There is no fixed series count: the set is
   whatever the scraped pages expose that the patterns match. Each sample is
   one `telemetry` row; `telemetry_at_done` on `request` rows is a last-seen
   map over the same series.
-- **`request.v3` `modality_metrics`** is an open map that each modality binary
+- **`request.v4` `modality_metrics`** is an open map that each modality binary
   fills, so it is not in the schema count. `metrum-ai-bench-cli-llm` writes
   {n_llm} keys on every success: {llm_keys}. See `docs/OUTPUT_SCHEMA.md` for
   vlm, asr, and imagegen.
@@ -1171,18 +1217,18 @@ reports, null or not (#245), only `n` of an empty one, and outside
 distributions only the numbers one run produced. It can therefore be lower
 than the schema `values` here, which counts every numeric slot.
 
-## `summary.v3` quantities
+## `summary.v4` quantities
 
 "#
     );
     quantity_table(&mut out, &s.summary, &summary_optional());
-    out.push_str("\n## `summary.v3` `per_endpoint` quantities (each endpoint)\n\n");
+    out.push_str("\n## `summary.v4` `per_endpoint` quantities (each endpoint)\n\n");
     quantity_table(&mut out, &s.per_endpoint, &[]);
     out.push_str("\n## Strategic sweep-point quantities\n\n");
     quantity_table(&mut out, &s.sweep, &sweep_optional());
-    out.push_str("\n## `request.v3` fields\n\n");
+    out.push_str("\n## `request.v4` fields\n\n");
     field_table(&mut out, &s.request, &request_optional());
-    out.push_str("\n## `telemetry.v1` `request` row fields (`--ndjson`)\n\n");
+    out.push_str("\n## `telemetry.v2` `request` row fields (`--ndjson`)\n\n");
     field_table(&mut out, &s.request_row, &request_row_optional());
     out
 }
@@ -1285,6 +1331,12 @@ fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static
             &["error"],
         ),
         ("src/stats.rs", "DistSummary", to_json(&dist_full()), &[]),
+        (
+            "src/summary.rs",
+            "TtftCoverage",
+            summary["ttft_coverage"].clone(),
+            &[],
+        ),
         (
             "src/time_weighted.rs",
             "TimeWeightedStat",

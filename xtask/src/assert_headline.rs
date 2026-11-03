@@ -83,7 +83,7 @@ pub fn evaluate(
         .collect();
 
     if summary.is_none() {
-        failures.push("no summary.v3 line (run crashed or was killed)".into());
+        failures.push("no summary line (run crashed or was killed)".into());
     } else if let Some(ref summary) = summary {
         let common = summary
             .pointer("/config/common")

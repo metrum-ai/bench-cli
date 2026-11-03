@@ -144,7 +144,7 @@ measurement is valid only when the client is not the limiting factor.
 | **Error rate** | Measured failures divided by measured attempts. |
 | **Goodput** | Measured successes satisfying every configured TTFT, TPOT, and E2E SLO, divided by the window. |
 
-**Effective max concurrency** is stamped on `summary.v3.config` as
+**Effective max concurrency** is stamped on `summary.v4.config` as
 `effective_max_concurrency` - `--max-concurrency` when set, otherwise the
 closed-loop `--concurrency` value that caps outstanding work. Observed
 concurrency (in-flight mean/p50/max, cap-engagement) is reported separately on
@@ -190,5 +190,5 @@ percentile-bootstrap 95% confidence interval.
 ## Console vs JSONL
 
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
-values written as `summary.v3`. There is no separate nearest-rank console
+values written as `summary.v4`. There is no separate nearest-rank console
 estimator.

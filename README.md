@@ -244,7 +244,7 @@ Quality evidence stays separate from throughput claims. Example:
 [examples/sut.strict.example.json](examples/sut.strict.example.json).
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
-must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v3`
+must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v4`
 line in a published results directory); see the
 [results publication policy](docs/RESULTS_PUBLICATION_POLICY.md).
 
@@ -361,12 +361,19 @@ Pass `--runs N` among the forwarded modality arguments to the unified entry
 point to execute sequential independent runs and append a seeded bootstrap
 cross-run aggregate to `--data-log`.
 
+> **Strong recommendation — system telemetry:** install the Metrum AI
+> [all-smi fork](https://github.com/metrum-ai/all-smi/releases) from a GitHub
+> release (latest recorded tag `v0.28.1-metrum.3`); verify the release SHA-256
+> and record the tag. Start `all-smi api --port 9090` and run Bench with
+> `--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml`.
+> This pairs GPU/NPU/APU power, utilization, memory and deep GPM metrics with
+> requests on the same run clock. Availability depends on hardware and exporter
+> support. See [telemetry](docs/TELEMETRY.md) for installation and sampling caveats.
+
 Every modality binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`, `-imagegen`)
 and `metrum-ai-bench-cli-strategic` write tagged telemetry NDJSON (`--ndjson`
 with `--telemetry` Prometheus scrapes; the series list is the YAML, loaded at
-startup, not a catalog in the binary; default smoke exporter is the Metrum
-[all-smi](https://github.com/chetan-metrum-ai/all-smi) fork on `/metrics` plus
-the serving engine's `/metrics`). Strategic also adds concurrency/rate sweeps
+startup, not a catalog in the binary). Strategic also adds concurrency/rate sweeps
 (`--sweep`), knee detection, multi-turn sessions, validity rules,
 server-metrics correlation via legacy `--metrics-url`, and CSV, HTML
 (`--html`), MLPerf-shaped (`--mlperf-dir`), and optional OTLP exports. See

@@ -3,18 +3,25 @@
 
 # Run telemetry (Prometheus scrape)
 
-**Search first, then check the path.** Before a run, confirm the exporter's
-current release, its listen port, and the path your installed binary serves
-(`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/metrics`). The
-Metrum all-smi fork v0.26.3-metrum.4 serves **`/metrics`**. Its `/metric`
-returned HTTP 404 on 2026-10-02, although earlier repo docs gave `/metric`.
+> **Strong recommendation — system telemetry:** install the Metrum AI
+> [all-smi fork](https://github.com/metrum-ai/all-smi/releases) from a GitHub
+> release. The latest recorded tag is `v0.28.1-metrum.3`: verify its SHA-256
+> and record the tag. Run `all-smi api --port 9090`, then pass
+> `--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml` to
+> Bench. This joins GPU/NPU/APU power, utilization, memory and deep GPM series
+> with request timing on the same run clock when supported by the hardware.
+
+**Check the path and series.** Confirm the current release, listener and
+`/metrics` endpoint for the installed binary before each run. Historically,
+`v0.26.3-metrum.4` served `/metrics`, while `/metric` returned 404.
 
 Every benchmark binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`,
 `-imagegen` and `-strategic`) optionally scrapes Prometheus text or
 OpenMetrics exposition during a run and writes tagged NDJSON rows beside
 request and stage rows. All five share one writer and one lifecycle
 (`TelemetrySession` in `src/telemetry/session.rs`), so the YAML schema, the
-row kinds and `telemetry.v1` are the same everywhere. Hardware and engine signals reach the harness only
+row kinds and `telemetry.v2` are the same everywhere (v1 remains readable).
+Hardware and engine signals reach the harness only
 through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
 source, not a crate dependency.
@@ -59,7 +66,7 @@ Bench CLI writes the series matched by the YAML `include` into one NDJSON next
 to the per-request JSONL, so GPU series from any exporter can be correlated
 per request.
 
-Bench CLI splits the same job differently. `request.v3` and `summary.v3` are
+Bench CLI splits the same job differently. `request.v4` and `summary.v4` are
 the fixed client schema. Telemetry is not a second catalog in the binary:
 `TelemetryConfig::load` reads YAML at startup, `parse_exposition` keeps samples
 whose names match `include`, and the probe prints `matched_series` from the
@@ -100,13 +107,13 @@ Failure policy, the same for every binary:
   `scrape_error` row and the run continues. With it, N consecutive failures
   on one source stop the run from issuing new requests (or stages), the
   in-flight requests finish, and the binary exits non-zero. Modality
-  binaries still write `summary.v3` (with `partial: true`) and close the
+  binaries still write `summary.v4` (with `partial: true`) and close the
   NDJSON with `partial: true` before exiting. Strategic also closes its
   NDJSON with `partial: true` before exiting non-zero.
 - A scraper that exits without `--require-telemetry` (for example a panic)
   is a warning and never stops the run.
 - If the NDJSON itself cannot be written (for example a full disk), the
-  modality binary stops writing rows, still writes `summary.v3`, and then
+  modality binary stops writing rows, still writes `summary.v4`, and then
   exits non-zero.
 - `--require-telemetry` without `--telemetry` (or `--metrics-url` on
   strategic) is rejected at startup.
@@ -117,11 +124,17 @@ still feeds the existing strategic correlation path only.
 Example:
 
 ```bash
-# Default smoke: Metrum all-smi fork on loopback /metrics
-# Prefer a release binary (x86_64 example):
-curl -fsSL -o /tmp/all-smi.tgz \
-  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
-tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
+# Linux x86_64 example: select the appropriate asset for your platform.
+# Record this release tag with the run.
+TAG=v0.28.1-metrum.3
+ASSET=all-smi-linux-x86_64.tar.gz
+BASE="https://github.com/metrum-ai/all-smi/releases/download/${TAG}"
+curl -fsSLO "${BASE}/${ASSET}"
+curl -fsSLO "${BASE}/${ASSET}.sha256"
+sha256sum -c "${ASSET}.sha256"
+tar -xzf "${ASSET}"
+# Keep the glibc Linux plugins beside the binary for AMD and DCGM support.
+sudo install -m 0755 all-smi liball_smi_amd.so liball_smi_dcgm.so /usr/local/bin/
 all-smi api --port 9090
 
 metrum-ai-bench-cli-strategic \
@@ -129,7 +142,7 @@ metrum-ai-bench-cli-strategic \
   --model demo --api-key dummy \
   --sweep 1,2,4 --requests-per-stage 32 \
   --ndjson /tmp/run.ndjson \
-  --telemetry docs/telemetry/examples/all-smi.yaml \
+  --telemetry examples/telemetry/all-smi-vllm.yaml \
   --require-telemetry
 ```
 
@@ -153,7 +166,7 @@ A modality run is one stage. Its NDJSON holds:
 
 - One `run` row first. `config.binary` names the binary; `config` never holds
   API keys.
-- One `request` row per `request.v3` record, written as each request
+- One `request` row per `request.v4` record, written as each request
   completes, joined on `seq` and `run_id`. Emission order is per-request
   completion order (the record channel's receive order), not `seq` order,
   and rows become visible to a tailing reader within the writer flush bound:
@@ -191,7 +204,7 @@ Boundary requests carry the header `x-metrum-telemetry-boundary:
 pre-measured`, so a real exporter or proxy can tell the synchronous
 baseline apart from periodic scrapes.
 
-`summary.v3` gains a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
+`summary.v4` carries a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 
@@ -265,7 +278,7 @@ in the study evidence bundle, not here.
 
 The checked-in default is the Metrum fork of all-smi:
 
-- Install: https://github.com/chetan-metrum-ai/all-smi
+- Install: https://github.com/metrum-ai/all-smi/releases (verify SHA-256 and record the tag)
 - Listen: `http://127.0.0.1:9090/metrics`. The same path as upstream lablup; `/metric` is not served. The API binds `0.0.0.0` with no bind flag, so firewall port 9090 on shared hosts.
 - Example YAML: [docs/telemetry/examples/all-smi.yaml](telemetry/examples/all-smi.yaml)
   (GPU, host memory, aggregate CPU, chassis, energy, and NVLink series;

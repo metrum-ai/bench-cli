@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Default smoke/E2E telemetry: Metrum all-smi fork (/metrics) plus engine metrics.
-# Install: https://github.com/chetan-metrum-ai/all-smi/releases
-#   curl -fsSL -o /tmp/all-smi.tgz \
-#     https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
-#   tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
+# Install: https://github.com/metrum-ai/all-smi/releases
+# Latest recorded release: v0.28.1-metrum.3. Verify its SHA-256 and record
+# the tag; see docs/TELEMETRY.md for installation, then run:
 #   all-smi api --port 9090
-# The fork (v0.26.3-metrum.4) serves /metrics; /metric returns 404. It binds
-# 0.0.0.0 (no bind flag), so firewall port 9090 on shared hosts.
+# Check the installed release's listener and /metrics endpoint before use;
+# protect the listening port on shared hosts.
 #
 # Starting point only: curl the live page and adjust include before a run.
 # Names below were checked against fork source at tag v0.26.3-metrum.4

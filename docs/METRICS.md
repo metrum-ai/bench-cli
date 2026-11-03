@@ -384,15 +384,30 @@ Workload section. This page focuses on measured fields.
 
 ## Thinking models: TTFT vs first reasoning
 
-- **TTFT**: first visible output delta minus send. Role and reasoning-only
-  deltas do not count. Missing visible output is `no_output_token`. TTFT
-  includes connection setup, TLS, and queueing by design. Non-streaming
-  responses report `ttft_s: null` (undefined; never fabricated from E2E).
+- **TTFT**: first visible output delta minus send; role and reasoning-only
+  deltas do not count. Includes connection setup, TLS and queueing. An
+  explicitly requested `first_token_fallback` or `first_byte_approx` is a
+  labelled substitute, not visible-answer TTFT. Non-streaming responses do
+  not have token TTFT. Completed reasoning-only streams ending in `length`
+  are `reasoning_truncated` errors; other no-answer streams are
+  `no_output_token` errors under every flag.
 - **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
-  minus send, reported separately from TTFT. Summary and strategic sweep
-  point `first_reasoning_s` (seconds) is the type-7 distribution over
-  measured successes that recorded it; `n=0` for non-thinking models. The
-  strategic request CSV carries it per request.
+  minus send. The summary and strategic point `first_reasoning_s` distribution
+  includes measured completed no-answer streams. `ttft_first_any_s` is the
+  first real visible or reasoning delta, never HTTP headers, and is reported
+  even when no visible delta arrived. Both are absent as samples when no such
+  delta arrived. Streaming measurement uses choice index 0.
+- **Coverage**: `ttft_coverage` counts measured non-warmup requests, visible
+  observations, reasoning-only streams, truncated outcomes, no-token errors,
+  missing visible times, and source counts. The source counts partition
+  measured requests; reasoning-only and truncated counts overlap. Fallback
+  times on failed requests have a separate `fallback_ttft_s` distribution and
+  do not enter the success-only headline, goodput or throughput.
+- **Observed usage**: `observed_reasoning_tokens` and
+  `observed_visible_completion_tokens` distributions/totals include measured
+  no-answer streams with server-reported usage. Missing usage stays null.
+  Legacy token and throughput aggregates remain success-only; completion-token
+  throughput includes reasoning, not just visible output.
 - **Reasoning tokens** (`reasoning_tokens`, tokens): the server-reported
   count of reasoning tokens inside `completion_tokens` (#192). Read from the
   `usage` object (final usage chunk when streaming, response `usage`
@@ -494,7 +509,7 @@ computes `gpu_util_mean`, `sm_active_p50`,
 - **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-
   weighted math must join long-format `telemetry` rows to `stage` windows.
 
-Default smoke exporter: Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
+Default smoke exporter: Metrum [all-smi](https://github.com/metrum-ai/all-smi)
 fork on `http://127.0.0.1:9090/metrics`, scraped beside the serving engine's
 `/metrics`. Which series land in the NDJSON is the runtime `--telemetry`
 YAML, not a list compiled into the binary. Full join rules and recipes:

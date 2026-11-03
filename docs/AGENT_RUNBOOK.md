@@ -92,6 +92,15 @@ A stale listener is not a live server. Always re-probe `/v1/models` after a rest
 
 Goal: durable hardware and engine time series that cover every sweep window.
 
+> **Strong recommendation — system telemetry:** install the Metrum AI
+> [all-smi fork](https://github.com/metrum-ai/all-smi/releases) from a GitHub
+> release (latest recorded tag `v0.28.1-metrum.3`); verify its SHA-256 and
+> record the tag. Start `all-smi api --port 9090` and pass
+> `--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml` to
+> Bench. Supported GPU/NPU/APU power, utilization, memory and deep GPM
+> samples share the request run clock. See [TELEMETRY.md](TELEMETRY.md)
+> for installation and sampling limitations.
+
 Run the recorder on the serving host and scrape it with `--ndjson --telemetry`. Verify the installed recorder's own `--help` first; do not assume flag names.
 
 <!-- doc-check: requires-gpu reason="the all-smi recorder needs a GPU host" -->

@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
         'docs/agent-driven',
         'docs/modalities',
         'docs/strategic-benchmarking',
+        'docs/system-telemetry',
         'docs/prompt-library',
         'docs/platforms',
       ],

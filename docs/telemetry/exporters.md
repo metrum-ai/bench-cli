@@ -13,17 +13,13 @@ host. Paths are Prometheus text unless noted.
 
 ## all-smi (required default)
 
-**Use the Metrum fork only.** Like upstream lablup, the fork serves
-`/metrics` (v0.26.3-metrum.4; `/metric` returns 404).
-
-```bash
-# Prefer the published Linux binary (see GitHub Releases for other arches):
-curl -fsSL -o /tmp/all-smi.tgz \
-  https://github.com/chetan-metrum-ai/all-smi/releases/download/v0.26.3-metrum.4/all-smi-linux-x86_64.tar.gz
-tar -xzf /tmp/all-smi.tgz -C /tmp && sudo install -m 0755 /tmp/all-smi /usr/local/bin/all-smi
-all-smi api --port 9090
-# scrape: http://127.0.0.1:9090/metrics
-```
+**Strongly recommended: use the Metrum AI fork.** Install from the
+[release page](https://github.com/metrum-ai/all-smi/releases), verify SHA-256
+and record the tag (latest recorded: `v0.28.1-metrum.3`). See the verified
+installation example in [TELEMETRY.md](../TELEMETRY.md). Start
+`all-smi api --port 9090`, then scrape with
+`--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml`.
+Confirm the installed release's `/metrics` series before a run.
 
 Example: [examples/all-smi.yaml](examples/all-smi.yaml).
 

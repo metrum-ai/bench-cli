@@ -1,0 +1,63 @@
+---
+title: System telemetry
+description: Collect system telemetry with the Metrum AI all-smi fork alongside benchmark requests.
+sidebar_label: System telemetry
+sidebar_position: 5
+---
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# System telemetry
+
+> **Strong recommendation:** collect system telemetry with the [Metrum AI
+> all-smi fork](https://github.com/metrum-ai/all-smi/releases). It exposes
+> supported GPU, NPU and APU power, utilization, memory and deep GPM metrics
+> for Bench to scrape alongside the serving engine. Bench timestamps telemetry
+> and requests on the same run clock, so their intervals can be joined. Metric
+> availability depends on the device and exporter; a scrape is a sample, not
+> a measurement of every request.
+
+## Install and verify
+
+Download the appropriate binary and checksum from [GitHub Releases](https://github.com/metrum-ai/all-smi/releases).
+The latest recorded release is `v0.28.1-metrum.3`. Verify the SHA-256 before
+installing and record the tag with the benchmark. For example, on Linux x86_64:
+
+```bash
+TAG=v0.28.1-metrum.3
+ASSET=all-smi-linux-x86_64.tar.gz
+BASE="https://github.com/metrum-ai/all-smi/releases/download/${TAG}"
+curl -fsSLO "${BASE}/${ASSET}"
+curl -fsSLO "${BASE}/${ASSET}.sha256"
+sha256sum -c "${ASSET}.sha256"
+tar -xzf "${ASSET}"
+# Keep the glibc Linux plugins beside the binary for AMD and DCGM support.
+sudo install -m 0755 all-smi liball_smi_amd.so liball_smi_dcgm.so /usr/local/bin/
+```
+
+Use a different asset for other platforms; the musl build omits the AMD and
+DCGM plugins. DCGM enrichment requires an external DCGM hostengine; without it,
+DCGM fields are omitted while supported NVML/GPM collection continues. Verify the actual listening address,
+protect the port as appropriate, and confirm the `/metrics` endpoint and
+available series before a run.
+
+## Collect with Bench
+
+Start the API:
+
+```bash
+all-smi api --port 9090
+```
+
+Add these options to your LLM, VLM, ASR, image-generation or strategic run:
+
+```text
+--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml
+```
+
+The preset is included in Bench release archives under `examples/telemetry/`;
+it also includes vLLM metrics, so configure both endpoints for your setup.
+Adjust its `include` patterns to the live exporter series. The startup probe
+reports matched series; add `--require-telemetry` to fail on sustained scrape
+errors. Do not infer absent metrics as zero. For sampling, exporter freshness,
+privacy and analysis caveats, see the repository's [telemetry guide](https://github.com/metrum-ai/bench-cli/blob/main/docs/TELEMETRY.md).
