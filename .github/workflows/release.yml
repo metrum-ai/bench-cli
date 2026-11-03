@@ -171,8 +171,11 @@ jobs:
           test -x "${root}/bin/metrum-ai-bench-cli-mock-server"
           test -x "${root}/bin/dummy-model-server"
           cp LICENSE NOTICE THIRD_PARTY_LICENSES README.md TRADEMARKS.md "${root}/"
+          # The container runs as root while the runner owns the checkout.
+          # Trust only this checkout for these read-only git commands.
+          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD
           # Include the entire tracked documentation tree from the tagged commit.
-          git archive HEAD docs | tar -x -C "${root}"
+          git -c safe.directory="$GITHUB_WORKSPACE" archive HEAD docs | tar -x -C "${root}"
           cp -a examples "${root}/"
           cp -a test-data "${root}/"
           tar -czf "${root}.tar.gz" "${root}"
@@ -476,6 +479,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # workflow_dispatch runs the workflow from main, not from the tag.
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       # A missing token is a configuration choice, not a broken release: the
       # tarballs, SBOMs and signatures are already published by then.
