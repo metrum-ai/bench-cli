@@ -128,9 +128,9 @@ collisions; `append` is the default.
 
 Each line in `--data-log` is a complete JSON object with `schema_version`.
 
-- **Request records** (`metrum-ai-bench-cli.request.v3`) flush on completion with
+- **Request records** (`metrum-ai-bench-cli.request.v4`) flush on completion with
   latency, optional TTFT / first-byte / ITL, errors, and modality metrics.
-- **Summary** (`metrum-ai-bench-cli.summary.v3`) carries counts, rates,
+- **Summary** (`metrum-ai-bench-cli.summary.v4`) carries counts, rates,
   distributions, goodput, environment metadata, optional `sut`, and `partial`.
 
 Printed end-of-run statistics come from the same summary values written to

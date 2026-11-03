@@ -13,6 +13,24 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.7.2
+
+**Behavior change:** a completed stream without a visible answer is a request
+error under every TTFT flag, including `--infer-ttft-from-first-byte`. A
+length-limited reasoning-only response is `reasoning_truncated`; it is not a
+successful answer. This can change error counts and strict run exit codes.
+
+- Visible-answer TTFT remains the default. The opt-in `--ttft-fallback
+  first-token` records a labelled first-token time when no answer arrives;
+  `--allow-missing-ttft` allows a null time. Neither changes error outcomes or
+  strict safety gates. First-byte approximation remains an HTTP-header time.
+- First reasoning, first-any-token timing, coverage and reported token usage
+  make thinking-only responses visible without counting them as successful.
+- Binary release archives include the tracked documentation tree. We strongly
+  recommend the [Metrum AI all-smi fork](./system-telemetry) for system telemetry.
+
+---
+
 ## Metrum AI Bench CLI 1.7.1
 
 This documentation patch brings the external site up to date with 1.6.0 and

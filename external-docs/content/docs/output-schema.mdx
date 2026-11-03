@@ -17,9 +17,19 @@ this page and that file ever disagree, prefer the repository file and live
 
 ---
 
-## Request v3
+## Request v4
 
-`metrum-ai-bench-cli.request.v3` records are flushed immediately on completion:
+`metrum-ai-bench-cli.request.v4` records are flushed immediately on completion.
+V3 remains readable for audit. A completed stream without a visible answer is
+an error under every TTFT flag; reasoning-only length finishes are
+`reasoning_truncated`. `ttft_first_any_s` and `first_reasoning_s` retain actual
+streamed clocks even on completed no-answer failures. `ttft_source` identifies
+visible stream, `--ttft-fallback first-token`, or the HTTP-header approximation
+from `--infer-ttft-from-first-byte`. `--allow-missing-ttft` relaxes only the
+audit; none of these flags makes a missing answer successful, and `--ci-safety`
+remains strict. Choice index 0 is measured.
+
+Records include:
 
 - optional `run_id` (same UUID as `summary.config.run_id` when stamped)
 - `seq`, `phase` (`warmup`, `measure`, `drain`), and `endpoint`
@@ -33,8 +43,8 @@ this page and that file ever disagree, prefer the repository file and live
 - typed `error`, `partial`, modality-specific numeric metrics, and optional
   string `modality_labels`
 
-`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated
-from E2E latency.
+`ttft_s` is absent for non-streaming LLM/VLM responses unless HTTP first-byte
+approximation is explicitly requested; it is never fabricated from E2E latency.
 
 ### `modality_metrics`
 
@@ -45,19 +55,20 @@ from E2E latency.
 | Imagegen | `images_requested`, `images_returned`, `response_bytes`, `artifact_N_bytes` |
 
 Imagegen artifact SHA-256 digests live in `modality_labels.artifact_N_sha256`
-on `request.v3`.
+on `request.v4`.
 
 ---
 
-## Summary v3
+## Summary v4
 
-`metrum-ai-bench-cli.summary.v3` is field-additive over v2. It contains measured
+`metrum-ai-bench-cli.summary.v4` adds coverage and observed-token fields over
+v3. It contains measured
 attempted/success/error counts, rates, type-7 distributions,
 coordinated-omission-corrected latency, throughput-bin dispersion, SLO goodput,
 `pooled_mixture`, full `per_endpoint` distributions, environment metadata, and
 `partial`.
 
-Additional v3 fields:
+Selected summary fields:
 
 | Field | Notes |
 | --- | --- |
@@ -72,9 +83,9 @@ Additional v3 fields:
 | `usage_missing_count` | Measure-phase successes with `usage_missing` |
 | `completion_tokens_per_second` | `null` when usage is missing without tokenizer fallback |
 | `completion_tokens_source` | `"server_usage"` or `"tokenizer_fallback"` when the rate is present |
-| `ttft_approx_count` | Measured successes with TTFT from HTTP time-to-first-byte (`--infer-ttft-from-first-byte`) |
+| `ttft_approx_count` | Measured requests with TTFT from HTTP time-to-first-byte (`--infer-ttft-from-first-byte`) |
 | `ttft_warning` | Optional note when TTFT was approximated or left unmeasured |
-| Per-request `ttft_source` | `"stream"` or `"first_byte_approx"` when `ttft_s` is present |
+| Per-request `ttft_source` | `"stream"`, `"first_token_fallback"` or `"first_byte_approx"` when `ttft_s` is present |
 | `isl_osl.length_basis` | `"server_usage"` or `"tokenizer"` for published ISL/OSL means |
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and
@@ -124,7 +135,7 @@ audit but are excluded from summary distributions.
 ## Telemetry NDJSON
 
 `metrum-ai-bench-cli-strategic`, `-llm`, `-vlm`, `-asr`, and `-imagegen` each
-write the same tagged `telemetry.v1` file with `--ndjson` (kinds `run`,
+write the same tagged `telemetry.v2` file with `--ndjson` (kinds `run`,
 `stage`, `telemetry`, `request`, `scrape_error`, and `summary`). It is not the
 modality `--data-log`. With configured telemetry, modality binaries scrape
 sources immediately before measured issuance after warmup; samples or failures

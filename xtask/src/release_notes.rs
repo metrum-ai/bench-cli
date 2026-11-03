@@ -28,7 +28,8 @@ pub fn transform(doc: &str) -> String {
             continue;
         }
         let mut line_out = line.to_string();
-        if line == "## `summary.v3` quantities" && !folded {
+        if (line == "## `summary.v3` quantities" || line == "## `summary.v4` quantities") && !folded
+        {
             raw_lines.push(
                 "<details><summary>Every counted field and when it fires</summary>".to_string(),
             );
@@ -102,6 +103,10 @@ text
         assert!(out.contains("<details><summary>Every counted field and when it fires</summary>"));
         assert!(out.contains("### `summary.v3` quantities"));
         assert!(out.contains("</details>"));
+        let v4 = transform(&doc.replace("summary.v3", "summary.v4"));
+        assert!(v4.contains("<details><summary>Every counted field and when it fires</summary>"));
+        assert!(v4.contains("### `summary.v4` quantities"));
+        assert!(v4.contains("</details>"));
         // Both-outcome: empty input is still valid transform
         assert_eq!(transform(""), "\n");
     }

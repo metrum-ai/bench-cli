@@ -59,7 +59,7 @@ fn strategic_sweep_exports_all_formats() {
     let summary: Value = serde_json::from_slice(&output.stdout).expect("summary JSON");
     assert_eq!(
         summary["schema_version"],
-        "metrum-ai-bench-cli.strategic.v1"
+        "metrum-ai-bench-cli.strategic.v2"
     );
     assert!(summary["tool_version"].as_str().is_some());
     assert!(summary["environment"]["package_version"].is_string());

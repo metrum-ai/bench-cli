@@ -92,6 +92,15 @@ A stale listener is not a live server. Always re-probe `/v1/models` after a rest
 
 Goal: durable hardware and engine time series that cover every sweep window.
 
+> **Strong recommendation — system telemetry:** install the Metrum AI
+> [all-smi fork](https://github.com/metrum-ai/all-smi/releases) from a GitHub
+> release (latest recorded tag `v0.28.1-metrum.3`); verify its SHA-256 and
+> record the tag. Start `all-smi api --port 9090` and pass
+> `--ndjson run.ndjson --telemetry examples/telemetry/all-smi-vllm.yaml` to
+> Bench. Supported GPU/NPU/APU power, utilization, memory and deep GPM
+> samples share the request run clock. See [TELEMETRY.md](TELEMETRY.md)
+> for installation and sampling limitations.
+
 Run the recorder on the serving host and scrape it with `--ndjson --telemetry`. Verify the installed recorder's own `--help` first; do not assume flag names.
 
 <!-- doc-check: requires-gpu reason="the all-smi recorder needs a GPU host" -->
@@ -99,7 +108,7 @@ Run the recorder on the serving host and scrape it with `--ndjson --telemetry`. 
 # Verify the installed recorder's subcommands and flags before use.
 all-smi doctor --json
 all-smi api --port 9090 &
-# Confirm the path. On the Metrum fork v0.26.3-metrum.4 the path is /metrics;
+# Confirm the installed release's metrics path. Historically, v0.26.3-metrum.4 used /metrics;
 # /metric returned 404 on 2026-10-02.
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9090/metrics
 
@@ -242,7 +251,7 @@ Check that proves success: every reported number traces to a local summary line 
 
 Failure: no retry. A missing input stays missing and is reported as such.
 
-Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v3` has no knee field.
+Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v4` has no knee field. Compatible readers can still read historical v3 logs, which also lack this field.
 
 ## Step 9: Agent session resilience
 

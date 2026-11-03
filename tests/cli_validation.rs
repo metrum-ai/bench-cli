@@ -1377,7 +1377,7 @@ fn ci_safety_preset_rejects_http_500_all_error_runs() {
     );
     let logged = std::fs::read_to_string(&exploratory).unwrap();
     assert!(
-        logged.contains("metrum-ai-bench-cli.summary.v3"),
+        logged.contains("metrum-ai-bench-cli.summary.v4"),
         "summary must still be written for exploratory callers: {logged}"
     );
 }
@@ -1779,7 +1779,7 @@ fn metrum_ai_bench_llm_validate_model_passes_and_runs() {
         "a measured request record must appear first: {logged}"
     );
     assert!(
-        lines[1].contains("metrum-ai-bench-cli.summary.v3"),
+        lines[1].contains("metrum-ai-bench-cli.summary.v4"),
         "the closing summary row must be present: {logged}"
     );
 }

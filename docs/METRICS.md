@@ -4,6 +4,8 @@
 # Metric definitions
 
 All intervals use `std::time::Instant`. ISO timestamps are metadata only.
+Current request and summary records use v4; compatible readers can still read
+historical v3 logs.
 
 Workload (prompt source, ISL/OSL, profiles, warmup, client headroom) is defined
 in the live docs
@@ -282,7 +284,7 @@ Workload section. This page focuses on measured fields.
   `scheduled_offset_s`; closed-loop: `send_offset_s`), measured from the
   first measured request's offset. Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
-- **Effective max concurrency**: stamped on `summary.v3.config` as
+- **Effective max concurrency**: stamped on `summary.v4.config` as
   `effective_max_concurrency`: `--max-concurrency` when set, otherwise the
   closed-loop `--concurrency` value that caps outstanding work.
 - **Token throughput**: successful server-usage tokens divided by that same
@@ -343,7 +345,7 @@ Workload section. This page focuses on measured fields.
   are built with the same library builders as the modality binaries.
   `SweepPoint.modality_metrics` holds one type-7 distribution per key over
   measured successes, with the same names and definitions as modality
-  `request.v3` `modality_metrics`: VLM `image_count` (count) and
+  `request.v4` `modality_metrics`: VLM `image_count` (count) and
   `image_bytes` (bytes); ASR `wer`, `cer` (ratios, as above),
   `rtfx_client` (`audio_duration_s / service_latency_s`), and
   `audio_duration_s` (seconds); imagegen `images_requested` and
@@ -384,15 +386,34 @@ Workload section. This page focuses on measured fields.
 
 ## Thinking models: TTFT vs first reasoning
 
-- **TTFT**: first visible output delta minus send. Role and reasoning-only
-  deltas do not count. Missing visible output is `no_output_token`. TTFT
-  includes connection setup, TLS, and queueing by design. Non-streaming
-  responses report `ttft_s: null` (undefined; never fabricated from E2E).
+- **TTFT**: first visible output delta minus send; role and reasoning-only
+  deltas do not count. Includes connection setup, TLS and queueing. An
+  explicitly requested `first_token_fallback` or `first_byte_approx` is a
+  labelled substitute, not visible-answer TTFT. Non-streaming responses do
+  not have token TTFT. Completed reasoning-only streams ending in `length`
+  are `reasoning_truncated` errors; other no-answer streams are
+  `no_output_token` errors under every flag. `--ttft-fallback first-token`
+  uses a labelled real first token; `--allow-missing-ttft` relaxes the
+  missing-TTFT audit. `--infer-ttft-from-first-byte` instead uses HTTP header
+  timing, never a token. None makes a missing answer successful, and
+  `--ci-safety` remains strict.
 - **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
-  minus send, reported separately from TTFT. Summary and strategic sweep
-  point `first_reasoning_s` (seconds) is the type-7 distribution over
-  measured successes that recorded it; `n=0` for non-thinking models. The
-  strategic request CSV carries it per request.
+  minus send. The summary and strategic point `first_reasoning_s` distribution
+  includes measured completed no-answer streams. `ttft_first_any_s` is the
+  first real visible or reasoning delta, never HTTP headers, and is reported
+  even when no visible delta arrived. Both are absent as samples when no such
+  delta arrived. Streaming measurement uses choice index 0.
+- **Coverage**: `ttft_coverage` counts measured non-warmup requests, visible
+  observations, reasoning-only streams, truncated outcomes, no-token errors,
+  missing visible times, and source counts. The source counts partition
+  measured requests; reasoning-only and truncated counts overlap. Fallback
+  times on failed requests have a separate `fallback_ttft_s` distribution and
+  do not enter the success-only headline, goodput or throughput.
+- **Observed usage**: `observed_reasoning_tokens` and
+  `observed_visible_completion_tokens` distributions/totals include measured
+  no-answer streams with server-reported usage. Missing usage stays null.
+  Legacy token and throughput aggregates remain success-only; completion-token
+  throughput includes reasoning, not just visible output.
 - **Reasoning tokens** (`reasoning_tokens`, tokens): the server-reported
   count of reasoning tokens inside `completion_tokens` (#192). Read from the
   `usage` object (final usage chunk when streaming, response `usage`
@@ -445,21 +466,21 @@ Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 Scraped Prometheus gauges/counters land in a separate `--ndjson` file, not
 inside modality `--data-log` request rows. Strategic and, since #196, the
 LLM, VLM, ASR, and imagegen binaries write the same
-`metrum-ai-bench-cli.telemetry.v1` rows, so the derived metrics below apply
+`metrum-ai-bench-cli.telemetry.v2` rows, so the derived metrics below apply
 to a modality run's single `measure` stage as well.
 
 - **Shared epoch**: every `*_ns` field is nanoseconds from one run-start
   `Instant`, shared by request and telemetry rows. `run.t0_wall` is ISO 8601
   UTC metadata.
 - **Modality request timing**: a modality `request` row is derived from its
-  `request.v3` record: `t_sent_ns` is `send_offset_s` (same origin: the run
+  `request.v4` record: `t_sent_ns` is `send_offset_s` (same origin: the run
   clock starts at the NDJSON epoch),
   `t_done_ns = t_sent_ns + latency_s`, `service_latency_s` is the record's
   `latency_s`, and the row's `latency_s = queue_delay_s + latency_s`
   (seconds). The `measure` stage window runs from the first measured send to
   the last measured completion. Mapping:
   [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md#modality-binaries).
-- **Summary telemetry counts**: `summary.v3.telemetry` (present only with
+- **Summary telemetry counts**: `summary.v4.telemetry` (present only with
   `--ndjson`) reports integer row counts per kind and
   `dropped_telemetry_rows`; a non-zero drop count means time-weighted
   telemetry math in that run has gaps. Strategic sweep points do not carry
@@ -494,7 +515,7 @@ computes `gpu_util_mean`, `sm_active_p50`,
 - **Sugar**: optional `request.telemetry_at_done` is last-seen only; time-
   weighted math must join long-format `telemetry` rows to `stage` windows.
 
-Default smoke exporter: Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
+Default smoke exporter: Metrum [all-smi](https://github.com/metrum-ai/all-smi)
 fork on `http://127.0.0.1:9090/metrics`, scraped beside the serving engine's
 `/metrics`. Which series land in the NDJSON is the runtime `--telemetry`
 YAML, not a list compiled into the binary. Full join rules and recipes:
@@ -515,7 +536,7 @@ full distributions are emitted independently per endpoint.
 ## Console vs JSONL
 
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
-values written as `summary.v3`. There is no separate nearest-rank console
+values written as `summary.v4`. There is no separate nearest-rank console
 estimator. The console prints First byte, Queue delay, First reasoning,
 ISL tokens (source), OSL tokens (source), Reasoning tokens (with the total),
 and Visible completion tokens lines only when that distribution has `n > 0`.

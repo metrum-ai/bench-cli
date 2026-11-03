@@ -170,6 +170,31 @@ fn vlm_non_streaming_reports_no_ttft() {
     }
 }
 
+#[test]
+fn vlm_reasoning_only_fallback_reports_failed_answers() {
+    let Some(dummy) = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"]) else {
+        skip("go dummy-model-server not available");
+        return;
+    };
+    let fixture = fixture();
+    run_vlm(
+        &fixture,
+        &dummy.url("/v1/chat/completions"),
+        2,
+        &["--streaming", "--ttft-fallback", "first-token"],
+    );
+    for record in request_records(&fixture.data_log) {
+        assert_eq!(record["error"]["kind"], "reasoning_truncated");
+        assert_eq!(record["ttft_source"], "first_token_fallback");
+        assert_eq!(record["reasoning_tokens"], 20);
+    }
+    let summary = summary_record(&fixture.data_log).expect("summary");
+    assert_eq!(summary["successes"], 0);
+    assert_eq!(summary["ttft_coverage"]["reasoning_truncated"], 2);
+    assert_eq!(summary["ttft_first_any_s"]["n"], 2);
+    assert_eq!(summary["observed_reasoning_tokens_total"], 40);
+}
+
 /// #192: VLM reads server-reported reasoning tokens from the usage payload,
 /// streaming and non-streaming, and derives visible completion tokens.
 #[test]

@@ -7,8 +7,11 @@ use serde::Serialize;
 use std::time::Duration;
 
 /// Request record schema (field-additive: config stamps, first_byte_s).
-pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench-cli.request.v3";
-pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench-cli.summary.v3";
+pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench-cli.request.v4";
+pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench-cli.summary.v4";
+/// Previous field-additive schemas remain readable by audit consumers.
+pub const SCHEMA_VERSION_REQUEST_V3: &str = "metrum-ai-bench-cli.request.v3";
+pub const SCHEMA_VERSION_SUMMARY_V3: &str = "metrum-ai-bench-cli.summary.v3";
 
 /// Historical schemas still accepted when auditing 0.1.82 JSONL (read-only).
 pub const SCHEMA_VERSION_REQUEST_V2: &str = "metrum-ai-bench-cli.request.v2";
@@ -26,6 +29,8 @@ pub fn accepts_audit_schema(schema_version: &str) -> bool {
         schema_version,
         SCHEMA_VERSION_REQUEST
             | SCHEMA_VERSION_SUMMARY
+            | SCHEMA_VERSION_REQUEST_V3
+            | SCHEMA_VERSION_SUMMARY_V3
             | SCHEMA_VERSION_REQUEST_V2
             | SCHEMA_VERSION_SUMMARY_V2
             | SCHEMA_VERSION_REQUEST_LEGACY
@@ -126,6 +131,12 @@ pub struct RequestRecord {
     pub decode_tok_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_reasoning_s: Option<f64>,
+    /// First observed reasoning or visible delta, never HTTP first byte.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_first_any_s: Option<f64>,
+    /// Finish reason of streamed choice index 0, if provided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
     /// Inter-chunk intervals in seconds (visible tokens only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub itl_s: Vec<f64>,
@@ -201,6 +212,12 @@ impl RequestRecord {
             ttft_s: ttft.map(|d| d.as_secs_f64()),
             ttft_source: ttft.map(|_| crate::measurement::TtftSource::Stream),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
+            ttft_first_any_s: match (ttft, first_reasoning) {
+                (Some(a), Some(b)) => Some(a.min(b).as_secs_f64()),
+                (Some(a), None) | (None, Some(a)) => Some(a.as_secs_f64()),
+                (None, None) => None,
+            },
+            finish_reason: None,
             itl_s: itl.iter().map(|d| d.as_secs_f64()).collect(),
             in_flight_at_send: None,
             prompt_tokens,
@@ -254,6 +271,8 @@ impl RequestRecord {
             ttft_s: None,
             ttft_source: None,
             first_reasoning_s: None,
+            ttft_first_any_s: None,
+            finish_reason: None,
             itl_s: Vec::new(),
             in_flight_at_send: None,
             prompt_tokens: 0,
@@ -328,6 +347,12 @@ impl RequestRecord {
 
     /// Fill `prefill_s` / `decode_s` / `decode_tok_s` from TTFT, connect, and tokens.
     pub fn with_phase_metrics(mut self) -> Self {
+        if !self.is_success() {
+            self.prefill_s = None;
+            self.decode_s = None;
+            self.decode_tok_s = None;
+            return self;
+        }
         self.prefill_s = match (self.ttft_s, self.connect_s) {
             (Some(ttft), Some(connect)) => Some((ttft - connect).max(0.0)),
             (Some(ttft), None) => Some(ttft),

@@ -238,9 +238,9 @@ pub fn count_bench(path: &Path, max_ttft_ratio: f64) -> Result<Value> {
         .find(|row| {
             row["schema_version"]
                 .as_str()
-                .is_some_and(|v| v.ends_with(".summary.v3"))
+                .is_some_and(|v| v.ends_with(".summary.v3") || v.ends_with(".summary.v4"))
         })
-        .with_context(|| format!("{}: no summary.v3 record", path.display()))?;
+        .with_context(|| format!("{}: no supported summary record", path.display()))?;
     summary.as_object().context("summary must be an object")?;
     let mut empty = BTreeSet::new();
     let classified = collect_quantities(summary, BENCH_SKIP, &mut empty);
@@ -262,7 +262,7 @@ pub fn count_bench(path: &Path, max_ttft_ratio: f64) -> Result<Value> {
         .filter(|row| {
             row["schema_version"]
                 .as_str()
-                .is_some_and(|v| v.ends_with(".request.v3"))
+                .is_some_and(|v| v.ends_with(".request.v3") || v.ends_with(".request.v4"))
                 && row["phase"] == "measure"
         })
         .collect();
@@ -535,19 +535,19 @@ mod tests {
     fn bench_log_counter_requires_and_reports_nonzero_measurements() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("run.jsonl");
-        std::fs::write(
-            &path,
-            concat!(
-                r#"{"schema_version":"metrum-ai-bench-cli.request.v3","phase":"measure","ttft_s":0.1,"latency_s":0.5,"output_tokens":4}"#,
-                "\n",
-                r#"{"schema_version":"metrum-ai-bench-cli.summary.v3","attempted":1,"latency_s":{"n":1,"p50":0.5,"p99":0.5}}"#,
-                "\n"
-            ),
-        ).unwrap();
-        let result = count_bench(&path, 0.9).unwrap();
-        assert!(result["quantities"].as_u64().unwrap() > 0);
-        assert!(result["values"].as_u64().unwrap() > 0);
-        assert_eq!(result["measured_requests"], 1);
+        let fixture = concat!(
+            r#"{"schema_version":"metrum-ai-bench-cli.request.v3","phase":"measure","ttft_s":0.1,"latency_s":0.5,"output_tokens":4}"#,
+            "\n",
+            r#"{"schema_version":"metrum-ai-bench-cli.summary.v3","attempted":1,"latency_s":{"n":1,"p50":0.5,"p99":0.5}}"#,
+            "\n"
+        );
+        for version in ["v3", "v4"] {
+            std::fs::write(&path, fixture.replace("v3", version)).unwrap();
+            let result = count_bench(&path, 0.9).unwrap();
+            assert!(result["quantities"].as_u64().unwrap() > 0);
+            assert!(result["values"].as_u64().unwrap() > 0);
+            assert_eq!(result["measured_requests"], 1);
+        }
     }
 
     #[test]

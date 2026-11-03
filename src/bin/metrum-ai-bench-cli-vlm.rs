@@ -203,6 +203,15 @@ struct Args {
     )]
     infer_ttft_from_first_byte: bool,
 
+    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful")]
+    ttft_fallback: Option<String>,
+
+    #[arg(
+        long,
+        help = "Allow missing TTFT in exploratory runs; request errors and safety gates still apply"
+    )]
+    allow_missing_ttft: bool,
+
     #[arg(long, help = "Maximum number of tokens")]
     max_tokens: u32,
 
@@ -287,7 +296,6 @@ async fn make_request(
     api_key: &str,
     images: &[ImageData],
     streaming: bool,
-    allow_missing_ttft: bool,
 ) -> Result<
     (
         Duration,
@@ -301,6 +309,8 @@ async fn make_request(
         Vec<Duration>,
         String,
         Option<u64>,
+        Option<metrum_ai_bench::error::RequestError>,
+        Option<String>,
     ),
     Box<dyn Error + Send + Sync>,
 > {
@@ -351,10 +361,11 @@ async fn make_request(
         let stream = metrum_ai_bench::chat_stream::consume_with_options(
             metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
-            allow_missing_ttft,
+            true,
             false,
         )
         .await?;
+        let output_error = stream.output_error();
         return Ok((
             stream.latency,
             first_byte,
@@ -367,6 +378,8 @@ async fn make_request(
             stream.itl,
             stream.completion_text,
             stream.reasoning_tokens,
+            output_error,
+            stream.finish_reason,
         ));
     }
 
@@ -417,6 +430,8 @@ async fn make_request(
         Vec::new(),
         completion_text,
         reasoning_tokens,
+        None,
+        None,
     ))
 }
 
@@ -437,6 +452,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut args = Args::parse();
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
+    if args.ttft_fallback.is_some() && !args.streaming {
+        return Err("--ttft-fallback requires streaming".into());
+    }
 
     // Check for version-only flag first
     if args.version_only {
@@ -1209,6 +1227,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let request_timeout = args.request_timeout;
         let streaming = args.streaming;
         let infer_ttft = args.infer_ttft_from_first_byte;
+        let first_token_fallback = args.ttft_fallback.is_some();
         let selected_images: Arc<[ImageData]> = selected_images.into();
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
         let seq = slot.seq;
@@ -1289,7 +1308,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     &api_key,
                     &selected_images,
                     streaming,
-                    infer_ttft,
                 ),
             )
             .await;
@@ -1319,6 +1337,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     itl,
                     completion_text,
                     reasoning_tokens,
+                    output_error,
+                    finish_reason,
                 )) => {
                     let completed_at =
                         metrum_ai_bench::runner::completed_at_from_start(started_at, response_time);
@@ -1326,11 +1346,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     let tokenized_completion_tokens =
                         tokenizer.count(&completion_text).ok().flatten();
                     let usage_missing = completion_tokens == 0 && !completion_text.is_empty();
-                    let resolved = metrum_ai_bench::measurement::resolve_ttft(
+                    let resolved = metrum_ai_bench::measurement::resolve_ttft_with_fallback(
                         streaming,
                         ttft.map(|d| d.as_secs_f64()),
+                        first_reasoning.map(|d| d.as_secs_f64()),
                         Some(first_byte.as_secs_f64()),
                         infer_ttft,
+                        first_token_fallback,
                     );
                     let mut rec = metrum_ai_bench::record::RequestRecord::success(
                         seq,
@@ -1339,7 +1361,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         started_at,
                         completed_at,
                         response_time,
-                        None,
+                        ttft,
                         first_reasoning,
                         itl,
                         prompt_tokens,
@@ -1349,12 +1371,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_reasoning_tokens(reasoning_tokens)
                     .with_first_byte(first_byte)
                     .with_resolved_ttft(resolved)
-                    .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
+                    rec.error = output_error;
+                    rec.finish_reason = finish_reason;
+                    rec = rec.with_http_trace(http_trace);
                     rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
                     rec.tokenized_completion_tokens = tokenized_completion_tokens;
                     rec.usage_missing = usage_missing;
@@ -1555,26 +1579,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             metrum_ai_bench::args_common::CommonBenchArgs::unique_prompt_nonce_template(
                 args.common.unique_prompts,
             ),
-        modality: [
-            (
-                "reencode_jpeg".into(),
-                serde_json::json!(args.reencode_jpeg),
-            ),
-            (
-                "image_detail".into(),
-                serde_json::json!(format!("{}", args.image_detail)),
-            ),
-            (
-                "max_image_dimension".into(),
-                serde_json::json!(args.max_image_dimension),
-            ),
-            (
-                "server_side_download".into(),
-                serde_json::json!(args.server_side_download),
-            ),
-        ]
-        .into_iter()
-        .collect(),
+        modality: {
+            let mut map: std::collections::BTreeMap<String, serde_json::Value> = [
+                (
+                    "reencode_jpeg".into(),
+                    serde_json::json!(args.reencode_jpeg),
+                ),
+                (
+                    "image_detail".into(),
+                    serde_json::json!(format!("{}", args.image_detail)),
+                ),
+                (
+                    "max_image_dimension".into(),
+                    serde_json::json!(args.max_image_dimension),
+                ),
+                (
+                    "server_side_download".into(),
+                    serde_json::json!(args.server_side_download),
+                ),
+            ]
+            .into_iter()
+            .collect();
+            if let Some(fallback) = &args.ttft_fallback {
+                map.insert("ttft_fallback".into(), serde_json::json!(fallback));
+            }
+            if args.allow_missing_ttft {
+                map.insert("allow_missing_ttft".into(), serde_json::json!(true));
+            }
+            if args.infer_ttft_from_first_byte {
+                map.insert("infer_ttft_from_first_byte".into(), serde_json::json!(true));
+            }
+            map
+        },
     });
     shared_summary.environment = metrum_ai_bench::environment::collect(
         ntp_offset_ms,
@@ -1585,51 +1621,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         args.common.price_per_hour,
         sut_block.as_ref(),
     );
-    let measure_successes: Vec<_> = records
-        .iter()
-        .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && r.is_success())
-        .collect();
-    let missing_ttft = measure_successes
-        .iter()
-        .filter(|r| r.ttft_s.is_none())
-        .count();
-    let approx_count = measure_successes
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.ttft_source,
-                Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
-            )
-        })
-        .count();
-    let no_output_token_errors = records
-        .iter()
-        .filter(|r| {
-            r.phase == metrum_ai_bench::record::Phase::Measure
-                && matches!(
-                    r.error,
-                    Some(metrum_ai_bench::error::RequestError::NoOutputToken)
-                )
-        })
-        .count();
-    let ttft_audit = metrum_ai_bench::measurement::audit_chat_ttft(
+    let ttft_audit = metrum_ai_bench::measurement::audit_chat_request_records(
+        &records,
         args.streaming,
         args.infer_ttft_from_first_byte,
-        measure_successes.len(),
-        missing_ttft,
-        approx_count,
-        no_output_token_errors,
-    )?;
+        args.ttft_fallback.is_some(),
+        args.allow_missing_ttft,
+    );
     shared_summary = shared_summary
         .with_sut(sut_block)
         .with_telemetry(telemetry_info)
         .with_price(price)
         .with_observed_concurrency(Some(inflight_tracker.snapshot()))
-        .with_ttft_audit(ttft_audit.approx_count, ttft_audit.warning);
+        .with_ttft_audit(
+            ttft_audit.as_ref().map_or(0, |a| a.approx_count),
+            ttft_audit.as_ref().ok().and_then(|a| a.warning.clone()),
+        );
     if let Err(e) = sink.write(&shared_summary) {
         warn!("Failed to write summary JSONL: {e}");
     }
     shared_summary.print_console();
+    ttft_audit?;
     telemetry_verdict?;
     let measure_errors = records
         .iter()

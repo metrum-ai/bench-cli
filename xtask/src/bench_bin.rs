@@ -6,12 +6,27 @@
 use anyhow::{bail, Result};
 use std::{
     env,
+    ffi::OsStr,
     path::{Path, PathBuf},
 };
 
 pub fn resolve(root: &Path, name: &str) -> Result<PathBuf> {
+    resolve_with_search(
+        root,
+        name,
+        env::var_os("BENCH_BIN_DIR").as_deref(),
+        env::var_os("PATH").as_deref(),
+    )
+}
+
+fn resolve_with_search(
+    root: &Path,
+    name: &str,
+    bin_dir: Option<&OsStr>,
+    path: Option<&OsStr>,
+) -> Result<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(dir) = env::var_os("BENCH_BIN_DIR") {
+    if let Some(dir) = bin_dir {
         candidates.push(PathBuf::from(dir).join(name));
     }
     candidates.extend([
@@ -19,8 +34,8 @@ pub fn resolve(root: &Path, name: &str) -> Result<PathBuf> {
         root.join("target/release").join(name),
         root.join("target/rel-user/release").join(name),
     ]);
-    if let Some(path) = env::var_os("PATH") {
-        candidates.extend(env::split_paths(&path).map(|dir| dir.join(name)));
+    if let Some(path) = path {
+        candidates.extend(env::split_paths(path).map(|dir| dir.join(name)));
     }
     for candidate in candidates {
         if is_executable(&candidate) {
@@ -62,7 +77,10 @@ mod tests {
         executable(&release);
         executable(&rel_user);
         executable(&debug);
-        assert_eq!(resolve(root.path(), "bench").unwrap(), release);
+        assert_eq!(
+            resolve_with_search(root.path(), "bench", None, None).unwrap(),
+            release
+        );
     }
 
     #[test]
@@ -73,21 +91,20 @@ mod tests {
         let bundled = root.path().join("bin/bench");
         executable(&override_bin);
         executable(&bundled);
-        let old = env::var_os("BENCH_BIN_DIR");
-        env::set_var("BENCH_BIN_DIR", explicit.path());
-        let result = resolve(root.path(), "bench").unwrap();
-        if let Some(old) = old {
-            env::set_var("BENCH_BIN_DIR", old);
-        } else {
-            env::remove_var("BENCH_BIN_DIR");
-        }
+        let result = resolve_with_search(
+            root.path(),
+            "bench",
+            Some(explicit.path().as_os_str()),
+            None,
+        )
+        .unwrap();
         assert_eq!(result, override_bin);
     }
 
     #[test]
     fn missing_binary_fails_instead_of_building() {
         let root = tempfile::tempdir().unwrap();
-        let error = resolve(root.path(), "missing-bench").unwrap_err();
+        let error = resolve_with_search(root.path(), "missing-bench", None, None).unwrap_err();
         assert!(error.to_string().contains("prebuilt release"));
     }
 }

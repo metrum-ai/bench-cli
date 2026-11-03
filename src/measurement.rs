@@ -17,6 +17,8 @@ pub enum TtftSource {
     Stream,
     /// HTTP time-to-first-byte used because visible-token TTFT was absent.
     FirstByteApprox,
+    /// Actual first reasoning token used because visible-token TTFT was absent.
+    FirstTokenFallback,
 }
 
 impl TtftSource {
@@ -24,6 +26,7 @@ impl TtftSource {
         match self {
             Self::Stream => "stream",
             Self::FirstByteApprox => "first_byte_approx",
+            Self::FirstTokenFallback => "first_token_fallback",
         }
     }
 }
@@ -100,6 +103,33 @@ pub fn resolve_ttft(
     }
 }
 
+/// Resolve visible TTFT first, then an optional observed first-token fallback,
+/// otherwise the legacy HTTP first-byte approximation. The flags are checked
+/// for mutual exclusion by the caller's CLI.
+pub fn resolve_ttft_with_fallback(
+    streaming: bool,
+    stream_ttft_s: Option<f64>,
+    first_reasoning_s: Option<f64>,
+    first_byte_s: Option<f64>,
+    infer_from_first_byte: bool,
+    first_token_fallback: bool,
+) -> ResolvedTtft {
+    if streaming && stream_ttft_s.is_none() && first_token_fallback {
+        if let Some(first) = first_reasoning_s {
+            return ResolvedTtft {
+                ttft_s: Some(first),
+                source: Some(TtftSource::FirstTokenFallback),
+            };
+        }
+    }
+    resolve_ttft(
+        streaming,
+        stream_ttft_s,
+        first_byte_s,
+        infer_from_first_byte,
+    )
+}
+
 /// Decide whether a chat run's TTFT coverage is publishable.
 ///
 /// Prints one stderr warning when approximation is used, or when a
@@ -152,6 +182,126 @@ pub fn audit_chat_ttft(
     })
 }
 
+/// Inputs for the completed-stream aware audit used by chat runs.
+pub struct ChatTtftAuditInput {
+    pub streaming: bool,
+    pub infer_from_first_byte: bool,
+    pub first_token_fallback: bool,
+    pub allow_missing: bool,
+    pub successes: usize,
+    pub missing_successes: usize,
+    pub no_answer: usize,
+    pub unresolved_no_answer: usize,
+    pub reasoning_truncated: usize,
+    pub measured: usize,
+    pub first_byte_count: usize,
+    pub first_token_count: usize,
+    pub timeout_flag: &'static str,
+    pub thinking_toggle_supported: bool,
+}
+
+/// Preserve outcome errors while allowing explicit opt-ins to relax only TTFT coverage.
+pub fn audit_chat_ttft_observed(input: ChatTtftAuditInput) -> anyhow::Result<TtftAudit> {
+    if input.streaming && !input.allow_missing {
+        let missing = input.missing_successes > 0
+            || (input.successes == 0 && input.no_answer > 0 && input.unresolved_no_answer > 0);
+        if missing {
+            if input.measured > 0 && input.reasoning_truncated == input.measured {
+                let toggle = if input.thinking_toggle_supported {
+                    " or disable thinking where supported with --extra-body-json '{\"chat_template_kwargs\":{\"enable_thinking\":false}}'"
+                } else {
+                    " or disable thinking in the server configuration where supported"
+                };
+                anyhow::bail!("all requests spent the token budget on reasoning without a visible answer; raise --max-tokens and {} or use --ttft-fallback first-token{}", input.timeout_flag, toggle);
+            }
+            anyhow::bail!("streaming run produced no visible-token TTFT; use --ttft-fallback first-token for observed reasoning, --allow-missing-ttft, or --infer-ttft-from-first-byte for an HTTP header approximation");
+        }
+    }
+    if !input.streaming && input.infer_from_first_byte && input.missing_successes > 0 {
+        anyhow::bail!("--infer-ttft-from-first-byte could not approximate TTFT: HTTP time-to-first-byte is missing");
+    }
+    let warning = if input.first_byte_count > 0 {
+        Some(format!("approximated TTFT from HTTP time-to-first-byte for {} request(s); this is not visible-token TTFT", input.first_byte_count))
+    } else if input.first_token_count > 0 {
+        Some(format!(
+            "used first-token TTFT fallback for {} request(s); this is not visible-answer TTFT",
+            input.first_token_count
+        ))
+    } else if !input.streaming && !input.infer_from_first_byte && input.successes > 0 {
+        Some("TTFT is not measured without --streaming. Pass --infer-ttft-from-first-byte to approximate from HTTP time-to-first-byte".to_string())
+    } else {
+        None
+    };
+    if let Some(ref message) = warning {
+        eprintln!("warning: {message}");
+    }
+    Ok(TtftAudit {
+        approx_count: input.first_byte_count,
+        warning,
+    })
+}
+
+/// Construct audit input from request records, excluding warmup and drain.
+pub fn audit_chat_request_records(
+    records: &[crate::record::RequestRecord],
+    streaming: bool,
+    infer_from_first_byte: bool,
+    first_token_fallback: bool,
+    allow_missing: bool,
+) -> anyhow::Result<TtftAudit> {
+    let rows: Vec<_> = records
+        .iter()
+        .filter(|r| r.phase == crate::record::Phase::Measure)
+        .collect();
+    let no_answer = |r: &&crate::record::RequestRecord| {
+        matches!(
+            r.error,
+            Some(
+                crate::error::RequestError::NoOutputToken
+                    | crate::error::RequestError::ReasoningTruncated
+            )
+        )
+    };
+    audit_chat_ttft_observed(ChatTtftAuditInput {
+        streaming,
+        infer_from_first_byte,
+        first_token_fallback,
+        allow_missing,
+        successes: rows.iter().filter(|r| r.is_success()).count(),
+        missing_successes: rows
+            .iter()
+            .filter(|r| r.is_success() && r.ttft_s.is_none())
+            .count(),
+        no_answer: rows.iter().copied().filter(no_answer).count(),
+        unresolved_no_answer: rows
+            .iter()
+            .copied()
+            .filter(no_answer)
+            .filter(|r| r.ttft_s.is_none())
+            .count(),
+        reasoning_truncated: rows
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.error,
+                    Some(crate::error::RequestError::ReasoningTruncated)
+                )
+            })
+            .count(),
+        measured: rows.len(),
+        first_byte_count: rows
+            .iter()
+            .filter(|r| r.ttft_source == Some(TtftSource::FirstByteApprox))
+            .count(),
+        first_token_count: rows
+            .iter()
+            .filter(|r| r.ttft_source == Some(TtftSource::FirstTokenFallback))
+            .count(),
+        timeout_flag: "--request-timeout",
+        thinking_toggle_supported: true,
+    })
+}
+
 /// Count measured successes without TTFT and first-byte approximations.
 pub fn count_ttft_gaps<'a, I>(records: I) -> (usize, usize, usize)
 where
@@ -167,7 +317,7 @@ where
         successes += 1;
         match row.ttft_source {
             Some(TtftSource::FirstByteApprox) => approx += 1,
-            Some(TtftSource::Stream) => {}
+            Some(TtftSource::Stream | TtftSource::FirstTokenFallback) => {}
             None if row.ttft_s.is_none() => missing += 1,
             None => {}
         }
@@ -211,6 +361,19 @@ mod tests {
         let resolved = resolve_ttft(true, Some(0.2), Some(0.05), true);
         assert_eq!(resolved.ttft_s, Some(0.2));
         assert_eq!(resolved.source, Some(TtftSource::Stream));
+    }
+
+    #[test]
+    fn first_token_fallback_is_labelled_and_visible_wins() {
+        let fallback = resolve_ttft_with_fallback(true, None, Some(0.4), Some(0.02), false, true);
+        assert_eq!(fallback.ttft_s, Some(0.4));
+        assert_eq!(fallback.source, Some(TtftSource::FirstTokenFallback));
+        let visible =
+            resolve_ttft_with_fallback(true, Some(0.9), Some(0.4), Some(0.02), false, true);
+        assert_eq!(visible.ttft_s, Some(0.9));
+        assert_eq!(visible.source, Some(TtftSource::Stream));
+        let absent = resolve_ttft_with_fallback(true, None, None, Some(0.02), false, true);
+        assert_eq!(absent.ttft_s, None);
     }
 
     #[test]

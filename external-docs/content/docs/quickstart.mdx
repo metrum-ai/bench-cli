@@ -20,6 +20,12 @@ toolchain is installed, the loop usually takes under ten minutes.
 4. Run `metrum-ai-bench-cli-llm` (or the unified `metrum-ai-bench-cli llm` entry)
 5. Inspect the JSONL data log and end-of-run summary
 
+For real-device runs, we strongly recommend the [Metrum AI all-smi fork](https://github.com/metrum-ai/all-smi/releases)
+for power, utilization, memory and supported deep GPM metrics alongside
+request timing. See [System telemetry](./system-telemetry) for verified
+installation and the Bench scrape preset. The dummy-server quickstart does
+not require an accelerator or all-smi.
+
 If you already have a binary and only need a smoke check:
 
 ```bash
@@ -192,7 +198,7 @@ were removed in **1.3.0**.
 ### What success looks like
 
 - Request records stream into `--data-log` as each request finishes.
-- A `summary.v3` object is appended when the run completes.
+- A `summary.v4` object is appended when the run completes.
 - Console statistics match the same `RunSummary` / `DistSummary` values written
   to JSONL.
 

@@ -34,6 +34,21 @@ pub struct EffectiveRunConfig {
     pub modality: BTreeMap<String, serde_json::Value>,
 }
 
+/// Coverage over measured requests; source counts partition the population.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TtftCoverage {
+    pub measured: usize,
+    pub visible: usize,
+    pub reasoning_only: usize,
+    pub reasoning_truncated: usize,
+    pub no_token: usize,
+    pub missing_visible: usize,
+    pub stream: usize,
+    pub first_token_fallback: usize,
+    pub first_byte_approx: usize,
+    pub unresolved: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunSummary {
     pub schema_version: &'static str,
@@ -42,6 +57,13 @@ pub struct RunSummary {
     pub errors: usize,
     pub error_rate: f64,
     pub errors_by_type: BTreeMap<String, usize>,
+    pub ttft_coverage: TtftCoverage,
+    /// Server-reported token totals on measured completed streams, including no-answer failures.
+    pub observed_reasoning_tokens: DistSummary,
+    pub observed_reasoning_tokens_total: Option<u64>,
+    pub observed_visible_completion_tokens: DistSummary,
+    pub observed_visible_completion_tokens_total: Option<u64>,
+    pub fallback_ttft_s: DistSummary,
     pub window_seconds: f64,
     pub requests_per_second: f64,
     pub usage_missing_count: usize,
@@ -76,11 +98,8 @@ pub struct RunSummary {
     pub queue_delay_s: DistSummary,
     /// Send to first reasoning chunk; streaming thinking models only.
     pub first_reasoning_s: DistSummary,
-    /// First token of ANY category (`min(ttft_s, first_reasoning_s)` per
-    /// row): separates the two clocks for reasoning models (#313). Omitted
-    /// unless at least one measured row reported reasoning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ttft_first_any_s: Option<DistSummary>,
+    /// First actual visible or reasoning delta, including completed no-answer streams.
+    pub ttft_first_any_s: DistSummary,
     /// DNS lookup inside the connector (`0` = no lookup: pool hit or IP literal).
     pub dns_s: DistSummary,
     /// Response headers to last body chunk.
@@ -310,9 +329,6 @@ struct RecordedFieldDists {
     first_byte_s: DistSummary,
     queue_delay_s: DistSummary,
     first_reasoning_s: DistSummary,
-    /// Optional first-any-category clock (#313): present only when at least
-    /// one row reported reasoning.
-    ttft_first_any_s: Option<DistSummary>,
     prefill_tps_per_user: DistSummary,
     time_to_second_token_s: DistSummary,
     user_tps: DistSummary,
@@ -332,16 +348,6 @@ impl RecordedFieldDists {
     /// (ASR, imagegen) contribute no sample.
     fn from_successes(successes: &[&RequestRecord]) -> Self {
         let first_byte: Vec<f64> = successes.iter().filter_map(|r| r.first_byte_s).collect();
-        let has_reasoning = successes.iter().any(|r| r.first_reasoning_s.is_some());
-        // #313: first-any-category clock (first visible OR first reasoning).
-        let first_any: Vec<f64> = if has_reasoning {
-            successes
-                .iter()
-                .filter_map(|r| first_generated_token_s(r.ttft_s, r.first_reasoning_s))
-                .collect()
-        } else {
-            Vec::new()
-        };
         // Queue delay is only measured when a request had an intended arrival.
         let queue_delay: Vec<f64> = successes
             .iter()
@@ -387,7 +393,6 @@ impl RecordedFieldDists {
             first_byte_s: DistSummary::from_values(&first_byte),
             queue_delay_s: DistSummary::from_values(&queue_delay),
             first_reasoning_s: DistSummary::from_values(&first_reasoning),
-            ttft_first_any_s: has_reasoning.then(|| DistSummary::from_values(&first_any)),
             prefill_tps_per_user: DistSummary::from_values(&prefill_rates),
             time_to_second_token_s: DistSummary::from_values(&second_token),
             user_tps: DistSummary::from_values(&user_rates),
@@ -638,6 +643,83 @@ impl RunSummary {
         };
         let per_endpoint = endpoint_summaries(&pool);
         let recorded = RecordedFieldDists::from_successes(&successes);
+        let mut coverage = TtftCoverage {
+            measured: attempted,
+            ..TtftCoverage::default()
+        };
+        let mut first_reasoning = Vec::new();
+        let mut first_any = Vec::new();
+        let mut fallback_ttft = Vec::new();
+        let mut observed_reasoning = Vec::new();
+        let mut observed_visible = Vec::new();
+        for r in &pool {
+            match r.ttft_source {
+                Some(crate::measurement::TtftSource::Stream) => {
+                    coverage.visible += 1;
+                    coverage.stream += 1;
+                }
+                Some(crate::measurement::TtftSource::FirstTokenFallback) => {
+                    coverage.first_token_fallback += 1;
+                }
+                Some(crate::measurement::TtftSource::FirstByteApprox) => {
+                    coverage.first_byte_approx += 1;
+                }
+                None => {
+                    coverage.unresolved += 1;
+                }
+            }
+            if r.first_reasoning_s.is_some()
+                && r.ttft_source != Some(crate::measurement::TtftSource::Stream)
+            {
+                coverage.reasoning_only += 1;
+            }
+            if matches!(
+                r.error,
+                Some(crate::error::RequestError::ReasoningTruncated)
+            ) {
+                coverage.reasoning_truncated += 1;
+            }
+            if matches!(r.error, Some(crate::error::RequestError::NoOutputToken))
+                && r.first_reasoning_s.is_none()
+            {
+                coverage.no_token += 1;
+            }
+            if let Some(value) = r.first_reasoning_s {
+                first_reasoning.push(value);
+            }
+            let visible = if r.ttft_source == Some(crate::measurement::TtftSource::Stream) {
+                r.ttft_s
+            } else {
+                None
+            };
+            let observed_any = [r.ttft_first_any_s, visible, r.first_reasoning_s]
+                .into_iter()
+                .flatten()
+                .reduce(f64::min);
+            if let Some(value) = observed_any {
+                first_any.push(value);
+            }
+            if !r.is_success()
+                && matches!(
+                    r.ttft_source,
+                    Some(
+                        crate::measurement::TtftSource::FirstTokenFallback
+                            | crate::measurement::TtftSource::FirstByteApprox
+                    )
+                )
+            {
+                if let Some(value) = r.ttft_s {
+                    fallback_ttft.push(value);
+                }
+            }
+            if let Some(value) = r.reasoning_tokens {
+                observed_reasoning.push(value);
+            }
+            if let Some(value) = r.visible_completion_tokens {
+                observed_visible.push(value);
+            }
+        }
+        coverage.missing_visible = attempted - coverage.visible;
         let http = HttpTraceDists::from_successes(&successes);
         let bins = throughput_bins(&successes, open_loop_anchor(&pool), window, bin_seconds);
         let time_weighted = time_weighted(&pool, &successes, window_seconds);
@@ -658,6 +740,14 @@ impl RunSummary {
                 errors.len() as f64 / attempted as f64
             },
             errors_by_type,
+            ttft_coverage: coverage,
+            observed_reasoning_tokens: DistSummary::from_values(&as_f64(&observed_reasoning)),
+            observed_reasoning_tokens_total: total(&observed_reasoning),
+            observed_visible_completion_tokens: DistSummary::from_values(&as_f64(
+                &observed_visible,
+            )),
+            observed_visible_completion_tokens_total: total(&observed_visible),
+            fallback_ttft_s: DistSummary::from_values(&fallback_ttft),
             window_seconds,
             requests_per_second: successes.len() as f64 / window,
             usage_missing_count,
@@ -678,8 +768,8 @@ impl RunSummary {
             decode_tok_s: DistSummary::from_values(&decode_tok),
             first_byte_s: recorded.first_byte_s,
             queue_delay_s: recorded.queue_delay_s,
-            first_reasoning_s: recorded.first_reasoning_s,
-            ttft_first_any_s: recorded.ttft_first_any_s,
+            first_reasoning_s: DistSummary::from_values(&first_reasoning),
+            ttft_first_any_s: DistSummary::from_values(&first_any),
             dns_s: http.dns_s,
             receive_s: http.receive_s,
             bytes_sent: http.bytes_sent,
@@ -897,7 +987,18 @@ pub fn print_run_summary(summary: &RunSummary) {
         "CO-corrected latency",
         &summary.coordinated_omission_latency_s,
     );
-    print_dist("TTFT", &summary.ttft_s);
+    print_dist("TTFT (visible; approximations labelled)", &summary.ttft_s);
+    let coverage = &summary.ttft_coverage;
+    println!("  TTFT coverage: visible={} reasoning-only={} truncated={} first-token-fallback={} first-byte-approx={} unresolved={} / {} measured",
+        coverage.visible, coverage.reasoning_only, coverage.reasoning_truncated,
+        coverage.first_token_fallback, coverage.first_byte_approx, coverage.unresolved, coverage.measured);
+    if summary.fallback_ttft_s.n > 0 {
+        print_dist("No-answer fallback TTFT", &summary.fallback_ttft_s);
+    }
+    print_dist("First token (any)", &summary.ttft_first_any_s);
+    if let Some(total) = summary.observed_reasoning_tokens_total {
+        println!("  Observed reasoning tokens (including no-answer streams): {total}");
+    }
     if summary.ttft_approx_count > 0 {
         println!(
             "  TTFT approximated from first-byte: {}",
@@ -2023,10 +2124,9 @@ mod first_any_tests {
     use super::*;
     use chrono::Utc;
 
-    /// #313: the first-any clock fires only when a reasoning row exists,
-    /// and takes the earlier of the two clocks.
+    /// First-any is always present and takes the earlier real token clock.
     #[test]
-    fn ttft_first_any_tracks_reasoning_rows_only() {
+    fn ttft_first_any_tracks_visible_and_reasoning() {
         let base = |ttft: Option<f64>, reasoning: Option<f64>| {
             let now = Utc::now();
             RequestRecord::success(
@@ -2044,19 +2144,14 @@ mod first_any_tests {
                 15,
             )
         };
-        // No reasoning: field omitted (serde skips None).
+        // Without reasoning, first-any is the visible clock.
         let without = vec![base(Some(1.0), None)];
         let summary = RunSummary::from_records(&without, 1.0, false);
-        assert!(
-            summary.ttft_first_any_s.is_none(),
-            "no reasoning rows → no first-any clock"
-        );
+        assert_eq!(summary.ttft_first_any_s.p50, Some(1.0));
         // With reasoning: first-any = min(first-visible, first-reasoning).
         let with = vec![base(Some(1.0), Some(0.3))];
         let summary = RunSummary::from_records(&with, 1.0, false);
-        let first_any = summary
-            .ttft_first_any_s
-            .expect("reasoning rows produce the clock");
+        let first_any = summary.ttft_first_any_s;
         assert!(
             (first_any.p50.unwrap() - 0.3).abs() < 1e-9,
             "first-any is the earlier clock: {:?}",

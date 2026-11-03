@@ -110,6 +110,13 @@ struct Args {
         help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
     )]
     infer_ttft_from_first_byte: bool,
+    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful")]
+    ttft_fallback: Option<String>,
+    #[arg(
+        long,
+        help = "Allow missing TTFT in exploratory runs; request errors and safety gates still apply"
+    )]
+    allow_missing_ttft: bool,
     #[arg(long, default_value_t = 100)]
     requests_per_stage: u64,
     #[arg(long, default_value = "1,2,4,8")]
@@ -704,6 +711,9 @@ fn imagegen_request(body: &Value) -> Result<ImagegenRequest> {
 /// Reject flags that do not apply to `--kind` before any input is loaded.
 fn validate_kind_flags(args: &Args) -> Result<()> {
     let kind = args.kind;
+    if args.ttft_fallback.is_some() && (!args.streaming || !kind.chat_like()) {
+        bail!("--ttft-fallback requires streaming chat or vlm");
+    }
     if !args.images.is_empty() && kind != EndpointKind::Vlm {
         bail!("--image is only valid for --kind vlm");
     }
@@ -1021,6 +1031,7 @@ fn spawn_one_request(
     let kind = args.kind;
     let streaming = args.streaming && kind.chat_like();
     let infer_ttft = args.infer_ttft_from_first_byte;
+    let first_token_fallback = args.ttft_fallback.is_some();
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
     tokio::spawn(async move {
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
@@ -1092,6 +1103,7 @@ fn spawn_one_request(
         let mut t_first_ns = None;
         let mut stream_ttft_s = None;
         let mut first_reasoning_s = None;
+        let mut stream_output_error = None;
         let mut itl_s = Vec::new();
         let body_slot = Arc::clone(&connect_slot);
         let result: Result<Reply> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
@@ -1103,10 +1115,11 @@ fn spawn_one_request(
                 let stream = metrum_ai_bench::chat_stream::consume_with_options(
                     metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
                     sent,
-                    infer_ttft,
+                    true,
                     false,
                 )
                 .await?;
+                stream_output_error = stream.output_error();
                 stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());
                 first_reasoning_s = stream.first_reasoning.map(|d| d.as_secs_f64());
                 itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
@@ -1155,23 +1168,28 @@ fn spawn_one_request(
             Ok(value) => {
                 let (input_tokens, output_tokens) = response_tokens(kind, &value);
                 (
-                    true,
-                    validator.as_ref().map(|check| check.validate(&value)),
+                    stream_output_error.is_none(),
+                    stream_output_error
+                        .is_none()
+                        .then(|| validator.as_ref().map(|check| check.validate(&value)))
+                        .flatten(),
                     input_tokens,
                     output_tokens,
                     response_reasoning_tokens(kind, &value),
-                    None,
+                    stream_output_error.as_ref().map(ToString::to_string),
                 )
             }
             Err(error) => (false, None, 0, 0, None, Some(error.to_string())),
         };
         // InFlightSlot leaves the gauge before freeing the permit (#189).
         drop(request_slot);
-        let resolved = metrum_ai_bench::measurement::resolve_ttft(
+        let resolved = metrum_ai_bench::measurement::resolve_ttft_with_fallback(
             streaming,
             stream_ttft_s,
+            first_reasoning_s,
             first_byte_s,
             infer_ttft,
+            first_token_fallback,
         );
         let record = BenchRecord {
             seq: sequence,
@@ -1233,6 +1251,8 @@ fn spawn_one_request(
                         service_latency_s: record.service_latency_s,
                         ttft_s: record.ttft_s,
                         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
+                        first_reasoning_s: record.first_reasoning_s,
+                        ttft_first_any_s: record.first_any_s(),
                         error,
                         queue_sample_age_ms: None,
                         queue_sample_stale: None,
@@ -1740,6 +1760,15 @@ async fn main() -> Result<()> {
     if let Some(temperature) = args.temperature {
         redacted_config["temperature"] = json!(decimal_f32(temperature));
     }
+    if let Some(fallback) = &args.ttft_fallback {
+        redacted_config["ttft_fallback"] = json!(fallback);
+    }
+    if args.allow_missing_ttft {
+        redacted_config["allow_missing_ttft"] = json!(true);
+    }
+    if args.infer_ttft_from_first_byte {
+        redacted_config["infer_ttft_from_first_byte"] = json!(true);
+    }
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
@@ -1769,6 +1798,7 @@ async fn main() -> Result<()> {
     let mut all_records = Vec::new();
     let mut points = Vec::new();
     let mut any_osl_validation = None;
+    let mut ttft_error = None;
     let mut partial = false;
     for stage in stages {
         if stop.is_stopped() {
@@ -1802,44 +1832,64 @@ async fn main() -> Result<()> {
         if let Some(ref v) = isl_osl {
             any_osl_validation = Some(v.clone());
         }
-        let measured_successes: Vec<_> =
-            records.iter().filter(|r| !r.warmup && r.success).collect();
-        let missing_ttft = measured_successes
-            .iter()
-            .filter(|r| r.ttft_s.is_none())
-            .count();
-        let approx_count = measured_successes
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.ttft_source,
-                    Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
-                )
-            })
-            .count();
-        let no_output_token_errors = records
-            .iter()
-            .filter(|r| {
-                !r.warmup
-                    && r.error
-                        .as_deref()
-                        .is_some_and(|msg| msg.contains("no output token"))
-            })
-            .count();
+        let measured: Vec<_> = records.iter().filter(|r| !r.warmup).collect();
+        let is_no_answer = |r: &&metrum_ai_bench::strategic::BenchRecord| {
+            matches!(
+                r.error.as_deref(),
+                Some("no output token" | "reasoning truncated before visible output")
+            )
+        };
         let ttft_audit = if args.kind.chat_like() {
-            metrum_ai_bench::measurement::audit_chat_ttft(
-                args.streaming,
-                args.infer_ttft_from_first_byte,
-                measured_successes.len(),
-                missing_ttft,
-                approx_count,
-                no_output_token_errors,
-            )?
+            metrum_ai_bench::measurement::audit_chat_ttft_observed(
+                metrum_ai_bench::measurement::ChatTtftAuditInput {
+                    streaming: args.streaming,
+                    infer_from_first_byte: args.infer_ttft_from_first_byte,
+                    first_token_fallback: args.ttft_fallback.is_some(),
+                    allow_missing: args.allow_missing_ttft,
+                    successes: measured.iter().filter(|r| r.success).count(),
+                    missing_successes: measured
+                        .iter()
+                        .filter(|r| r.success && r.ttft_s.is_none())
+                        .count(),
+                    no_answer: measured.iter().copied().filter(is_no_answer).count(),
+                    unresolved_no_answer: measured
+                        .iter()
+                        .copied()
+                        .filter(is_no_answer)
+                        .filter(|r| r.ttft_s.is_none())
+                        .count(),
+                    reasoning_truncated: measured
+                        .iter()
+                        .filter(|r| {
+                            r.error.as_deref() == Some("reasoning truncated before visible output")
+                        })
+                        .count(),
+                    measured: measured.len(),
+                    first_byte_count: measured
+                        .iter()
+                        .filter(|r| {
+                            r.ttft_source
+                                == Some(metrum_ai_bench::measurement::TtftSource::FirstByteApprox)
+                        })
+                        .count(),
+                    first_token_count: measured
+                        .iter()
+                        .filter(|r| {
+                            r.ttft_source
+                                == Some(
+                                    metrum_ai_bench::measurement::TtftSource::FirstTokenFallback,
+                                )
+                        })
+                        .count(),
+                    timeout_flag: "--timeout-seconds",
+                    thinking_toggle_supported: true,
+                },
+            )
         } else {
-            metrum_ai_bench::measurement::TtftAudit {
+            Ok(metrum_ai_bench::measurement::TtftAudit {
                 approx_count: 0,
                 warning: None,
-            }
+            })
         };
         let mut point = summarize_stage_with_options(
             stage,
@@ -1862,10 +1912,14 @@ async fn main() -> Result<()> {
                 &records, &samples,
             ));
         }
-        point.ttft_approx_count = ttft_audit.approx_count;
-        point.ttft_warning = ttft_audit.warning;
+        point.ttft_approx_count = ttft_audit.as_ref().map_or(0, |a| a.approx_count);
+        point.ttft_warning = ttft_audit.as_ref().ok().and_then(|a| a.warning.clone());
         points.push(point);
         all_records.extend(records);
+        if let Err(error) = ttft_audit {
+            ttft_error = Some(error);
+            break;
+        }
     }
     stop_legacy.store(true, Ordering::Relaxed);
     if let Some(session) = telemetry_session.as_mut() {
@@ -1906,7 +1960,7 @@ async fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
-            "schema_version": "metrum-ai-bench-cli.strategic.v1",
+            "schema_version": "metrum-ai-bench-cli.strategic.v2",
             "tool_version": VERSION,
             "environment": environment,
             "config": redacted_config,
@@ -1958,6 +2012,9 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "otlp"))]
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
+    }
+    if let Some(error) = ttft_error {
+        return Err(error);
     }
     if let Some(ref validation) = any_osl_validation {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.fail_on_osl_mismatch)?;

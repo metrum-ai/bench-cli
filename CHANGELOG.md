@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.2 (2026-11-03)
+
+### Changed
+
+- **Behavior change:** a completed stream with no visible answer is a request
+  error under every TTFT flag, including `--infer-ttft-from-first-byte`.
+  Reasoning-only streams stopped by the token limit report `reasoning_truncated`;
+  previously the first-byte option could count them as successes. Error counts,
+  success-only throughput and strict exit codes can change for these runs.
+- Visible-answer TTFT remains the default; the explicit `--ttft-fallback
+  first-token` is a labelled first-token substitute, not answer latency.
+  `--allow-missing-ttft` relaxes only the TTFT audit, not request failures or
+  `--ci-safety`. Report first-reasoning, first-any, source/coverage and
+  observed reasoning/visible usage separately. JSON schema versions change
+  for the new output shape; older audit schemas remain readable.
+- Release archives include the tracked documentation tree and verify README
+  documentation links. Recommend the Metrum AI all-smi fork for system telemetry.
+
 ## 1.7.1 (2026-11-02)
 
 ### Documentation

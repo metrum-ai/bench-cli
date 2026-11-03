@@ -97,6 +97,14 @@ Options:
       --infer-ttft-from-first-byte
           When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
 
+      --ttft-fallback <TTFT_FALLBACK>
+          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+
+          [possible values: first-token]
+
+      --allow-missing-ttft
+          Allow missing TTFT in exploratory runs; request errors and safety gates still apply
+
       --log-level <LOG_LEVEL>
           Log level: error, warn, info, debug, trace
 
@@ -211,7 +219,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -233,7 +241,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -465,7 +473,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -487,7 +495,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -505,6 +513,14 @@ Options:
 
       --infer-ttft-from-first-byte
           When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+
+      --ttft-fallback <TTFT_FALLBACK>
+          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+
+          [possible values: first-token]
+
+      --allow-missing-ttft
+          Allow missing TTFT in exploratory runs; request errors and safety gates still apply
 
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
@@ -730,7 +746,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -752,7 +768,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -996,7 +1012,7 @@ Options:
           [default: append]
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v1)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -1010,7 +1026,7 @@ Options:
           [default: 3]
 
       --summary-json <SUMMARY_JSON>
-          Optional path to write summary.v3 JSON (same schema as the data-log summary line)
+          Optional path to write summary.v4 JSON (same schema as the data-log summary line)
 
       --debug-log <DEBUG_LOG>
           [default: debug.log]
@@ -1040,7 +1056,7 @@ Options:
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v3 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -1236,6 +1252,14 @@ Options:
 
       --infer-ttft-from-first-byte
           When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+
+      --ttft-fallback <TTFT_FALLBACK>
+          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+
+          [possible values: first-token]
+
+      --allow-missing-ttft
+          Allow missing TTFT in exploratory runs; request errors and safety gates still apply
 
       --requests-per-stage <REQUESTS_PER_STAGE>
           [default: 100]

@@ -59,6 +59,8 @@ jobs:
       - name: Data-point counts are current
         shell: bash
         run: cargo xtask render-data-points --check
+      - name: Test release archive link checker
+        run: python3 -m unittest discover -s scripts -p test_check_release_readme_links.py
 
   dummy-binaries:
     needs: verify
@@ -84,6 +86,8 @@ jobs:
         working-directory: dummy-model-server
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.10"
@@ -131,6 +135,8 @@ jobs:
       SDKROOT: /opt/MacOSX11.3.sdk
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dummy-${{ matrix.target }}
@@ -165,12 +171,12 @@ jobs:
           test -x "${root}/bin/metrum-ai-bench-cli-mock-server"
           test -x "${root}/bin/dummy-model-server"
           cp LICENSE NOTICE THIRD_PARTY_LICENSES README.md TRADEMARKS.md "${root}/"
-          mkdir -p "${root}/docs"
-          cp docs/RESULTS_PUBLICATION_POLICY.md docs/CLAIMS_LEDGER.md \
-             docs/NAMING.md "${root}/docs/"
+          # Include the entire tracked documentation tree from the tagged commit.
+          git archive HEAD docs | tar -x -C "${root}"
           cp -a examples "${root}/"
           cp -a test-data "${root}/"
           tar -czf "${root}.tar.gz" "${root}"
+          python3 scripts/check_release_readme_links.py "${root}.tar.gz"
           if command -v shasum >/dev/null 2>&1; then
             shasum -a 256 "${root}.tar.gz" > "${root}.tar.gz.sha256"
           else

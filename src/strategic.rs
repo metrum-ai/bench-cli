@@ -132,6 +132,19 @@ where
 }
 
 impl BenchRecord {
+    /// First observed visible or reasoning delta, never an HTTP approximation.
+    pub fn first_any_s(&self) -> Option<f64> {
+        let visible = if self.ttft_source == Some(crate::measurement::TtftSource::Stream) {
+            self.ttft_s
+        } else {
+            None
+        };
+        [visible, self.first_reasoning_s]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min)
+    }
+
     /// N-1 TPOT: `(service_latency - ttft) / (output_tokens - 1)`.
     pub fn tpot_s(&self) -> Option<f64> {
         let ttft = self.ttft_s?;
@@ -152,6 +165,12 @@ impl BenchRecord {
 
     /// Fill prefill/decode proxies from TTFT, connect, and token counts.
     pub fn with_phase_metrics(mut self) -> Self {
+        if !self.success {
+            self.prefill_s = None;
+            self.decode_s = None;
+            self.decode_tok_s = None;
+            return self;
+        }
         self.prefill_s = match (self.ttft_s, self.connect_s) {
             (Some(ttft), Some(connect)) => Some((ttft - connect).max(0.0)),
             (Some(ttft), None) => Some(ttft),
@@ -172,6 +191,13 @@ impl BenchRecord {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SweepPoint {
+    pub ttft_coverage: crate::summary::TtftCoverage,
+    pub ttft_first_any_s: crate::stats::DistSummary,
+    pub fallback_ttft_s: crate::stats::DistSummary,
+    pub observed_reasoning_tokens: crate::stats::DistSummary,
+    pub observed_reasoning_tokens_total: Option<u64>,
+    pub observed_visible_completion_tokens: crate::stats::DistSummary,
+    pub observed_visible_completion_tokens_total: Option<u64>,
     pub load: f64,
     pub n: usize,
     pub errors: usize,
@@ -574,9 +600,75 @@ pub fn summarize_stage_with_options(
     } else {
         Vec::new()
     };
-    let first_reasoning: Vec<f64> = success_rows
+    let first_reasoning: Vec<f64> = measured
         .iter()
         .filter_map(|record| record.first_reasoning_s)
+        .collect();
+    let mut coverage = crate::summary::TtftCoverage {
+        measured: measured.len(),
+        ..Default::default()
+    };
+    let mut first_any = Vec::new();
+    let mut fallback_ttft = Vec::new();
+    for record in &measured {
+        match record.ttft_source {
+            Some(crate::measurement::TtftSource::Stream) => {
+                coverage.visible += 1;
+                coverage.stream += 1;
+            }
+            Some(crate::measurement::TtftSource::FirstTokenFallback) => {
+                coverage.first_token_fallback += 1
+            }
+            Some(crate::measurement::TtftSource::FirstByteApprox) => {
+                coverage.first_byte_approx += 1
+            }
+            None => coverage.unresolved += 1,
+        }
+        if record.first_reasoning_s.is_some()
+            && record.ttft_source != Some(crate::measurement::TtftSource::Stream)
+        {
+            coverage.reasoning_only += 1;
+        }
+        if record.error.as_deref() == Some("reasoning truncated before visible output") {
+            coverage.reasoning_truncated += 1;
+        }
+        if record.error.as_deref() == Some("no output token") && record.first_reasoning_s.is_none()
+        {
+            coverage.no_token += 1;
+        }
+        let visible = if record.ttft_source == Some(crate::measurement::TtftSource::Stream) {
+            record.ttft_s
+        } else {
+            None
+        };
+        if let Some(value) = [visible, record.first_reasoning_s]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min)
+        {
+            first_any.push(value);
+        }
+        if !record.success
+            && matches!(
+                record.ttft_source,
+                Some(
+                    crate::measurement::TtftSource::FirstByteApprox
+                        | crate::measurement::TtftSource::FirstTokenFallback
+                )
+            )
+        {
+            if let Some(value) = record.ttft_s {
+                fallback_ttft.push(value);
+            }
+        }
+    }
+    coverage.missing_visible = measured.len() - coverage.visible;
+    let observed_reasoning: Vec<u64> = measured.iter().filter_map(|r| r.reasoning_tokens).collect();
+    let observed_visible: Vec<u64> = measured
+        .iter()
+        .filter_map(|r| {
+            crate::usage::visible_completion_tokens(r.output_tokens, r.reasoning_tokens)
+        })
         .collect();
     // Rows with no reported usage are skipped, never counted as zero-token
     // requests. Rerank `input_tokens` is `usage.total_tokens` (all input).
@@ -662,6 +754,23 @@ pub fn summarize_stage_with_options(
     let no_slos = thresholds.is_empty();
     let time_weighted = stage_time_weighted(&measured, &success_rows, generates_output);
     SweepPoint {
+        ttft_coverage: coverage,
+        ttft_first_any_s: crate::stats::DistSummary::from_values(&first_any),
+        fallback_ttft_s: crate::stats::DistSummary::from_values(&fallback_ttft),
+        observed_reasoning_tokens: crate::stats::DistSummary::from_values(
+            &observed_reasoning
+                .iter()
+                .map(|&v| v as f64)
+                .collect::<Vec<_>>(),
+        ),
+        observed_reasoning_tokens_total: crate::summary::total(&observed_reasoning),
+        observed_visible_completion_tokens: crate::stats::DistSummary::from_values(
+            &observed_visible
+                .iter()
+                .map(|&v| v as f64)
+                .collect::<Vec<_>>(),
+        ),
+        observed_visible_completion_tokens_total: crate::summary::total(&observed_visible),
         load,
         n: measured.len(),
         errors,
@@ -1298,6 +1407,8 @@ struct CsvBenchRecord {
     bytes_received: Option<u64>,
     chunks_received: Option<u64>,
     send_offset_s: Option<f64>,
+    #[serde(getter = "BenchRecord::first_any_s")]
+    ttft_first_any_s: Option<f64>,
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
@@ -1723,6 +1834,13 @@ mod tests {
     fn knee_point(throughput: f64, latency: f64) -> SweepPoint {
         let latency_s = crate::stats::DistSummary::from_values(&[latency]);
         SweepPoint {
+            ttft_coverage: Default::default(),
+            ttft_first_any_s: crate::stats::DistSummary::from_values(&[]),
+            fallback_ttft_s: crate::stats::DistSummary::from_values(&[]),
+            observed_reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
+            observed_reasoning_tokens_total: None,
+            observed_visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
+            observed_visible_completion_tokens_total: None,
             load: throughput,
             n: 1,
             errors: 0,
@@ -2251,6 +2369,13 @@ mod tests {
     fn html_report_has_axes_ticks_and_labels() {
         let latency_s = crate::stats::DistSummary::from_values(&[0.1, 0.2]);
         let points = vec![SweepPoint {
+            ttft_coverage: Default::default(),
+            ttft_first_any_s: crate::stats::DistSummary::from_values(&[]),
+            fallback_ttft_s: crate::stats::DistSummary::from_values(&[]),
+            observed_reasoning_tokens: crate::stats::DistSummary::from_values(&[]),
+            observed_reasoning_tokens_total: None,
+            observed_visible_completion_tokens: crate::stats::DistSummary::from_values(&[]),
+            observed_visible_completion_tokens_total: None,
             load: 1.0,
             n: 2,
             errors: 0,
@@ -2431,13 +2556,16 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("records.csv");
             export_csv(&path, &records).unwrap();
-            let mut reader = csv::Reader::from_path(path).unwrap();
+            let mut reader = csv::Reader::from_path(&path).unwrap();
             let headers = reader.headers().unwrap().clone();
             let keys = serde_json::to_value(&success).unwrap();
             let keys = keys.as_object().unwrap();
-            assert_eq!(headers.len(), keys.len());
+            assert_eq!(headers.len(), keys.len() + 1);
             for header in &headers {
-                assert!(keys.contains_key(header), "{header}");
+                assert!(
+                    header == "ttft_first_any_s" || keys.contains_key(header),
+                    "{header}"
+                );
             }
             let rows: Vec<_> = reader.records().collect::<Result<_, _>>().unwrap();
             assert_eq!(rows.len(), 2);
@@ -2447,6 +2575,10 @@ mod tests {
             let source = headers.iter().position(|h| h == "ttft_source").unwrap();
             assert!(rows.iter().any(|row| &row[source] == "stream"));
             assert!(rows.iter().any(|row| row[source].is_empty()));
+            let mut reader = csv::Reader::from_path(&path).unwrap();
+            let round_trip: Vec<BenchRecord> =
+                reader.deserialize().collect::<Result<_, _>>().unwrap();
+            assert_eq!(round_trip.len(), 2);
         }
     }
 

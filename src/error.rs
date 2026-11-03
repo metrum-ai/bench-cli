@@ -9,14 +9,24 @@ use std::fmt;
 pub enum RequestError {
     Timeout,
     Connect,
-    HttpStatus { status: u16 },
+    HttpStatus {
+        status: u16,
+    },
     RateLimit,
     StreamTruncated,
-    ParseError { message: String },
+    ParseError {
+        message: String,
+    },
     NoOutputToken,
+    /// The stream spent its token budget on reasoning without an answer.
+    ReasoningTruncated,
     UsageMissing,
-    ApiError { message: String },
-    Other { message: String },
+    ApiError {
+        message: String,
+    },
+    Other {
+        message: String,
+    },
 }
 
 impl RequestError {
@@ -74,6 +84,7 @@ impl RequestError {
             Self::StreamTruncated => "stream_truncated",
             Self::ParseError { .. } => "parse_error",
             Self::NoOutputToken => "no_output_token",
+            Self::ReasoningTruncated => "reasoning_truncated",
             Self::UsageMissing => "usage_missing",
             Self::ApiError { .. } => "api_error",
             Self::Other { .. } => "other",
@@ -91,6 +102,7 @@ impl fmt::Display for RequestError {
             Self::StreamTruncated => write!(f, "stream truncated"),
             Self::ParseError { message } => write!(f, "parse error: {message}"),
             Self::NoOutputToken => write!(f, "no output token"),
+            Self::ReasoningTruncated => write!(f, "reasoning truncated before visible output"),
             Self::UsageMissing => write!(f, "usage missing"),
             Self::ApiError { message } => write!(f, "API error: {message}"),
             Self::Other { message } => write!(f, "{message}"),

@@ -101,7 +101,7 @@ unit-normalized Kneedle result. In each point, `load` is the selected sweep
 axis and `throughput` is successful requests per second. There is no
 `knee_rps` field. `knee` is null when no index is selected; otherwise use
 `knee.load`, with the diagnostic details in `knee_detection`. Modality
-`summary.v3` output does not contain a knee.
+`summary.v4` output does not contain a knee; historical v3 logs remain readable.
 
 Knee detection needs at least 5 measured stages (stages with a p95): both
 endpoints plus 3 interior candidates. Stages with no successes have no p95
@@ -285,7 +285,7 @@ metrum-ai-bench-cli-strategic --kind imagegen \
 Every sweep point keeps the usual stage summary (throughput, latency, HTTP
 phases, time-weighted blocks, `knee_detection`) and adds `modality_metrics`:
 one distribution per key over measured successes, with the key names the
-modality binaries use on `request.v3` records. VLM: `image_count`,
+modality binaries use on `request.v4` records. VLM: `image_count`,
 `image_bytes`. ASR: `wer`, `cer` (with references), `rtfx_client` and
 `audio_duration_s` (when the sample row has `duration`). Imagegen:
 `images_requested`, `images_returned`, plus `image_digests` (`images`,
@@ -308,7 +308,7 @@ not written to the CSV, which keeps its columns for every kind.
 For durable hardware and engine time series during a sweep, pass `--ndjson`
 with `--telemetry` (YAML Prometheus sources) or legacy `--metrics-url`. Optional
 `--require-telemetry` aborts after consecutive scrape failures. The default
-smoke source is the Metrum [all-smi](https://github.com/chetan-metrum-ai/all-smi)
+smoke source is the Metrum [all-smi](https://github.com/metrum-ai/all-smi)
 fork at `http://127.0.0.1:9090/metrics`, plus the serving engine's `/metrics`.
 The series list is the YAML you pass, read at startup, not a catalog compiled
 into the binary. Scope, units, join model, and recipes:

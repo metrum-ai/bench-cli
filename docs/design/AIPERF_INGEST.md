@@ -10,6 +10,12 @@
 - Date: 2026-10-05
 - Author: Metrum AI
 
+> **Version note:** This historical proposal describes the v3 design as it
+> stood in 2026; it is not an implemented importer. Current Bench output is
+> `request.v4`, `summary.v4`, and `telemetry.v2`. Compatible readers can still
+> read historical v3 request and summary logs. A future importer must review
+> the v4 fields and no-answer classification before implementation.
+
 ## Question
 
 Should Metrum AI Bench CLI read an NVIDIA AIPerf `profile_export.jsonl` and
@@ -80,9 +86,12 @@ Design choices made in this note (recorded per the #184 protocol):
   time-weighted blocks stay in the source files. The `import` block records
   each file's SHA-256 digest. If Track B adds a native Bench metric that one
   of those fields supplies, the importer fills it then.
-- An AIPerf success that has no visible output token is imported as a
-  `no_output_token` error, as Bench classifies it. This can make the imported
-  error rate higher than AIPerf's. The `import` block reports the count.
+- A successful AIPerf record without a visible output token must remain an
+  error. In current Bench, observed reasoning followed by `finish_reason=length`
+  is `reasoning_truncated`; other no-answer completions are `no_output_token`.
+  A future importer must not infer truncation when the export lacks that finish
+  reason. This can make imported error rates higher than AIPerf's, and the
+  proposed `import` block should report reclassifications.
 
 ## Inputs
 
@@ -94,10 +103,11 @@ All counts below come from real files.
 | Bake-off evidence [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`), `raw/aiperf/c4/` inside the zip | 0.11.0, JSON export schema `1.3` | A real vLLM-served model, c=4, 16 requests, streaming chat. Same three files plus CSVs |
 | Upstream docs at tag `v0.13.0` | 0.13.0 | [Profile exports](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/working-with-profile-exports.md), [JSON export schema](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/json-export-schema.md), [metrics reference](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/metrics-reference.md), [server metrics](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md) |
 
-Bench targets: `request.v3` and `summary.v3` in
+Current Bench targets are `request.v4` and `summary.v4` in
 [OUTPUT_SCHEMA.md](../OUTPUT_SCHEMA.md), definitions in
-[METRICS.md](../METRICS.md), and `telemetry.v1` in
-[TELEMETRY.md](../TELEMETRY.md).
+[METRICS.md](../METRICS.md), and `telemetry.v2` in
+[TELEMETRY.md](../TELEMETRY.md). The v3/v1 mapping tables below document the
+historical proposal and must be updated before implementation.
 
 ### AIPerf record shape
 
@@ -169,7 +179,7 @@ One `request.v3` line per AIPerf record, sorted by `request_start_ns`. Status:
 | `usage_missing` | `usage_*` presence | true when the usage fields are absent (every 0.11.0 record) | derived |
 | `in_flight_at_send` | intervals of all records | count of records with start at or before this send and end after it. Label it reconstructed | derived |
 | `scheduled_offset_s` / `queue_delay_s` | none for `concurrency` phases | `scheduled_offset_s` absent and `queue_delay_s = 0`, as a native closed-loop run writes them. Open-loop (`request_rate`) phases export no intended send time, so the importer refuses them in phase 1 | gap (open loop) |
-| `error` | `error.code`, `error.type`, `error.message` | 429 to `rate_limit`, other HTTP codes to `http_status`, timeout classes to `timeout`, the rest to `other { message }`. A success with no TTFO becomes `no_output_token` | derived |
+| `error` | `error.code`, `error.type`, `error.message` | 429 to `rate_limit`, other HTTP codes to `http_status`, timeout classes to `timeout`, the rest to `other { message }`. A success with no TTFO remains a no-answer error; classify `reasoning_truncated` only when reasoning and a length finish are evidenced, otherwise `no_output_token` | derived |
 | `partial` | `metadata.was_cancelled` | bool | exact |
 | `modality_metrics.prompt_words` | `inputs.json` payload via `conversation_id` and `turn_index` | whitespace word count of the prompt | derived (optional) |
 | `modality_metrics.completion_words` | none | AIPerf does not save response text | gap |
@@ -183,7 +193,7 @@ cannot be filled.
 
 | `summary.v3` field | Source | Status |
 |--------------------|--------|--------|
-| `attempted`, `successes`, `errors`, `error_rate`, `errors_by_type` | recomputed over `phase=measure` | recomputed; may exceed AIPerf errors by the `no_output_token` count |
+| `attempted`, `successes`, `errors`, `error_rate`, `errors_by_type` | recomputed over `phase=measure` | recomputed; may exceed AIPerf errors by no-answer counts (`no_output_token` or, when evidenced, `reasoning_truncated`) |
 | `latency_s`, `ttft_s`, `itl_s`, `tpot_s`, `connect_s`, `prefill_s`, `decode_s`, `decode_tok_s` | recomputed type-7 `DistSummary` | recomputed |
 | `first_byte_s` (#191) | mapped `first_byte_s` | recomputed; `n=64` in each 0.13.0 run and `n=16` in 0.11.0 (all streaming). `n=0` for non-streaming imports, because `request_ack_ns` is null there |
 | `queue_delay_s` (#191) | none; no `scheduled_offset_s` | `n=0` for every closed-loop import, which is what a native closed-loop run reports. Open loop is refused |

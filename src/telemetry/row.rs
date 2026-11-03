@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// Schema version for strategic telemetry NDJSON rows.
-pub const TELEMETRY_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.telemetry.v1";
+pub const TELEMETRY_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.telemetry.v2";
 
 /// Prometheus / OpenMetrics metric type as recorded at ingest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +123,10 @@ pub struct RequestRow {
     /// Provenance for `ttft_s` when present (`stream` or `first_byte_approx`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_reasoning_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_first_any_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Last-seen included metric values at request completion (sugar, not truth).

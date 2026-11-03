@@ -12,4 +12,5 @@ prompt_profile: rag-medium
 prompt_revision: main
 budget: 3
 promptfoo_budget_s: 1800
-all_smi_release: v0.26.3-metrum.4
+# Verify the release checksum and record the tag: https://github.com/metrum-ai/all-smi/releases
+all_smi_release: v0.28.1-metrum.3
