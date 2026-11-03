@@ -130,8 +130,11 @@ impl Condition {
                  chunks, `decode_tok_s` a positive decode time and output tokens."
             }
             Self::TtftApprox => {
-                "`--infer-ttft-from-first-byte` on a non-streaming chat run \
-                 (TTFT approximated from the first response byte)."
+                "This condition refers only to `--infer-ttft-from-first-byte`, \
+                 which approximates missing TTFT from HTTP response headers, not \
+                 a token. Separately, `--ttft-fallback first-token` labels a real \
+                 first token; `--allow-missing-ttft` relaxes the audit. No option \
+                 makes a no-answer stream successful, and `--ci-safety` remains strict."
             }
             Self::ReasoningStream => "The server streams `reasoning_content` deltas.",
             Self::ReasoningUsage => {
@@ -166,7 +169,7 @@ impl Condition {
 
 use Condition::*;
 
-/// Optional `summary.v3` quantities and when they fire.
+/// Optional `summary.v4` quantities and when they fire.
 const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("completion_tokens_per_second", &[Usage, Tokenizer]),
     ("completion_tokens_total", &[Usage, Tokenizer]),
@@ -190,7 +193,7 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("visible_completion_tokens_total", &[ReasoningUsage]),
 ];
 
-/// Optional `request.v3` numeric fields and when they fire.
+/// Optional `request.v4` numeric fields and when they fire.
 const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("bytes_received", &[HttpPath]),
     ("bytes_sent", &[HttpPath]),
@@ -1509,8 +1512,8 @@ fn every_optional_field_has_a_condition_and_no_stale_rows() {
         );
         assert!(table.iter().all(|(_, c)| !c.is_empty()), "{label}");
     };
-    check("summary.v3", &s.summary.optional, &summary_optional());
-    check("request.v3", &s.request.optional, &request_optional());
+    check("summary.v4", &s.summary.optional, &summary_optional());
+    check("request.v4", &s.request.optional, &request_optional());
     check("sweep point", &s.sweep.optional, &sweep_optional());
     check(
         "telemetry request row",
@@ -1703,7 +1706,7 @@ fn published_counts_match_real_llm_runs() {
     expected_fields.extend(modality_fields());
     assert_eq!(per_request, expected_fields, "full-run per-request fields");
 
-    // telemetry.v1 request rows: subset of the schema, superset of the always set.
+    // telemetry.v2 request rows: subset of the schema, superset of the always set.
     let rows: Vec<Value> = std::fs::read_to_string(&ndjson)
         .expect("ndjson")
         .lines()

@@ -199,7 +199,7 @@ done
 
 Fields to compare across the three summaries: time-to-first-answer
 (`ttft_s`), output tokens per second (`completion_tokens_per_second`), and
-`errors_by_type.no_output_token`, plus first-reasoning latency
+`errors_by_type.reasoning_truncated` and `errors_by_type.no_output_token`, plus first-reasoning latency
 (`first_reasoning_s`), `reasoning_tokens` / `reasoning_tokens_total`, and
 `visible_completion_tokens` when the server reports reasoning usage.
 

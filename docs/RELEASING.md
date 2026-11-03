@@ -119,8 +119,9 @@ site with `make -C external-docs build` to check both content and rendering.
 Every release states how many data points it tracks.
 [DATA_POINTS.md](DATA_POINTS.md) is generated from the serde schemas by
 `tests/data_points.rs`. Regenerate it with `cargo xtask render-data-points`
-after any change to `summary.v3`, `request.v3`, the strategic sweep point,
-or the `telemetry.v1` request row. `cargo test` (CI) and the release `verify`
+after any change to `summary.v4`, `request.v4`, the strategic sweep point,
+or the `telemetry.v2` request row. Historical v3 logs remain readable by
+compatible consumers. `cargo test` (CI) and the release `verify`
 job (`cargo xtask render-data-points --check`) fail when the committed file is
 stale. The `github-release` job builds the release body itself: GitHub's
 generated notes, then the output of `cargo xtask release-notes-data-points`.

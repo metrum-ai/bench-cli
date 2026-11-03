@@ -78,4 +78,4 @@ LLM prompts come from Hugging Face [`metrum-ai/prompt-library`](https://huggingf
 > GPU/NPU/APU hardware are recorded on the same run clock as requests.
 > See [TELEMETRY.md](TELEMETRY.md) for installation and sampling caveats.
 
-Check which path your installed binary serves before you rely on the example YAML. On 2026-10-02, v0.26.3-metrum.4 served `/metrics`, and `/metric` returned 404.
+Check which path your installed release serves before you rely on the example YAML. As historical evidence, on 2026-10-02 v0.26.3-metrum.4 served `/metrics`, and `/metric` returned 404; this is not the recommended release.

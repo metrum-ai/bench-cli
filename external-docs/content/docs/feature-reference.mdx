@@ -73,6 +73,16 @@ tokenizer counts need a source build:
 cargo build --release --features tokenizer
 ```
 
+For streaming chat and VLM, headline TTFT is the first visible answer delta;
+first-reasoning and first-any-token clocks are separate. A reasoning-only
+length finish is `reasoning_truncated`; other no-answer completions are
+`no_output_token`. `--ttft-fallback first-token` opts into a labelled observed
+token fallback, while `--allow-missing-ttft` relaxes the audit. The legacy
+`--infer-ttft-from-first-byte` is HTTP-header timing, not a token. None turns
+an unanswered stream into a success; `--ci-safety` remains strict. Only choice
+index 0 is measured. Current request/summary output uses v4; compatible
+consumers can still read historical v3 logs.
+
 Walkthroughs: [Modalities](./modalities). Flag lists: [CLI Reference](./cli-reference).
 
 ---
@@ -109,8 +119,8 @@ reports on failure. Cache creation failures name the affected path. Details:
 
 `metrum-ai-bench-cli-strategic` is a **separate binary**, not
 `metrum-ai-bench-cli strategic`. Details: [Strategic benchmarking](./strategic-benchmarking).
-Default GPU exporter for smoke: Metrum all-smi fork on `/metrics` (see
-repository `docs/TELEMETRY.md`).
+For real-device runs, strongly prefer the [Metrum AI all-smi fork](./system-telemetry)
+for system telemetry; verify the release checksum and record its tag.
 ---
 
 ## SUT and redaction {#sut-and-redaction}

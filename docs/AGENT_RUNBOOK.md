@@ -108,7 +108,7 @@ Run the recorder on the serving host and scrape it with `--ndjson --telemetry`. 
 # Verify the installed recorder's subcommands and flags before use.
 all-smi doctor --json
 all-smi api --port 9090 &
-# Confirm the path. On the Metrum fork v0.26.3-metrum.4 the path is /metrics;
+# Confirm the installed release's metrics path. Historically, v0.26.3-metrum.4 used /metrics;
 # /metric returned 404 on 2026-10-02.
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9090/metrics
 
@@ -251,7 +251,7 @@ Check that proves success: every reported number traces to a local summary line 
 
 Failure: no retry. A missing input stays missing and is reported as such.
 
-Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v3` has no knee field.
+Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v4` has no knee field. Compatible readers can still read historical v3 logs, which also lack this field.
 
 ## Step 9: Agent session resilience
 

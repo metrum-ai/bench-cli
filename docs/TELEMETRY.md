@@ -13,7 +13,8 @@
 
 **Check the path and series.** Confirm the current release, listener and
 `/metrics` endpoint for the installed binary before each run. Historically,
-`v0.26.3-metrum.4` served `/metrics`, while `/metric` returned 404.
+As historical evidence, `v0.26.3-metrum.4` served `/metrics`, while `/metric`
+returned 404; it is not the current release recommendation.
 
 Every benchmark binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`,
 `-imagegen` and `-strategic`) optionally scrapes Prometheus text or

@@ -41,6 +41,8 @@ campaign workflow; deterministic lifecycle and smoke operations use `cargo xtask
 commands rather than shell workflows.
 
 ## Offline Telemetry and Fixtures
+- For system telemetry, use the [Metrum AI all-smi release](https://github.com/metrum-ai/all-smi/releases)
+  (latest recorded `v0.28.1-metrum.3`); verify its checksum and record the tag.
 - Analyze completed NDJSON runs with the
   [telemetry-analysis skill](.claude/skills/telemetry-analysis/SKILL.md) and
   `cargo xtask telemetry-analysis`; this is an offline xtask, not a benchmark

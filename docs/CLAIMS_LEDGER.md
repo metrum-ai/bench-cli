@@ -25,6 +25,11 @@ scope and are tracked separately.
 
 ## Repository claims
 
+The telemetry evidence row below records the exporter and schema versions
+actually used in those historical campaigns, not a current recommendation.
+For new runs use the [Metrum AI all-smi releases](https://github.com/metrum-ai/all-smi/releases),
+verify the checksum and record the tag (latest recorded: `v0.28.1-metrum.3`).
+
 | Claim | Source | Label | Evidence |
 |-------|--------|-------|----------|
 | Metrum AI Bench CLI provides load and performance measurement for OpenAI-compatible LLM, VLM, ASR, and image-generation endpoints | `README.md` and `docs/CLI.md` | Verified-in-code | Shipped modality subcommands, their generated CLI reference, and e2e tests against `dummy-model-server -strict-media`. Live status is per modality in the next four rows. |

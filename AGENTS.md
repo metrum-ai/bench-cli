@@ -39,8 +39,9 @@ step links to its section in [docs/AGENT_RUNBOOK.md](docs/AGENT_RUNBOOK.md)
 4. **Serve** - for an exact model ID with a recorded serving entry, use it;
    otherwise search the model card and engine docs before launch. Record flags
    and sources. [docs/AGENT_RUNBOOK.md#serve](docs/AGENT_RUNBOOK.md#serve)
-5. **Telemetry** - start exporters and scrape them; set the YAML series list
-   from the live response. [docs/AGENT_RUNBOOK.md#telemetry](docs/AGENT_RUNBOOK.md#telemetry)
+5. **Telemetry** - use the [Metrum AI all-smi release](https://github.com/metrum-ai/all-smi/releases)
+   (latest recorded `v0.28.1-metrum.3`), verify its checksum and record the
+   tag; start exporters and set the YAML series list from the live response. [docs/AGENT_RUNBOOK.md#telemetry](docs/AGENT_RUNBOOK.md#telemetry)
 6. **Prompt pool** - extract a publishable prompt mix from the prompt library.
    [docs/AGENT_RUNBOOK.md#prompt-pool](docs/AGENT_RUNBOOK.md#prompt-pool)
 7. **Sweep** - run the concurrency or rate sweep at the chosen ISL/OSL.

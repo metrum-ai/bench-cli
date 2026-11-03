@@ -181,9 +181,12 @@ with `cargo install metrum-ai-bench-cli`.
 
 ## Reasoning models
 
-Thinking models emit reasoning deltas before the answer. A small
-`--max-tokens` often yields `no_output_token` on every request, and a naive
-TTFT that counts reasoning looks falsely fast. Read
+Thinking models emit reasoning deltas before the answer. If the token budget
+ends on reasoning without an answer, the request is `reasoning_truncated`;
+other no-answer streams are `no_output_token`. TTFT measures the visible
+answer by default. `--ttft-fallback first-token` labels a real first-token
+fallback, and `--allow-missing-ttft` relaxes the missing-TTFT audit; neither
+makes a missing answer successful. Read
 [docs/REASONING_MODELS.md](docs/REASONING_MODELS.md) before choosing
 `--max-tokens` or `reasoning_effort`.
 

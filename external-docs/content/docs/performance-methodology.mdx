@@ -52,12 +52,19 @@ See the harness README for dataset freezing, setup, and limitations.
 | --- | --- |
 | **E2E latency** | Response body completion minus actual send. Successful measure-phase requests only. Field: `latency_s`. |
 | **Coordinated-omission latency** | E2E latency plus delay between scheduled arrival and actual send. Headline open-loop latency. |
-| **TTFT** | First **visible** output delta minus send. Role and reasoning-only deltas do not count. Missing visible output is `no_output_token`. Includes connection setup, TLS, and queueing by design. Non-streaming responses report `ttft_s: null` (never fabricated from E2E). For publishable TTFT, run the load generator on the serving host (loopback or same private network); a public WAN URL adds RTT into TTFT. The CLI warns on non-loopback / non-RFC1918 hosts; set `METRUM_AI_BENCH_ALLOW_REMOTE_URL=1` to silence. |
+| **TTFT** | First **visible** output delta minus send. Role and reasoning-only deltas do not count. A reasoning-only length finish is `reasoning_truncated`; other completed no-answer streams are `no_output_token`. Includes connection setup, TLS, and queueing. Non-streaming TTFT is absent unless HTTP first-byte approximation is explicitly requested; it is never fabricated from E2E. Network RTT affects client-observed TTFT. |
 | **First byte** | Response headers received minus send (`first_byte_s`). Separates gateway/header delay from body wait. |
 | **Connect** | TCP/TLS connector time minus pool reuse (`connect_s`). `0` means the request reused a pooled connection. Prefill proxy: `prefill_s` approximates TTFT minus connect when both are present. TTFT still includes connect/TLS/queue by design. |
-| **First reasoning** | First non-empty `reasoning_content` / `reasoning` delta minus send; reported separately from TTFT. |
+| **First reasoning** | First non-empty `reasoning_content` / `reasoning` delta minus send; reported separately from TTFT, including completed no-answer streams. |
 | **ITL** | Every successive visible-output chunk timestamp delta, pooled across measured successes. |
 | **TPOT** | `(e2e - ttft) / (completion_tokens - 1)`, defined only for at least two completion tokens. |
+
+Streaming chat/VLM may use `--ttft-fallback first-token` for a labelled real
+first-token fallback or `--allow-missing-ttft` to relax the audit. The legacy
+`--infer-ttft-from-first-byte` uses HTTP headers, not a token. No option makes
+an unanswered stream successful; `--ci-safety` remains strict. Choice index 0
+is measured. Current request/summary output is v4; compatible consumers can
+read historical v3 logs.
 
 ---
 

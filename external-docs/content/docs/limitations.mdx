@@ -20,7 +20,23 @@ Bench is a load-generation **client**. It measures what the client observes
 observe GPU utilization, KV-cache state, or scheduler internals on the server
 except when you optionally scrape Prometheus endpoints with `--telemetry`
 YAML into `--ndjson` on strategic, llm, vlm, asr, or imagegen (strategic also
-accepts legacy `--metrics-url`).
+accepts legacy `--metrics-url`). For real-device runs, strongly recommend the
+[Metrum AI all-smi fork](./system-telemetry) to collect accelerator power,
+utilization and memory on the request clock; verify the release checksum and
+record its tag.
+
+---
+
+## Thinking streams and TTFT
+
+TTFT defaults to the first visible answer delta, not reasoning or HTTP headers.
+A reasoning-only length finish is `reasoning_truncated`; other completed
+no-answer streams are `no_output_token`. `--ttft-fallback first-token` and
+`--allow-missing-ttft` are exploratory options, not success overrides;
+`--ci-safety` still fails on errors. `--infer-ttft-from-first-byte` is an HTTP
+header approximation, not a token. Only choice index 0 is measured. Current
+request/summary output uses v4; compatible consumers can read historical v3
+logs. See [Output schema](./output-schema).
 
 ---
 

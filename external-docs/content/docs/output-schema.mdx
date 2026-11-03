@@ -24,7 +24,10 @@ V3 remains readable for audit. A completed stream without a visible answer is
 an error under every TTFT flag; reasoning-only length finishes are
 `reasoning_truncated`. `ttft_first_any_s` and `first_reasoning_s` retain actual
 streamed clocks even on completed no-answer failures. `ttft_source` identifies
-visible stream, first-token fallback or HTTP first-byte approximation.
+visible stream, `--ttft-fallback first-token`, or the HTTP-header approximation
+from `--infer-ttft-from-first-byte`. `--allow-missing-ttft` relaxes only the
+audit; none of these flags makes a missing answer successful, and `--ci-safety`
+remains strict. Choice index 0 is measured.
 
 Records include:
 

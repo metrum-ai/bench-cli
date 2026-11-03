@@ -30,7 +30,8 @@ Records contain:
   outside `latency_s` and, on open-loop runs, inside `queue_delay_s`
 - monotonic `latency_s`, optional `ttft_s`, `first_byte_s`, `connect_s`,
   `prefill_s`, `decode_s`, `decode_tok_s`, `first_reasoning_s`, and `itl_s`
-  (`ttft_s` is null for non-streaming LLM/VLM responses; it is never fabricated
+  (`ttft_s` is absent for non-streaming LLM/VLM responses unless HTTP
+  first-byte approximation is explicitly requested; it is never fabricated
   from E2E latency)
 - optional `in_flight_at_send` (client outstanding count at send)
 - optional `scheduled_offset_s` and `queue_delay_s`
@@ -184,8 +185,13 @@ Other summary fields:
   time-to-first-byte via `--infer-ttft-from-first-byte` (omitted when zero)
 - `ttft_warning` - optional human-readable note when TTFT was approximated or
   left unmeasured without `--streaming`
-- Per-request `ttft_source` - `"stream"` or `"first_byte_approx"` when `ttft_s`
-  is present
+- Per-request `ttft_source` - `"stream"`, `"first_token_fallback"` or
+  `"first_byte_approx"` when `ttft_s` is present. The opt-in
+  `--ttft-fallback first-token` uses an observed token, while
+  `--infer-ttft-from-first-byte` uses HTTP response-header timing.
+  `--allow-missing-ttft` relaxes only the missing-TTFT audit. Under every
+  option a completed no-answer stream remains an error, and `--ci-safety`
+  remains strict.
 - `price_per_hour` / `price_provenance` - declared `$/hour` from
   `--price-per-hour` (`"cli"`) or `sut.cost.price_per_hour` (`"sut"`); both
   `null` when absent. CLI overrides SUT.

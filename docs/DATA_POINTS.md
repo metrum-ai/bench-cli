@@ -80,7 +80,7 @@ harness counts agree on what a quantity is.
 | `http` | Set by the bundled binaries' HTTP request path (llm, vlm, asr, imagegen, strategic). Response body fields (`receive_s`, `bytes_received`, `chunks_received`) are on successes only. |
 | `usage` | The server reports `usage` token counts. |
 | `streaming` | `--streaming` chat or vlm. `itl_s` needs two or more content chunks, `decode_tok_s` a positive decode time and output tokens. |
-| `ttft-approx` | `--infer-ttft-from-first-byte` on a non-streaming chat run (TTFT approximated from the first response byte). |
+| `ttft-approx` | This condition refers only to `--infer-ttft-from-first-byte`, which approximates missing TTFT from HTTP response headers, not a token. Separately, `--ttft-fallback first-token` labels a real first token; `--allow-missing-ttft` relaxes the audit. No option makes a no-answer stream successful, and `--ci-safety` remains strict. |
 | `reasoning-stream` | The server streams `reasoning_content` deltas. |
 | `reasoning-usage` | The server reports `usage.completion_tokens_details.reasoning_tokens` (or an accepted variant). |
 | `tokenizer` | `--tokenizer` is set (client token counts; also fills `usage_missing` rows). |
