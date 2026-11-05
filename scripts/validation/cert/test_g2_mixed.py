@@ -9,10 +9,10 @@ import g2_mixed_checks
 
 
 class MixedChecksTests(unittest.TestCase):
-    def fixture(self, order, strict=False):
+    def fixture(self, order, strict=False, count=16):
         events, rows = [], []
-        failed = 1 if order == 'error-first' else 15
-        for request in range(1, 17):
+        failed = 1 if order == 'error-first' else count-1
+        for request in range(1, count+1):
             now = request * 1_000_000_000
             events.extend([{'request': request, 'kind': 'request_transform', 'forwarded_cap': 128 if request % 2 else 4096},
                            {'request': request, 'kind': 'send', 'monotonic_ns': now}])
@@ -30,8 +30,16 @@ class MixedChecksTests(unittest.TestCase):
                        'error': {'kind': 'reasoning_truncated'} if truncated and strict else None}
             rows.append({'schema_version': 'bench.request.v5', 'phase': 'measure', 'seq': request - 1, **row})
         errors = sum(r['error'] is not None for r in rows)
-        rows.append({'schema_version': 'bench.summary.v5', 'attempted': 16, 'successes': 16-errors, 'errors': errors, 'answered_requests': 8})
+        rows.append({'schema_version': 'bench.summary.v5', 'attempted': count, 'successes': count-errors, 'errors': errors, 'answered_requests': count//2})
         return '\n'.join(map(json.dumps, rows)), '\n'.join(map(json.dumps, events))
+
+    def test_shorter_eight_request_cell(self):
+        data, trace = self.fixture('error-last', count=8)
+        result = g2_mixed_checks.verify(data, trace, 'error-last', count=8)
+        self.assertEqual(8, result['attempted'])
+        self.assertEqual(4, result['answer'])
+        with self.assertRaises(ValueError):
+            g2_mixed_checks.verify(data, trace, 'error-last')
 
     def test_serial_order_strict_and_counts(self):
         for order in ('error-first', 'error-last'):

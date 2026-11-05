@@ -59,7 +59,7 @@ def stop_client(client):
         client.wait(timeout=10)
 
 
-def run_cell(args, order, label="g3", extra_flags=(), concurrency=4):
+def run_cell(args, order, label="g3", extra_flags=(), concurrency=4, count=16):
     evidence = args.out / "evidence"
     prefix = f"{label}-{order}"
     trace, data = evidence / f"{prefix}-trace.jsonl", evidence / f"{prefix}-requests.jsonl"
@@ -68,7 +68,7 @@ def run_cell(args, order, label="g3", extra_flags=(), concurrency=4):
     if not container or any(c not in "0123456789abcdef" for c in container):
         raise ValueError("invalid pinned serving container identity")
     command = [str(args.candidate), "--url", f"http://localhost:{args.proxy_port}/v1/chat/completions",
-               "--api-key", "dummy", "--scenario", prefix, "--num-requests", "16", "--concurrency", str(concurrency),
+               "--api-key", "dummy", "--scenario", prefix, "--num-requests", str(count), "--concurrency", str(concurrency),
                "--prompts", str(args.prompt), "--mode", "chat", "--streaming", "--model", args.model,
                "--data-log", str(data), "--max-tokens", "4096", "--warmup-requests", "0", "--seed", "42",
                "--temperature", "0", "--request-timeout", "600", "--slo", f"e2e={E2E_SLO_SECONDS}",

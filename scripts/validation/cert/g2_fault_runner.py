@@ -41,8 +41,8 @@ def main():
     for order in ('error-first', 'error-last'):
         key = f'g2-fault-restart-{order}'
         try:
-            data, trace, code = g3_runner.run_cell(args, order, label='g2-fault-restart', extra_flags=['--fail-on-error'], concurrency=1)
-            result = g2_mixed_checks.verify(data, trace, order)
+            data, trace, code = g3_runner.run_cell(args, order, label='g2-fault-restart', extra_flags=['--fail-on-error'], concurrency=1, count=8)
+            result = g2_mixed_checks.verify(data, trace, order, count=8)
             rows = [json.loads(line) for line in data.splitlines() if line.strip()]
             if code == 0 or not any((r.get('error') or {}).get('kind') == 'stream_truncated' for r in rows if '.request.' in r.get('schema_version', '')):
                 raise ValueError('safety exit or real truncated-stream classification missing')

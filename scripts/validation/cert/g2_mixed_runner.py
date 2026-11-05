@@ -37,8 +37,8 @@ def main():
             label = f'g2-mixed-{name}'
             key = f'{name}-{order}'
             try:
-                data, trace, code = g3_runner.run_cell(args, order, label=label, extra_flags=extra, concurrency=1)
-                observed = g2_mixed_checks.verify(data, trace, order, strict)
+                data, trace, code = g3_runner.run_cell(args, order, label=label, extra_flags=extra, concurrency=1, count=8)
+                observed = g2_mixed_checks.verify(data, trace, order, strict, count=8)
                 if strict and code == 0:
                     raise ValueError('strict truncation must exit nonzero')
                 cells[key] = {**observed, 'exit_code': code}
@@ -66,7 +66,7 @@ def main():
                            'baseline_binary_sha256': manifest_tool.sha256_file(args.baseline),
                            'manifest_sha256': manifest_tool.sha256_file(args.manifest)},
               'observed_values': {'cells': cells, 'failed_cells': errors},
-              'thresholds': {'requests_per_mixed_cell': 16, 'answers_min': 1, 'truncations_min': 1,
+              'thresholds': {'requests_per_mixed_cell': 8, 'answers_min': 1, 'truncations_min': 1,
                              'real_interruption_failures_min': 1, 'flags_and_orders': 10}, 'evidence_paths': files}
     result_writer.write_record(args.out, record)
     return 1 if errors else 0

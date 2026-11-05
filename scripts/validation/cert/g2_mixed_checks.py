@@ -6,17 +6,17 @@ import base64
 import json
 
 
-def verify(data, trace, order, strict=False):
+def verify(data, trace, order, strict=False, count=16):
     records = [json.loads(line) for line in data.splitlines() if line.strip()]
     rows = sorted((r for r in records if '.request.' in r.get('schema_version', '') and r.get('phase') == 'measure'), key=lambda r: r['seq'])
     summary = [r for r in records if '.summary.' in r.get('schema_version', '')]
-    if len(rows) != 16 or [r.get('seq') for r in rows] != list(range(16)) or len(summary) != 1:
-        raise ValueError('16 unique measured request slots and one summary required')
+    if count < 4 or len(rows) != count or [r.get('seq') for r in rows] != list(range(count)) or len(summary) != 1:
+        raise ValueError('unique measured request slots and one summary required')
     groups = {}
     for event in (json.loads(line) for line in trace.splitlines() if line.strip()):
         groups.setdefault(event['request'], []).append(event)
-    if sorted(groups) != list(range(1, 17)):
-        raise ValueError('16 serial real-server request traces required')
+    if sorted(groups) != list(range(1, count + 1)):
+        raise ValueError('serial real-server request traces required')
     seen = {'answer': 0, 'reasoning_truncated': 0, 'failure': 0}
     terminals = {'answer': [], 'failure': []}
     for row, request_id in zip(rows, sorted(groups)):
@@ -64,7 +64,7 @@ def verify(data, trace, order, strict=False):
         raise ValueError('failure ordering not observed')
     reported = summary[0]
     errors = sum(row.get('error') is not None for row in rows)
-    if (reported.get('attempted') != 16 or reported.get('errors') != errors or reported.get('successes') != 16-errors or
+    if (reported.get('attempted') != count or reported.get('errors') != errors or reported.get('successes') != count-errors or
         reported.get('answered_requests') != seen['answer']):
         raise ValueError('per-request and summary outcome counts differ')
-    return {'attempted': 16, **seen, 'errors': errors, 'strict': strict, 'order': order}
+    return {'attempted': count, **seen, 'errors': errors, 'strict': strict, 'order': order}
