@@ -217,12 +217,14 @@ class DefaultCapTests(unittest.TestCase):
         data, trace = ReasoningEvaluatorTests().fixture()
         rows = [json.loads(line) for line in data.splitlines()]
         rows[-1]["ttft_s"] = {"p50": 0.1}
-        rows[-1]["config"] = {"model": "test"}
+        rows[-1]["config"] = {"body_template": {"max_tokens": 512, "chat_template_kwargs": {"enable_thinking": True}}}
         data = "\n".join(map(json.dumps, rows))
         warning = "warning: 64/64 measured requests exhausted the token budget on reasoning without an answer"
         self.assertEqual(1.0, d_default_checks.evaluate(data, trace, warning, 0)["truncation_fraction"])
         with self.assertRaises(ValueError):
             d_default_checks.evaluate(data, trace, "no warning", 0)
+        with self.assertRaises(ValueError):
+            d_default_checks.evaluate(data.replace('"max_tokens": 512', '"max_tokens": 128'), trace, warning, 0)
         with self.assertRaises(ValueError):
             d_default_checks.evaluate("", "", "required: --max-tokens", 2)
 
@@ -360,11 +362,15 @@ class ProxyTests(unittest.TestCase):
 
     def test_restart_retry_forwards_only_upstream_response(self):
         body = b'data: [DONE]\n\n'
+        posts = []
         class Upstream(http.server.BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
+            def do_GET(self):
+                self.send_response(200 if self.path == '/health' else 404)
+                self.send_header('Content-Length', '0'); self.end_headers()
             def do_POST(self):
-                self.rfile.read(int(self.headers["Content-Length"]))
+                posts.append(self.rfile.read(int(self.headers["Content-Length"])))
                 self.send_response(200); self.send_header("Content-Length", str(len(body)))
                 self.end_headers(); self.wfile.write(body)
         with tempfile.TemporaryDirectory() as temp:
@@ -405,6 +411,8 @@ class ProxyTests(unittest.TestCase):
                 upstream.server_close(); recorder.stream.close()
             events = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertTrue(any(e["kind"] == "upstream_wait" for e in events))
+            self.assertTrue(any(e["kind"] == "upstream_ready" for e in events))
+            self.assertEqual([b"{}"], posts)
             self.assertEqual("complete", events[-1]["kind"])
 
     def test_caps_modify_only_real_request_caps(self):

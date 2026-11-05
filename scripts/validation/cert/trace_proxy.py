@@ -51,7 +51,45 @@ def take_frame(buffer):
     return buffer[:end], buffer[end:]
 
 
-def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0):
+def request_identity(body):
+    data = json.loads(body)
+    messages = data.get("messages")
+    if not isinstance(messages, list) or len(messages) != 1 or messages[0].get("role") != "user":
+        raise ValueError("comparison requires one user message")
+    text = messages[0].get("content")
+    if isinstance(text, list) and all(isinstance(x, dict) and x.get("type") == "text" and isinstance(x.get("text"), str) for x in text):
+        text = "".join(x["text"] for x in text)
+    if not isinstance(text, str):
+        raise ValueError("comparison requires text-only user prompts")
+    cap = data.get("max_tokens", data.get("max_completion_tokens"))
+    thinking = data.get("chat_template_kwargs", {}).get("enable_thinking")
+    return {"prompt_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "max_tokens": cap,
+            "model": data.get("model"), "temperature": data.get("temperature"), "seed": data.get("seed"), "thinking": thinking}
+
+
+def wait_for_upstream(port, recorder, request_id, retry_seconds):
+    """Gate new POSTs on real-server readiness; never replay a submitted POST."""
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        probe = http.client.HTTPConnection("localhost", port, timeout=2)
+        try:
+            probe.request("GET", "/health")
+            response = probe.getresponse()
+            response.read()
+            if response.status == 200:
+                recorder.event(request_id, "upstream_ready")
+                return
+        except (OSError, http.client.HTTPException):
+            pass
+        finally:
+            probe.close()
+        if time.monotonic() >= deadline:
+            raise TimeoutError("real server did not recover before readiness deadline")
+        recorder.event(request_id, "upstream_wait")
+        time.sleep(.25)
+
+
+def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -91,11 +129,20 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                     recorder.event(request_id, "error", error="InvalidRequestForCapTransform")
                     self.send_error(400)
                     return
+            if record_identity:
+                try:
+                    recorder.event(request_id, "request_identity", **request_identity(body))
+                except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+                    recorder.event(request_id, "error", error="InvalidComparisonRequest")
+                    self.send_error(400)
+                    return
             upstream = http.client.HTTPConnection("localhost", upstream_port, timeout=300)
             try:
                 headers = {key: value for key, value in self.headers.items() if key.lower() not in HOP_HEADERS}
                 headers["Content-Length"] = str(len(body))
                 recorder.event(request_id, "send")
+                if retry_seconds:
+                    wait_for_upstream(upstream_port, recorder, request_id, retry_seconds)
                 deadline = time.monotonic() + retry_seconds
                 while True:
                     try:
@@ -170,7 +217,8 @@ def main():
     parser.add_argument("--fault", choices=fault_transform.MODES)
     parser.add_argument("--fault-request", type=int, help="apply fault only to this one-based request index")
     parser.add_argument("--request-caps", help="cycle these comma-separated request max_tokens values")
-    parser.add_argument("--retry-seconds", type=int, default=0, help="retry connection refusal before sending, for real restart tests")
+    parser.add_argument("--retry-seconds", type=int, default=0, help="wait for real-server readiness before sending during restart tests")
+    parser.add_argument("--record-request-identity", action="store_true", help="record normalized prompt hashes and comparison settings")
     args = parser.parse_args()
     if not 1024 <= args.listen_port <= 65535 or not 1024 <= args.upstream_port <= 65535 or args.listen_port == args.upstream_port:
         parser.error("ports must be distinct and in 1024..65535")
@@ -187,7 +235,7 @@ def main():
         except ValueError:
             parser.error("--request-caps must be comma-separated integers in 1..65536")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity))
     try:
         server.serve_forever()
     finally:

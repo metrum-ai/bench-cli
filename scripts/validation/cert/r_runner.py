@@ -20,7 +20,9 @@ import result_writer
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None):
+def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None, field_reported=False):
+    if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None):
+        raise ValueError("field-reported case requires 64 requests, thinking ON, cap 512, and no other overrides")
     evidence = args.out / "evidence"
     trace = evidence / f"{label}-trace.jsonl"
     data = evidence / f"{label}-requests.jsonl"
@@ -30,7 +32,7 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
                "--concurrency", str(concurrency), "--prompts", str(args.prompt), "--mode", "chat", "--streaming",
                "--model", args.model, "--data-log", str(data),
                *( ["--max-tokens", str(cap)] if cap is not None else [] ),
-               "--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", "600",
+               *([] if field_reported else ["--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", "600"]),
                "--debug-log", str(evidence / f"{label}-debug.log"), "--error-log", str(evidence / f"{label}-error.log"),
                "--extra-body-json", json.dumps({"chat_template_kwargs": {"enable_thinking": thinking}}), *extra]
     command_path = evidence / f"{label}-command.json"

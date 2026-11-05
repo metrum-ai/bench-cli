@@ -28,6 +28,7 @@
           "evidence_link": {"type": "string", "minLength": 1},
           "prompt_binary": {"$ref": "#/$defs/pinnedFile"},
           "strategic_binary": {"$ref": "#/$defs/pinnedFile"},
+          "reference_order": {"$ref": "#/$defs/pinnedFile"},
           "sut": {"$ref": "#/$defs/pinnedFile"},
           "server_flags": {"type": "array", "items": {"type": "string", "minLength": 1}},
           "prompt_sets": {
