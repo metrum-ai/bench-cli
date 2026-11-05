@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Metrum AI: qualify releases using frozen core plus stratified extended case
+  selection, with changed-area and rotation coverage, selected-only lane plans
+  and explicit NOT-SELECTED results. Skip unchanged full nightly runs and use
+  change-triggered rather than monthly GPU regression scheduling.
+
 - Metrum AI: schedule nightly and weekly CPU release-quality checks, track test
   cadence, and export certification evidence tables and reports. GPU lane
   automation remains separate; missing evidence blocks release certification.

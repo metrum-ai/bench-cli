@@ -7,10 +7,11 @@ This document covers deliberate publish gates, pre-release (rc) policy, and
 how to verify signed release artifacts. See Metrum AI's
 [release certification policy and case catalog](RELEASE_CERTIFICATION.md)
 for candidate-wide criteria, evidence and prospective N/A requirements.
-Before tagging, include a certification table in the release PR for every
-required case on the exact candidate SHA. A missing, failed or unimplemented
-case blocks the tag; only a prospectively approved N/A can satisfy a genuinely
-inapplicable case. Post-tag checks are tracked separately.
+Before tagging, include the frozen selection and certification table in the
+release PR for every selected pre-tag case on the exact candidate SHA. A missing,
+failed or unimplemented selected case blocks the tag; only a prospectively
+approved N/A can satisfy a genuinely inapplicable case. Unselected cases are
+NOT-SELECTED, not passes. Post-tag checks are tracked separately.
 
 ## Repository variables (publish gates)
 
