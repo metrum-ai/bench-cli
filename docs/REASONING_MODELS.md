@@ -14,21 +14,21 @@ Bench. Read this before choosing `--max-tokens` or `reasoning_effort`.
 
 ## Why this page exists
 
-Thinking models emit reasoning deltas before the visible answer. A naive TTFT
-that counts the first reasoning token makes the model look fast. A small
-`--max-tokens` often never reaches the answer at all.
+Thinking models emit reasoning deltas before the visible answer. First-any
+TTFT measures generation onset, not answer availability. A small `--max-tokens`
+often never reaches the answer at all.
 
 ## How Bench measures it
 
 Definitions (from [METRICS.md](METRICS.md)):
 
-- **TTFT** (`ttft_s` on each request; summary distribution `ttft_s`): first
-  **visible** output delta minus send. Role and reasoning-only deltas do not
-  count. A completed stream without visible output is an error under **every**
-  TTFT flag, including `--infer-ttft-from-first-byte`; reasoning-only with
-  `finish_reason: length` is `reasoning_truncated`, while other no-answer
-  streams are `no_output_token`. A labelled fallback does not make an answer
-  arrive.
+- **TTFT** (`ttft_s`): first nonempty reasoning or visible output delta minus
+  send. `ttft_visible_answer_s` measures the first visible output separately.
+  Role-only and HTTP header events are not tokens. A reasoning-only stream with
+  `finish_reason: length` is a `reasoning_truncated` outcome, non-failing by
+  default; other no-answer streams are `no_output_token` errors. Use
+  `--strict-reasoning-truncation` or `--ci-safety` to classify truncation as an
+  error. Metrum AI v1.7.2 used visible TTFT as its headline: rebaseline SLOs.
 - **First reasoning** (`first_reasoning_s` on each request): first non-empty
   `reasoning_content` / `reasoning` delta minus send, reported separately from
   TTFT. `first_reasoning_s` and `ttft_first_any_s` summarize measured streams
@@ -55,19 +55,18 @@ See [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 
 The two answer different questions:
 
-- `reasoning_truncated` is a no-answer request failure where the token limit
-  ended reasoning; other no-answer streams are `no_output_token`. Observed
-  clocks and server-reported usage are retained even on failure.
+- `reasoning_truncated` is a counted no-answer outcome where the token limit
+  ended reasoning; strict mode turns it into a request failure. Other no-answer
+  streams are `no_output_token`. Observed clocks and usage are retained.
 - `reasoning_tokens` describes successful requests only. The separate
   `observed_reasoning_tokens` and `observed_reasoning_tokens_total` also
   include reporting no-answer streams; absent usage remains null.
 
-A run with many `reasoning_truncated` errors can have a biased success-only
-`reasoning_tokens` distribution. Fix the cap first (see below). Once no-answer
-errors are zero, compare `reasoning_tokens` p99 with
-`--max-tokens` to see the remaining headroom. `completion_tokens`,
-`completion_tokens_per_second`, and cost per million output tokens include
-reasoning tokens; use `visible_completion_tokens` for answer-only counts.
+Inspect truncation and answer coverage before using results. Compare observed
+reasoning-token tails with `--max-tokens` to estimate headroom. Completion
+throughput includes reported reasoning across the full measured window and is
+null when usage is incomplete. `visible_completion_tokens` is the reported
+completion-minus-reasoning split, not necessarily an exact answer-token count.
 
 ## Passing `reasoning_effort` and related parameters
 
@@ -109,31 +108,23 @@ Probe procedure:
 
 1. Run `--num-requests 4 --concurrency 1` with your intended
    `--extra-body-json` and a candidate `--max-tokens`.
-2. Inspect the summary line: raise the cap until
-   both `errors_by_type.reasoning_truncated` and `errors_by_type.no_output_token` are absent or zero.
+2. Inspect truncation and answer coverage; if answers are required, raise the
+   cap within the model and server context limits until coverage is adequate.
 3. Record that cap on the manifest (it is already in `config.body_template`
    as `max_tokens`) and use it for the full sweep.
 
 ## Unattended harnesses running thinking models
 
-Report both visible-answer `ttft_s` and the separately labelled
-`first_reasoning_s` / `ttft_first_any_s`, with `ttft_coverage` and errors. The
-first-token time measures when generation began, not when an answer appeared.
-Do not always substitute `--infer-ttft-from-first-byte`: it uses HTTP response
-headers, which can arrive before any token. Sources and fallback counts make
-such approximations explicit.
-
-For exploratory streaming runs, `--ttft-fallback first-token` substitutes an
-observed reasoning token only when visible TTFT is absent. The row's
-`ttft_source` is `first_token_fallback`, while a visible token always wins.
-`--allow-missing-ttft` instead leaves missing times null; it also covers empty
-streams. These flags relax only the TTFT audit, never request outcomes.
-On LLM/VLM, `--ci-safety` / `--fail-on-error` still fail on missing answers.
-Strategic has different gates and reports errors per stage. An all-error
-exploratory run can exit zero with an applicable opt-in: inspect counts, not
-just exit code. Keep success-only throughput separate from observed token
-counts; completion throughput includes reasoning, and visible counts require
-server reasoning usage.
+Report headline `ttft_s`, `ttft_visible_answer_s`, `first_reasoning_s`,
+`ttft_coverage`, answer coverage and outcomes. First-token time is not answer
+latency. `--infer-ttft-from-first-byte` uses HTTP headers and is explicitly
+labelled, not a token time. `--ttft-fallback first-token` is redundant under
+first-any TTFT; `--allow-missing-ttft` relaxes only the missing-time audit.
+`--strict-reasoning-truncation` classifies no-answer length truncation as an
+error and exits nonzero on a measured truncation; `--ci-safety` enforces
+strictness and fails on errors. Inspect
+coverage rather than relying on exit status. Missing token usage yields null
+throughput; the non-reasoning split requires server-reported reasoning usage.
 
 When answers are required, increase `--max-tokens` and `--request-timeout`
 (strategic: `--timeout-seconds`) enough for the workload. Alternatively, turn
@@ -198,8 +189,8 @@ done
 ```
 
 Fields to compare across the three summaries: time-to-first-answer
-(`ttft_s`), output tokens per second (`completion_tokens_per_second`), and
-`errors_by_type.reasoning_truncated` and `errors_by_type.no_output_token`, plus first-reasoning latency
+(`ttft_visible_answer_s`), output tokens per second (`completion_tokens_per_second`), and
+truncation/answer coverage and `errors_by_type.no_output_token`, plus first-reasoning latency
 (`first_reasoning_s`), `reasoning_tokens` / `reasoning_tokens_total`, and
 `visible_completion_tokens` when the server reports reasoning usage.
 

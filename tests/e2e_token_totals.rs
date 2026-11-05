@@ -199,14 +199,16 @@ fn llm_prefill_rate_ends_at_first_reasoning_token() {
         let isl = record["prompt_tokens"].as_f64().expect("prompt_tokens");
         let reasoning = f64_at(record, "first_reasoning_s");
         let ttft = f64_at(record, "ttft_s");
-        // Wire check: reasoning streams before the first visible chunk.
+        let visible = f64_at(record, "ttft_visible_answer_s");
+        // Wire check: reasoning is headline TTFT and precedes visible output.
+        assert_eq!(reasoning, ttft);
         assert!(
-            reasoning < ttft,
-            "reasoning {reasoning}s not before ttft {ttft}s"
+            reasoning < visible,
+            "reasoning {reasoning}s not before visible {visible}s"
         );
         assert_eq!(first_generated_token_s(record), reasoning);
         by_reasoning.push(isl / reasoning);
-        by_visible.push(isl / ttft);
+        by_visible.push(isl / visible);
     }
     assert_eq!(summary["prefill_tps_per_user"]["n"], REQUESTS);
     assert_close(

@@ -236,9 +236,11 @@ pub fn count_bench(path: &Path, max_ttft_ratio: f64) -> Result<Value> {
         .iter()
         .rev()
         .find(|row| {
-            row["schema_version"]
-                .as_str()
-                .is_some_and(|v| v.ends_with(".summary.v3") || v.ends_with(".summary.v4"))
+            row["schema_version"].as_str().is_some_and(|v| {
+                v.ends_with(".summary.v3")
+                    || v.ends_with(".summary.v4")
+                    || v.ends_with(".summary.v5")
+            })
         })
         .with_context(|| format!("{}: no supported summary record", path.display()))?;
     summary.as_object().context("summary must be an object")?;
@@ -260,10 +262,11 @@ pub fn count_bench(path: &Path, max_ttft_ratio: f64) -> Result<Value> {
     let measured: Vec<&Value> = rows
         .iter()
         .filter(|row| {
-            row["schema_version"]
-                .as_str()
-                .is_some_and(|v| v.ends_with(".request.v3") || v.ends_with(".request.v4"))
-                && row["phase"] == "measure"
+            row["schema_version"].as_str().is_some_and(|v| {
+                v.ends_with(".request.v3")
+                    || v.ends_with(".request.v4")
+                    || v.ends_with(".request.v5")
+            }) && row["phase"] == "measure"
         })
         .collect();
     let mut fields = BTreeSet::new();

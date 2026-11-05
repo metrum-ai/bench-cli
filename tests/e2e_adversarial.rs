@@ -202,37 +202,49 @@ fn empty_stream_requires_allow_missing_even_with_fallback() {
     }
 }
 
-/// A token-time fallback permits exploratory runs without turning a truncated
-/// reasoning-only response into a successful answer.
+/// A reasoning-only length response is an outcome, not an answered request.
 #[test]
-fn reasoning_only_fallback_preserves_failure_and_observations() {
+fn reasoning_only_outcome_and_strict_mode_matrix() {
     let Some(dummy) = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"]) else {
         skip("go dummy-model-server not available");
         return;
     };
     let url = dummy.url("/v1/chat/completions");
-    for (extra, expected_ok) in [
+    for (extra, strict) in [
         (vec![], false),
-        (vec!["--ttft-fallback", "first-token"], true),
-        (vec!["--ttft-fallback", "first-token", "--ci-safety"], false),
-        (vec!["--allow-missing-ttft"], true),
-        (vec!["--infer-ttft-from-first-byte"], true),
+        (vec!["--ttft-fallback", "first-token"], false),
+        (
+            vec!["--ttft-fallback", "first-token", "--allow-missing-ttft"],
+            false,
+        ),
+        (vec!["--ttft-fallback", "first-token", "--ci-safety"], true),
+        (vec!["--strict-reasoning-truncation"], true),
+        (
+            vec!["--strict-reasoning-truncation", "--fail-on-error"],
+            true,
+        ),
+        (vec!["--fail-on-error"], false),
+        (vec!["--allow-missing-ttft"], false),
+        (vec!["--infer-ttft-from-first-byte"], false),
     ] {
         let fixture = fixture();
-        assert_eq!(run_llm(&fixture, &url, 2, &extra), expected_ok, "{extra:?}");
+        assert_eq!(run_llm(&fixture, &url, 2, &extra), !strict, "{extra:?}");
         let records = request_records(&fixture.data_log);
         assert_eq!(records.len(), 2);
         for record in &records {
-            assert_eq!(error_kind(&record["error"]), "reasoning_truncated");
-            assert!(record["first_reasoning_s"].as_f64().is_some());
+            assert_eq!(record["outcome"], "reasoning_truncated");
+            assert_eq!(record["answer_completed"], false);
+            assert!(record["ttft_visible_answer_s"].is_null());
+            assert_eq!(record["error"].is_null(), !strict);
+            assert_eq!(record["ttft_s"], record["first_reasoning_s"]);
+            assert_eq!(record["ttft_source"], "stream");
             assert_eq!(record["reasoning_tokens"], 10);
-            if extra.contains(&"first-token") {
-                assert_eq!(record["ttft_source"], "first_token_fallback");
-                assert_eq!(record["ttft_s"], record["first_reasoning_s"]);
-            }
         }
         let summary = summary_record(&fixture.data_log).expect("summary despite missing answer");
-        assert_eq!(summary["successes"], 0);
+        assert_eq!(summary["successes"], if strict { 0 } else { 2 });
+        assert_eq!(summary["answered_requests"], 0);
+        assert_eq!(summary["goodput"]["count"], 0);
+        assert_eq!(summary["ttft_visible_answer_s"]["n"], 0);
         assert_eq!(summary["ttft_coverage"]["reasoning_truncated"], 2);
         assert_eq!(summary["first_reasoning_s"]["n"], 2);
         assert_eq!(summary["ttft_first_any_s"]["n"], 2);
@@ -240,8 +252,7 @@ fn reasoning_only_fallback_preserves_failure_and_observations() {
     }
 }
 
-/// Reasoning deltas are timed separately and must not be mistaken for the
-/// first visible token.
+/// First-any TTFT includes reasoning; visible-answer timing remains separate.
 #[test]
 fn reasoning_deltas_are_separated_from_ttft() {
     let Some(dummy) = spawn_dummy(&["-reasoning", "-latency", "40ms", "-chunk-interval", "10ms"])
@@ -264,13 +275,13 @@ fn reasoning_deltas_are_separated_from_ttft() {
             .as_f64()
             .expect("first_reasoning_s");
         let ttft = record["ttft_s"].as_f64().expect("ttft_s");
+        let visible = record["ttft_visible_answer_s"]
+            .as_f64()
+            .expect("visible answer");
+        assert_eq!(ttft, first_reasoning);
         assert!(
-            first_reasoning <= ttft,
-            "reasoning at {first_reasoning}s reported after first token at {ttft}s"
-        );
-        assert!(
-            ttft > first_reasoning,
-            "ttft {ttft}s equals the reasoning timestamp, so reasoning was counted as output"
+            visible > ttft,
+            "visible {visible} must follow first token {ttft}"
         );
     }
 

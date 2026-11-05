@@ -73,15 +73,14 @@ tokenizer counts need a source build:
 cargo build --release --features tokenizer
 ```
 
-For streaming chat and VLM, headline TTFT is the first visible answer delta;
-first-reasoning and first-any-token clocks are separate. A reasoning-only
-length finish is `reasoning_truncated`; other no-answer completions are
-`no_output_token`. `--ttft-fallback first-token` opts into a labelled observed
-token fallback, while `--allow-missing-ttft` relaxes the audit. The legacy
-`--infer-ttft-from-first-byte` is HTTP-header timing, not a token. None turns
-an unanswered stream into a success; `--ci-safety` remains strict. Only choice
-index 0 is measured. Current request/summary output uses v4; compatible
-consumers can still read historical v3 logs.
+For streaming chat and VLM, headline TTFT is the first reasoning or visible
+output delta; visible-answer timing is separate. A reasoning-only length finish
+is `reasoning_truncated`, non-failing by default but not an answer; strict
+mode and `--ci-safety` reject it. Other no-answer completions are errors.
+`--ttft-fallback first-token` is a deprecated redundant alias;
+`--allow-missing-ttft` relaxes the audit. Explicit first-byte inference is
+HTTP-header timing, not a token. Only choice index 0 is measured. Current
+request/summary output uses v5; historical v4 TTFT has different semantics.
 
 Walkthroughs: [Modalities](./modalities). Flag lists: [CLI Reference](./cli-reference).
 

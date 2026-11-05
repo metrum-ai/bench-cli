@@ -168,14 +168,74 @@ fn strategic_reasoning_only_fallback_preserves_outcomes() {
     );
     let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
     let point = &summary["points"][0];
-    assert_eq!(point["errors"], 2);
+    assert_eq!(point["errors"], 0);
     assert_eq!(point["ttft_coverage"]["reasoning_truncated"], 2);
+    assert_eq!(point["goodput"], 0.0);
     assert_eq!(point["first_reasoning_s"]["n"], 2);
     assert_eq!(point["ttft_first_any_s"]["n"], 2);
     assert_eq!(point["observed_reasoning_tokens_total"], 16);
     let contents = std::fs::read_to_string(csv).unwrap();
-    assert!(contents.contains("first_token_fallback"));
+    assert!(contents.contains("reasoning_truncated"));
+    assert!(contents.contains("stream"));
     assert!(contents.contains("ttft_first_any_s"));
+}
+
+// BC-CLI-002 / BC-SSE-002: strategic stages retain outcomes before strict exit.
+#[test]
+fn strategic_reasoning_truncation_strict_exit_matrix() {
+    let dummy = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"])
+        .expect("catalog certification requires the dummy-model-server");
+    for (flags, strict) in [
+        (&[][..], false),
+        (&["--fail-on-error"][..], false),
+        (&["--strict-reasoning-truncation"][..], true),
+        (&["--ci-safety"][..], true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("rows.csv");
+        let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+            .args([
+                "--url",
+                &dummy.url("/v1/chat/completions"),
+                "--model",
+                "dummy",
+                "--max-tokens",
+                "8",
+                "--sweep",
+                "1",
+                "--requests-per-stage",
+                "2",
+                "--streaming",
+            ])
+            .arg("--csv")
+            .arg(&csv)
+            .arg("--html")
+            .arg(dir.path().join("report.html"))
+            .args(flags)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            !strict,
+            "{flags:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let point = &summary["points"][0];
+        assert_eq!(point["ttft_coverage"]["reasoning_truncated"], 2);
+        assert_eq!(point["answered_requests"], 0);
+        assert_eq!(point["goodput"], 0.0);
+        assert_eq!(point["errors"], if strict { 2 } else { 0 });
+        let mut reader = csv::Reader::from_path(&csv).unwrap();
+        let rows: Vec<metrum_ai_bench::strategic::BenchRecord> =
+            reader.deserialize().map(Result::unwrap).collect();
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .all(|r| r.outcome.as_deref() == Some("reasoning_truncated")
+                && r.answer_completed == Some(false)
+                && r.success != strict));
+    }
 }
 
 #[test]

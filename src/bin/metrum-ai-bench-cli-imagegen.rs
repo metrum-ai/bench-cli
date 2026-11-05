@@ -930,12 +930,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let metrics = metrics.lock().await;
+    // No measured span means an undefined rate, not elapsed setup/warmup time.
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&shared_records);
-    let window_seconds = if window_seconds > 0.0 {
-        window_seconds
-    } else {
-        run_start.elapsed().as_secs_f64()
-    };
     let mut shared_summary = metrum_ai_bench::summary::RunSummary::from_records(
         &shared_records,
         window_seconds,

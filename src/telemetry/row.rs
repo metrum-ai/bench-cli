@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// Schema version for strategic telemetry NDJSON rows.
-pub const TELEMETRY_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.telemetry.v2";
+pub const TELEMETRY_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.telemetry.v3";
 
 /// Prometheus / OpenMetrics metric type as recorded at ingest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +127,19 @@ pub struct RequestRow {
     pub first_reasoning_s: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_first_any_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_visible_answer_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_completed: Option<bool>,
+    /// Absent in v2 records; never infer coverage from an old zero count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_missing: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_prompt_tokens_present: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_completion_tokens_present: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Last-seen included metric values at request completion (sugar, not truth).

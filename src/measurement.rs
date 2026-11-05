@@ -3,7 +3,7 @@
 
 //! Measurement gates shared by the chat load generators.
 //!
-//! Empty runs fail before any request is sent. Visible-token TTFT is the
+//! Empty runs fail before any request is sent. First-any-token TTFT is the
 //! normal streaming measurement. `--infer-ttft-from-first-byte` may copy HTTP
 //! time-to-first-byte into `ttft_s` and must say so.
 
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TtftSource {
-    /// First visible output token on a streaming response.
+    /// First observed reasoning or visible output delta on a streaming response.
     Stream,
     /// HTTP time-to-first-byte used because visible-token TTFT was absent.
     FirstByteApprox,
@@ -103,31 +103,21 @@ pub fn resolve_ttft(
     }
 }
 
-/// Resolve visible TTFT first, then an optional observed first-token fallback,
-/// otherwise the legacy HTTP first-byte approximation. The flags are checked
-/// for mutual exclusion by the caller's CLI.
+/// Resolve the first observed reasoning or visible token, otherwise the legacy
+/// HTTP first-byte approximation. The fallback flag remains a compatible no-op.
 pub fn resolve_ttft_with_fallback(
     streaming: bool,
     stream_ttft_s: Option<f64>,
     first_reasoning_s: Option<f64>,
     first_byte_s: Option<f64>,
     infer_from_first_byte: bool,
-    first_token_fallback: bool,
+    _first_token_fallback: bool,
 ) -> ResolvedTtft {
-    if streaming && stream_ttft_s.is_none() && first_token_fallback {
-        if let Some(first) = first_reasoning_s {
-            return ResolvedTtft {
-                ttft_s: Some(first),
-                source: Some(TtftSource::FirstTokenFallback),
-            };
-        }
-    }
-    resolve_ttft(
-        streaming,
-        stream_ttft_s,
-        first_byte_s,
-        infer_from_first_byte,
-    )
+    let first_any = [stream_ttft_s, first_reasoning_s]
+        .into_iter()
+        .flatten()
+        .reduce(f64::min);
+    resolve_ttft(streaming, first_any, first_byte_s, infer_from_first_byte)
 }
 
 /// Decide whether a chat run's TTFT coverage is publishable.
@@ -212,9 +202,9 @@ pub fn audit_chat_ttft_observed(input: ChatTtftAuditInput) -> anyhow::Result<Ttf
                 } else {
                     " or disable thinking in the server configuration where supported"
                 };
-                anyhow::bail!("all requests spent the token budget on reasoning without a visible answer; raise --max-tokens and {} or use --ttft-fallback first-token{}", input.timeout_flag, toggle);
+                anyhow::bail!("all requests spent the token budget on reasoning without a visible answer; raise --max-tokens and {}{}", input.timeout_flag, toggle);
             }
-            anyhow::bail!("streaming run produced no visible-token TTFT; use --ttft-fallback first-token for observed reasoning, --allow-missing-ttft, or --infer-ttft-from-first-byte for an HTTP header approximation");
+            anyhow::bail!("streaming run produced no actual first-token TTFT; use --allow-missing-ttft or --infer-ttft-from-first-byte for an HTTP header approximation");
         }
     }
     if !input.streaming && input.infer_from_first_byte && input.missing_successes > 0 {
@@ -364,16 +354,37 @@ mod tests {
     }
 
     #[test]
-    fn first_token_fallback_is_labelled_and_visible_wins() {
-        let fallback = resolve_ttft_with_fallback(true, None, Some(0.4), Some(0.02), false, true);
-        assert_eq!(fallback.ttft_s, Some(0.4));
-        assert_eq!(fallback.source, Some(TtftSource::FirstTokenFallback));
-        let visible =
-            resolve_ttft_with_fallback(true, Some(0.9), Some(0.4), Some(0.02), false, true);
-        assert_eq!(visible.ttft_s, Some(0.9));
-        assert_eq!(visible.source, Some(TtftSource::Stream));
-        let absent = resolve_ttft_with_fallback(true, None, None, Some(0.02), false, true);
-        assert_eq!(absent.ttft_s, None);
+    fn first_any_is_independent_of_compatibility_flags() {
+        for fallback in [false, true] {
+            for infer in [false, true] {
+                let reasoning =
+                    resolve_ttft_with_fallback(true, None, Some(0.4), Some(0.02), infer, fallback);
+                assert_eq!(reasoning.ttft_s, Some(0.4));
+                assert_eq!(reasoning.source, Some(TtftSource::Stream));
+                let both = resolve_ttft_with_fallback(
+                    true,
+                    Some(0.9),
+                    Some(0.4),
+                    Some(0.02),
+                    infer,
+                    fallback,
+                );
+                assert_eq!(both.ttft_s, Some(0.4));
+                assert_eq!(both.source, Some(TtftSource::Stream));
+                let visible = resolve_ttft_with_fallback(
+                    true,
+                    Some(0.1),
+                    Some(0.4),
+                    Some(0.02),
+                    infer,
+                    fallback,
+                );
+                assert_eq!(visible.ttft_s, Some(0.1));
+                let absent =
+                    resolve_ttft_with_fallback(true, None, None, Some(0.02), infer, fallback);
+                assert_eq!(absent.ttft_s, if infer { Some(0.02) } else { None });
+            }
+        }
     }
 
     #[test]

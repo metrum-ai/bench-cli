@@ -21,11 +21,11 @@ pub struct LabeledRun {
 #[derive(Debug, Clone, Serialize)]
 pub struct ComparePoint {
     pub load: f64,
-    pub throughput: f64,
+    pub throughput: Option<f64>,
     pub p50_s: Option<f64>,
     pub p95_s: Option<f64>,
     pub p99_s: Option<f64>,
-    pub goodput: f64,
+    pub goodput: Option<f64>,
     pub user_tps_mean: Option<f64>,
     pub users_at_slo: Option<f64>,
     pub cost_per_million_output_tokens: Option<f64>,
@@ -107,14 +107,11 @@ fn compare_point_from_value(point: &Value) -> Result<ComparePoint> {
         .get("load")
         .and_then(|v| v.as_f64())
         .ok_or_else(|| anyhow::anyhow!("point missing load"))?;
-    let throughput = point
-        .get("throughput")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let throughput = point.get("throughput").and_then(|v| v.as_f64());
     let p50_s = point.get("p50_s").and_then(|v| v.as_f64());
     let p95_s = point.get("p95_s").and_then(|v| v.as_f64());
     let p99_s = point.get("p99_s").and_then(|v| v.as_f64());
-    let goodput = point.get("goodput").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let goodput = point.get("goodput").and_then(|v| v.as_f64());
     let user_tps_mean = point
         .pointer("/user_tps/avg")
         .and_then(|v| v.as_f64())
@@ -278,11 +275,11 @@ pub fn compare_runs(runs: &[LabeledRun]) -> Result<CompareReport> {
 
 fn metric_value(point: &ComparePoint, name: &str) -> Option<f64> {
     match name {
-        "throughput" => Some(point.throughput),
+        "throughput" => point.throughput,
         "p50_s" => point.p50_s,
         "p95_s" => point.p95_s,
         "p99_s" => point.p99_s,
-        "goodput" => Some(point.goodput),
+        "goodput" => point.goodput,
         "user_tps_mean" => point.user_tps_mean,
         "users_at_slo" => point.users_at_slo,
         "cost_per_million_output_tokens" => point.cost_per_million_output_tokens,
@@ -478,6 +475,7 @@ mod tests {
                 bytes_received: None,
                 chunks_received: None,
                 send_offset_s: None,
+                ..Default::default()
             };
             w.serialize(&record).unwrap();
         }
@@ -486,10 +484,8 @@ mod tests {
         assert_eq!(run.points.len(), 2);
     }
 
-    /// #224: `compare` recomputes a CSV stage on the live strategic window,
-    /// so a failure that ends after the last success and a warmup row do not
-    /// stretch it. Successes end at 1.0 s and 2.0 s after the first send, so
-    /// throughput is 2 / 2.0, not 2 / 3.0 (the failure's end).
+    /// Compare uses the same first-send to last-terminal measured window as
+    /// a live stage, excluding warmup and including late failures.
     #[test]
     fn csv_compare_uses_strategic_stage_window() {
         let dir = tempfile::tempdir().unwrap();
@@ -540,6 +536,7 @@ mod tests {
                 bytes_received: None,
                 chunks_received: None,
                 send_offset_s: None,
+                ..Default::default()
             };
             w.serialize(&record).unwrap();
             records.push(record);
@@ -548,10 +545,10 @@ mod tests {
         let run = load_run(&csv_path, "csv").unwrap();
         assert_eq!(run.points.len(), 1);
         let window = stage_window_seconds(&records).unwrap();
-        assert!((window - 2.0).abs() < 1e-9, "{window}");
+        assert!((window - 3.0).abs() < 1e-9, "{window}");
         let live = summarize_stage(2.0, &records, window, &SloConfig::default(), None);
-        assert!((run.points[0].throughput - live.throughput).abs() < 1e-12);
-        assert!((live.throughput - 1.0).abs() < 1e-9);
+        assert!((run.points[0].throughput.unwrap() - live.throughput.unwrap()).abs() < 1e-12);
+        assert!((live.throughput.unwrap() - 2.0 / 3.0).abs() < 1e-9);
     }
 
     /// #224: a CSV with `send_offset_s` recomputes the stage on the monotonic
@@ -582,6 +579,6 @@ mod tests {
         let run = load_run(&csv_path, "csv").unwrap();
         assert_eq!(run.points.len(), 1);
         // Window 0 s to 2 s on the monotonic clock, not 62 s on wall clock.
-        assert!((run.points[0].throughput - 1.0).abs() < 1e-9);
+        assert!((run.points[0].throughput.unwrap() - 1.0).abs() < 1e-9);
     }
 }

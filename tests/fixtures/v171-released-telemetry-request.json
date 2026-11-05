@@ -1,0 +1,1 @@
+{"extra_future_field":"ignored","input_tokens":4,"kind":"request","latency_s":0.031652713,"output_tokens":2,"queue_delay_s":0.0,"reasoning_tokens":1,"run_id":"fixture","seq":0,"service_latency_s":0.031652713,"stage":1.0,"success":true,"t_done_ns":32331250,"t_first_ns":2015243,"t_sched_ns":678377,"t_sent_ns":678537,"ttft_s":0.011302871,"ttft_source":"stream","warmup":false}

@@ -181,12 +181,14 @@ with `cargo install metrum-ai-bench-cli`.
 
 ## Reasoning models
 
-Thinking models emit reasoning deltas before the answer. If the token budget
-ends on reasoning without an answer, the request is `reasoning_truncated`;
-other no-answer streams are `no_output_token`. TTFT measures the visible
-answer by default. `--ttft-fallback first-token` labels a real first-token
-fallback, and `--allow-missing-ttft` relaxes the missing-TTFT audit; neither
-makes a missing answer successful. Read
+Thinking models emit reasoning deltas before the answer. Metrum AI Bench CLI
+v1.8.0 records `reasoning_truncated` as a non-error outcome when the output
+budget ends in reasoning without an answer. `--strict-reasoning-truncation`
+marks it as an error and exits nonzero on measured truncation; `--ci-safety`
+enables strict mode and fails on errors.
+Headline TTFT is now the first actual reasoning or visible output delta; visible
+answer latency and answer coverage remain separate. This is a breaking metric
+change from v1.7.2: rebaseline dashboards and SLOs. Read
 [docs/REASONING_MODELS.md](docs/REASONING_MODELS.md) before choosing
 `--max-tokens` or `reasoning_effort`.
 
@@ -454,10 +456,12 @@ is never touched).
 | Metric | Meaning |
 |--------|---------|
 | E2E latency | Send → body complete (`latency_s`) |
-| TTFT | First visible token (`ttft_s`); not first-byte headers |
+| TTFT | First reasoning or visible output token (`ttft_s`); not first-byte headers |
+| Visible-answer TTFT | First visible output, absent when no answer is observed |
 | First byte | Headers received (`first_byte_s`) |
-| Window rps | Measured successes / monotonic send→complete window |
-| Goodput | Successes meeting `--slo` thresholds / window |
+| Window rps | Completed requests / first-send to last-terminal-completion window |
+| Goodput | Answered requests meeting `--slo` thresholds / window |
+| Output token rate | Reported completion tokens including reasoning / window; null when usage is incomplete |
 | RTFx (ASR) | Audio seconds / client request seconds |
 
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see

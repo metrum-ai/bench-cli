@@ -88,6 +88,7 @@ enum Condition {
     Ndjson,
     Validation,
     MeasuredSuccess,
+    PositiveWindow,
     VlmSweep,
     AsrSweep,
     ImagegenSweep,
@@ -111,6 +112,7 @@ impl Condition {
             Self::Ndjson => "ndjson",
             Self::Validation => "validation",
             Self::MeasuredSuccess => "measured-success",
+            Self::PositiveWindow => "positive-window",
             Self::VlmSweep => "vlm-sweep",
             Self::AsrSweep => "asr-sweep",
             Self::ImagegenSweep => "imagegen-sweep",
@@ -124,7 +126,9 @@ impl Condition {
                  imagegen, strategic). Response body fields (`receive_s`, \
                  `bytes_received`, `chunks_received`) are on successes only."
             }
-            Self::Usage => "The server reports `usage` token counts.",
+            Self::Usage => {
+                "The server reports complete `usage` token counts for the relevant population."
+            }
             Self::Streaming => {
                 "`--streaming` chat or vlm. `itl_s` needs two or more content \
                  chunks, `decode_tok_s` a positive decode time and output tokens."
@@ -132,9 +136,9 @@ impl Condition {
             Self::TtftApprox => {
                 "This condition refers only to `--infer-ttft-from-first-byte`, \
                  which approximates missing TTFT from HTTP response headers, not \
-                 a token. Separately, `--ttft-fallback first-token` labels a real \
-                 first token; `--allow-missing-ttft` relaxes the audit. No option \
-                 makes a no-answer stream successful, and `--ci-safety` remains strict."
+                 a token. `--ttft-fallback first-token` is a deprecated redundant \
+                 alias; `--allow-missing-ttft` relaxes the audit. Reasoning-only \
+                 truncation is unanswered and `--ci-safety` rejects it."
             }
             Self::ReasoningStream => "The server streams `reasoning_content` deltas.",
             Self::ReasoningUsage => {
@@ -153,6 +157,7 @@ impl Condition {
             Self::Ndjson => "`--ndjson PATH`.",
             Self::Validation => "Strategic response validation (`--json-schema` or `--tools`).",
             Self::MeasuredSuccess => "The stage has at least one measured request or success.",
+            Self::PositiveWindow => "The measured terminal window is finite and strictly positive.",
             Self::VlmSweep => "`metrum-ai-bench-cli-strategic --kind vlm`.",
             Self::AsrSweep => {
                 "`metrum-ai-bench-cli-strategic --kind asr`. `wer` and `cer` are \
@@ -169,15 +174,25 @@ impl Condition {
 
 use Condition::*;
 
-/// Optional `summary.v4` quantities and when they fire.
+/// Optional `summary.v5` quantities and when they fire.
 const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
-    ("completion_tokens_per_second", &[Usage, Tokenizer]),
-    ("completion_tokens_total", &[Usage, Tokenizer]),
+    ("answered_requests_per_second", &[PositiveWindow]),
+    ("requests_per_second", &[PositiveWindow]),
+    ("completion_tokens_per_second", &[Usage]),
+    ("completion_tokens_total", &[Usage]),
     ("connection_reuse_rate", &[HttpPath]),
     ("connections_reused", &[HttpPath]),
     ("cost_per_million_output_tokens", &[Price]),
-    ("input_tokens_per_second", &[Usage, Tokenizer]),
+    ("input_tokens_per_second", &[Usage]),
     ("isl_osl", &[IslOslTargets]),
+    (
+        "legacy_success_completion_tokens_per_second",
+        &[Usage, Tokenizer],
+    ),
+    (
+        "non_reasoning_completion_tokens_per_second",
+        &[ReasoningUsage],
+    ),
     ("observed_concurrency", &[HttpPath]),
     ("observed_reasoning_tokens_total", &[ReasoningUsage]),
     (
@@ -185,15 +200,15 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
         &[ReasoningUsage],
     ),
     ("price_per_hour", &[Price]),
-    ("prompt_tokens_total", &[Usage, Tokenizer]),
+    ("prompt_tokens_total", &[Usage]),
     ("reasoning_tokens_total", &[ReasoningUsage]),
     ("telemetry", &[Ndjson]),
-    ("total_tokens_per_second", &[Usage, Tokenizer]),
+    ("total_tokens_per_second", &[Usage]),
     ("ttft_approx_count", &[TtftApprox]),
     ("visible_completion_tokens_total", &[ReasoningUsage]),
 ];
 
-/// Optional `request.v4` numeric fields and when they fire.
+/// Optional `request.v5` numeric fields and when they fire.
 const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("bytes_received", &[HttpPath]),
     ("bytes_sent", &[HttpPath]),
@@ -215,11 +230,16 @@ const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("tokenized_prompt_tokens", &[Tokenizer]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
+    ("ttft_visible_answer_s", &[Streaming]),
     ("visible_completion_tokens", &[ReasoningUsage]),
 ];
 
 /// Optional strategic sweep-point quantities and when they fire.
 const SWEEP_ROWS: &[(&str, &[Condition])] = &[
+    ("legacy_success_completion_tokens_per_second", &[Usage]),
+    ("answered_requests_per_second", &[PositiveWindow]),
+    ("throughput", &[PositiveWindow]),
+    ("goodput", &[PositiveWindow]),
     ("completion_tokens_per_second", &[Usage]),
     ("completion_tokens_total", &[Usage]),
     ("connection_reuse_rate", &[HttpPath]),
@@ -227,6 +247,10 @@ const SWEEP_ROWS: &[(&str, &[Condition])] = &[
     ("cost_per_million_output_tokens", &[Price]),
     ("error_rate", &[MeasuredSuccess]),
     ("image_digests", &[ImagegenSweep]),
+    (
+        "non_reasoning_completion_tokens_per_second",
+        &[ReasoningUsage],
+    ),
     ("input_tokens_per_second", &[Usage]),
     ("isl_osl", &[IslOslTargets]),
     ("observed_concurrency", &[HttpPath]),
@@ -256,6 +280,7 @@ const REQUEST_ROW_ROWS: &[(&str, &[Condition])] = &[
     ("t_first_ns", &[HttpPath]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
+    ("ttft_visible_answer_s", &[Streaming]),
 ];
 
 /// One optional field and the conditions that fire it.
@@ -301,7 +326,7 @@ fn modality_kinds() -> [(&'static [&'static str], &'static [Condition]); 3] {
 
 /// Conditions a plain closed-loop `--streaming` llm run against a server
 /// that reports usage meets (the parity harness `plain` scenario).
-const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming];
+const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, PositiveWindow];
 
 // Fixtures
 
@@ -366,7 +391,7 @@ fn isl_osl() -> IslOslValidation {
 
 fn telemetry_info() -> TelemetryRunInfo {
     TelemetryRunInfo {
-        schema_version: "metrum-ai-bench-cli.telemetry.v2",
+        schema_version: "metrum-ai-bench-cli.telemetry.v3",
         ndjson: "run.ndjson".into(),
         sources: 1,
         request_rows: 8,
@@ -430,9 +455,14 @@ fn summary_max() -> RunSummary {
         observed_visible_completion_tokens_total: Some(150),
         fallback_ttft_s: d(),
         window_seconds: 2.0,
-        requests_per_second: 3.5,
+        requests_per_second: Some(3.5),
         usage_missing_count: 1,
         completion_tokens_per_second: Some(100.0),
+        non_reasoning_completion_tokens_per_second: Some(75.0),
+        answered_requests: 6,
+        answered_requests_per_second: Some(3.0),
+        legacy_success_completion_tokens_per_second: Some(100.0),
+        ttft_visible_answer_s: d(),
         completion_tokens_source: Some("server_usage"),
         prompt_tokens_total: Some(400),
         completion_tokens_total: Some(200),
@@ -472,7 +502,7 @@ fn summary_max() -> RunSummary {
         throughput_bins_rps: d(),
         goodput: GoodputSummary {
             count: 6,
-            requests_per_second: 3.0,
+            requests_per_second: Some(3.0),
             fraction_of_attempted: 0.75,
             thresholds_s: summary_thresholds(),
         },
@@ -510,9 +540,14 @@ fn summary_min() -> RunSummary {
         observed_visible_completion_tokens_total: None,
         fallback_ttft_s: d(),
         window_seconds: 0.0,
-        requests_per_second: 0.0,
+        requests_per_second: None,
         usage_missing_count: 0,
         completion_tokens_per_second: None,
+        non_reasoning_completion_tokens_per_second: None,
+        answered_requests: 0,
+        answered_requests_per_second: None,
+        legacy_success_completion_tokens_per_second: None,
+        ttft_visible_answer_s: d(),
         completion_tokens_source: None,
         prompt_tokens_total: None,
         completion_tokens_total: None,
@@ -552,7 +587,7 @@ fn summary_min() -> RunSummary {
         throughput_bins_rps: d(),
         goodput: GoodputSummary {
             count: 0,
-            requests_per_second: 0.0,
+            requests_per_second: None,
             fraction_of_attempted: 0.0,
             thresholds_s: BTreeMap::new(),
         },
@@ -597,6 +632,9 @@ fn request_max() -> RequestRecord {
         bytes_received: Some(4000),
         chunks_received: Some(40),
         ttft_s: Some(0.1),
+        ttft_visible_answer_s: Some(0.1),
+        outcome: Some("answer".into()),
+        answer_completed: Some(true),
         ttft_source: Some(TtftSource::Stream),
         prefill_s: Some(0.1),
         decode_s: Some(0.3),
@@ -614,6 +652,8 @@ fn request_max() -> RequestRecord {
         tokenized_prompt_tokens: Some(50),
         tokenized_completion_tokens: Some(31),
         usage_missing: false,
+        usage_prompt_tokens_present: Some(true),
+        usage_completion_tokens_present: Some(true),
         modality_metrics: BTreeMap::from([("prompt_words".to_string(), 40.0)]),
         modality_labels: BTreeMap::from([("image_0_sha256".to_string(), "00".to_string())]),
         error: Some(RequestError::Timeout),
@@ -644,6 +684,9 @@ fn request_min() -> RequestRecord {
         bytes_received: None,
         chunks_received: None,
         ttft_s: None,
+        ttft_visible_answer_s: None,
+        outcome: None,
+        answer_completed: None,
         ttft_source: None,
         prefill_s: None,
         decode_s: None,
@@ -661,6 +704,8 @@ fn request_min() -> RequestRecord {
         tokenized_prompt_tokens: None,
         tokenized_completion_tokens: None,
         usage_missing: false,
+        usage_prompt_tokens_present: None,
+        usage_completion_tokens_present: None,
         modality_metrics: BTreeMap::new(),
         modality_labels: BTreeMap::new(),
         error: None,
@@ -683,7 +728,7 @@ fn sweep_max() -> SweepPoint {
         load: 4.0,
         n: 8,
         errors: 0,
-        throughput: 3.5,
+        throughput: Some(3.5),
         latency_s: d(),
         p50_s: Some(0.4),
         p95_s: Some(0.5),
@@ -691,13 +736,18 @@ fn sweep_max() -> SweepPoint {
         p99_unreliable: true,
         error_rate: Some(0.0),
         validity_rate: Some(1.0),
-        goodput: 3.0,
+        goodput: Some(3.0),
         goodput_equals_throughput: false,
         slo_thresholds_s: thresholds,
         user_tps: d(),
         users_at_slo: Some(3.0),
         users_meeting_user_tps: Some(6),
         completion_tokens_per_second: Some(100.0),
+        non_reasoning_completion_tokens_per_second: Some(75.0),
+        legacy_success_completion_tokens_per_second: Some(80.0),
+        answered_requests: 6,
+        answered_requests_per_second: Some(3.0),
+        ttft_visible_answer_s: d(),
         prompt_tokens_total: Some(400),
         completion_tokens_total: Some(200),
         input_tokens_per_second: Some(200.0),
@@ -757,7 +807,7 @@ fn sweep_min() -> SweepPoint {
         load: 4.0,
         n: 0,
         errors: 0,
-        throughput: 0.0,
+        throughput: None,
         latency_s: d(),
         p50_s: None,
         p95_s: None,
@@ -765,13 +815,18 @@ fn sweep_min() -> SweepPoint {
         p99_unreliable: true,
         error_rate: None,
         validity_rate: None,
-        goodput: 0.0,
+        goodput: None,
         goodput_equals_throughput: true,
         slo_thresholds_s: None,
         user_tps: d(),
         users_at_slo: None,
         users_meeting_user_tps: None,
         completion_tokens_per_second: None,
+        non_reasoning_completion_tokens_per_second: None,
+        legacy_success_completion_tokens_per_second: None,
+        answered_requests: 0,
+        answered_requests_per_second: None,
+        ttft_visible_answer_s: d(),
         prompt_tokens_total: None,
         completion_tokens_total: None,
         input_tokens_per_second: None,
@@ -832,6 +887,12 @@ fn request_row_max() -> RequestRow {
         ttft_source: Some("stream".into()),
         first_reasoning_s: Some(0.08),
         ttft_first_any_s: Some(0.08),
+        ttft_visible_answer_s: Some(0.1),
+        outcome: Some("answer".into()),
+        answer_completed: Some(true),
+        usage_missing: Some(false),
+        usage_prompt_tokens_present: Some(true),
+        usage_completion_tokens_present: Some(true),
         error: Some("timeout".into()),
         queue_sample_age_ms: Some(std::collections::BTreeMap::from([("engine".into(), 42.0)])),
         queue_sample_stale: Some(vec!["engine".to_string()]),
@@ -860,6 +921,12 @@ fn request_row_min() -> RequestRow {
         ttft_source: None,
         first_reasoning_s: None,
         ttft_first_any_s: None,
+        ttft_visible_answer_s: None,
+        outcome: None,
+        answer_completed: None,
+        usage_missing: None,
+        usage_prompt_tokens_present: None,
+        usage_completion_tokens_present: None,
         error: None,
         queue_sample_age_ms: None,
         queue_sample_stale: None,
@@ -1066,8 +1133,8 @@ fn render(s: &Schemas) -> String {
 <!-- Generated by cargo xtask render-data-points from tests/data_points.rs. Do not edit by hand. -->
 
 How many data points Metrum AI Bench reports, derived from the serde schemas
-in this release (`summary.v4`, `request.v4`, the strategic sweep point, and
-the `telemetry.v2` NDJSON `request` row). `tests/data_points.rs` builds every
+in this release (`summary.v5`, `request.v5`, the strategic sweep point, and
+the `telemetry.v3` NDJSON `request` row). `tests/data_points.rs` builds every
 schema struct with every optional field set and with every optional field
 unset, serializes both, and counts the JSON. CI fails when this file is stale,
 and the release workflow publishes it in the release notes.
@@ -1076,21 +1143,21 @@ and the release workflow publishes it in the release notes.
 
 | Output | Quantities | Distributions | Blocks | Scalars | Values | Always | Optional |
 |---|---|---|---|---|---|---|---|
-| `summary.v4` run summary | {sq} | {sd} | {sb} | {ss} | {sv} | {sa} | {so} |
-| `summary.v4` `per_endpoint`, each endpoint | {eq} | {ed} | {eb} | {es} | {ev} | {ea} | {eo} |
+| `summary.v5` run summary | {sq} | {sd} | {sb} | {ss} | {sv} | {sa} | {so} |
+| `summary.v5` `per_endpoint`, each endpoint | {eq} | {ed} | {eb} | {es} | {ev} | {ea} | {eo} |
 | Strategic sweep point (`points[]`) | {pq} | {pd} | {pb} | {ps} | {pv} | {pa} | {po} |
 
 | Per-request output | Numeric fields | Always | Optional |
 |---|---|---|---|
-| `request.v4` (`--data-log`), schema fields | {rq} | {ra} | {ro} |
-| `telemetry.v2` `request` row (`--ndjson`) | {wq} | {wa} | {wo} |
+| `request.v5` (`--data-log`), schema fields | {rq} | {ra} | {ro} |
+| `telemetry.v3` `request` row (`--ndjson`) | {wq} | {wa} | {wo} |
 
 - **Telemetry series** are selected by the YAML `include` patterns of each
   `--telemetry` source at run time. There is no fixed series count: the set is
   whatever the scraped pages expose that the patterns match. Each sample is
   one `telemetry` row; `telemetry_at_done` on `request` rows is a last-seen
   map over the same series.
-- **`request.v4` `modality_metrics`** is an open map that each modality binary
+- **`request.v5` `modality_metrics`** is an open map that each modality binary
   fills, so it is not in the schema count. `metrum-ai-bench-cli-llm` writes
   {n_llm} keys on every success: {llm_keys}. See `docs/OUTPUT_SCHEMA.md` for
   vlm, asr, and imagegen.
@@ -1220,18 +1287,18 @@ reports, null or not (#245), only `n` of an empty one, and outside
 distributions only the numbers one run produced. It can therefore be lower
 than the schema `values` here, which counts every numeric slot.
 
-## `summary.v4` quantities
+## `summary.v5` quantities
 
 "#
     );
     quantity_table(&mut out, &s.summary, &summary_optional());
-    out.push_str("\n## `summary.v4` `per_endpoint` quantities (each endpoint)\n\n");
+    out.push_str("\n## `summary.v5` `per_endpoint` quantities (each endpoint)\n\n");
     quantity_table(&mut out, &s.per_endpoint, &[]);
     out.push_str("\n## Strategic sweep-point quantities\n\n");
     quantity_table(&mut out, &s.sweep, &sweep_optional());
-    out.push_str("\n## `request.v4` fields\n\n");
+    out.push_str("\n## `request.v5` fields\n\n");
     field_table(&mut out, &s.request, &request_optional());
-    out.push_str("\n## `telemetry.v2` `request` row fields (`--ndjson`)\n\n");
+    out.push_str("\n## `telemetry.v3` `request` row fields (`--ndjson`)\n\n");
     field_table(&mut out, &s.request_row, &request_row_optional());
     out
 }
@@ -1512,8 +1579,8 @@ fn every_optional_field_has_a_condition_and_no_stale_rows() {
         );
         assert!(table.iter().all(|(_, c)| !c.is_empty()), "{label}");
     };
-    check("summary.v4", &s.summary.optional, &summary_optional());
-    check("request.v4", &s.request.optional, &request_optional());
+    check("summary.v5", &s.summary.optional, &summary_optional());
+    check("request.v5", &s.request.optional, &request_optional());
     check("sweep point", &s.sweep.optional, &sweep_optional());
     check(
         "telemetry request row",
@@ -1685,6 +1752,7 @@ fn published_counts_match_real_llm_runs() {
     );
     let active = [
         HttpPath,
+        PositiveWindow,
         Usage,
         Streaming,
         ReasoningStream,
@@ -1706,7 +1774,7 @@ fn published_counts_match_real_llm_runs() {
     expected_fields.extend(modality_fields());
     assert_eq!(per_request, expected_fields, "full-run per-request fields");
 
-    // telemetry.v2 request rows: subset of the schema, superset of the always set.
+    // telemetry.v3 request rows: subset of the schema, superset of the always set.
     let rows: Vec<Value> = std::fs::read_to_string(&ndjson)
         .expect("ndjson")
         .lines()

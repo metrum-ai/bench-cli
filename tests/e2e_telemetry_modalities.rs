@@ -128,7 +128,7 @@ fn assert_joined(run: &Run, binary: &str) {
     assert_eq!(rows[0]["kind"], "run", "run row first: {kinds:?}");
     assert_eq!(
         rows[0]["schema_version"],
-        "metrum-ai-bench-cli.telemetry.v2"
+        "metrum-ai-bench-cli.telemetry.v3"
     );
     assert_eq!(rows[0]["config"]["binary"], binary);
     assert_eq!(
@@ -225,7 +225,7 @@ fn assert_joined(run: &Run, binary: &str) {
     // summary.v3 carries the additive telemetry stamp.
     let run_summary = summary_record(&run.data_log).expect("summary.v3");
     let stamp = &run_summary["telemetry"];
-    assert_eq!(stamp["schema_version"], "metrum-ai-bench-cli.telemetry.v2");
+    assert_eq!(stamp["schema_version"], "metrum-ai-bench-cli.telemetry.v3");
     assert_eq!(
         stamp["ndjson"], "run.ndjson",
         "file name only, no local dirs"

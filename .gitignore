@@ -1,6 +1,8 @@
 target/
 target-e2e/
 *.csv
+!docs/RELEASE_CERTIFICATION_CATALOG.csv
+!tests/fixtures/*.csv
 *.jsonl
 !test-data/**/*.jsonl
 *.md5

@@ -19,6 +19,7 @@ const sidebars: SidebarsConfig = {
         'docs/user-guide',
         'docs/agent-driven',
         'docs/modalities',
+        'docs/reasoning-models',
         'docs/strategic-benchmarking',
         'docs/system-telemetry',
         'docs/prompt-library',

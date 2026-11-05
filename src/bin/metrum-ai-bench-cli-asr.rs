@@ -1124,12 +1124,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let (telemetry_info, telemetry_verdict) =
         metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
+    // No measured span means an undefined rate, not elapsed setup/warmup time.
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
-    let window_seconds = if window_seconds > 0.0 {
-        window_seconds
-    } else {
-        start_time.elapsed().as_secs_f64()
-    };
     let slos = args.common.parse_slos()?;
     let body_template = json!({
         "multipart_fields": ["file", "model", "response_format", "language", "timestamp_granularities[]"],

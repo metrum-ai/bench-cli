@@ -65,7 +65,7 @@ pub struct RunSummary {
     pub observed_visible_completion_tokens_total: Option<u64>,
     pub fallback_ttft_s: DistSummary,
     pub window_seconds: f64,
-    pub requests_per_second: f64,
+    pub requests_per_second: Option<f64>,
     pub usage_missing_count: usize,
     pub completion_tokens_per_second: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +82,12 @@ pub struct RunSummary {
     pub latency_s: DistSummary,
     pub coordinated_omission_latency_s: DistSummary,
     pub ttft_s: DistSummary,
+    pub ttft_visible_answer_s: DistSummary,
+    pub answered_requests: usize,
+    pub answered_requests_per_second: Option<f64>,
+    /// Legacy v1.7.2 success-only numerator and last-success window.
+    pub legacy_success_completion_tokens_per_second: Option<f64>,
+    pub non_reasoning_completion_tokens_per_second: Option<f64>,
     pub tpot_s: DistSummary,
     pub itl_s: DistSummary,
     /// TCP/TLS connector duration (`0` = pool hit).
@@ -117,7 +123,7 @@ pub struct RunSummary {
     /// Per-request prefill rate `isl_tokens / min(first_reasoning_s, ttft_s)`; rows with both values
     /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: DistSummary,
-    /// Per-request `ttft_s + itl_s[0]`; streaming rows with at least two content chunks.
+    /// Per-request `ttft_visible_answer_s + itl_s[0]`; at least two visible chunks.
     pub time_to_second_token_s: DistSummary,
     /// Per-request `completion_tokens / latency_s` (same definition as the `user_tps=` SLO).
     pub user_tps: DistSummary,
@@ -263,7 +269,7 @@ fn parse_duration_seconds(raw: &str) -> anyhow::Result<f64> {
 #[derive(Debug, Clone, Serialize)]
 pub struct GoodputSummary {
     pub count: usize,
-    pub requests_per_second: f64,
+    pub requests_per_second: Option<f64>,
     pub fraction_of_attempted: f64,
     pub thresholds_s: BTreeMap<String, f64>,
 }
@@ -373,7 +379,14 @@ impl RecordedFieldDists {
             .collect();
         let second_token: Vec<f64> = successes
             .iter()
-            .filter_map(|r| Some(r.ttft_s? + r.itl_s.first()?))
+            .filter_map(|r| {
+                let visible = r.ttft_visible_answer_s.or_else(|| {
+                    (r.first_reasoning_s.is_none() && !ttft_is_first_byte_approx(r.ttft_source))
+                        .then_some(r.ttft_s)
+                        .flatten()
+                })?;
+                Some(visible + r.itl_s.first()?)
+            })
             .collect();
         let user_rates: Vec<f64> = successes.iter().filter_map(|r| r.user_tps()).collect();
         let isl = token_samples(successes, |r| (r.prompt_tokens, r.tokenized_prompt_tokens));
@@ -600,7 +613,19 @@ impl RunSummary {
         }
         let lat: Vec<f64> = successes.iter().map(|r| r.latency_s).collect();
         let corrected_lat: Vec<f64> = successes.iter().map(|r| r.corrected_latency_s()).collect();
-        let ttft: Vec<f64> = successes.iter().filter_map(|r| r.ttft_s).collect();
+        let ttft: Vec<f64> = pool
+            .iter()
+            .filter(|r| r.is_completed_response())
+            .filter_map(|r| r.ttft_s)
+            .collect();
+        let visible_ttft: Vec<f64> = pool
+            .iter()
+            .filter_map(|r| r.ttft_visible_answer_s)
+            .collect();
+        let answered_requests = pool
+            .iter()
+            .filter(|r| r.answer_completed == Some(true))
+            .count();
         let tpot: Vec<f64> = successes.iter().filter_map(|r| r.tpot_s()).collect();
         let itl: Vec<f64> = successes
             .iter()
@@ -610,22 +635,41 @@ impl RunSummary {
         let prefill: Vec<f64> = successes.iter().filter_map(|r| r.prefill_s).collect();
         let decode: Vec<f64> = successes.iter().filter_map(|r| r.decode_s).collect();
         let decode_tok: Vec<f64> = successes.iter().filter_map(|r| r.decode_tok_s).collect();
-        let completion = token_sum_accounting(&successes, |r| {
+        let completion = token_sum_accounting(&pool, |r| (r.completion_tokens, None));
+        let prompt = token_sum_accounting(&pool, |r| (r.prompt_tokens, None));
+        // v1.7.2 classified reasoning-only truncation as a failure even
+        // when this version records it as non-failing by default.
+        let legacy_successes: Vec<&RequestRecord> = successes
+            .iter()
+            .copied()
+            .filter(|r| r.outcome.as_deref() != Some("reasoning_truncated"))
+            .collect();
+        let legacy_completion = token_sum_accounting(&legacy_successes, |r| {
             (r.completion_tokens, r.tokenized_completion_tokens)
         });
-        let prompt =
-            token_sum_accounting(&successes, |r| (r.prompt_tokens, r.tokenized_prompt_tokens));
+        let legacy_window = pool
+            .iter()
+            .map(|r| crate::runner::send_offset_seconds(r))
+            .min_by(f64::total_cmp)
+            .and_then(|start| {
+                legacy_successes
+                    .iter()
+                    .map(|r| crate::runner::send_offset_seconds(r) + r.latency_s)
+                    .max_by(f64::total_cmp)
+                    .map(|end| end - start)
+            });
+        let legacy_success_completion_tokens_per_second = legacy_window
+            .filter(|w| *w > 0.0)
+            .and_then(|w| legacy_completion.total().map(|t| t as f64 / w));
         let usage_missing_count = completion.usage_missing_count;
         let completion_tokens_total = completion.total();
         let prompt_tokens_total = prompt.total();
-        let window = if window_seconds > 0.0 {
-            window_seconds
-        } else {
-            1e-9
-        };
+        let valid_window = window_seconds.is_finite() && window_seconds > 0.0;
+        // Bins use a harmless internal width only when the public rates are null.
+        let window = if valid_window { window_seconds } else { 1.0 };
         let good: Vec<_> = successes
             .iter()
-            .filter(|record| meets_slos(record, slos))
+            .filter(|record| record.answer_completed != Some(false) && meets_slos(record, slos))
             .collect();
         let thresholds_s = {
             let mut map: BTreeMap<String, f64> = [
@@ -655,7 +699,6 @@ impl RunSummary {
         for r in &pool {
             match r.ttft_source {
                 Some(crate::measurement::TtftSource::Stream) => {
-                    coverage.visible += 1;
                     coverage.stream += 1;
                 }
                 Some(crate::measurement::TtftSource::FirstTokenFallback) => {
@@ -668,15 +711,18 @@ impl RunSummary {
                     coverage.unresolved += 1;
                 }
             }
-            if r.first_reasoning_s.is_some()
-                && r.ttft_source != Some(crate::measurement::TtftSource::Stream)
-            {
+            if r.ttft_visible_answer_s.is_some() {
+                coverage.visible += 1;
+            }
+            if r.first_reasoning_s.is_some() && r.ttft_visible_answer_s.is_none() {
                 coverage.reasoning_only += 1;
             }
-            if matches!(
-                r.error,
-                Some(crate::error::RequestError::ReasoningTruncated)
-            ) {
+            if r.outcome.as_deref() == Some("reasoning_truncated")
+                || matches!(
+                    r.error,
+                    Some(crate::error::RequestError::ReasoningTruncated)
+                )
+            {
                 coverage.reasoning_truncated += 1;
             }
             if matches!(r.error, Some(crate::error::RequestError::NoOutputToken))
@@ -721,12 +767,35 @@ impl RunSummary {
         }
         coverage.missing_visible = attempted - coverage.visible;
         let http = HttpTraceDists::from_successes(&successes);
-        let bins = throughput_bins(&successes, open_loop_anchor(&pool), window, bin_seconds);
+        let bins = if valid_window {
+            throughput_bins(&successes, open_loop_anchor(&pool), window, bin_seconds)
+        } else {
+            Vec::new()
+        };
         let time_weighted = time_weighted(&pool, &successes, window_seconds);
-        let completion_tokens_per_second = completion_tokens_total.map(|t| t as f64 / window);
-        let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / window);
+        let completion_tokens_per_second = completion_tokens_total
+            .filter(|_| valid_window)
+            .map(|t| t as f64 / window);
+        let non_reasoning_completion_tokens_per_second = if valid_window
+            && !pool.is_empty()
+            && pool
+                .iter()
+                .all(|r| !r.usage_missing && r.visible_completion_tokens.is_some())
+        {
+            Some(
+                pool.iter()
+                    .filter_map(|r| r.visible_completion_tokens)
+                    .sum::<u64>() as f64
+                    / window,
+            )
+        } else {
+            None
+        };
+        let input_tokens_per_second = prompt_tokens_total
+            .filter(|_| valid_window)
+            .map(|t| t as f64 / window);
         let total_tokens_per_second = match (prompt_tokens_total, completion_tokens_total) {
-            (Some(p), Some(c)) => Some(p.saturating_add(c) as f64 / window),
+            (Some(p), Some(c)) if valid_window => Some(p.saturating_add(c) as f64 / window),
             _ => None,
         };
         Self {
@@ -749,7 +818,8 @@ impl RunSummary {
             observed_visible_completion_tokens_total: total(&observed_visible),
             fallback_ttft_s: DistSummary::from_values(&fallback_ttft),
             window_seconds,
-            requests_per_second: successes.len() as f64 / window,
+            requests_per_second: valid_window
+                .then(|| pool.iter().filter(|r| r.is_completed_response()).count() as f64 / window),
             usage_missing_count,
             completion_tokens_per_second,
             completion_tokens_source: completion.source,
@@ -760,6 +830,11 @@ impl RunSummary {
             latency_s: DistSummary::from_values(&lat),
             coordinated_omission_latency_s: DistSummary::from_values(&corrected_lat),
             ttft_s: DistSummary::from_values(&ttft),
+            ttft_visible_answer_s: DistSummary::from_values(&visible_ttft),
+            answered_requests,
+            answered_requests_per_second: valid_window.then_some(answered_requests as f64 / window),
+            legacy_success_completion_tokens_per_second,
+            non_reasoning_completion_tokens_per_second,
             tpot_s: DistSummary::from_values(&tpot),
             itl_s: DistSummary::from_values(&itl),
             connect_s: DistSummary::from_values(&connect),
@@ -791,7 +866,7 @@ impl RunSummary {
             throughput_bins_rps: DistSummary::from_values(&bins),
             goodput: GoodputSummary {
                 count: good.len(),
-                requests_per_second: good.len() as f64 / window,
+                requests_per_second: valid_window.then_some(good.len() as f64 / window),
                 fraction_of_attempted: if attempted == 0 {
                     0.0
                 } else {
@@ -949,8 +1024,9 @@ pub fn print_run_summary(summary: &RunSummary) {
         println!("  Errors by type: {:?}", summary.errors_by_type);
     }
     println!(
-        "  Window: {:.3}s  Requests/sec: {:.3}",
-        summary.window_seconds, summary.requests_per_second
+        "  Window: {:.3}s  Requests/sec: {}",
+        summary.window_seconds,
+        fmt_opt(summary.requests_per_second, 3)
     );
     match summary.completion_tokens_per_second {
         Some(rate) => println!(
@@ -987,7 +1063,7 @@ pub fn print_run_summary(summary: &RunSummary) {
         "CO-corrected latency",
         &summary.coordinated_omission_latency_s,
     );
-    print_dist("TTFT (visible; approximations labelled)", &summary.ttft_s);
+    print_dist("TTFT (first-any; approximations labelled)", &summary.ttft_s);
     let coverage = &summary.ttft_coverage;
     println!("  TTFT coverage: visible={} reasoning-only={} truncated={} first-token-fallback={} first-byte-approx={} unresolved={} / {} measured",
         coverage.visible, coverage.reasoning_only, coverage.reasoning_truncated,
@@ -1028,7 +1104,10 @@ pub fn print_run_summary(summary: &RunSummary) {
         );
     }
     if summary.time_to_second_token_s.n > 0 {
-        print_dist("Time to second token", &summary.time_to_second_token_s);
+        print_dist(
+            "Time to second visible chunk",
+            &summary.time_to_second_token_s,
+        );
     }
     if summary.prefill_tps_per_user.n > 0 {
         print_dist_unit("Prefill tok/s per user", &summary.prefill_tps_per_user, "");
@@ -1137,8 +1216,8 @@ pub fn print_run_summary(summary: &RunSummary) {
         );
     }
     println!(
-        "  Goodput: {:.3} req/s ({}/{} attempted; thresholds={:?})",
-        summary.goodput.requests_per_second,
+        "  Goodput: {} req/s ({}/{} attempted; thresholds={:?})",
+        fmt_opt(summary.goodput.requests_per_second, 3),
         summary.goodput.count,
         summary.attempted,
         summary.goodput.thresholds_s
@@ -1198,7 +1277,14 @@ fn token_sum_accounting(
         None
     } else if used_tokenizer_fallback {
         Some("tokenizer_fallback")
-    } else if sum > 0 || usage_missing_count > 0 {
+    } else if sum > 0
+        || usage_missing_count > 0
+        || successes.iter().any(|record| {
+            record.usage_prompt_tokens_present == Some(true)
+                && record.usage_completion_tokens_present == Some(true)
+        })
+    {
+        // An explicitly reported zero is known usage, not missing accounting.
         Some("server_usage")
     } else {
         // Non-token modalities (ASR/imagegen) report 0 tokens without a
@@ -1214,7 +1300,7 @@ fn token_sum_accounting(
 
 impl CrossRunSummary {
     pub fn from_runs(runs: &[RunSummary], seed: u64) -> Self {
-        let request_rates: Vec<_> = runs.iter().map(|r| r.requests_per_second).collect();
+        let request_rates: Vec<_> = runs.iter().filter_map(|r| r.requests_per_second).collect();
         let token_rates: Vec<_> = runs
             .iter()
             .filter_map(|r| r.completion_tokens_per_second)
@@ -1425,6 +1511,261 @@ mod tests {
         }
     }
 
+    // BC-MATH-001: overlapping sends, late error, missing usage, and warmup.
+    #[test]
+    fn bc_math_001_all_terminal_window_and_usage_coverage() {
+        let mut answered = ok(0, 4000, 200, 8, &[]).with_send_offset(Duration::from_secs(0));
+        answered.answer_completed = Some(true);
+        let mut truncated = ok(1, 4000, 100, 16, &[]).with_send_offset(Duration::from_secs(1));
+        truncated.answer_completed = Some(false);
+        truncated.outcome = Some("reasoning_truncated".into());
+        let started = Utc::now();
+        let latency = Duration::from_secs(8);
+        let mut failed = RequestRecord::failed(
+            2,
+            Phase::Measure,
+            "ep".into(),
+            started,
+            with_times(started, latency),
+            latency,
+            RequestError::Timeout,
+        )
+        .with_send_offset(Duration::from_secs(2));
+        // The error explicitly reports zero completion tokens, not missing usage.
+        failed.usage_missing = false;
+        failed.prompt_tokens = 1;
+        let mut warmup = ok(3, 20000, 100, 999, &[]).with_send_offset(Duration::from_secs(0));
+        warmup.phase = Phase::Warmup;
+        let mut rows = vec![answered, truncated, failed, warmup];
+        let window = crate::runner::window_seconds_from_records(&rows);
+        assert_eq!(window, 10.0);
+        let summary = RunSummary::from_records(&rows, window, false);
+        assert_eq!(summary.completion_tokens_total, Some(24));
+        assert_eq!(summary.completion_tokens_per_second, Some(2.4));
+        rows[2].usage_missing = true;
+        let incomplete = RunSummary::from_records(&rows, window, false);
+        assert!(incomplete.completion_tokens_total.is_none());
+        assert!(incomplete.completion_tokens_per_second.is_none());
+    }
+
+    // BC-MATH-002: completion, answer and SLO-goodput populations differ.
+    #[test]
+    fn bc_math_002_completed_answered_and_slo_populations() {
+        let mut first = ok(0, 1000, 100, 8, &[]);
+        first.answer_completed = Some(true);
+        let mut second = ok(1, 1000, 400, 8, &[]);
+        second.answer_completed = Some(true);
+        let mut truncated = ok(2, 1000, 50, 16, &[]);
+        truncated.answer_completed = Some(false);
+        truncated.outcome = Some("reasoning_truncated".into());
+        let slos = SloConfig {
+            ttft_s: Some(0.2),
+            ..Default::default()
+        };
+        let summary = RunSummary::from_records_with_options(
+            &[first, second, truncated],
+            10.0,
+            false,
+            &slos,
+            10.0,
+        );
+        assert!((summary.requests_per_second.unwrap() - 0.3).abs() < 1e-12);
+        assert_eq!(summary.answered_requests, 2);
+        assert!((summary.answered_requests_per_second.unwrap() - 0.2).abs() < 1e-12);
+        assert_eq!(summary.goodput.count, 1);
+        assert!((summary.goodput.requests_per_second.unwrap() - 0.1).abs() < 1e-12);
+        assert!((summary.goodput.fraction_of_attempted - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    // BC-MATH-002: a completed empty response is an error but not a transport failure.
+    #[test]
+    fn completed_empty_response_is_not_answered_or_goodput() {
+        let mut empty =
+            ok(0, 1000, 100, 0, &[]).with_chat_outcome(Some(RequestError::NoOutputToken), false);
+        empty.ttft_s = None;
+        empty.ttft_first_any_s = None;
+        empty.ttft_visible_answer_s = None;
+        empty.answer_completed = Some(false);
+        assert!(!empty.is_success());
+        assert!(empty.is_completed_response());
+        let summary = RunSummary::from_records(&[empty], 10.0, false);
+        assert_eq!(summary.errors, 1);
+        assert_eq!(summary.requests_per_second, Some(0.1));
+        assert_eq!(summary.answered_requests, 0);
+        assert_eq!(summary.goodput.count, 0);
+        let strategic = crate::strategic::BenchRecord {
+            success: false,
+            outcome: Some("no_output_token".into()),
+            answer_completed: Some(false),
+            ..Default::default()
+        };
+        let point =
+            crate::strategic::summarize_stage(1.0, &[strategic], 10.0, &SloConfig::default(), None);
+        assert_eq!(point.throughput, Some(0.1));
+        assert_eq!(point.answered_requests, 0);
+        assert_eq!(point.goodput, Some(0.0));
+    }
+
+    // BC-SSE-004 / BC-MATH-003: reported zero remains distinct from missing.
+    #[test]
+    fn reported_zero_token_usage_is_not_missing() {
+        let mut row = ok(0, 1000, 100, 0, &[]);
+        row.prompt_tokens = 0;
+        row.total_tokens = 0;
+        row.usage_prompt_tokens_present = Some(true);
+        row.usage_completion_tokens_present = Some(true);
+        let summary = RunSummary::from_records(&[row], 2.0, false);
+        assert_eq!(summary.prompt_tokens_total, Some(0));
+        assert_eq!(summary.completion_tokens_total, Some(0));
+        assert_eq!(summary.input_tokens_per_second, Some(0.0));
+        assert_eq!(summary.completion_tokens_per_second, Some(0.0));
+        assert_eq!(summary.total_tokens_per_second, Some(0.0));
+        assert_eq!(summary.completion_tokens_source, Some("server_usage"));
+    }
+
+    // BC-MATH-005: independently recompute all rate populations in three
+    // fixed-time error orderings, with complete and missing usage and zero window.
+    #[test]
+    fn bc_math_005_mixed_error_ordering_all_rates() {
+        use crate::strategic::{stage_window_seconds, summarize_stage, BenchRecord};
+        for (error_latency, expected_window) in [(1.0, 5.0), (8.0, 10.0), (2.5, 5.0)] {
+            let mut answer = ok(0, 4000, 100, 8, &[])
+                .with_send_offset(Duration::ZERO)
+                .with_reasoning_tokens(Some(3));
+            answer.prompt_tokens = 4;
+            answer.total_tokens = 12;
+            answer.answer_completed = Some(true);
+            let mut truncated = ok(1, 4000, 100, 8, &[])
+                .with_send_offset(Duration::from_secs(1))
+                .with_reasoning_tokens(Some(3));
+            truncated.prompt_tokens = 4;
+            truncated.total_tokens = 12;
+            truncated.answer_completed = Some(false);
+            truncated.outcome = Some("reasoning_truncated".into());
+            let now = Utc::now();
+            let duration = Duration::from_secs_f64(error_latency);
+            let mut failure = RequestRecord::failed(
+                2,
+                Phase::Measure,
+                "ep".into(),
+                now,
+                with_times(now, duration),
+                duration,
+                RequestError::Timeout,
+            )
+            .with_send_offset(Duration::from_secs(2));
+            failure.usage_missing = false;
+            failure.prompt_tokens = 4;
+            failure.completion_tokens = 8;
+            failure.total_tokens = 12;
+            failure = failure.with_reasoning_tokens(Some(3));
+            let mut rows = vec![answer, truncated, failure];
+            let window = crate::runner::window_seconds_from_records(&rows);
+            assert_eq!(window, expected_window);
+            let summary = RunSummary::from_records(&rows, window, false);
+            let close = |actual: Option<f64>, expected: f64| {
+                assert!((actual.unwrap() - expected).abs() < 1e-9)
+            };
+            close(summary.requests_per_second, 2.0 / expected_window);
+            close(summary.answered_requests_per_second, 1.0 / expected_window);
+            close(summary.goodput.requests_per_second, 1.0 / expected_window);
+            close(summary.input_tokens_per_second, 12.0 / expected_window);
+            close(summary.completion_tokens_per_second, 24.0 / expected_window);
+            close(summary.total_tokens_per_second, 36.0 / expected_window);
+            close(
+                summary.non_reasoning_completion_tokens_per_second,
+                15.0 / expected_window,
+            );
+            close(summary.legacy_success_completion_tokens_per_second, 2.0);
+            let mut strategic: Vec<BenchRecord> = rows
+                .iter()
+                .map(|r| BenchRecord {
+                    seq: r.seq,
+                    stage: 1.0,
+                    sent_unix_ns: (r.send_offset_s.unwrap() * 1e9) as u128,
+                    send_offset_s: r.send_offset_s,
+                    latency_s: r.latency_s,
+                    service_latency_s: r.latency_s,
+                    success: r.is_success(),
+                    input_tokens: r.prompt_tokens,
+                    output_tokens: r.completion_tokens,
+                    reasoning_tokens: r.reasoning_tokens,
+                    usage_missing: r.usage_missing,
+                    outcome: r.outcome.clone(),
+                    answer_completed: r.answer_completed,
+                    ..Default::default()
+                })
+                .collect();
+            assert_eq!(stage_window_seconds(&strategic), Some(expected_window));
+            let point = summarize_stage(
+                1.0,
+                &strategic,
+                expected_window,
+                &SloConfig::default(),
+                None,
+            );
+            close(point.throughput, 2.0 / expected_window);
+            close(point.answered_requests_per_second, 1.0 / expected_window);
+            close(point.goodput, 1.0 / expected_window);
+            close(point.input_tokens_per_second, 12.0 / expected_window);
+            close(point.completion_tokens_per_second, 24.0 / expected_window);
+            close(point.total_tokens_per_second, 36.0 / expected_window);
+            close(
+                point.non_reasoning_completion_tokens_per_second,
+                15.0 / expected_window,
+            );
+            close(point.legacy_success_completion_tokens_per_second, 2.0);
+            rows[2].usage_missing = true;
+            strategic[2].usage_missing = true;
+            let missing = RunSummary::from_records(&rows, expected_window, false);
+            assert!(
+                missing.completion_tokens_per_second.is_none()
+                    && missing.input_tokens_per_second.is_none()
+                    && missing.total_tokens_per_second.is_none()
+                    && missing.non_reasoning_completion_tokens_per_second.is_none()
+            );
+            let missing_stage = summarize_stage(
+                1.0,
+                &strategic,
+                expected_window,
+                &SloConfig::default(),
+                None,
+            );
+            assert!(
+                missing_stage.completion_tokens_per_second.is_none()
+                    && missing_stage.input_tokens_per_second.is_none()
+                    && missing_stage.total_tokens_per_second.is_none()
+                    && missing_stage
+                        .non_reasoning_completion_tokens_per_second
+                        .is_none()
+            );
+            let zero = RunSummary::from_records(&rows, 0.0, false);
+            let zero_stage = summarize_stage(1.0, &strategic, 0.0, &SloConfig::default(), None);
+            assert!(
+                zero.requests_per_second.is_none() && zero.goodput.requests_per_second.is_none()
+            );
+            assert!(zero_stage.throughput.is_none() && zero_stage.goodput.is_none());
+        }
+    }
+
+    #[test]
+    fn undefined_window_has_null_rates_and_no_infinite_bins() {
+        let mut record = ok(0, 0, 0, 20, &[]);
+        record.answer_completed = Some(true);
+        for window in [0.0, -1.0, f64::INFINITY] {
+            let summary = RunSummary::from_records(&[record.clone()], window, false);
+            assert_eq!(summary.requests_per_second, None);
+            assert_eq!(summary.answered_requests_per_second, None);
+            assert_eq!(summary.goodput.requests_per_second, None);
+            assert_eq!(summary.completion_tokens_per_second, None);
+            assert_eq!(summary.input_tokens_per_second, None);
+            assert_eq!(summary.total_tokens_per_second, None);
+            assert_eq!(summary.throughput_bins_rps.n, 0);
+            let json = serde_json::to_value(summary).unwrap();
+            assert!(json["requests_per_second"].is_null());
+        }
+    }
+
     #[test]
     fn excludes_no_output_token_from_ttft() {
         let mut recs = vec![ok(0, 500, 120, 20, &[20; 19])];
@@ -1509,14 +1850,14 @@ mod tests {
     }
 
     #[test]
-    fn usage_missing_uses_tokenizer_fallback() {
+    fn usage_missing_tokenizer_does_not_fill_headline() {
         let mut rec = ok(0, 100, 20, 0, &[]);
         rec.usage_missing = true;
         rec.tokenized_completion_tokens = Some(20);
         let summary = RunSummary::from_records(&[rec], 1.0, false);
         assert_eq!(summary.usage_missing_count, 1);
-        assert_eq!(summary.completion_tokens_per_second, Some(20.0));
-        assert_eq!(summary.completion_tokens_source, Some("tokenizer_fallback"));
+        assert_eq!(summary.completion_tokens_per_second, None);
+        assert_eq!(summary.completion_tokens_source, None);
     }
 
     #[test]
@@ -1927,13 +2268,13 @@ mod tests {
         assert!(unfilled.completion_tokens_total.is_none());
         assert!(unfilled.total_tokens_per_second.is_none());
 
-        // Tokenizer-filled gap counts, matching isl_tokens / osl_tokens.
+        // Visible-text tokenization cannot fill the reported-usage headline.
         gap.tokenized_prompt_tokens = Some(17);
         gap.tokenized_completion_tokens = Some(12);
         let filled = RunSummary::from_records(&[server, gap], 2.0, false);
-        assert_eq!(filled.prompt_tokens_total, Some(18 + 17));
-        assert_eq!(filled.completion_tokens_total, Some(8 + 12));
-        assert_eq!(filled.total_tokens_per_second, Some(55.0 / 2.0));
+        assert_eq!(filled.prompt_tokens_total, None);
+        assert_eq!(filled.completion_tokens_total, None);
+        assert_eq!(filled.total_tokens_per_second, None);
         assert_eq!(filled.prefill_tps_per_user.n, 2);
 
         // First-byte approximated TTFT is excluded from the prefill rate only.

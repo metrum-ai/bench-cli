@@ -274,7 +274,7 @@ pub fn send_offset_seconds(record: &RequestRecord) -> f64 {
         .unwrap_or_else(|| datetime_to_unix_secs(record.started_at))
 }
 
-/// Measured window: first measured send → last measured successful completion.
+/// Measured window: first measured send → last measured terminal completion.
 /// Prefer monotonic `send_offset_s` so wall-clock steps cannot inflate the
 /// window (N-02). Falls back to `started_at` for records that lack the field.
 pub fn window_seconds_from_records(records: &[RequestRecord]) -> f64 {
@@ -290,9 +290,7 @@ pub fn window_seconds_from_records(records: &[RequestRecord]) -> f64 {
     for r in &measured {
         let send = send_offset_seconds(r);
         min_send = min_send.min(send);
-        if r.is_success() {
-            max_end = max_end.max(send + r.latency_s);
-        }
+        max_end = max_end.max(send + r.latency_s);
     }
     if !min_send.is_finite() || !max_end.is_finite() || max_end < min_send {
         return 0.0;

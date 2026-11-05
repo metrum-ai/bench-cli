@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.0
+
+### Breaking measurement and schema changes
+
+- Metrum AI: streaming headline TTFT now measures the first actual reasoning or
+  visible output delta, not v1.7.2's first visible answer. The separate visible
+  answer TTFT preserves that measurement. The reachable 0.1.82 source also used
+  visible TTFT; historical wrapper results require version and cohort checks.
+- Completed reasoning-only length streams are counted outcomes, not request
+  failures by default. Strict mode and `--ci-safety` enforce answer-required
+  behavior; answer goodput excludes unanswered requests.
+- Output token rates use reported completion tokens including reasoning over
+  the entire measured first-send to last-terminal window. Rates become null
+  when usage is incomplete; non-reasoning rates require a complete split.
+  Existing dashboards, schema readers and TTFT SLO thresholds must migrate.
+  See [v1.8.0 release notes](docs/release-notes/v1.8.0.md).
+
 ## 1.7.2 (2026-11-03)
 
 ### Changed

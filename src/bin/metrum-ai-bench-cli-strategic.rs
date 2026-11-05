@@ -107,16 +107,28 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
-        help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
+        help = "When actual first-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
     )]
     infer_ttft_from_first_byte: bool,
-    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful")]
+    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Deprecated redundant alias: first actual streamed token is now the default")]
     ttft_fallback: Option<String>,
     #[arg(
         long,
         help = "Allow missing TTFT in exploratory runs; request errors and safety gates still apply"
     )]
     allow_missing_ttft: bool,
+    #[arg(
+        long,
+        help = "Fail reasoning-only length-truncated responses (implied by --ci-safety)"
+    )]
+    strict_reasoning_truncation: bool,
+    #[arg(long, help = "Exit non-zero when measured requests fail")]
+    fail_on_error: bool,
+    #[arg(
+        long,
+        help = "Enable strict reasoning truncation and fail on measured errors or interruption"
+    )]
+    ci_safety: bool,
     #[arg(long, default_value_t = 100)]
     requests_per_stage: u64,
     #[arg(long, default_value = "1,2,4,8")]
@@ -990,6 +1002,19 @@ fn response_tokens(kind: EndpointKind, response: &Value) -> (u64, u64) {
     }
 }
 
+/// Required server usage fields differ for input-only endpoint kinds.
+fn response_usage_complete(kind: EndpointKind, response: &Value) -> bool {
+    let count = |path: &str| response.pointer(path).and_then(Value::as_u64).is_some();
+    match kind {
+        EndpointKind::Chat | EndpointKind::Vlm | EndpointKind::Asr => {
+            count("/usage/prompt_tokens") && count("/usage/completion_tokens")
+        }
+        EndpointKind::Embeddings => count("/usage/prompt_tokens"),
+        EndpointKind::Rerank => count("/usage/total_tokens"),
+        EndpointKind::Imagegen => false,
+    }
+}
+
 /// Server-reported reasoning tokens for chat and vlm responses; `None` when
 /// absent and for the other kinds (#192).
 fn response_reasoning_tokens(kind: EndpointKind, response: &Value) -> Option<u64> {
@@ -1032,6 +1057,7 @@ fn spawn_one_request(
     let streaming = args.streaming && kind.chat_like();
     let infer_ttft = args.infer_ttft_from_first_byte;
     let first_token_fallback = args.ttft_fallback.is_some();
+    let strict_reasoning = args.strict_reasoning_truncation || args.ci_safety;
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
     tokio::spawn(async move {
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
@@ -1104,6 +1130,9 @@ fn spawn_one_request(
         let mut stream_ttft_s = None;
         let mut first_reasoning_s = None;
         let mut stream_output_error = None;
+        let mut stream_completed = false;
+        let mut usage_missing = true;
+        let mut usage_presence = kind.chat_like().then_some((false, false));
         let mut itl_s = Vec::new();
         let body_slot = Arc::clone(&connect_slot);
         let result: Result<Reply> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
@@ -1112,14 +1141,17 @@ fn spawn_one_request(
             t_first_ns.replace(run_epoch.elapsed_ns());
             let response = response.error_for_status()?;
             if streaming {
-                let stream = metrum_ai_bench::chat_stream::consume_with_options(
+                let stream = metrum_ai_bench::chat_stream::consume_preserving_usage(
                     metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
                     sent,
                     true,
                     false,
                 )
                 .await?;
+                stream_completed = true;
                 stream_output_error = stream.output_error();
+                usage_missing = !stream.usage_complete;
+                usage_presence = Some((stream.prompt_tokens_present, stream.completion_tokens_present));
                 stream_ttft_s = stream.ttft.map(|d| d.as_secs_f64());
                 first_reasoning_s = stream.first_reasoning.map(|d| d.as_secs_f64());
                 itl_s = stream.itl.iter().map(|d| d.as_secs_f64()).collect();
@@ -1164,8 +1196,52 @@ fn spawn_one_request(
             },
             Err(err) => (Err(err), ModalitySample::default()),
         };
+        let reasoning_truncated = matches!(
+            stream_output_error,
+            Some(metrum_ai_bench::error::RequestError::ReasoningTruncated)
+        );
+        let nonstream_answer = if !streaming && kind.chat_like() {
+            result
+                .as_ref()
+                .ok()
+                .map(metrum_ai_bench::chat_stream::response_has_visible_output)
+        } else {
+            None
+        };
+        if nonstream_answer == Some(false) {
+            stream_output_error = Some(metrum_ai_bench::error::RequestError::NoOutputToken);
+        }
+        let answer_completed = if stream_completed {
+            Some(stream_ttft_s.is_some())
+        } else {
+            nonstream_answer
+        };
+        let outcome = answer_completed.map(|answered| {
+            if reasoning_truncated {
+                "reasoning_truncated"
+            } else if answered {
+                "answer"
+            } else {
+                "no_output_token"
+            }
+            .to_string()
+        });
+        if reasoning_truncated && !strict_reasoning {
+            stream_output_error = None;
+        }
         let (success, valid, input_tokens, output_tokens, reasoning_tokens, error) = match result {
             Ok(value) => {
+                if !streaming {
+                    if kind.chat_like() {
+                        usage_presence = Some(
+                            value
+                                .get("usage")
+                                .map(metrum_ai_bench::chat_stream::usage_presence)
+                                .unwrap_or_default(),
+                        );
+                    }
+                    usage_missing = !response_usage_complete(kind, &value);
+                }
                 let (input_tokens, output_tokens) = response_tokens(kind, &value);
                 (
                     stream_output_error.is_none(),
@@ -1179,7 +1255,24 @@ fn spawn_one_request(
                     stream_output_error.as_ref().map(ToString::to_string),
                 )
             }
-            Err(error) => (false, None, 0, 0, None, Some(error.to_string())),
+            Err(error) => {
+                let usage = error
+                    .downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
+                    .map(|failure| &failure.usage);
+                if let Some(usage) = usage {
+                    usage_missing = !usage.usage_complete;
+                    usage_presence =
+                        Some((usage.prompt_tokens_present, usage.completion_tokens_present));
+                }
+                (
+                    false,
+                    None,
+                    usage.map_or(0, |u| u.prompt_tokens),
+                    usage.map_or(0, |u| u.completion_tokens),
+                    usage.and_then(|u| u.reasoning_tokens),
+                    Some(error.to_string()),
+                )
+            }
         };
         // InFlightSlot leaves the gauge before freeing the permit (#189).
         drop(request_slot);
@@ -1228,6 +1321,12 @@ fn spawn_one_request(
             chunks_received: http_trace.chunks_received.filter(|_| success),
             // Same origin as the NDJSON `t_sent_ns`; monotonic (#224).
             send_offset_s: Some(t_sent_ns as f64 / 1e9),
+            ttft_visible_answer_s: stream_ttft_s,
+            outcome,
+            answer_completed,
+            usage_missing,
+            usage_prompt_tokens_present: usage_presence.map(|p| p.0),
+            usage_completion_tokens_present: usage_presence.map(|p| p.1),
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -1253,6 +1352,12 @@ fn spawn_one_request(
                         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
                         first_reasoning_s: record.first_reasoning_s,
                         ttft_first_any_s: record.first_any_s(),
+                        ttft_visible_answer_s: record.ttft_visible_answer_s,
+                        outcome: record.outcome.clone(),
+                        answer_completed: record.answer_completed,
+                        usage_missing: Some(record.usage_missing),
+                        usage_prompt_tokens_present: record.usage_prompt_tokens_present,
+                        usage_completion_tokens_present: record.usage_completion_tokens_present,
                         error,
                         queue_sample_age_ms: None,
                         queue_sample_stale: None,
@@ -1539,8 +1644,9 @@ async fn run_stage(
             .await?;
     }
 
-    let measured_seconds = metrum_ai_bench::strategic::stage_window_seconds(&records)
-        .unwrap_or_else(|| measure_epoch.elapsed().as_secs_f64());
+    // No measured requests means no defined throughput denominator.
+    let measured_seconds =
+        metrum_ai_bench::strategic::stage_window_seconds(&records).unwrap_or(0.0);
     Ok((
         records,
         samples,
@@ -1608,6 +1714,9 @@ async fn main() -> Result<()> {
     let stages = parse_sweep(&args.sweep)?;
     // Flag checks before any file is read, so a wrong flag says so first.
     validate_kind_flags(&args)?;
+    if args.ttft_fallback.is_some() {
+        eprintln!("warning: --ttft-fallback is deprecated; first-any TTFT is now the default");
+    }
     let schema = args.json_schema.as_deref().map(read_json).transpose()?;
     let tools = args.tools.as_deref().map(read_json).transpose()?;
     if schema.is_some() && tools.is_some() {
@@ -1914,6 +2023,9 @@ async fn main() -> Result<()> {
         }
         point.ttft_approx_count = ttft_audit.as_ref().map_or(0, |a| a.approx_count);
         point.ttft_warning = ttft_audit.as_ref().ok().and_then(|a| a.warning.clone());
+        if point.ttft_coverage.reasoning_truncated > 0 {
+            eprintln!("warning: {}/{} measured requests exhausted the token budget on reasoning without an answer", point.ttft_coverage.reasoning_truncated, point.n);
+        }
         points.push(point);
         all_records.extend(records);
         if let Err(error) = ttft_audit {
@@ -1960,7 +2072,7 @@ async fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
-            "schema_version": "metrum-ai-bench-cli.strategic.v2",
+            "schema_version": "metrum-ai-bench-cli.strategic.v3",
             "tool_version": VERSION,
             "environment": environment,
             "config": redacted_config,
@@ -2016,6 +2128,20 @@ async fn main() -> Result<()> {
     if let Some(error) = ttft_error {
         return Err(error);
     }
+    if args.strict_reasoning_truncation
+        && all_records
+            .iter()
+            .any(|r| !r.warmup && r.outcome.as_deref() == Some("reasoning_truncated"))
+    {
+        bail!("reasoning-truncated requests rejected by strict mode");
+    }
+    if (args.fail_on_error || args.ci_safety) && all_records.iter().any(|r| !r.warmup && !r.success)
+    {
+        bail!("measured requests failed");
+    }
+    if args.ci_safety && partial {
+        bail!("strategic run was interrupted");
+    }
     if let Some(ref validation) = any_osl_validation {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.fail_on_osl_mismatch)?;
     }
@@ -2025,6 +2151,28 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_only_usage_coverage_does_not_require_output_tokens() {
+        let embedding = json!({"usage": {"prompt_tokens": 0}});
+        let rerank = json!({"usage": {"total_tokens": 4}});
+        assert!(response_usage_complete(
+            EndpointKind::Embeddings,
+            &embedding
+        ));
+        assert_eq!(
+            response_tokens(EndpointKind::Embeddings, &embedding),
+            (0, 0)
+        );
+        assert!(response_usage_complete(EndpointKind::Rerank, &rerank));
+        assert_eq!(response_tokens(EndpointKind::Rerank, &rerank), (4, 0));
+        assert!(!response_usage_complete(EndpointKind::Chat, &embedding));
+        assert!(!response_usage_complete(EndpointKind::Imagegen, &rerank));
+        assert!(!response_usage_complete(
+            EndpointKind::Rerank,
+            &json!({"usage": {}})
+        ));
+    }
 
     #[test]
     fn prompts_require_max_tokens() {

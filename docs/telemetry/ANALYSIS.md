@@ -20,7 +20,7 @@ There is no `correlate` subcommand or built-in DuckDB feature.
 | `scrape_error` | `run_id`, `t_ns`, `src`, `error` | Optional `http_status` |
 | `summary` | `run_id`, `partial`, row counts, `dropped_telemetry_rows` | Terminal line |
 
-`schema_version` on a current run row is `metrum-ai-bench-cli.telemetry.v2`;
+`schema_version` on a current run row is `metrum-ai-bench-cli.telemetry.v3`;
 historical `telemetry.v1` rows remain readable by compatible analysis tools.
 `mtype` is one of `counter`, `gauge`, `histogram_bucket`, `summary`, `unknown`.
 

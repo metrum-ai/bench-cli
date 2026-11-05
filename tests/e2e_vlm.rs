@@ -54,6 +54,13 @@ fn fixture_with_rows(rows: impl Fn(&std::path::Path) -> Vec<String>) -> Fixture 
 }
 
 fn run_vlm(fixture: &Fixture, url: &str, requests: u32, extra: &[&str]) {
+    assert!(
+        run_vlm_status(fixture, url, requests, extra),
+        "vlm bench failed"
+    );
+}
+
+fn run_vlm_status(fixture: &Fixture, url: &str, requests: u32, extra: &[&str]) -> bool {
     let requests = requests.to_string();
     let mut args: Vec<String> = [
         "--url",
@@ -90,7 +97,7 @@ fn run_vlm(fixture: &Fixture, url: &str, requests: u32, extra: &[&str]) {
         .args(&args)
         .status()
         .expect("run vlm");
-    assert!(status.success(), "vlm bench failed");
+    status.success()
 }
 
 /// Streaming TTFT must come from the first content token, not be fabricated,
@@ -166,12 +173,64 @@ fn vlm_non_streaming_reports_no_ttft() {
             "non-streaming record reported ttft {:?}",
             record["ttft_s"]
         );
+        assert!(record["ttft_visible_answer_s"].is_null());
+        assert_eq!(record["answer_completed"], true);
+        assert_eq!(record["outcome"], "answer");
         assert!(record["latency_s"].as_f64().expect("latency_s") >= 0.050);
+    }
+    let summary = summary_record(&fixture.data_log).unwrap();
+    assert_eq!(summary["answered_requests"], 2);
+}
+
+// BC-MODE-002: VLM non-streaming header approximations remain labelled.
+#[test]
+fn vlm_nonstreaming_first_byte_is_only_an_approximation() {
+    let dummy = spawn_dummy(&["-latency", "1ms"]).expect("catalog requires dummy-model-server");
+    let f = fixture();
+    assert!(run_vlm_status(
+        &f,
+        &dummy.url("/v1/chat/completions"),
+        1,
+        &["--infer-ttft-from-first-byte"]
+    ));
+    let rows = request_records(&f.data_log);
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["ttft_source"], "first_byte_approx");
+    assert_eq!(row["ttft_s"], row["first_byte_s"]);
+    assert!(row["ttft_visible_answer_s"].is_null());
+    assert!(row["ttft_first_any_s"].is_null());
+    assert_eq!(row["answer_completed"], true);
+    assert_eq!(row["usage_missing"], false);
+}
+
+// BC-CLI-002 / BC-SSE-002: VLM must apply the same truncation exit policy.
+#[test]
+fn vlm_reasoning_truncation_strict_exit_matrix() {
+    let dummy = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"])
+        .expect("catalog certification requires the dummy-model-server");
+    let url = dummy.url("/v1/chat/completions");
+    for (flags, strict) in [
+        (&["--streaming"][..], false),
+        (&["--streaming", "--fail-on-error"][..], false),
+        (&["--streaming", "--strict-reasoning-truncation"][..], true),
+        (&["--streaming", "--ci-safety"][..], true),
+    ] {
+        let f = fixture();
+        assert_eq!(run_vlm_status(&f, &url, 2, flags), !strict, "{flags:?}");
+        for row in request_records(&f.data_log) {
+            assert_eq!(row["outcome"], "reasoning_truncated");
+            assert_eq!(row["answer_completed"], false);
+            assert_eq!(row["error"].is_null(), !strict);
+        }
+        let summary = summary_record(&f.data_log).unwrap();
+        assert_eq!(summary["ttft_coverage"]["reasoning_truncated"], 2);
+        assert_eq!(summary["goodput"]["count"], 0);
     }
 }
 
 #[test]
-fn vlm_reasoning_only_fallback_reports_failed_answers() {
+fn vlm_reasoning_only_fallback_reports_unanswered_outcomes() {
     let Some(dummy) = spawn_dummy(&["-reasoning-only", "-chunk-interval", "1ms"]) else {
         skip("go dummy-model-server not available");
         return;
@@ -184,12 +243,15 @@ fn vlm_reasoning_only_fallback_reports_failed_answers() {
         &["--streaming", "--ttft-fallback", "first-token"],
     );
     for record in request_records(&fixture.data_log) {
-        assert_eq!(record["error"]["kind"], "reasoning_truncated");
-        assert_eq!(record["ttft_source"], "first_token_fallback");
+        assert!(record["error"].is_null());
+        assert_eq!(record["outcome"], "reasoning_truncated");
+        assert_eq!(record["answer_completed"], false);
+        assert_eq!(record["ttft_source"], "stream");
         assert_eq!(record["reasoning_tokens"], 20);
     }
     let summary = summary_record(&fixture.data_log).expect("summary");
-    assert_eq!(summary["successes"], 0);
+    assert_eq!(summary["successes"], 2);
+    assert_eq!(summary["goodput"]["count"], 0);
     assert_eq!(summary["ttft_coverage"]["reasoning_truncated"], 2);
     assert_eq!(summary["ttft_first_any_s"]["n"], 2);
     assert_eq!(summary["observed_reasoning_tokens_total"], 40);
