@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,16 +32,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Decide whether full nightly is needed
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/validation/cert/nightly_decision.py
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: steps.decision.outputs.run == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.decision.outputs.run == 'true'
         with:
           go-version: '1.26.10'
           cache-dependency-path: dummy-model-server/go.sum
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.decision.outputs.run == 'true'
       - name: Build required dummy server
+        if: steps.decision.outputs.run == 'true'
         working-directory: dummy-model-server
         run: go build -o "$RUNNER_TEMP/dummy-model-server" ./cmd/dummy-model-server
       - name: Full suite and ignored tests
+        if: steps.decision.outputs.run == 'true'
         env:
           METRUM_BENCH_REQUIRE_DUMMY: '1'
           METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
@@ -48,6 +59,7 @@ jobs:
           cargo --locked test --all-targets --all-features
           cargo --locked test --all-targets --all-features -- --ignored
       - name: Connection reuse regression repeated twenty times
+        if: steps.decision.outputs.run == 'true'
         run: |
           set -euo pipefail
           for iteration in {1..20}; do
@@ -55,24 +67,29 @@ jobs:
             cargo --locked test --test e2e_http_trace strategic_points_report_http_phase_trace -- --exact
           done
       - name: Mock certification and schema-history fixtures
+        if: steps.decision.outputs.run == 'true'
         env:
           METRUM_BENCH_REQUIRE_DUMMY: '1'
           METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
         run: |
           cargo --locked test --test e2e_catalog_reasoning --test certification_modes --test certification_math --test certification_strategic --test schema_history --test schema_migration
-          python3 -m unittest discover -s scripts/validation/cert -p 'test_cert.py' -v
+          python3 -m unittest discover -s scripts/validation/cert -p 'test*.py' -v
       - name: Packaging dry-run and full tracked docs tree
+        if: steps.decision.outputs.run == 'true'
         run: |
           cargo --locked package --allow-dirty --target-dir "$RUNNER_TEMP/pkg"
           python3 scripts/validation/cert/check_package_docs.py --dry-run
       - name: Full-history secret scan
+        if: steps.decision.outputs.run == 'true'
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
           "$(go env GOPATH)/bin/gitleaks" git --redact --config .gitleaks.toml --log-opts='--all'
       - name: Dependency policy
+        if: steps.decision.outputs.run == 'true'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
+      # Published docs change independently of repository commits.
       - name: Published documentation links
         run: python3 scripts/validation/cert/check_live_docs.py
 

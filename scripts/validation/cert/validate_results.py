@@ -97,11 +97,31 @@ def check_record(record, candidate, root, as_of):
     return result
 
 
-def validate(catalog, results, candidate, as_of, cadence=None, history=None):
+def load_selection(path, catalog, rows, candidate):
+    # Recompute the whole selection rather than trusting an edited selected list.
+    import select_cases
+    with path.open(encoding="utf-8") as stream:
+        selection = json.load(stream, object_pairs_hook=unique_object,
+                              parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
+    if not isinstance(selection, dict):
+        raise ValueError("selection must be an object")
+    try:
+        expected = select_cases.make_selection(rows, select_cases.catalog_hash(catalog), candidate,
+                                               selection["sample_rate"], selection["rotation_releases"],
+                                               selection["changed_files"], selection["history_newest_first"], selection["seed"])
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"invalid selection: {exc}") from exc
+    if selection != expected:
+        raise ValueError("selection does not match candidate, catalog, inputs and deterministic policy")
+    return selection
+
+
+def validate(catalog, results, candidate, as_of, cadence=None, history=None, selection=None, include_post=False):
     rows = load_catalog(catalog)
-    expected = {case for case, row in rows.items()
+    universe = {case for case, row in rows.items()
                 if (cadence in row.get("Cadence", "").split(";") if cadence
-                    else row["Tier"] in REQUIRED_TIERS)}
+                    else row["Tier"] in REQUIRED_TIERS | ({"POST"} if include_post else set()))}
+    expected = universe & set(selection["selected"]) if selection is not None else universe
     if not expected:
         raise ValueError("no required cases in catalog")
     records = {}
@@ -138,7 +158,12 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None):
                 except (ValueError, OSError, AttributeError) as exc:
                     errors.append(f"history {path.name}: {exc}")
     table = []
-    for case in sorted(expected):
+    for case in sorted(universe):
+        if case not in expected:
+            table.append({"ID": case, "Test case": rows[case]["Test case"], "Tier": rows[case]["Tier"],
+                          "Result": "NOT-SELECTED", "Notes": "outside frozen selection", "Catalog": rows[case],
+                          "Record": {}, "History": []})
+            continue
         record = records.get(case)
         try:
             if record is None:
@@ -207,22 +232,24 @@ def export_csv(path, table, args):
 
 
 def export_report(path, table, errors, args):
-    counts = {key: sum(row["Result"] == key for row in table) for key in ("PASS", "FAIL", "N-A")}
+    counts = {key: sum(row["Result"] == key for row in table) for key in ("PASS", "FAIL", "N-A", "NOT-SELECTED")}
     lanes = {}
     for row in table:
         lane = row["Catalog"].get("Parallel group", "unassigned")
-        group = lanes.setdefault(lane, {"PASS": 0, "FAIL": 0, "N-A": 0})
+        group = lanes.setdefault(lane, {"PASS": 0, "FAIL": 0, "N-A": 0, "NOT-SELECTED": 0})
         group[row["Result"]] += 1
     with path.open("w", encoding="utf-8") as stream:
         stream.write(f"# Certification report: {md(args.release)}\n\n")
         stream.write(f"Candidate: `{md(args.candidate_sha)}`  \nVerdict: **{'FAIL' if errors else 'PASS'}**  \n")
-        stream.write(f"Counts: {counts['PASS']} PASS, {counts['FAIL']} FAIL, {counts['N-A']} N-A.\n\n")
+        stream.write(f"Counts: {counts['PASS']} PASS, {counts['FAIL']} FAIL, {counts['N-A']} N-A, {counts['NOT-SELECTED']} NOT-SELECTED.\n\n")
+        if not args.cadence:
+            stream.write(f"Qualification stage: {md(args.stage)}. POST is not a pre-tag result.\n\n")
         if args.cadence:
             stream.write(f"Periodic run: {md(args.run_id)}; cadence {md(args.cadence)}; branch {md(args.branch)}; "
                          f"compared against {md(args.compared_against)}; UTC {md(args.run_date_utc)}.\n\n")
-        stream.write("## Lane summary\n\n| Lane | PASS | FAIL | N-A |\n| --- | ---: | ---: | ---: |\n")
+        stream.write("## Lane summary\n\n| Lane | PASS | FAIL | N-A | NOT-SELECTED |\n| --- | ---: | ---: | ---: | ---: |\n")
         for lane, totals in sorted(lanes.items()):
-            stream.write(f"| {md(lane)} | {totals['PASS']} | {totals['FAIL']} | {totals['N-A']} |\n")
+            stream.write(f"| {md(lane)} | {totals['PASS']} | {totals['FAIL']} | {totals['N-A']} | {totals['NOT-SELECTED']} |\n")
         stream.write("\n## Cases and attempt history\n")
         for row in table:
             rec, case = row["Record"], row["Catalog"]
@@ -257,9 +284,11 @@ def main():
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--release", required=True)
     parser.add_argument("--history", type=Path)
+    parser.add_argument("--selection", type=Path, help="frozen selection.json (required for release)")
+    parser.add_argument("--stage", choices=["pre-tag", "full"], default="pre-tag")
     parser.add_argument("--markdown", type=Path, default=Path("CERTIFICATION-REPORT.md"))
     parser.add_argument("--csv", type=Path)
-    parser.add_argument("--cadence", choices=["nightly", "weekly", "monthly", "on-upstream-change"])
+    parser.add_argument("--cadence", choices=["nightly", "weekly", "on-main-change", "on-upstream-change"])
     parser.add_argument("--run-id")
     parser.add_argument("--run-date-utc")
     parser.add_argument("--branch")
@@ -267,13 +296,19 @@ def main():
     args = parser.parse_args()
     if not SHA.fullmatch(args.candidate_sha) or not args.results.is_dir():
         parser.error("candidate must be a full lowercase SHA and results must be a directory")
+    if (not args.cadence and not args.selection) or (args.cadence and args.selection):
+        parser.error("release mode requires --selection; periodic mode does not use it")
+    if args.cadence and args.stage != "pre-tag":
+        parser.error("--stage applies only to release mode")
     if args.cadence and not all((args.run_id, args.run_date_utc, args.branch, args.compared_against)):
         parser.error("periodic mode requires run ID, UTC date, branch and comparison release")
     try:
         if args.cadence:
             timestamp(args.run_date_utc)
+        selection = load_selection(args.selection, args.catalog, load_catalog(args.catalog), args.candidate_sha) if args.selection else None
         table, errors = validate(args.catalog, args.results, args.candidate_sha,
-                                 dt.datetime.now(dt.timezone.utc), args.cadence, args.history)
+                                 dt.datetime.now(dt.timezone.utc), args.cadence, args.history,
+                                 selection, args.stage == "full")
         export_csv(args.csv or Path("periodic.csv" if args.cadence else "results.csv"), table, args)
         export_report(args.markdown, table, errors, args)
         for error in errors:

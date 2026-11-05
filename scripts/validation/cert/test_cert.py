@@ -14,6 +14,7 @@ from unittest import mock
 
 import check_live_docs
 import check_package_docs
+import select_cases
 import validate_results as cert
 
 
@@ -25,9 +26,12 @@ class ValidatorTests(unittest.TestCase):
         self.results = self.root / "results"
         self.results.mkdir()
         self.catalog = self.root / "catalog.csv"
-        self.catalog.write_text("ID,Tier,Test case,Cadence,Parallel group\nBC-CLI-001,PR,Flags,weekly,MOCK\nBC-POST-001,POST,Published,,POST\n", encoding="utf-8")
+        self.catalog.write_text("ID,Tier,Test case,Cadence,Parallel group,Area,Selection\nBC-CLI-001,PR,Flags,weekly,MOCK,CLI,core\nBC-POST-001,POST,Published,,POST,POST,core\n", encoding="utf-8")
         (self.root / "evidence.txt").write_text("evidence", encoding="utf-8")
         self.sha = "a" * 40
+        self.selection = self.root / "selection.json"
+        selection = select_cases.make_selection(cert.load_catalog(self.catalog), select_cases.catalog_hash(self.catalog), self.sha, .3, 3, [], [])
+        self.selection.write_text(json.dumps(selection), encoding="utf-8")
         self.now = dt.datetime(2026, 11, 5, tzinfo=dt.timezone.utc)
         self.record = {"ID": "BC-CLI-001", "candidate_sha": self.sha, "result": "PASS",
                        "observed_values": {"count": 1}, "thresholds": {"minimum": 1},
@@ -90,6 +94,8 @@ class ValidatorTests(unittest.TestCase):
                 if mode == "weekly":
                     args += ["--cadence", "weekly", "--run-id", "run-1", "--run-date-utc", "2026-11-05T00:00:00Z",
                              "--branch", "main", "--compared-against", "v1.7.2"]
+                else:
+                    args += ["--selection", str(self.selection)]
                 result = subprocess.run(args, check=False, capture_output=True, text=True)
                 self.assertEqual(0, result.returncode, result.stderr)
                 with dest.open(newline="", encoding="utf-8") as stream:
