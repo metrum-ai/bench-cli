@@ -104,9 +104,9 @@ def extract_point(folder):
          "error_rate": (len(rows) - len(ok)) / max(len(rows), 1),
          "requests_s": len(ok) / dur if dur else None,
          "window_definition": "first measured send to last legacy-success terminal",
-         "headline": ({key: summary.get(key) for key in ('window_seconds', 'completion_tokens_per_second',
-                       'completion_tokens_total', 'prompt_tokens_total', 'usage_missing_count',
-                       'legacy_success_completion_tokens_per_second')} if summary else None)}
+         "headline": ({key: summary.get(key) for key in ('attempted', 'successes', 'errors', 'ttft_coverage',
+                       'window_seconds', 'completion_tokens_per_second', 'completion_tokens_total', 'prompt_tokens_total',
+                       'usage_missing_count', 'ttft_first_any_s', 'legacy_success_completion_tokens_per_second')} if summary else None)}
     for metric, ps in [("ttft", [50, 90]), ("tpot", [50, 90])]:
         vals = []
         for x in ok:
@@ -246,6 +246,18 @@ def main():
             f"{f(k.get('system_output_tok_s'))} | {f(ch['system_output_tok_s']['delta_pct'])} | "
             f"{f(b.get('tpot_p50_ms'))} | {f(k.get('tpot_p50_ms'))} | {f(ch['tpot_p50_ms']['delta_pct'])} | "
             f"{f(b.get('ttft_p50_ms'))} / {f(k.get('ttft_p50_ms'))} | {'PASS' if ok else 'FAIL'} |")
+    lines += ["", "Candidate native headline (informational; not the legacy-cohort gate):", "",
+              "| point | headline window s | headline completion tok/s | first-any TTFT p50 ms |",
+              "|---|---:|---:|---:|"]
+    for row in rows:
+        if not row.get('candidate'):
+            continue
+        headline = row['candidate'].get('headline') or {}
+        first_any = headline.get('ttft_first_any_s') or {}
+        first_any_p50 = first_any.get('p50') if isinstance(first_any, dict) else None
+        lines.append(f"| {row['workload']} c{row['concurrency']} | {f(headline.get('window_seconds'))} | "
+                     f"{f(headline.get('completion_tokens_per_second'))} | "
+                     f"{f(first_any_p50 * 1000 if first_any_p50 is not None else None)} |")
     gate_note = f"gate: output tok/s and TPOT p50 within {a.tolerance_pct}%"
     if noise:
         floors = sorted({tol for (_, _), m in noise.items() for tol in m.values()})

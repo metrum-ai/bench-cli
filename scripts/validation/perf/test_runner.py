@@ -57,6 +57,23 @@ class RunnerCacheTests(unittest.TestCase):
         self.assertEqual(self.calls.read_text().splitlines(), ["run", "logs", "ps", "inspect", "logs", "rm", "ps"])
         self.assertFalse((self.root / 'state').exists())
 
+    def test_capture_commands_and_hashes_with_cpu_fixture(self):
+        datasets = self.root / 'datasets'; datasets.mkdir()
+        (datasets / 'W1.jsonl').write_text('fixture one\\n')
+        (datasets / 'W2.jsonl').write_text('fixture two\\n')
+        self.env.update({'WARMUP': '0', 'DURATION': '0'})
+        result = subprocess.run(['bash', str(RUNNER), 'q38-27b', '/bin/true', '/bin/true',
+                                 str(self.root / 'output'), '1'], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        import json
+        point = self.root / 'output/bench-src/1/W1/c1'
+        command = json.loads((point / 'command.json').read_text())
+        self.assertEqual(command['binary_sha256'], command['binary_sha256_end'])
+        self.assertEqual(command['prompt_sha256'], command['prompt_sha256_end'])
+        self.assertTrue((point / 'DONE').is_file())
+        # This only exercises collection plumbing: there are no request logs or GPU results.
+        self.assertFalse((point / 'requests.jsonl').exists())
+
     def test_mismatched_owner_is_never_removed(self):
         self.env['FAKE_WRONG_OWNER'] = '1'
         result = self.run_runner()

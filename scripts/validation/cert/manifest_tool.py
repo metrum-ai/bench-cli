@@ -81,6 +81,40 @@ def load_manifest(path, lane, candidate, baseline, gpu):
             raise ValueError("prompt set hash mismatch")
     if lane in ("L1", "R", "D", "G1", "G2", "G3", "G4", "G5", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
         raise ValueError("this lane requires the pinned Qwen3-8B model")
+    if lane in ("P1", "P2"):
+        from perf_baseline import verify as verify_perf_baseline
+        expected_model, expected_revision = {
+            "P1": ("Qwen/Qwen3.8-27B", "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"),
+            "P2": ("nvidia/Qwen3.8-27B-NVFP4", "482ca0f3832238542f8f5295dde86b5f22711d80"),
+        }[lane]
+        common = ["--max-model-len", "16384", "--max-num-seqs", "128", "--gpu-memory-utilization", "0.90",
+                  "--default-chat-template-kwargs", '{"enable_thinking": false}']
+        extra = ["--compilation-config", '{"cudagraph_mode":"PIECEWISE"}'] if lane == "P2" else []
+        if (config["model"] != expected_model or config["revision"] != expected_revision or config["port"] != 8000
+                or config["image"] != "vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34"
+                or flags != common + extra + ["--no-enable-prefix-caching"]):
+            raise ValueError("27B server identity and flags must match the unchanged performance spec")
+        archive = config.get("baseline_asset", {})
+        if (not isinstance(archive, dict) or not isinstance(archive.get("path"), str)
+                or not SHA.fullmatch(str(archive.get("sha256", ""))) or sha256_file(archive["path"]) != archive["sha256"]):
+            raise ValueError("27B lanes require a pinned v1.7.2 release archive")
+        verify_perf_baseline(archive["path"], baseline)
+        if set(prompt_sets) != {"W1", "W2"}:
+            raise ValueError("27B lanes require exactly W1 and W2")
+        if (prompt_sets["W1"]["sha256"] not in ("4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7",
+                                                 "44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340")
+                or prompt_sets["W2"]["sha256"] != "eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b"):
+            raise ValueError("27B prompt sets must match the frozen spec")
+        paths = [Path(prompt_sets[w]["path"]).resolve() for w in ("W1", "W2")]
+        if paths[0].name != "W1.jsonl" or paths[1].name != "W2.jsonl" or paths[0].parent != paths[1].parent:
+            raise ValueError("27B prompt sets must be W1.jsonl and W2.jsonl in one directory")
+        for key in ("owner", "evidence_link"):
+            if not isinstance(config.get(key), str) or not config[key].strip():
+                raise ValueError(f"{lane} requires {key}")
+        noise = config.get("noise_floor")
+        if noise is not None and (not isinstance(noise, dict) or not isinstance(noise.get("path"), str)
+                                  or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]):
+            raise ValueError("27B noise floor must be a pinned file")
     if lane == "G6":
         strategic = config.get("strategic_binary")
         if not isinstance(strategic, dict) or not isinstance(strategic.get("path"), str) or not SHA.fullmatch(str(strategic.get("sha256", ""))):

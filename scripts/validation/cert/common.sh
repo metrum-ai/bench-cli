@@ -7,7 +7,7 @@ CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cert_parse() {
   CERT_LANE=$1; shift
-  CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT=''
+  CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT='' CERT_AUX_OWNER=''
   while (($#)); do
     case "$1" in
       --plan) python3 "$CERT_DIR/lane.py" "$CERT_LANE" --plan; return 10 ;;
@@ -133,6 +133,26 @@ cert_on_exit() {
         local remaining
         remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_CONTAINER_OWNER" --format '{{.ID}}')" || rc=1
         [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
+      fi
+    fi
+  fi
+  # A nested perf runner owns a separate labelled container. Independently
+  # verify its cleanup even if the runner process was interrupted or killed.
+  if [[ -n "${CERT_AUX_OWNER:-}" ]]; then
+    local aux_remaining aux_name aux_owner
+    aux_name="perfval-${CERT_AUX_OWNER}"
+    aux_remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_AUX_OWNER" --format '{{.ID}}')" || rc=1
+    if [[ -n "$aux_remaining" ]]; then
+      echo 'performance container remained after runner; lane failed' >&2
+      rc=1
+      aux_owner="$(docker inspect --format '{{index .Config.Labels "metrum.cert.owner"}}' "$aux_name" 2>/dev/null)" || aux_owner=''
+      if [[ "$aux_owner" == "$CERT_AUX_OWNER" ]]; then
+        docker logs "$aux_name" > "$CERT_OUT/evidence/perf-emergency-server.log" 2>&1
+        docker rm -f "$aux_name" > "$CERT_OUT/evidence/perf-emergency-stop.txt" 2>&1 || rc=1
+        aux_remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_AUX_OWNER" --format '{{.ID}}')" || rc=1
+        [[ -z "$aux_remaining" ]] || echo 'performance container remains after emergency cleanup' >&2
+      else
+        echo 'performance container owner mismatch; refusing removal' >&2
       fi
     fi
   fi

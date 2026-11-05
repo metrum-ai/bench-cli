@@ -57,7 +57,12 @@ if [[ $PLAN -eq 1 ]]; then
   echo "  warmup/measure: ${WARMUP}s / ${DURATION}s"
   echo "  serve:"
   echo "    docker run -d --name <owned-unique-name> --gpus device=<selected-gpu> --ipc=host \\"
-  echo "      -p 127.0.0.1:8000:8000 -e HF_TOKEN \\"
+  echo "      -p 127.0.0.1:8000:8000 \\"
+  if [[ "${PERF_OFFLINE:-0}" == 1 ]]; then
+    echo "      --pull=never -e HF_HUB_OFFLINE=1 \\"
+  else
+    echo "      <HF_TOKEN passed by environment only if present> \\"
+  fi
   echo "      -v <hub-cache>:/root/.cache/huggingface/hub \\"
   echo "      $VLLM_IMAGE --model $MODEL --revision $REV \\"
   echo "      --max-model-len 16384 --max-num-seqs 128 --gpu-memory-utilization 0.90 \\"
@@ -81,7 +86,8 @@ fi
 : "${CUDA_VISIBLE_DEVICES:?select one CUDA_VISIBLE_DEVICES GPU}"
 [[ "$CUDA_VISIBLE_DEVICES" =~ ^([0-9]+|GPU-[0-9a-fA-F-]+)$ ]] || { echo 'select exactly one GPU' >&2; exit 2; }
 mkdir -p "$OUT"
-OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+OWNER="${PERF_OWNER:-$(python3 -c 'import secrets; print(secrets.token_hex(16))')}"
+[[ "$OWNER" =~ ^[0-9a-f]{32}$ ]] || { echo 'invalid performance owner token' >&2; exit 2; }
 CONTAINER="perfval-${OWNER}"
 STARTED=0 SAMPLE_PID=''
 # Called by the EXIT trap.
@@ -143,12 +149,7 @@ serve() {
 run_one() { # binary workload concurrency pass tool-label out-dir duration
   local bin=$1 w=$2 c=$3 pass=$4 label=$5 out=$6 dur=$7
   local mt=512; [[ $w == W1 ]] && mt=128
-  mkdir -p "$out"
-  if command -v nvidia-smi >/dev/null; then
-    nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=timestamp,uuid,power.draw,power.limit,temperature.gpu,utilization.gpu,memory.used \
-      --format=csv -lms 1000 > "$out/nvidia.csv" 2>/dev/null &
-    SAMPLE_PID=$!
-  fi
+  mkdir -p "$out" || return 1
   local args=(
     --scenario "$w" --url http://127.0.0.1:8000/v1/chat/completions --api-key dummy
     --num-requests 1000000 --concurrency "$c"
@@ -160,17 +161,45 @@ run_one() { # binary workload concurrency pass tool-label out-dir duration
   if [[ -n "${TELEMETRY_YAML:-}" ]]; then
     args+=(--ndjson "$out/run.ndjson" --telemetry "$TELEMETRY_YAML" --require-telemetry)
   fi
-  echo "{\"tool\":\"$label\",\"workload\":\"$w\",\"concurrency\":$c,\"pass\":\"$pass\",\"start\":$(date +%s.%N)}" > "$out/point.json"
+  echo "{\"tool\":\"$label\",\"workload\":\"$w\",\"concurrency\":$c,\"pass\":\"$pass\",\"start\":$(date +%s.%N)}" > "$out/point.json" || return 1
+  if ! python3 - "$out/command.json" "$bin" "$DATASETS_DIR/$w.jsonl" "${args[@]}" <<'PY'
+import hashlib, json, pathlib, sys
+out, binary, prompt, *arguments = sys.argv[1:]
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''): h.update(chunk)
+    return h.hexdigest()
+pathlib.Path(out).write_text(json.dumps({'argv': [binary, *arguments], 'binary_sha256': digest(binary),
+    'prompt_sha256': digest(prompt)}, indent=2) + '\n', encoding='utf-8')
+PY
+  then
+    return 1
+  fi
+  if command -v nvidia-smi >/dev/null; then
+    TZ=UTC nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=timestamp,uuid,power.draw,power.limit,temperature.gpu,utilization.gpu,memory.used \
+      --format=csv -lms 1000 > "$out/nvidia.csv" 2>/dev/null &
+    SAMPLE_PID=$!
+  fi
   local rc=0
   "$bin" "${args[@]}" > "$out/stdout.log" 2>&1 || rc=$?
   if [[ -n "$SAMPLE_PID" ]]; then kill "$SAMPLE_PID" 2>/dev/null || true; wait "$SAMPLE_PID" 2>/dev/null || true; SAMPLE_PID=''; fi
-  python3 - "$out/point.json" <<'PY'
-import json, sys, time
-p = sys.argv[1]
-m = json.load(open(p)); m["stop"] = time.time(); json.dump(m, open(p, "w"))
+  python3 - "$out/point.json" "$out/command.json" "$bin" "$DATASETS_DIR/$w.jsonl" <<'PY' || rc=1
+import hashlib, json, pathlib, sys, time
+point, command, binary, prompt = map(pathlib.Path, sys.argv[1:])
+def digest(path):
+    h = hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''): h.update(chunk)
+    return h.hexdigest()
+m = json.loads(point.read_text()); m['stop'] = time.time(); point.write_text(json.dumps(m))
+c = json.loads(command.read_text()); c['binary_sha256_end'] = digest(binary); c['prompt_sha256_end'] = digest(prompt)
+command.write_text(json.dumps(c, indent=2) + '\n')
+if c['binary_sha256_end'] != c['binary_sha256'] or c['prompt_sha256_end'] != c['prompt_sha256']:
+    raise SystemExit('performance input changed during execution')
 PY
-  [[ $rc -eq 0 ]] && touch "$out/DONE"
-  return $rc
+  if [[ $rc -eq 0 ]]; then touch "$out/DONE" || rc=1; fi
+  return "$rc"
 }
 
 serve

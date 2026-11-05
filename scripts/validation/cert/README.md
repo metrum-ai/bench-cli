@@ -64,6 +64,16 @@ retains real server bytes; configured faults are explicitly recorded. Raw
 SSE, prompts and generated output can be sensitive and must be kept private
 until reviewed and redacted.
 
+For v1.8.0 P1/P2, the approved previous release is the SHA256-verified v1.7.2
+release asset, not the historical v1.5.4 study-build entry in the unchanged
+perf spec. The prospective P2 runner requires the release archive pin in
+`baseline_asset`, the exact spec model/server/input pins, and a prepopulated
+`CERT_HF_HUB_CACHE`. A wider pre-recorded noise floor must be pinned with
+`recorded_utc` and `evidence_link` and independently reviewed; the default is
+5%. Candidate native first-any TTFT and throughput are informational alongside
+legacy-cohort gate values. P1, telemetry and the two-model comparability barrier
+remain unfinished; none of these CPU checks establishes a GPU result.
+
 For release evidence, generate and freeze the selection described in
 [the release policy](../../../docs/RELEASE_CERTIFICATION.md). The validator
 requires all selected PR, RC and RC-GPU rows and produces `results.csv` and
