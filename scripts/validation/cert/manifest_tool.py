@@ -105,7 +105,19 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         if noise is not None:
             if not isinstance(noise, dict) or not isinstance(noise.get("path"), str) or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]:
                 raise ValueError("G7 noise floor must be a pinned file")
-    if lane in ("R", "D", "G1", "G2", "G3", "G4", "G5", "G6"):
+    if lane == "V":
+        if config["model"] != "Qwen/Qwen3-VL-8B-Thinking":
+            raise ValueError("V requires the pinned thinking-capable Qwen3-VL-8B model")
+        for key in ("vlm_binary", "vlm_image"):
+            item = config.get(key)
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not SHA.fullmatch(str(item.get("sha256", ""))):
+                raise ValueError(f"V requires a pinned {key}")
+            path = Path(item["path"]).resolve()
+            if not path.is_file() or sha256_file(path) != item["sha256"]:
+                raise ValueError(f"V {key} hash mismatch")
+            if key == "vlm_binary" and (path != Path(candidate).resolve().parent / "metrum-ai-bench-cli-vlm" or not os.access(path, os.X_OK)):
+                raise ValueError("V binary must be executable beside the candidate")
+    if lane in ("R", "D", "V", "G1", "G2", "G3", "G4", "G5", "G6"):
         if "default" not in prompt_sets:
             raise ValueError(f"{lane} requires a default prompt set")
         proxy_port = config.get("proxy_port")

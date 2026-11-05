@@ -89,6 +89,22 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
 
+    def test_vlm_preflight_requires_binary_and_image_pins(self):
+        config = self.manifest['lanes']['L1'].copy()
+        binary = self.root / 'metrum-ai-bench-cli-vlm'; binary.write_text('binary'); binary.chmod(0o755)
+        image = self.root / 'image.png'; image.write_bytes(b'image')
+        config.update({'model': 'Qwen/Qwen3-VL-8B-Thinking', 'proxy_port': 8111,
+                       'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
+                       'vlm_binary': {'path': str(binary), 'sha256': manifest_tool.sha256_file(binary)},
+                       'vlm_image': {'path': str(image), 'sha256': manifest_tool.sha256_file(image)}})
+        self.manifest['lanes']['V'] = config
+        self.path.write_text(json.dumps(self.manifest))
+        manifest_tool.load_manifest(self.path, 'V', self.candidate, self.baseline, '0')
+        config['vlm_image']['sha256'] = '0' * 64
+        self.path.write_text(json.dumps(self.manifest))
+        with self.assertRaises(ValueError):
+            manifest_tool.load_manifest(self.path, 'V', self.candidate, self.baseline, '0')
+
     def test_g7_requires_both_frozen_workloads_and_proxy(self):
         config = self.manifest["lanes"]["L1"].copy()
         default = config["prompt_sets"]["default"]
