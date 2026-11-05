@@ -30,7 +30,7 @@ def main():
     cells, errors = {}, []
     for mode in ("short", "adequate", "remove_output", "remove_finish_and_done", "nonlength_finish", "duplicate_finish"):
         try:
-            count, cap = (4, 4096) if mode == "adequate" else (2, 128)
+            count, cap = 8, 4096 if mode == "adequate" else 128
             fault = None if mode in ("short", "adequate") else mode
             flags = ["--fail-on-error"] if fault in ("remove_output", "remove_finish_and_done", "nonlength_finish") else []
             data, trace, code, _ = r_runner.run_cell(args, f"g2-terminal-{mode}", args.candidate, count, cap, True, flags,
@@ -45,10 +45,13 @@ def main():
             cells[mode] = {"error": str(exc)}
             errors.append(mode)
     try:
-        data, trace, code = g3_runner.run_cell(args, "error-first")
+        data, trace, code = g3_runner.run_cell(args, "error-first", count=8)
         rows = [json.loads(line) for line in data.splitlines() if line.strip()]
         requests = [r for r in rows if ".request." in r.get("schema_version", "") and r.get("phase") == "measure"]
         failures = [r for r in requests if r.get("error") is not None]
+        summaries = [r for r in rows if ".summary." in r.get("schema_version", "")]
+        if len(requests) != 8 or len(summaries) != 1 or summaries[0].get("attempted") != 8:
+            raise ValueError("interruption cell must contain all eight measured attempts")
         if not failures or not any(e.get("kind") == "error" for e in g3_runner.events(evidence / "g3-error-first-trace.jsonl")):
             raise ValueError("real server kill produced no measured stream failure")
         cells["interruption"] = {"attempted": len(requests), "failed": len(failures), "exit_code": code}
@@ -67,7 +70,7 @@ def main():
                            "baseline_binary_sha256": manifest_tool.sha256_file(args.baseline),
                            "manifest_sha256": manifest_tool.sha256_file(args.manifest)},
               "observed_values": {"cells": cells, "failed_cells": errors},
-              "thresholds": {"short_truncations_min": 1, "adequate_answers_min": 1,
+              "thresholds": {"requests_per_cell": 8, "short_truncations_min": 1, "adequate_answers_min": 1,
                              "faults_required": ["remove_output", "remove_finish_and_done", "nonlength_finish", "duplicate_finish"],
                              "real_interruption_errors_min": 1}, "evidence_paths": files}
     result_writer.write_record(args.out, record)

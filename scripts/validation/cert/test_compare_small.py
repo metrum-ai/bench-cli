@@ -31,14 +31,15 @@ class SmallComparisonTests(unittest.TestCase):
                 rows = [{"schema_version": "metrum-ai-bench-cli.request.v5", "phase": "measure",
                          "send_offset_s": i, "error": None, "completion_tokens": 4,
                          "usage_completion_tokens_present": True, "latency_s": 2.0, "ttft_s": 1.0,
-                         "ttft_visible_answer_s": 1.0} for i in (0, 1)]
+                         "ttft_visible_answer_s": 1.0} for i in (0, 180)]
                 rows.append({"schema_version": "metrum-ai-bench-cli.summary.v5", "attempted": 2})
                 (cell / "requests.jsonl").write_text("\n".join(map(json.dumps, rows)))
                 sse = (b'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n'
                        b'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4}}\n\ndata: [DONE]\n\n')
                 events = []
                 for index in range(2):
-                    events.extend([{"request": index, "kind": "chunk", "bytes_b64": base64.b64encode(sse).decode()},
+                    events.extend([{"request": index, "kind": "send", "monotonic_ns": (1 + 180 * index) * 1_000_000_000},
+                                   {"request": index, "kind": "chunk", "bytes_b64": base64.b64encode(sse).decode()},
                                    {"request": index, "kind": "complete"}])
                 (cell / "trace.jsonl").write_text("\n".join(map(json.dumps, events)))
 
@@ -49,7 +50,18 @@ class SmallComparisonTests(unittest.TestCase):
         result = self.verdict()
         self.assertEqual("PASS", result["result"])
         self.assertEqual(6, len(result["points"]))
-        self.assertAlmostEqual(8 / 3, result["points"][0]["baseline"]["legacy_output_tokens_per_second"])
+        self.assertAlmostEqual(8 / 182, result["points"][0]["baseline"]["legacy_output_tokens_per_second"])
+        self.assertEqual(180, result["points"][0]["baseline"]["issuance_span_seconds"])
+
+    def test_short_issuance_even_with_long_drain_fails(self):
+        path = self.b / "W1" / "c1" / "requests.jsonl"
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[1]['send_offset_s'] = 179
+        rows[1]['latency_s'] = 10
+        path.write_text('\n'.join(map(json.dumps, rows)))
+        result = self.verdict()
+        self.assertEqual('FAIL', result['result'])
+        self.assertIn('full 180-second issuance', result['points'][0]['error'])
 
     def test_missing_point_and_incomplete_usage_fail(self):
         (self.b / "W1" / "c1" / "trace.jsonl").unlink()

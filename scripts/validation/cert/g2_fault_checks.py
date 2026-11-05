@@ -7,25 +7,26 @@ import json
 import math
 
 
-def verify(data, trace, fault, target, exit_code, timeout_s=2):
+def verify(data, trace, fault, target, exit_code, timeout_s=2, count=2):
     records = [json.loads(line) for line in data.splitlines() if line.strip()]
     rows = sorted((r for r in records if '.request.' in r.get('schema_version', '') and r.get('phase') == 'measure'), key=lambda r: r['seq'])
     summary = [r for r in records if '.summary.' in r.get('schema_version', '')]
-    if len(rows) != 2 or [r.get('seq') for r in rows] != [0, 1] or len(summary) != 1 or exit_code == 0:
-        raise ValueError('two measured slots, one summary and nonzero safety exit required')
-    failed, good = rows[target-1], rows[2-target]
+    if count < 2 or target not in (1, count) or len(rows) != count or [r.get('seq') for r in rows] != list(range(count)) or len(summary) != 1 or exit_code == 0:
+        raise ValueError('ordered measured slots, one summary and nonzero safety exit required')
+    failed = rows[target - 1]
+    good = [row for index, row in enumerate(rows, 1) if index != target]
     expected = 'timeout' if fault == 'timeout' else 'parse_error'
     if (failed.get('error') or {}).get('kind') != expected or failed.get('answer_completed') is True:
         raise ValueError('failure classification or incomplete outcome differs')
-    if good.get('error') is not None or good.get('answer_completed') is not True:
+    if any(row.get('error') is not None or row.get('answer_completed') is not True for row in good):
         raise ValueError('control request did not answer')
-    if summary[0].get('attempted') != 2 or summary[0].get('successes') != 1 or summary[0].get('errors') != 1 or summary[0].get('errors_by_type', {}).get(expected) != 1:
+    if summary[0].get('attempted') != count or summary[0].get('successes') != count - 1 or summary[0].get('errors') != 1 or summary[0].get('errors_by_type', {}).get(expected) != 1:
         raise ValueError('summary failed to count success and fault once')
     groups = {}
     for event in (json.loads(line) for line in trace.splitlines() if line.strip()):
         groups.setdefault(event['request'], []).append(event)
-    if sorted(groups) != [1, 2]:
-        raise ValueError('two distinct real request traces required')
+    if sorted(groups) != list(range(1, count + 1)):
+        raise ValueError('distinct real request trace for every measured request required')
     events = groups[target]
     if not any(e.get('kind') == 'chunk' for e in events):
         raise ValueError('fault did not originate with real server bytes')
@@ -44,7 +45,8 @@ def verify(data, trace, fault, target, exit_code, timeout_s=2):
             raise ValueError('original/forwarded malformed evidence missing')
     else:
         raise ValueError('unknown fault')
-    if any(e.get('kind') in ('delay', 'transformation') for e in groups[3-target]):
+    if any(e.get('kind') in ('delay', 'transformation') for request, events in groups.items() if request != target for e in events):
         raise ValueError('fault unexpectedly applied to successful control')
-    return {'fault': fault, 'failure_slot': target - 1, 'success_slot': 2 - target, 'error_kind': expected,
+    return {'fault': fault, 'failure_slot': target - 1, 'success_slot': 1 if target == 1 else 0,
+            'successful_controls': count - 1, 'error_kind': expected,
             'failure_latency_s': failed.get('latency_s'), 'exit_code': exit_code}

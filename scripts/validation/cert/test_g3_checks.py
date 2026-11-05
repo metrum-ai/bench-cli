@@ -99,6 +99,22 @@ class G3ChecksTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             g3_checks.verify_window(data.replace('"completion_tokens_total": null', '"completion_tokens_total": 3'), trace, "error-first")
 
+    def test_same_cohort_median_goodput_matches_tool_summary(self):
+        data, trace = self.fixture()
+        rows = [json.loads(line) for line in data.splitlines()]
+        rows[-1]['config'] = {'modality': {'cert_e2e_median_slo': True}}
+        encoded = lambda: '\n'.join(map(json.dumps, rows))
+        self.assertEqual(2.5, g3_checks.verify_goodput_median(encoded(), trace)['e2e_slo_s'])
+        rows[-1]['goodput']['count'] = 2
+        with self.assertRaisesRegex(ValueError, 'goodput count'):
+            g3_checks.verify_goodput_median(encoded(), trace)
+        rows[-1]['goodput']['count'] = 1
+        rows[0]['latency_s'] = 3
+        events = [json.loads(line) for line in trace.splitlines()]
+        next(event for event in events if event['request'] == 0 and event['kind'] == 'complete')['monotonic_ns'] += 1_000_000_000
+        with self.assertRaisesRegex(ValueError, 'distinct'):
+            g3_checks.verify_goodput_median(encoded(), '\n'.join(map(json.dumps, events)))
+
 
 if __name__ == "__main__":
     unittest.main()

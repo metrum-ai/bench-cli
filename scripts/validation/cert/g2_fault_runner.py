@@ -28,13 +28,14 @@ def main():
     evidence = args.out / 'evidence'
     gpu = (evidence / 'gpu.csv').read_text(encoding='utf-8').strip().split(',', 1)
     cells, errors = {}, []
+    count, timeout_s, delay_s = 8, 10, 20
     for fault in ('timeout', 'corrupt'):
-        for target in (1, 2):
+        for target in (1, count):
             label = f'g2-fault-{fault}-{target}'
             try:
-                kw = {'fault': 'corrupt', 'fault_request': target} if fault == 'corrupt' else {'delay_request': target, 'delay_seconds': 4.5, 'request_timeout': 2}
-                data, trace, code, _ = r_runner.run_cell(args, label, args.candidate, 2, 128, False, ['--fail-on-error'], concurrency=1, **kw)
-                cells[label] = g2_fault_checks.verify(data, trace, fault, target, code, timeout_s=2)
+                kw = {'fault': 'corrupt', 'fault_request': target} if fault == 'corrupt' else {'delay_request': target, 'delay_seconds': delay_s, 'request_timeout': timeout_s}
+                data, trace, code, _ = r_runner.run_cell(args, label, args.candidate, count, 128, False, ['--fail-on-error'], concurrency=1, **kw)
+                cells[label] = g2_fault_checks.verify(data, trace, fault, target, code, timeout_s=timeout_s, count=count)
             except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
                 cells[label] = {'error': str(exc)}
                 errors.append(label)
@@ -61,7 +62,7 @@ def main():
                            'baseline_binary_sha256': manifest_tool.sha256_file(args.baseline),
                            'manifest_sha256': manifest_tool.sha256_file(args.manifest)},
               'observed_values': {'cells': cells, 'failed_cells': errors},
-              'thresholds': {'orders': 2, 'faults': ['timeout', 'corrupt', 'restart'], 'timeout_s': 2,
+              'thresholds': {'requests_per_cell': count, 'orders': 2, 'faults': ['timeout', 'corrupt', 'restart'], 'timeout_s': timeout_s, 'delay_s': delay_s,
                              'timeout_overrun_limit_s': 5, 'safety_exit_nonzero': True}, 'evidence_paths': files}
     result_writer.write_record(args.out, record)
     return 1 if errors else 0

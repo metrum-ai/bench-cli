@@ -64,6 +64,13 @@ def point(meta, data, trace, binary_sha):
     output = 0
     tpot = []
     sends = _send_times(requests)
+    issuance_span = max(sends) - min(sends)
+    if issuance_span < 180.0:
+        raise ValueError("real send timestamps do not prove a full 180-second issuance window")
+    trace_rows = [json.loads(line) for line in trace.splitlines() if line.strip()]
+    proxy_sends = [_number(event.get('monotonic_ns')) for event in trace_rows if event.get('kind') == 'send']
+    if len(proxy_sends) != len(requests) or (max(proxy_sends) - min(proxy_sends)) / 1e9 < 180.0:
+        raise ValueError("independent proxy timestamps do not prove a full 180-second issuance window")
     ends = []
     for row, send in zip(requests, sends):
         tokens = row.get("completion_tokens")
@@ -85,7 +92,7 @@ def point(meta, data, trace, binary_sha):
     window = max(ends) - min(sends)
     if not math.isfinite(window) or window <= 0:
         raise ValueError("invalid legacy success window")
-    return {"sample_count": len(requests), "output_tokens": output, "window_seconds": window,
+    return {"sample_count": len(requests), "output_tokens": output, "window_seconds": window, "issuance_span_seconds": issuance_span,
             "legacy_output_tokens_per_second": output / window, "tpot_p50_ms": statistics.median(tpot) * 1000}
 
 

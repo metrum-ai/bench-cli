@@ -68,6 +68,29 @@ def request_identity(body):
             "thinking": thinking, "streaming": data.get("stream", False)}
 
 
+def image_identity(body):
+    data = json.loads(body)
+    images = []
+    for message in data.get('messages', []):
+        content = message.get('content')
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get('type') == 'image_url':
+                url = (part.get('image_url') or {}).get('url', '')
+                header, separator, encoded = url.partition(',')
+                if not separator or not header.startswith('data:image/') or not header.endswith(';base64'):
+                    raise ValueError('image must be an embedded data URL')
+                raw = base64.b64decode(encoded, validate=True)
+                if not raw:
+                    raise ValueError('empty image')
+                images.append(hashlib.sha256(raw).hexdigest())
+    if not images:
+        raise ValueError('no image sent')
+    return {'image_sha256': images, 'model': data.get('model'),
+            'thinking': data.get('chat_template_kwargs', {}).get('enable_thinking')}
+
+
 def wait_for_upstream(port, recorder, request_id, retry_seconds):
     """Gate new POSTs on real-server readiness; never replay a submitted POST."""
     deadline = time.monotonic() + retry_seconds
@@ -90,7 +113,7 @@ def wait_for_upstream(port, recorder, request_id, retry_seconds):
         time.sleep(.25)
 
 
-def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False, delay_request=None, delay_seconds=0):
+def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False, delay_request=None, delay_seconds=0, record_image_identity=False):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -135,6 +158,13 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                     recorder.event(request_id, "request_identity", **request_identity(body))
                 except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
                     recorder.event(request_id, "error", error="InvalidComparisonRequest")
+                    self.send_error(400)
+                    return
+            if record_image_identity:
+                try:
+                    recorder.event(request_id, 'image_identity', **image_identity(body))
+                except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+                    recorder.event(request_id, 'error', error='InvalidImageRequest')
                     self.send_error(400)
                     return
             upstream = http.client.HTTPConnection("localhost", upstream_port, timeout=300)
@@ -225,6 +255,7 @@ def main():
     parser.add_argument("--request-caps", help="cycle these comma-separated request max_tokens values")
     parser.add_argument("--retry-seconds", type=int, default=0, help="wait for real-server readiness before sending during restart tests")
     parser.add_argument("--record-request-identity", action="store_true", help="record normalized prompt hashes and comparison settings")
+    parser.add_argument("--record-image-identity", action="store_true", help="record hashes of embedded request images without their bytes")
     parser.add_argument("--delay-request", type=int, help="delay first real response chunk for this one-based request")
     parser.add_argument("--delay-seconds", type=float, default=0)
     args = parser.parse_args()
@@ -247,7 +278,7 @@ def main():
         except ValueError:
             parser.error("--request-caps must be comma-separated integers in 1..65536")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity, args.delay_request, args.delay_seconds))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity, args.delay_request, args.delay_seconds, args.record_image_identity))
     try:
         server.serve_forever()
     finally:

@@ -2,9 +2,13 @@
 
 ## Unreleased
 
-- Metrum AI: add development GPU certification runners and independent evidence
-  checks; unsupported cases remain fail-closed. Revise BC-COMP-002 prospectively
-  to distinguish reference first-choices timing from first-any output timing.
+- Metrum AI: develop GPU certification runners and independent evidence
+  checks; unsupported cases remain fail-closed. Prospectively revise the
+  reference comparison to use frozen ShareGPT prompts with a matched 1024-token
+  cap and distinguish first-choices timing from first-any. Fix G2 at eight
+  requests per cell, define BC-GPU-009's same-cohort median SLO, retarget
+  BC-GPU-015 to one NVIDIA GPU with at least 48 GB, and require all six complete
+  180-second G7 issuance windows. Previous development attempts remain intact.
 
 - Metrum AI: qualify releases using frozen core plus stratified extended case
   selection, with changed-area and rotation coverage, selected-only lane plans

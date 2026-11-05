@@ -30,10 +30,10 @@ def main():
     cells, errors = {}, []
     for mode in ("control", "remove_usage", "remove_reasoning_split"):
         try:
-            data, trace, code, paths = r_runner.run_cell(args, f"g2-usage-{mode}", args.candidate, 2, 4096, True, [],
+            data, trace, code, paths = r_runner.run_cell(args, f"g2-usage-{mode}", args.candidate, 8, 4096, True, [],
                                                         concurrency=1, fault=None if mode == "control" else mode)
             files.extend(paths)
-            cells[mode] = g2_usage_checks.evaluate(data, trace, code, mode, 2)
+            cells[mode] = g2_usage_checks.evaluate(data, trace, code, mode, 8)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
             cells[mode] = {"error": str(exc)}
             errors.append(mode)
@@ -47,7 +47,7 @@ def main():
                            "baseline_binary_sha256": manifest_tool.sha256_file(args.baseline),
                            "manifest_sha256": manifest_tool.sha256_file(args.manifest)},
               "observed_values": {"cells": cells, "failed_modes": errors},
-              "thresholds": {"requests_per_cell": 2, "control_usage_coverage": 1.0,
+              "thresholds": {"requests_per_cell": 8, "control_usage_coverage": 1.0,
                              "missing_rates_null": True, "original_and_forwarded_streams_required": True},
               "evidence_paths": files}
     result_writer.write_record(args.out, record)

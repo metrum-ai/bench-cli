@@ -9,11 +9,11 @@ import g2_fault_checks
 
 
 class FaultChecksTests(unittest.TestCase):
-    def fixture(self, fault, target):
+    def fixture(self, fault, target, count=2):
         kind = 'timeout' if fault == 'timeout' else 'parse_error'
         rows = []
         events = []
-        for request in (1, 2):
+        for request in range(1, count + 1):
             failed = request == target
             rows.append({'schema_version': 'bench.request.v5', 'phase': 'measure', 'seq': request-1,
                          'answer_completed': False if failed else True,
@@ -26,7 +26,7 @@ class FaultChecksTests(unittest.TestCase):
                 events.append({'request': request, 'kind': 'delay', 'seconds': 4.5} if fault == 'timeout' else
                               {'request': request, 'kind': 'transformation', 'mode': 'corrupt'})
             events.append({'request': request, 'kind': 'forwarded_chunk', 'bytes_b64': base64.b64encode(forwarded).decode()})
-        rows.append({'schema_version': 'bench.summary.v5', 'attempted': 2, 'errors': 1, 'successes': 1, 'errors_by_type': {kind: 1}})
+        rows.append({'schema_version': 'bench.summary.v5', 'attempted': count, 'errors': 1, 'successes': count - 1, 'errors_by_type': {kind: 1}})
         return '\n'.join(map(json.dumps, rows)), '\n'.join(map(json.dumps, events))
 
     def test_fault_orders_and_fail_closed(self):
@@ -42,6 +42,17 @@ class FaultChecksTests(unittest.TestCase):
                 if fault == 'timeout':
                     with self.assertRaises(ValueError):
                         g2_fault_checks.verify(data.replace('2.01', '8.0'), trace, fault, target, 1)
+
+    def test_eight_request_both_fault_orders_require_every_control(self):
+        for fault in ('timeout', 'corrupt'):
+            for target in (1, 8):
+                data, trace = self.fixture(fault, target, count=8)
+                observed = g2_fault_checks.verify(data, trace, fault, target, 1, count=8)
+                self.assertEqual(7, observed['successful_controls'])
+                rows = [json.loads(line) for line in data.splitlines()]
+                rows[1 if target == 1 else 0]['answer_completed'] = False
+                with self.assertRaisesRegex(ValueError, 'control request did not answer'):
+                    g2_fault_checks.verify('\n'.join(map(json.dumps, rows)), trace, fault, target, 1, count=8)
 
 
 if __name__ == '__main__':

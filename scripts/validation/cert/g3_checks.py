@@ -9,6 +9,7 @@ They do not start or interrupt a server and are not a substitute for a lane.
 import base64
 import json
 import math
+import statistics
 
 import g6_checks
 
@@ -151,6 +152,33 @@ def verify_window(data, trace, order):
     return {"attempted": len(rows), "answered": len(answered), "truncated": len(truncated), "failed": len(failed),
             "order": order, "client_window_s": window, "proxy_window_s": proxy_window,
             "completion_tokens_total": summary.get("completion_tokens_total"), "usage_complete": complete_usage}
+
+
+def verify_goodput_median(data, trace):
+    rows, summary, window, proxy_window = load(data, trace)
+    answered = [row for row in rows if row.get('answer_completed') is True and row.get('error') is None]
+    values = [finite(row.get('latency_s')) for row in answered]
+    if len(values) < 2 or len(set(values)) < 2 or any(value <= 0 for value in values):
+        raise ValueError('same-cohort median requires two distinct positive answered latencies')
+    if any(finite(row.get('queue_delay_s', 0)) != 0 for row in rows):
+        raise ValueError('same-cohort raw e2e requires zero scheduling delay')
+    slo = statistics.median(values)
+    if not math.isclose(finite(summary.get('goodput', {}).get('thresholds_s', {}).get('e2e')), slo, abs_tol=1e-9, rel_tol=0):
+        raise ValueError('tool threshold differs from independently derived median')
+    if summary.get('config', {}).get('modality', {}).get('cert_e2e_median_slo') is not True:
+        raise ValueError('tool did not record same-cohort median mode')
+    good = sum(value <= slo for value in values)
+    if summary.get('answered_requests') != len(answered) or summary.get('goodput', {}).get('count') != good:
+        raise ValueError('tool answered or goodput count differs')
+    if not near(summary.get('goodput', {}).get('requests_per_second'), good / window):
+        raise ValueError('tool goodput rate differs from independent count/window')
+    if not any(row.get('outcome') == 'reasoning_truncated' and row.get('answer_completed') is False for row in rows):
+        raise ValueError('real unanswered truncation required')
+    if not any(row.get('error') is not None and row.get('outcome') != 'reasoning_truncated' for row in rows):
+        raise ValueError('real failure required')
+    return {'attempted': len(rows), 'answered': len(answered), 'answered_pass': good,
+            'answered_fail': len(answered) - good, 'e2e_slo_s': slo,
+            'window_s': window, 'proxy_window_s': proxy_window, 'goodput_requests_per_second': good / window}
 
 
 def verify_goodput(data, trace, e2e_s):

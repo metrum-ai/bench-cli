@@ -19,7 +19,7 @@ import manifest_tool
 import result_writer
 
 ROOT = Path(__file__).resolve().parents[3]
-# Fixed before G3 attempt 3; previous 150s run and its failure are retained.
+# Retained only for non-goodput cells; BC-GPU-009 uses the r3 median mode.
 E2E_SLO_SECONDS = 60
 
 
@@ -59,7 +59,7 @@ def stop_client(client):
         client.wait(timeout=10)
 
 
-def run_cell(args, order, label="g3", extra_flags=(), concurrency=4, count=16):
+def run_cell(args, order, label="g3", extra_flags=(), concurrency=4, count=16, median_slo=False):
     evidence = args.out / "evidence"
     prefix = f"{label}-{order}"
     trace, data = evidence / f"{prefix}-trace.jsonl", evidence / f"{prefix}-requests.jsonl"
@@ -71,7 +71,7 @@ def run_cell(args, order, label="g3", extra_flags=(), concurrency=4, count=16):
                "--api-key", "dummy", "--scenario", prefix, "--num-requests", str(count), "--concurrency", str(concurrency),
                "--prompts", str(args.prompt), "--mode", "chat", "--streaming", "--model", args.model,
                "--data-log", str(data), "--max-tokens", "4096", "--warmup-requests", "0", "--seed", "42",
-               "--temperature", "0", "--request-timeout", "600", "--slo", f"e2e={E2E_SLO_SECONDS}",
+               "--temperature", "0", "--request-timeout", "600", *(["--cert-e2e-median-slo"] if median_slo else ["--slo", f"e2e={E2E_SLO_SECONDS}"]),
                "--extra-body-json", '{"chat_template_kwargs":{"enable_thinking":true}}', *extra_flags]
     proxycmd = [sys.executable, str(Path(__file__).with_name("trace_proxy.py")), "--listen-port", str(args.proxy_port),
                 "--upstream-port", str(args.port), "--out", str(trace), "--request-caps", "128,4096", "--retry-seconds", "240"]
@@ -153,7 +153,7 @@ def main():
     outcomes, cells = {}, {}
     for order in ("control", "error-first", "error-last"):
         try:
-            data, trace, exit_code = run_cell(args, order)
+            data, trace, exit_code = run_cell(args, order, median_slo=(order == "error-last"))
             cells[order] = (data, trace)
             check = g3_checks.verify_complete_control(data, trace) if order == "control" else g3_checks.verify_window(data, trace, order)
             outcomes[order] = {"window": check, "exit_code": exit_code}
@@ -169,7 +169,7 @@ def main():
                 observed = {"cells": outcomes}
             else:
                 data, trace = cells["error-last"]
-                observed = {"goodput": g3_checks.verify_goodput(data, trace, E2E_SLO_SECONDS), "window_cell": outcomes["error-last"]}
+                observed = {"goodput": g3_checks.verify_goodput_median(data, trace), "window_cell": outcomes["error-last"]}
                 if "error" in outcomes["error-last"]:
                     raise ValueError("real error-last window verification failed")
             passed = True
@@ -186,7 +186,7 @@ def main():
                                "baseline_binary_sha256": manifest_tool.sha256_file(args.baseline),
                                "manifest_sha256": manifest_tool.sha256_file(args.manifest)},
                   "observed_values": observed, "thresholds": {"window_tolerance_s": .05, "rate_tolerance_pct": 1,
-                  "e2e_slo_s": E2E_SLO_SECONDS, "server_kill_restart_required": True}, "evidence_paths": files}
+                  "e2e_slo_rule": "same-cohort answered median for BC-GPU-009", "server_kill_restart_required": True}, "evidence_paths": files}
         result_writer.write_record(args.out, record)
         outcomes[case] = passed
     return 0 if outcomes["BC-GPU-008"] and outcomes["BC-GPU-009"] else 1

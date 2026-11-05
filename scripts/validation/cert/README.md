@@ -44,8 +44,14 @@ bash scripts/validation/cert/lane-l1.sh --manifest /path/frozen.json \
 `--plan` prints a lane's assigned cases without running a server. The D
 field-reported configuration and the reference comparison use separate
 invocations (`lane-d.sh` and `lane-comp002.sh`); the former records the
-unexecuted comparison as FAIL, not PASS. GPU 013 and the H100-only 015 remain
-fail-closed; other unsupported cases similarly cannot pass. Real restart
+unexecuted comparison as FAIL, not PASS. GPU 010, 011, 013 and the r3 runner for 015 have CPU-only development
+coverage, not GPU verification. G4 requires a pinned tokenizer.json and a
+candidate built with tokenizer support for 010; 011 also pins the VLM binary,
+strategic binary, thinking-capable VLM image/model/revision, prompt file and
+local image. G5 pins the strategic binary, distinct
+`second_port` and `second_proxy_port`, and `--gpu-memory-utilization 0.45` in
+its server flags; 015 uses one >=48GB NVIDIA GPU and two servers. Other
+unsupported cases cannot pass. Real restart
 runners kill only their own serving container. The recorder forwards and
 retains real server bytes; configured faults are explicitly recorded. Raw
 SSE, prompts and generated output can be sensitive and must be kept private
