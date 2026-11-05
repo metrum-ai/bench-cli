@@ -79,7 +79,7 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         expected = prompt.get("sha256")
         if not isinstance(expected, str) or not SHA.fullmatch(expected) or sha256_file(prompt["path"]) != expected:
             raise ValueError("prompt set hash mismatch")
-    if lane in ("L1", "R", "D", "G1", "G2", "G3", "G4", "G5", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
+    if lane in ("L1", "R", "D", "W", "G1", "G2", "G3", "G4", "G5", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
         raise ValueError("this lane requires the pinned Qwen3-8B model")
     if lane in ("P1", "P2"):
         from perf_baseline import verify as verify_perf_baseline
@@ -128,6 +128,26 @@ def load_manifest(path, lane, candidate, baseline, gpu):
             preset = Path(__file__).resolve().parents[3] / "docs/telemetry/examples/all-smi.yaml"
             if Path(config["telemetry_config"]["path"]).resolve() != preset.resolve():
                 raise ValueError("P1 telemetry config must be the tracked loopback all-smi preset")
+    if lane == "W":
+        wrapper = config.get('wrapper', {})
+        if (not isinstance(wrapper, dict) or not isinstance(wrapper.get('path'), str)
+                or not SHA.fullmatch(str(wrapper.get('sha256', ''))) or not Path(wrapper['path']).is_file()
+                or not os.access(wrapper['path'], os.X_OK) or sha256_file(wrapper['path']) != wrapper['sha256']
+                or not isinstance(wrapper.get('version'), str) or not wrapper['version'].strip()):
+            raise ValueError('W requires a pinned platform wrapper executable and version')
+        command = config.get('wrapper_args')
+        required = {'{candidate}', '{url}', '{prompt}', '{cli_log}', '{wrapper_log}', '{max_tokens}', '{count}', '{model}'}
+        if not isinstance(command, list) or not all(isinstance(x, str) and x and '\x00' not in x for x in command) or not required <= set(command):
+            raise ValueError('W wrapper args must include all standalone contract placeholders')
+        if command.count('--streaming') != 1 or command.count('--extra-body-json') != 1:
+            raise ValueError('W requires explicit forwarded streaming and thinking options')
+        position = command.index('--extra-body-json')
+        if position + 1 >= len(command) or json.loads(command[position + 1]) != {'chat_template_kwargs': {'enable_thinking': True}}:
+            raise ValueError('W requires thinking ON')
+        for key, flag in (('strict_args', '--strict-reasoning-truncation'), ('safety_args', '--ci-safety')):
+            args = config.get(key)
+            if not isinstance(args, list) or not all(isinstance(x, str) and x and '\x00' not in x for x in args) or args.count(flag) != 1:
+                raise ValueError(f'W requires a forwarding argument array containing {flag}')
     if lane == "G6":
         strategic = config.get("strategic_binary")
         if not isinstance(strategic, dict) or not isinstance(strategic.get("path"), str) or not SHA.fullmatch(str(strategic.get("sha256", ""))):
@@ -201,7 +221,7 @@ def load_manifest(path, lane, candidate, baseline, gpu):
                 raise ValueError(f"V {key} hash mismatch")
             if key == "vlm_binary" and (path != Path(candidate).resolve().parent / "metrum-ai-bench-cli-vlm" or not os.access(path, os.X_OK)):
                 raise ValueError("V binary must be executable beside the candidate")
-    if lane in ("R", "D", "V", "G1", "G2", "G3", "G4", "G5", "G6"):
+    if lane in ("R", "D", "V", "W", "G1", "G2", "G3", "G4", "G5", "G6"):
         if "default" not in prompt_sets:
             raise ValueError(f"{lane} requires a default prompt set")
         proxy_port = config.get("proxy_port")

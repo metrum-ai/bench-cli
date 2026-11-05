@@ -43,8 +43,8 @@ bash scripts/validation/cert/lane-l1.sh --manifest /path/frozen.json \
 
 `--plan` prints a lane's assigned cases without running a server. The D
 field-reported configuration and the reference comparison use separate
-invocations (`lane-d.sh` and `lane-comp002.sh`); the former records the
-unexecuted comparison as FAIL, not PASS. GPU 003, 010, 011, 013, the r3 runner for 015, REASON-005, and LIVE-002–004
+invocations (`lane-d.sh` and `lane-comp002.sh`); the former records only
+BC-REASON-006, so BC-COMP-002 remains missing until its own invocation. GPU 003, 010, 011, 013, the r3 runner for 015, REASON-005, and LIVE-002–004
 have CPU-only development coverage, not GPU verification. L2–L4 require a
 clean checkout matching the candidate SHA, a pinned modality binary and SUT,
 fixture hashes, and a prepared offline hub cache. They launch an owned,
@@ -105,6 +105,48 @@ It builds twice from the committed tree with normalized paths and fails if the
 bytes differ. Pin the reported binary SHA only after success and retain the
 build evidence; the P1 lane independently rebuilds it again. The build and
 CPU fixture results are not NVIDIA or release-certification evidence.
+
+### W: external platform wrapper and manual sign-off
+
+W is a two-step runner. The Metrum Bench platform team owns the wrapper run and
+its **external, manual** sign-off; a missing sign-off cannot pass the case.
+Freeze a real wrapper executable's path, SHA256 and version as `lanes.W.wrapper`.
+The manifest also supplies `wrapper_args`, `strict_args`, and `safety_args` as
+argument arrays (never shell text). `wrapper_args` must contain each standalone
+placeholder `{candidate}`, `{url}`, `{prompt}`, `{cli_log}`, `{wrapper_log}`,
+`{max_tokens}`, `{count}`, and `{model}`; include forwarded `--streaming` and
+`--extra-body-json` with `{"chat_template_kwargs":{"enable_thinking":true}}`.
+The strict and safety arrays must respectively forward
+`--strict-reasoning-truncation` and `--ci-safety`. The team must configure these
+arrays for its actual wrapper interface, not a fixture or mock. The wrapper must
+run the pinned candidate, emit its unmodified CLI JSONL at `{cli_log}`, and
+export a JSON object at `{wrapper_log}` containing `cli_argv`, `cli_exit_code`,
+`requests`, and `summary`. Each wrapper request has `seq`, the v1.8.0 fields
+`ttft_s`, `ttft_visible_answer_s`, `ttft_source`, `outcome`,
+`answer_completed`, `usage_missing`, and a nonempty `warning` for truncation.
+The wrapper summary exposes `attempted`, `answered_requests`, `successes`, `errors`,
+`usage_missing_count`, and `reasoning_truncated`. These are checked against the
+same actual CLI requests and a real proxy trace; strict and CI-safety truncation
+must fail the CLI and wrapper. The run uses separate adequate and low-cap cells.
+
+Collect with `lane-w.sh` using the common lane arguments and an offline model
+cache. Successful collection is not a PASS; it prints the collection SHA256
+and waits for the team. After server cleanup, the platform team reviews the raw
+private evidence and supplies a JSON sign-off file with `team` equal to
+`Metrum Bench platform`, `approved: true`, `signer`, `signed_utc`,
+`evidence_link`, `candidate_sha`, `wrapper_sha256`, `collection_sha256`,
+`cleanup_sha256` and `server_log_sha256`. Hash the corresponding retained files;
+these values bind the approval to this particular run. Finalize with:
+
+```sh
+bash scripts/validation/cert/lane-w.sh --finalize --out W_OUTPUT --signoff PLATFORM_SIGNOFF.json
+```
+
+This checks the hashes, cleanup and field contract again before writing the case
+record; without the file there is no PASS. The sign-off is external/manual: its
+claimed signer and approval must be authenticated by the independent reviewer;
+this offline JSON format does not cryptographically establish identity. Raw
+traces, wrapper output and sign-off evidence remain private.
 
 For release evidence, generate and freeze the selection described in
 [the release policy](../../../docs/RELEASE_CERTIFICATION.md). The validator

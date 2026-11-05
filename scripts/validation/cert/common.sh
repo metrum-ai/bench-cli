@@ -62,7 +62,9 @@ cert_manifest() {
 }
 
 cert_start_server() {
-  local -a flags=() gpu_args=(--gpus "device=${CUDA_VISIBLE_DEVICES}") token_args=() cache_args=()
+  local -a flags=() gpu_args=(--gpus "device=${CUDA_VISIBLE_DEVICES}") token_args=() cache_args=() owner_args=() offline_args=()
+  [[ -z "${CERT_CONTAINER_OWNER:-}" ]] || owner_args=(--label "metrum.cert.owner=$CERT_CONTAINER_OWNER")
+  [[ "${CERT_OFFLINE:-0}" != 1 ]] || offline_args=(--pull=never)
   local now_hash
   now_hash="$(sha256sum "$CERT_MANIFEST" | cut -d' ' -f1)"
   [[ "$now_hash" == "$CERT_MANIFEST_SHA" ]] || { echo 'manifest changed during run' >&2; return 1; }
@@ -77,7 +79,7 @@ cert_start_server() {
   fi
   # Arm cleanup before launch so an interrupted docker client cannot orphan the container.
   CERT_STARTED=1
-  docker run -d --name "$CERT_CONTAINER" "${gpu_args[@]}" --ipc=host \
+  docker run -d --name "$CERT_CONTAINER" "${offline_args[@]}" "${owner_args[@]}" "${gpu_args[@]}" --ipc=host \
     --env CUDA_VISIBLE_DEVICES=0 "${token_args[@]}" "${cache_args[@]}" -p "127.0.0.1:${CERT_PORT}:8000" \
     "$CERT_IMAGE" --model "$CERT_MODEL" --revision "$CERT_REVISION" \
     --port 8000 "${flags[@]}" > "$CERT_OUT/evidence/container-id.txt"
@@ -128,7 +130,7 @@ cert_on_exit() {
     fi
     if ((owned == 1)); then
       docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1 || {
-        [[ "${CERT_PERF_FINALIZE:-0}" != 1 ]] || rc=1
+        [[ "${CERT_PERF_FINALIZE:-0}" != 1 && "${CERT_LANE:-}" != W ]] || rc=1
       }
       if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
         echo 'failed to stop owned server container' >&2
@@ -159,6 +161,11 @@ cert_on_exit() {
         echo 'performance container owner mismatch; refusing removal' >&2
       fi
     fi
+  fi
+  # W collects first; external platform sign-off is a separate manual step.
+  # A successful cleanup marker is needed before finalization can publish PASS.
+  if [[ "${CERT_LANE:-}" == W && $rc == 0 ]]; then
+    printf '{"cleanup":"verified"}\n' > "$CERT_OUT/evidence/cleanup-verified.json" || rc=1
   fi
   # Performance records are provisional until both exporter and nested server
   # cleanup have been checked. A killed shell cannot publish a passing record.

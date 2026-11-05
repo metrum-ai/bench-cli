@@ -89,6 +89,20 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
 
+    def test_w_requires_pinned_wrapper_and_forwarded_strict_contract(self):
+        wrapper = self.root / 'wrapper'; wrapper.write_text('fixture'); wrapper.chmod(0o755)
+        config = self.manifest['lanes']['L1'].copy()
+        config.update({'proxy_port': 8111, 'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
+                       'wrapper': {'path': str(wrapper), 'sha256': manifest_tool.sha256_file(wrapper), 'version': 'fixture'},
+                       'wrapper_args': ['{candidate}', '{url}', '{prompt}', '{cli_log}', '{wrapper_log}', '{max_tokens}',
+                                        '{count}', '{model}', '--streaming', '--extra-body-json',
+                                        '{"chat_template_kwargs":{"enable_thinking":true}}'],
+                       'strict_args': ['--strict-reasoning-truncation'], 'safety_args': ['--ci-safety']})
+        self.manifest['lanes']['W'] = config; self.path.write_text(json.dumps(self.manifest))
+        manifest_tool.load_manifest(self.path, 'W', self.candidate, self.baseline, '0')
+        config['strict_args'] = []; self.path.write_text(json.dumps(self.manifest))
+        with self.assertRaises(ValueError): manifest_tool.load_manifest(self.path, 'W', self.candidate, self.baseline, '0')
+
     def test_live_modality_preflight_pins_every_input(self):
         root = Path(manifest_tool.__file__).resolve().parents[3]
         cases = {'L2': ('vlm', 'Qwen/Qwen3-VL-8B-Instruct', ['test-data/vlm/prompts.jsonl', 'test-data/vlm/shapes-512.png']),

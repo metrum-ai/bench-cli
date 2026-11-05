@@ -38,6 +38,13 @@
           "all_smi_protoc_crate": {"$ref": "#/$defs/pinnedFile"},
           "all_smi_checkout": {"type": "string", "minLength": 1},
           "telemetry_config": {"$ref": "#/$defs/pinnedFile"},
+          "wrapper": {"type": "object", "required": ["path", "sha256", "version"], "properties": {
+            "path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "version": {"type": "string", "minLength": 1}
+          }},
+          "wrapper_args": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "strict_args": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "safety_args": {"type": "array", "items": {"type": "string", "minLength": 1}},
           "fixture_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
           "vlm_image": {"$ref": "#/$defs/pinnedFile"},
           "vlm": {"type": "object", "required": ["image", "model", "revision", "server_flags"], "properties": {
