@@ -307,6 +307,9 @@ Options:
       --stop-after-seconds <STOP_AFTER_SECONDS>
           Stop sending new requests after N seconds
 
+      --cert-e2e-median-slo
+          Exploratory same-cohort answered e2e median threshold for goodput; requires at least two distinct answered latencies and zero scheduling delay; not a prospective service SLO
+
       --ramp-up-seconds <RAMP_UP_SECONDS>
           Ramp up period in seconds to gradually increase concurrency
 

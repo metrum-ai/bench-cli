@@ -576,6 +576,39 @@ impl RunSummary {
     /// distributions. Error rate uses attempted = successes + errors in the
     /// supplied slice (caller should pass measurement-phase records only, or
     /// all records - attempted is the slice length).
+    /// Derive an e2e threshold from the same measured answered cohort. This is
+    /// an exploratory cohort-relative threshold, not a prospective service SLO.
+    pub fn answered_e2e_median(records: &[RequestRecord]) -> Result<f64, &'static str> {
+        if records
+            .iter()
+            .any(|r| r.phase == Phase::Measure && r.queue_delay_s != 0.0)
+        {
+            return Err("same-cohort raw e2e requires zero scheduling delay");
+        }
+        let mut values: Vec<f64> = records
+            .iter()
+            .filter(|r| {
+                r.phase == Phase::Measure && r.is_success() && r.answer_completed == Some(true)
+            })
+            .map(|r| r.latency_s)
+            .collect();
+        if values.len() < 2 || values.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(
+                "same-cohort median requires at least two finite positive answered latencies",
+            );
+        }
+        values.sort_by(f64::total_cmp);
+        if values.first() == values.last() {
+            return Err("same-cohort median requires distinct answered latencies");
+        }
+        let middle = values.len() / 2;
+        Ok(if values.len().is_multiple_of(2) {
+            values[middle - 1] / 2.0 + values[middle] / 2.0
+        } else {
+            values[middle]
+        })
+    }
+
     pub fn from_records(records: &[RequestRecord], window_seconds: f64, partial: bool) -> Self {
         Self::from_records_with_options(
             records,
@@ -1575,6 +1608,24 @@ mod tests {
         assert_eq!(summary.goodput.count, 1);
         assert!((summary.goodput.requests_per_second.unwrap() - 0.1).abs() < 1e-12);
         assert!((summary.goodput.fraction_of_attempted - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn same_cohort_e2e_median_requires_distinct_measured_answers() {
+        let mut first = ok(0, 1000, 100, 8, &[]);
+        first.answer_completed = Some(true);
+        let mut second = ok(1, 3000, 100, 8, &[]);
+        second.answer_completed = Some(true);
+        let mut truncated = ok(2, 9000, 100, 8, &[]);
+        truncated.answer_completed = Some(false);
+        assert_eq!(
+            RunSummary::answered_e2e_median(&[first.clone(), second.clone(), truncated]),
+            Ok(2.0)
+        );
+        assert!(RunSummary::answered_e2e_median(&[first.clone()]).is_err());
+        assert!(RunSummary::answered_e2e_median(&[first.clone(), first.clone()]).is_err());
+        second.latency_s = f64::NAN;
+        assert!(RunSummary::answered_e2e_median(&[first, second]).is_err());
     }
 
     // BC-MATH-002: a completed empty response is an error but not a transport failure.

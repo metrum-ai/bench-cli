@@ -3279,6 +3279,7 @@ dependencies = [
  "clap",
  "crc32fast",
  "flate2",
+ "image",
  "png",
  "regex",
  "reqwest",

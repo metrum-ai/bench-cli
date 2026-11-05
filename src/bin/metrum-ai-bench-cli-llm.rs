@@ -190,6 +190,13 @@ struct Args {
 
     #[arg(
         long,
+        conflicts_with = "slos",
+        help = "Exploratory same-cohort answered e2e median threshold for goodput; requires at least two distinct answered latencies and zero scheduling delay; not a prospective service SLO"
+    )]
+    cert_e2e_median_slo: bool,
+
+    #[arg(
+        long,
         help = "Ramp up period in seconds to gradually increase concurrency"
     )]
     ramp_up_seconds: Option<u64>,
@@ -1468,7 +1475,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         // Fallback if no measured records produced a span.
         0.0
     };
-    let slos = args.common.parse_slos()?;
+    let mut slos = args.common.parse_slos()?;
+    if args.cert_e2e_median_slo {
+        slos.e2e_s = Some(
+            metrum_ai_bench::summary::RunSummary::answered_e2e_median(&records)
+                .map_err(anyhow::Error::msg)?,
+        );
+    }
     let body_template = build_request_body(
         args.mode,
         &args.model,
@@ -1526,6 +1539,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             );
             if args.infer_ttft_from_first_byte {
                 map.insert("infer_ttft_from_first_byte".into(), serde_json::json!(true));
+            }
+            if args.cert_e2e_median_slo {
+                map.insert("cert_e2e_median_slo".into(), serde_json::json!(true));
             }
             if let Some(ms) = args.start_jitter_ms.filter(|ms| *ms > 0) {
                 map.insert("start_jitter_ms".into(), serde_json::json!(ms));
