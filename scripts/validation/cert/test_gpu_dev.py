@@ -89,6 +89,27 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
 
+    def test_live_modality_preflight_pins_every_input(self):
+        root = Path(manifest_tool.__file__).resolve().parents[3]
+        cases = {'L2': ('vlm', 'Qwen/Qwen3-VL-8B-Instruct', ['test-data/vlm/prompts.jsonl', 'test-data/vlm/shapes-512.png']),
+                 'L3': ('asr', 'openai/whisper-large-v3-turbo', ['test-data/asr/input.jsonl', 'test-data/asr/truth.jsonl',
+                         'test-data/asr/1089-134686-0030.wav', 'test-data/asr/2961-961-0016.wav', 'test-data/asr/6930-81414-0005.wav']),
+                 'L4': ('imagegen', 'Tongyi-MAI/Z-Image-Turbo', [])}
+        for lane, (modality, model, fixtures) in cases.items():
+            binary = self.root / ('metrum-ai-bench-cli-' + modality); binary.write_text('binary'); binary.chmod(0o755)
+            sut = self.root / ('sut-' + lane + '.json'); sut.write_text(json.dumps({'model': {'id': model, 'revision': 'c' * 40}}))
+            default = root / fixtures[0] if fixtures else self.prompt
+            config = self.manifest['lanes']['L1'].copy()
+            config.update({'model': model, 'revision': 'c' * 40,
+                           'modality_binary': {'path': str(binary), 'sha256': manifest_tool.sha256_file(binary)},
+                           'sut': {'path': str(sut), 'sha256': manifest_tool.sha256_file(sut)},
+                           'prompt_sets': {'default': {'path': str(default), 'sha256': manifest_tool.sha256_file(default)}},
+                           'fixture_hashes': {name: manifest_tool.sha256_file(root / name) for name in fixtures}})
+            self.manifest['lanes'][lane] = config; self.path.write_text(json.dumps(self.manifest))
+            manifest_tool.load_manifest(self.path, lane, self.candidate, self.baseline, '0')
+            config['modality_binary']['sha256'] = '0' * 64; self.path.write_text(json.dumps(self.manifest))
+            with self.assertRaises(ValueError): manifest_tool.load_manifest(self.path, lane, self.candidate, self.baseline, '0')
+
     def test_vlm_preflight_requires_binary_and_image_pins(self):
         config = self.manifest['lanes']['L1'].copy()
         binary = self.root / 'metrum-ai-bench-cli-vlm'; binary.write_text('binary'); binary.chmod(0o755)

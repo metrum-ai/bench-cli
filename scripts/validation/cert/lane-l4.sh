@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
+set -euo pipefail
 CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec bash "$CERT_DIR/common.sh" L4 "$@"
+exec bash "$CERT_DIR/live_modality_lane.sh" L4 imagegen BC-LIVE-004 "$@"

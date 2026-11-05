@@ -105,6 +105,43 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         if noise is not None:
             if not isinstance(noise, dict) or not isinstance(noise.get("path"), str) or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]:
                 raise ValueError("G7 noise floor must be a pinned file")
+    if lane in ("L2", "L3", "L4"):
+        modality, expected_model = {
+            "L2": ("vlm", "Qwen/Qwen3-VL-8B-Instruct"),
+            "L3": ("asr", "openai/whisper-large-v3-turbo"),
+            "L4": ("imagegen", "Tongyi-MAI/Z-Image-Turbo"),
+        }[lane]
+        if config["model"] != expected_model or "default" not in prompt_sets:
+            raise ValueError(f"{lane} requires its fixed sub-10B model and default input")
+        for key in ("modality_binary", "sut"):
+            item = config.get(key)
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not SHA.fullmatch(str(item.get("sha256", ""))):
+                raise ValueError(f"{lane} requires a pinned {key}")
+            path = Path(item["path"]).resolve()
+            if not path.is_file() or sha256_file(path) != item["sha256"]:
+                raise ValueError(f"{lane} {key} hash mismatch")
+            if key == "modality_binary" and (path != Path(candidate).resolve().parent / f"metrum-ai-bench-cli-{modality}" or not os.access(path, os.X_OK)):
+                raise ValueError(f"{lane} binary must be executable beside the candidate")
+        sut = json.loads(Path(config["sut"]["path"]).read_text(encoding="utf-8"))
+        if sut.get("model", {}).get("id") != config["model"] or sut.get("model", {}).get("revision") != config["revision"]:
+            raise ValueError(f"{lane} SUT model and revision must match")
+        fixtures = {
+            "L2": ("test-data/vlm/prompts.jsonl", "test-data/vlm/shapes-512.png"),
+            "L3": ("test-data/asr/input.jsonl", "test-data/asr/truth.jsonl", "test-data/asr/1089-134686-0030.wav",
+                   "test-data/asr/2961-961-0016.wav", "test-data/asr/6930-81414-0005.wav"),
+            "L4": (),
+        }[lane]
+        pins = config.get("fixture_hashes", {})
+        root = Path(__file__).resolve().parents[3]
+        if not isinstance(pins, dict) or any(not SHA.fullmatch(str(pins.get(name, ""))) or sha256_file(root / name) != pins[name] for name in fixtures):
+            raise ValueError(f"{lane} tracked fixture hashes missing or mismatched")
+        if lane == "L2" and Path(prompt_sets["default"]["path"]).resolve() != (root / fixtures[0]).resolve():
+            raise ValueError("L2 default prompt must be the tracked VLM fixture")
+        if lane == "L3" and Path(prompt_sets["default"]["path"]).resolve() != (root / fixtures[0]).resolve():
+            raise ValueError("L3 default input must be the tracked ASR fixture")
+        for key in ("owner", "evidence_link"):
+            if not isinstance(config.get(key), str) or not config[key].strip():
+                raise ValueError(f"{lane} requires {key}")
     if lane == "V":
         if config["model"] != "Qwen/Qwen3-VL-8B-Thinking":
             raise ValueError("V requires the pinned thinking-capable Qwen3-VL-8B model")

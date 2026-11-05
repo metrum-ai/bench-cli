@@ -32,6 +32,8 @@
           "strategic_binary": {"$ref": "#/$defs/pinnedFile"},
           "tokenizer": {"$ref": "#/$defs/pinnedFile"},
           "vlm_binary": {"$ref": "#/$defs/pinnedFile"},
+          "modality_binary": {"$ref": "#/$defs/pinnedFile"},
+          "fixture_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
           "vlm_image": {"$ref": "#/$defs/pinnedFile"},
           "vlm": {"type": "object", "required": ["image", "model", "revision", "server_flags"], "properties": {
             "image": {"type": "string", "pattern": "@sha256:[0-9a-f]{64}$"},

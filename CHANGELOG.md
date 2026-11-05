@@ -10,8 +10,10 @@
   BC-GPU-015 to one NVIDIA GPU with at least 48 GB, and require all six complete
   180-second G7 issuance windows. GPU-003 records source and forwarded real
   SSE for selected-choice, tool-output and transformed ordering checks, and
-  REASON-005 pins a thinking-capable vision model and image. Previous
-  development attempts remain intact.
+  REASON-005 pins a thinking-capable vision model and image. LIVE-002–004
+  add pinned, isolated modality smoke runners; the image headline check now
+  actually decodes every PNG/JPEG artifact. Previous development attempts
+  remain intact.
 
 - Metrum AI: qualify releases using frozen core plus stratified extended case
   selection, with changed-area and rotation coverage, selected-only lane plans

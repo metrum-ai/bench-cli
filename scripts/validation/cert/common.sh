@@ -114,10 +114,26 @@ cert_on_exit() {
     wait "$CERT_RUNNER_PID" 2>/dev/null
   fi
   if ((CERT_STARTED == 1)); then
-    docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1
-    if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
-      echo 'failed to stop owned server container' >&2
-      rc=1
+    local owned=1
+    if [[ -n "${CERT_CONTAINER_OWNER:-}" ]]; then
+      local actual_owner
+      actual_owner="$(docker inspect --format '{{index .Config.Labels "metrum.cert.owner"}}' "$CERT_CONTAINER" 2>/dev/null)" || actual_owner=''
+      if [[ "$actual_owner" != "$CERT_CONTAINER_OWNER" ]]; then
+        echo 'owned-container label missing or mismatched; refusing removal' >&2
+        owned=0
+        rc=1
+      fi
+    fi
+    if ((owned == 1)); then
+      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1
+      if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
+        echo 'failed to stop owned server container' >&2
+        rc=1
+      elif [[ -n "${CERT_CONTAINER_OWNER:-}" ]]; then
+        local remaining
+        remaining="$(docker ps -a --filter "name=^/${CERT_CONTAINER}$" --format '{{.ID}}')" || rc=1
+        [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
+      fi
     fi
   fi
   local case_id
