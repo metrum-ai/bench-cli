@@ -5,7 +5,9 @@
 - Metrum AI: qualify releases using frozen core plus stratified extended case
   selection, with changed-area and rotation coverage, selected-only lane plans
   and explicit NOT-SELECTED results. Skip unchanged full nightly runs and use
-  change-triggered rather than monthly GPU regression scheduling.
+  change-triggered rather than monthly GPU regression scheduling. Retain the
+  nightly published-docs check on unchanged main. Revise BC-REASON-006 before
+  its first certification run to use the field-reported 512-token cap (#395).
 
 - Metrum AI: schedule nightly and weekly CPU release-quality checks, track test
   cadence, and export certification evidence tables and reports. GPU lane

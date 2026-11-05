@@ -41,20 +41,23 @@ responsibilities.
 ## Frozen selection and qualification
 
 The catalog marks every active case `core` or `extended`. Core includes the A/B
-performance gates, live modality smokes, R reasoning lane, default reasoning
-usefulness, counter comparison, packaging, release and post-release checks,
+performance gates, live modality smokes, R reasoning lane, field-reported
+reasoning usefulness, counter comparison, packaging, release and post-release checks,
 cleanup and wrapper integration. Every core case is selected. Extended cases
 are sampled deterministically within each Area: default 30%, rounded up with
 at least one per Area. The default seed is the candidate SHA. Changed paths
-force all extended cases in affected Areas; unmapped paths conservatively force
-all Areas. Cases not run in the last K releases (default 3) are forced by
+force all extended cases in affected Areas. Docs changes force REL, PACK, POST
+and CI; tests alone do not force an Area; workflow and certification harness
+changes force CI. Shared runtime changes force all Areas and unmapped paths
+conservatively force all Areas. Cases not run in the last K releases (default 3) are forced by
 rotation. Missing history is treated conservatively: never-run extended cases
 are selected. Results marked N-A or NOT-SELECTED do not count as a run.
 
 Generate and freeze `selection.json` **before execution**, retaining the input
 file list, history CSVs and catalog. Supply historical CSVs newest first (one
 release per file); absence of history is allowed but selects all previously
-unseen cases. `lane_plan` contains only selected IDs, packed by parallel group;
+unseen cases. `selected_count` and `eligible_count` report coverage; `lane_plan` contains
+only selected IDs, packed by parallel group;
 launch parallel-phase lanes concurrently with isolated devices, then cleanup,
 then POST after publication. Packing is a plan, not execution or evidence.
 The selector does not authorize GPU use.
@@ -85,8 +88,9 @@ documentation comparison, history secret scan, dependency policy and
 published-docs links. Weekly CPU checks cover installation and released
 assets; the weekly dependency hygiene report remains in `ci.yml`. A failed
 nightly opens or updates a single issue labeled `nightly-failure`. On main,
-nightly exits green early only when the last successful **full** nightly tested
-the same commit; unverifiable history runs the full suite. Weekly CPU still runs.
+nightly skips code-dependent checks only when the last successful **full** nightly
+tested the same commit; unverifiable history runs the full suite. The live docs
+link check still runs on unchanged main. Weekly CPU still runs.
 
 The agent-operated GPU regression smoke uses the R, G6 and L1 lanes against
 main and the latest certified release when main changes or a new serving-stack

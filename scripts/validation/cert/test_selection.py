@@ -3,6 +3,7 @@
 """Selection and qualification invariants without network or GPU."""
 import datetime as dt
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,8 @@ class SelectionTests(unittest.TestCase):
         self.assertNotIn('BC-HW-002', selected)
         for area in ('SSE', 'GPU'):
             self.assertEqual(2, sum(k.startswith('BC-' + area) for k in selected))
+        self.assertEqual(len(selected), first['selected_count'])
+        self.assertEqual(10, first['eligible_count'])
         self.assertEqual(set(selected), {c for lane in first['lane_plan'] for c in lane['cases']})
         self.assertTrue(any(x['phase'] == 'post' for x in first['lane_plan']))
 
@@ -119,7 +122,39 @@ class PublicCatalogTests(unittest.TestCase):
             self.assertTrue({'on-main-change', 'on-upstream-change'} <= set(rows[case]['Cadence'].split(';')))
 
 
+    def test_tracked_source_files_have_explicit_mapping(self):
+        root = Path(__file__).resolve().parents[3]
+        output = subprocess.run(['git', 'ls-files', 'src/**'], cwd=root, check=True, capture_output=True, text=True).stdout
+        paths = output.splitlines()
+        self.assertTrue(paths)
+        unmapped = [path for path in paths if path not in select.PATH_AREAS and not path.startswith('src/bin/')]
+        self.assertEqual([], unmapped, f'map newly tracked source paths explicitly: {unmapped}')
+
+    def test_docs_plus_changelog_is_sampled_not_full(self):
+        path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
+        catalog = validator.load_catalog(path)
+        sha = 'a' * 40
+        history = [{'release': 'prior', 'ran': sorted(catalog)}]
+        base = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3, [], history)
+        selected = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3,
+                                         ['CHANGELOG.md', 'docs/CLI.md'], history)
+        forced = {case for case, row in catalog.items() if row['Tier'] != 'PERIODIC' and row['Selection'] == 'extended' and row['Area'] in {'REL', 'PACK', 'POST', 'CI'}}
+        self.assertEqual(set(base['selected']) | forced, set(selected['selected']))
+        self.assertEqual(['CI', 'PACK', 'POST', 'REL'], selected['changed_areas'])
+        self.assertLess(selected['selected_count'], selected['eligible_count'])
+        self.assertFalse(selected['unmapped_files'])
+        test_only = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3, ['tests/example.rs'], history)
+        self.assertEqual(set(base['selected']), set(test_only['selected']))
+
+
 class NightlyDecisionTests(unittest.TestCase):
+    def test_live_docs_step_is_not_gated_by_skip(self):
+        root = Path(__file__).resolve().parents[3]
+        workflow = (root / '.github/workflows/regular-tests.yml').read_text(encoding='utf-8')
+        step = workflow.split('      - name: Published documentation links\n', 1)[1].split('\n  nightly-failure:', 1)[0]
+        self.assertNotIn('if:', step)
+        self.assertIn('check_live_docs.py', step)
+
     def test_only_a_successful_full_nightly_at_same_sha_skips(self):
         def responses(step, conclusion='success', head='a' * 40):
             def get(path):
