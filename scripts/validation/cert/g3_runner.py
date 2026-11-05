@@ -57,20 +57,20 @@ def stop_client(client):
         client.wait(timeout=10)
 
 
-def run_cell(args, order):
+def run_cell(args, order, label="g3", extra_flags=(), concurrency=4):
     evidence = args.out / "evidence"
-    prefix = f"g3-{order}"
+    prefix = f"{label}-{order}"
     trace, data = evidence / f"{prefix}-trace.jsonl", evidence / f"{prefix}-requests.jsonl"
     proxyerr, stdout, stderr = (evidence / f"{prefix}-{suffix}" for suffix in ("proxy-error.txt", "stdout.txt", "stderr.txt"))
     container = (evidence / "container-id.txt").read_text(encoding="utf-8").strip()
     if not container or any(c not in "0123456789abcdef" for c in container):
         raise ValueError("invalid pinned serving container identity")
     command = [str(args.candidate), "--url", f"http://localhost:{args.proxy_port}/v1/chat/completions",
-               "--api-key", "dummy", "--scenario", prefix, "--num-requests", "16", "--concurrency", "4",
+               "--api-key", "dummy", "--scenario", prefix, "--num-requests", "16", "--concurrency", str(concurrency),
                "--prompts", str(args.prompt), "--mode", "chat", "--streaming", "--model", args.model,
                "--data-log", str(data), "--max-tokens", "4096", "--warmup-requests", "0", "--seed", "42",
                "--temperature", "0", "--request-timeout", "600", "--slo", "e2e=150",
-               "--extra-body-json", '{"chat_template_kwargs":{"enable_thinking":true}}']
+               "--extra-body-json", '{"chat_template_kwargs":{"enable_thinking":true}}', *extra_flags]
     proxycmd = [sys.executable, str(Path(__file__).with_name("trace_proxy.py")), "--listen-port", str(args.proxy_port),
                 "--upstream-port", str(args.port), "--out", str(trace), "--request-caps", "128,4096", "--retry-seconds", "240"]
     commands = {"benchmark": command, "proxy": proxycmd}

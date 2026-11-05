@@ -14,20 +14,27 @@ CERT_PROMPT="$(cert_manifest prompt_default)"
 CERT_OWNER="$(cert_manifest owner)"
 CERT_EVIDENCE_LINK="$(cert_manifest evidence_link)"
 CERT_PROXY_PORT="$(cert_manifest proxy_port)"
-for id in BC-GPU-005 BC-GPU-007; do
-  python3 "$CERT_DIR/failure_writer.py" --out "$CERT_OUT" --id "$id" --sha "$CERT_SHA" \
-    --start "$CERT_START_UTC" --reason 'case not implemented; no test executed'
-done
 cert_start_server
 cert_server_logs
+status=0
 cert_run python3 "$CERT_DIR/g2_terminal_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
   --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" --prompt "$CERT_PROMPT" \
   --sha "$CERT_SHA" --model "$CERT_MODEL" --revision "$CERT_REVISION" --image "$CERT_IMAGE" \
   --start-utc "$CERT_START_UTC" --owner "$CERT_OWNER" --evidence-link "$CERT_EVIDENCE_LINK" \
-  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || true
+  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || status=1
+cert_run python3 "$CERT_DIR/g2_mixed_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
+  --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" --prompt "$CERT_PROMPT" \
+  --sha "$CERT_SHA" --model "$CERT_MODEL" --revision "$CERT_REVISION" --image "$CERT_IMAGE" \
+  --start-utc "$CERT_START_UTC" --owner "$CERT_OWNER" --evidence-link "$CERT_EVIDENCE_LINK" \
+  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || status=1
 cert_run python3 "$CERT_DIR/g2_usage_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
   --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" --prompt "$CERT_PROMPT" \
   --sha "$CERT_SHA" --model "$CERT_MODEL" --revision "$CERT_REVISION" --image "$CERT_IMAGE" \
   --start-utc "$CERT_START_UTC" --owner "$CERT_OWNER" --evidence-link "$CERT_EVIDENCE_LINK" \
-  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || true
-exit 1
+  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || status=1
+cert_run python3 "$CERT_DIR/g2_fault_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
+  --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" --prompt "$CERT_PROMPT" \
+  --sha "$CERT_SHA" --model "$CERT_MODEL" --revision "$CERT_REVISION" --image "$CERT_IMAGE" \
+  --start-utc "$CERT_START_UTC" --owner "$CERT_OWNER" --evidence-link "$CERT_EVIDENCE_LINK" \
+  --port "$CERT_PORT" --proxy-port "$CERT_PROXY_PORT" || status=1
+exit "$status"

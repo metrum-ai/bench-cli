@@ -73,9 +73,10 @@ def observed_clock_gaps(text):
     groups = {}
     for event in (json.loads(line) for line in text.splitlines() if line.strip()):
         groups.setdefault(event["request"], []).append(event)
-    gaps = []
+    gaps, choices_ttft, any_ttft = [], [], []
     for events in groups.values():
         buffer = b""; first_choice = first_any = None
+        sends = [event["monotonic_ns"] for event in events if event.get("kind") == "send"]
         for event in events:
             if event.get("kind") != "chunk":
                 continue
@@ -95,11 +96,15 @@ def observed_clock_gaps(text):
                     delta = choice.get("delta") or {}
                     if first_any is None and any(delta.get(k) for k in ("reasoning_content", "reasoning", "content")):
                         first_any = event["monotonic_ns"]
-        if first_choice is not None and first_any is not None:
+        if first_choice is not None and first_any is not None and len(sends) == 1:
             gaps.append((first_choice - first_any) / 1e9)
+            choices_ttft.append((first_choice - sends[0]) / 1e9)
+            any_ttft.append((first_any - sends[0]) / 1e9)
     if not gaps:
         return {"paired_streams": 0}
-    return {"paired_streams": len(gaps), "first_choices_minus_first_any_median_s": statistics.median(gaps),
+    return {"paired_streams": len(gaps), "first_choices_p50_s": statistics.median(choices_ttft),
+            "first_any_p50_s": statistics.median(any_ttft),
+            "first_choices_minus_first_any_median_s": statistics.median(gaps),
             "first_choices_minus_first_any_p95_s": percentile95(gaps)}
 
 

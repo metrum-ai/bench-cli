@@ -89,7 +89,7 @@ def wait_for_upstream(port, recorder, request_id, retry_seconds):
         time.sleep(.25)
 
 
-def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False):
+def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False, delay_request=None, delay_seconds=0):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -167,6 +167,7 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                 selected = fault is not None and (fault_request is None or fault_request == request_id)
                 buffer = b""
                 transformed = 0
+                delayed = False
 
                 def forward(chunk):
                     recorder.event(request_id, "forwarded_chunk", chunk)
@@ -178,6 +179,10 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                     if not chunk:
                         break
                     recorder.event(request_id, "chunk", chunk)
+                    if delay_request == request_id and not delayed:
+                        recorder.event(request_id, "delay", seconds=delay_seconds)
+                        time.sleep(delay_seconds)
+                        delayed = True
                     if not selected:
                         forward(chunk)
                         continue
@@ -219,11 +224,17 @@ def main():
     parser.add_argument("--request-caps", help="cycle these comma-separated request max_tokens values")
     parser.add_argument("--retry-seconds", type=int, default=0, help="wait for real-server readiness before sending during restart tests")
     parser.add_argument("--record-request-identity", action="store_true", help="record normalized prompt hashes and comparison settings")
+    parser.add_argument("--delay-request", type=int, help="delay first real response chunk for this one-based request")
+    parser.add_argument("--delay-seconds", type=float, default=0)
     args = parser.parse_args()
     if not 1024 <= args.listen_port <= 65535 or not 1024 <= args.upstream_port <= 65535 or args.listen_port == args.upstream_port:
         parser.error("ports must be distinct and in 1024..65535")
     if args.fault_request is not None and (args.fault is None or args.fault_request < 1):
         parser.error("--fault-request requires a fault and a positive request index")
+    if args.delay_request is not None and (args.delay_request < 1 or not 0 < args.delay_seconds <= 30):
+        parser.error("--delay-request requires a positive index and --delay-seconds in (0,30]")
+    if args.delay_request is None and args.delay_seconds != 0:
+        parser.error("--delay-seconds requires --delay-request")
     if not 0 <= args.retry_seconds <= 300:
         parser.error("--retry-seconds must be in 0..300")
     caps = None
@@ -235,7 +246,7 @@ def main():
         except ValueError:
             parser.error("--request-caps must be comma-separated integers in 1..65536")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity, args.delay_request, args.delay_seconds))
     try:
         server.serve_forever()
     finally:

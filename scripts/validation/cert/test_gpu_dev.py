@@ -415,6 +415,37 @@ class ProxyTests(unittest.TestCase):
             self.assertEqual([b"{}"], posts)
             self.assertEqual("complete", events[-1]["kind"])
 
+    def test_proxy_delay_preserves_real_response_bytes(self):
+        body = b'data: {"choices":[]}\n\n'
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200); self.send_header('Content-Length', str(len(body))); self.end_headers()
+                self.wfile.write(body)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'trace.jsonl'
+            recorder = trace_proxy.Recorder(path)
+            upstream = http.server.ThreadingHTTPServer(('localhost', 0), Upstream)
+            proxy = http.server.ThreadingHTTPServer(('localhost', 0), trace_proxy.make_handler(upstream.server_port, recorder, delay_request=1, delay_seconds=.05))
+            threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (upstream, proxy)]
+            for thread in threads:
+                thread.start()
+            try:
+                client = http.client.HTTPConnection('localhost', proxy.server_port, timeout=5)
+                client.request('POST', '/v1/chat/completions', body=b'{}')
+                self.assertEqual(body, client.getresponse().read()); client.close()
+            finally:
+                proxy.shutdown(); upstream.shutdown()
+                for thread in threads:
+                    thread.join(timeout=5)
+                proxy.server_close(); upstream.server_close(); recorder.stream.close()
+            events = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(1, sum(e['kind'] == 'delay' for e in events))
+            self.assertEqual(body, b''.join(base64.b64decode(e['bytes_b64']) for e in events if e['kind'] == 'chunk'))
+            self.assertEqual(body, b''.join(base64.b64decode(e['bytes_b64']) for e in events if e['kind'] == 'forwarded_chunk'))
+
     def test_caps_modify_only_real_request_caps(self):
         observed = []
         class Upstream(http.server.BaseHTTPRequestHandler):

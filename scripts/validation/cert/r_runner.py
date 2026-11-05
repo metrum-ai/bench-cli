@@ -20,8 +20,9 @@ import result_writer
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None, field_reported=False):
-    if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None):
+def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None, field_reported=False,
+             fault_request=None, delay_request=None, delay_seconds=0, request_timeout=600):
+    if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None or fault_request is not None or delay_request is not None or request_timeout != 600):
         raise ValueError("field-reported case requires 64 requests, thinking ON, cap 512, and no other overrides")
     evidence = args.out / "evidence"
     trace = evidence / f"{label}-trace.jsonl"
@@ -32,7 +33,7 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
                "--concurrency", str(concurrency), "--prompts", str(args.prompt), "--mode", "chat", "--streaming",
                "--model", args.model, "--data-log", str(data),
                *( ["--max-tokens", str(cap)] if cap is not None else [] ),
-               *([] if field_reported else ["--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", "600"]),
+               *([] if field_reported else ["--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", str(request_timeout)]),
                "--debug-log", str(evidence / f"{label}-debug.log"), "--error-log", str(evidence / f"{label}-error.log"),
                "--extra-body-json", json.dumps({"chat_template_kwargs": {"enable_thinking": thinking}}), *extra]
     command_path = evidence / f"{label}-command.json"
@@ -43,6 +44,11 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
                          "--listen-port", str(args.proxy_port), "--upstream-port", str(args.port), "--out", str(trace)]
         if fault is not None:
             proxy_command += ["--fault", fault]
+        if fault_request is not None:
+            proxy_command += ["--fault-request", str(fault_request)]
+        if delay_request is not None:
+            proxy_command += ["--delay-request", str(delay_request), "--delay-seconds", str(delay_seconds)]
+        (evidence / f"{label}-proxy-command.json").write_text(json.dumps(proxy_command, indent=2) + "\n", encoding="utf-8")
         process = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, process)

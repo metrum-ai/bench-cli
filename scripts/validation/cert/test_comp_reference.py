@@ -48,6 +48,8 @@ class ReferenceChecksTests(unittest.TestCase):
         self.assertAlmostEqual(-.1, result['first_choices_minus_first_any_median_s'])
         gaps = check.observed_clock_gaps(trace)
         self.assertEqual(64, gaps['paired_streams'])
+        self.assertAlmostEqual(.1, gaps['first_choices_p50_s'])
+        self.assertAlmostEqual(.2, gaps['first_any_p50_s'])
         self.assertAlmostEqual(-.1, gaps['first_choices_minus_first_any_median_s'])
         self.assertIn('not release certification', result['criteria_status'])
         wrong = {**ref, 'ttfts': [.2] * 64}
