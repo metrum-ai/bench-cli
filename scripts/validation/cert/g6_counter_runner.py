@@ -5,6 +5,7 @@
 import argparse
 import datetime as dt
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -89,8 +90,12 @@ def main():
                 after = snapshot(args.port, after_path)
                 if exit_code != 0:
                     raise ValueError(f"candidate exited {exit_code}")
+                inventory = json.loads((evidence / "models.json").read_text(encoding="utf-8"))
+                label, label_kind = g6_checks.metrics_model_label(before, after, args.model, args.revision,
+                                                                   inventory, bool(os.environ.get("CERT_HF_HUB_CACHE")))
                 observed = g6_checks.evaluate(data_log.read_text(encoding="utf-8"),
-                                              trace.read_text(encoding="utf-8"), before, after, args.model)
+                                              trace.read_text(encoding="utf-8"), before, after, label)
+                observed["counter_model_label_kind"] = label_kind
                 passed = True
             finally:
                 process.terminate()
@@ -102,7 +107,7 @@ def main():
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         observed = {"error": str(exc)}
     gpu_line = (evidence / "gpu.csv").read_text(encoding="utf-8").strip().split(",", 1)
-    evidence_files = ["g6-command.json", "g6-proxy-stdout.txt", "g6-proxy-stderr.txt", "gpu.csv", "server.log", "binary-hashes.txt"]
+    evidence_files = ["g6-command.json", "g6-proxy-stdout.txt", "g6-proxy-stderr.txt", "gpu.csv", "server.log", "binary-hashes.txt", "models.json"]
     evidence_files += [name for name in ("g6-trace.jsonl", "g6-results.jsonl", "g6-metrics-before.txt",
                                          "g6-metrics-after.txt", "g6-stdout.txt", "g6-stderr.txt")
                        if (evidence / name).is_file()]

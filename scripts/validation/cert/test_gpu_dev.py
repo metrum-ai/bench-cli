@@ -7,11 +7,14 @@ import http.client
 import http.server
 import json
 import os
+import socket
 import sys
+import time
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import d_default_checks
 import g1_clock_checks
@@ -128,6 +131,21 @@ class G6EvaluatorTests(unittest.TestCase):
                           {"request": i, "kind": "chunk", "bytes_b64": base64.b64encode(frame[15:]).decode()},
                           {"request": i, "kind": "complete"}])
         return "\n".join(map(json.dumps, rows)), "\n".join(map(json.dumps, trace))
+
+    def test_counter_label_is_bound_to_served_model_and_revision(self):
+        model, revision = "Qwen/Qwen3-8B", "c" * 40
+        alias = f"/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/{revision}"
+        def metrics(label):
+            return f'vllm:prompt_tokens_total{{model_name="{label}"}} 1\nvllm:generation_tokens_total{{model_name="{label}"}} 2\n'
+        inventory = {"data": [{"id": model}]}
+        self.assertEqual((alias, "pinned-cache-snapshot"), g6_checks.metrics_model_label(metrics(alias), metrics(alias), model, revision, inventory, True))
+        self.assertEqual((model, "model-id"), g6_checks.metrics_model_label(metrics(model), metrics(model), model, revision, inventory, False))
+        for before, after, inventory_value, cache in ((metrics(alias), metrics(alias), inventory, False),
+                                                     (metrics(alias), metrics(model), inventory, True),
+                                                     (metrics(alias) + metrics(model), metrics(alias), inventory, True),
+                                                     (metrics(alias), metrics(alias), {"data": []}, True)):
+            with self.assertRaises(ValueError):
+                g6_checks.metrics_model_label(before, after, model, revision, inventory_value, cache)
 
     def test_real_usage_oracle_requires_full_coverage_and_consistent_rate(self):
         data, trace = self.fixture()
@@ -340,7 +358,95 @@ class ProxyTests(unittest.TestCase):
             self.assertTrue(any(e["kind"] == "transformation" and e["mode"] == "remove_usage" for e in events))
 
 
+    def test_restart_retry_forwards_only_upstream_response(self):
+        body = b'data: [DONE]\n\n'
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200); self.send_header("Content-Length", str(len(body)))
+                self.end_headers(); self.wfile.write(body)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "trace.jsonl"
+            recorder = trace_proxy.Recorder(path)
+            with socket.socket() as reserve:
+                reserve.bind(("localhost", 0))
+                port = reserve.getsockname()[1]
+            proxy = http.server.ThreadingHTTPServer(("localhost", 0), trace_proxy.make_handler(port, recorder, retry_seconds=3))
+            proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+            proxy_thread.start()
+            upstream = http.server.ThreadingHTTPServer(("localhost", port), Upstream, bind_and_activate=False)
+            upstream_thread = None
+            output = []
+            def request():
+                client = http.client.HTTPConnection("localhost", proxy.server_port, timeout=5)
+                try:
+                    client.request("POST", "/v1/chat/completions", body=b"{}")
+                    output.append(client.getresponse().read())
+                finally:
+                    client.close()
+            client_thread = threading.Thread(target=request, daemon=True)
+            client_thread.start()
+            try:
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and '"kind":"upstream_wait"' not in path.read_text():
+                    time.sleep(.02)
+                self.assertIn('"kind":"upstream_wait"', path.read_text())
+                upstream.server_bind(); upstream.server_activate()
+                upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True); upstream_thread.start()
+                client_thread.join(timeout=5)
+                self.assertFalse(client_thread.is_alive())
+                self.assertEqual([body], output)
+            finally:
+                proxy.shutdown(); proxy.server_close(); proxy_thread.join(timeout=5)
+                if upstream_thread is not None:
+                    upstream.shutdown(); upstream_thread.join(timeout=5)
+                upstream.server_close(); recorder.stream.close()
+            events = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertTrue(any(e["kind"] == "upstream_wait" for e in events))
+            self.assertEqual("complete", events[-1]["kind"])
+
+    def test_caps_modify_only_real_request_caps(self):
+        observed = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                observed.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}")
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "trace.jsonl"
+            recorder = trace_proxy.Recorder(path)
+            upstream = http.server.ThreadingHTTPServer(("localhost", 0), Upstream)
+            proxy = http.server.ThreadingHTTPServer(("localhost", 0), trace_proxy.make_handler(upstream.server_port, recorder, request_caps=[128, 4096]))
+            threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (upstream, proxy)]
+            for thread in threads:
+                thread.start()
+            try:
+                for _ in range(2):
+                    client = http.client.HTTPConnection("localhost", proxy.server_port, timeout=5)
+                    client.request("POST", "/v1/chat/completions", body=json.dumps({"max_tokens": 512, "model": "test"}))
+                    self.assertEqual(b"{}", client.getresponse().read()); client.close()
+            finally:
+                proxy.shutdown(); upstream.shutdown()
+                for thread in threads:
+                    thread.join(timeout=5)
+                proxy.server_close(); upstream.server_close(); recorder.stream.close()
+            self.assertEqual([128, 4096], [row["max_tokens"] for row in observed])
+            self.assertTrue(all(row["model"] == "test" for row in observed))
+            events = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual([128, 4096], [event["forwarded_cap"] for event in events if event["kind"] == "request_transform"])
+
+
 class ResultWriterTests(unittest.TestCase):
+    def test_lane_attempt_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, {"CERT_ATTEMPT": "2"}):
+            path = result_writer.write_record(Path(temp), {"ID": "BC-LIVE-001", "result": "FAIL", "candidate_sha": "a" * 40, "attempt": 1})
+            self.assertEqual(2, json.loads(path.read_text())["attempt"])
+            with mock.patch.dict(os.environ, {"CERT_ATTEMPT": "0"}), self.assertRaises(ValueError):
+                result_writer.write_record(Path(temp), {"ID": "BC-LIVE-002", "result": "FAIL", "candidate_sha": "a" * 40})
+
     def test_atomic_write_requires_evidence_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

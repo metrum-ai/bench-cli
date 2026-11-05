@@ -27,6 +27,9 @@ cert_parse() {
     echo 'required: --candidate --baseline --manifest --out' >&2; return 2;
   }
   [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] || { echo 'select exactly one CUDA_VISIBLE_DEVICES GPU' >&2; return 2; }
+  CERT_ATTEMPT="${CERT_ATTEMPT:-1}"
+  [[ "$CERT_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || { echo 'CERT_ATTEMPT must be a positive integer' >&2; return 2; }
+  export CERT_ATTEMPT
   CERT_CANDIDATE="$(realpath "$CERT_CANDIDATE")"
   CERT_BASELINE="$(realpath "$CERT_BASELINE")"
   CERT_MANIFEST="$(realpath "$CERT_MANIFEST")"
@@ -57,7 +60,7 @@ cert_manifest() {
 }
 
 cert_start_server() {
-  local -a flags=() gpu_args=(--gpus "device=${CUDA_VISIBLE_DEVICES}") token_args=()
+  local -a flags=() gpu_args=(--gpus "device=${CUDA_VISIBLE_DEVICES}") token_args=() cache_args=()
   local now_hash
   now_hash="$(sha256sum "$CERT_MANIFEST" | cut -d' ' -f1)"
   [[ "$now_hash" == "$CERT_MANIFEST_SHA" ]] || { echo 'manifest changed during run' >&2; return 1; }
@@ -65,10 +68,15 @@ cert_start_server() {
   cert_manifest server_flags > "$CERT_OUT/evidence/server-flags.nul"
   mapfile -d '' -t flags < "$CERT_OUT/evidence/server-flags.nul"
   [[ -z "${HF_TOKEN:-}" ]] || token_args=(--env HF_TOKEN)
+  # Mount only the hub cache, never the parent directory that may contain tokens.
+  if [[ -n "${CERT_HF_HUB_CACHE:-}" ]]; then
+    [[ -d "$CERT_HF_HUB_CACHE" ]] || { echo 'configured Hugging Face hub cache is missing' >&2; return 1; }
+    cache_args=(--mount "type=bind,src=$(realpath "$CERT_HF_HUB_CACHE"),dst=/root/.cache/huggingface/hub" --env HF_HUB_OFFLINE=1)
+  fi
   # Arm cleanup before launch so an interrupted docker client cannot orphan the container.
   CERT_STARTED=1
   docker run -d --name "$CERT_CONTAINER" "${gpu_args[@]}" --ipc=host \
-    --env CUDA_VISIBLE_DEVICES=0 "${token_args[@]}" -p "localhost:${CERT_PORT}:8000" \
+    --env CUDA_VISIBLE_DEVICES=0 "${token_args[@]}" "${cache_args[@]}" -p "127.0.0.1:${CERT_PORT}:8000" \
     "$CERT_IMAGE" --model "$CERT_MODEL" --revision "$CERT_REVISION" \
     --port 8000 "${flags[@]}" > "$CERT_OUT/evidence/container-id.txt"
   local attempt

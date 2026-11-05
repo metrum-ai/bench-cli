@@ -15,6 +15,13 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 def write_record(root, record):
     root = Path(root).resolve()
+    # The lane-level attempt number is supplied by the operator for an
+    # unchanged rerun; never overwrite an earlier attempt directory.
+    attempt = os.environ.get("CERT_ATTEMPT")
+    if attempt is not None:
+        if not re.fullmatch(r"[1-9][0-9]*", attempt):
+            raise ValueError("CERT_ATTEMPT must be a positive integer")
+        record = {**record, "attempt": int(attempt)}
     case = record.get("ID", "")
     if not CASE.fullmatch(case) or record.get("result") not in ("PASS", "FAIL"):
         raise ValueError("invalid case ID or result")

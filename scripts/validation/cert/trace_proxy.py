@@ -8,6 +8,7 @@ private raw evidence. This component does not synthesize server responses.
 """
 import argparse
 import base64
+import hashlib
 import http.client
 import json
 import threading
@@ -50,7 +51,7 @@ def take_frame(buffer):
     return buffer[:end], buffer[end:]
 
 
-def make_handler(upstream_port, recorder, fault=None, fault_request=None):
+def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -74,12 +75,39 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None):
             if len(body) != size:
                 self.send_error(400)
                 return
+            if request_caps:
+                try:
+                    data = json.loads(body)
+                    if not isinstance(data, dict) or not isinstance(data.get("max_tokens"), int) or isinstance(data["max_tokens"], bool):
+                        raise ValueError("request lacks an integer max_tokens")
+                    original_hash = hashlib.sha256(body).hexdigest()
+                    original_cap = data["max_tokens"]
+                    cap = request_caps[(request_id - 1) % len(request_caps)]
+                    data["max_tokens"] = cap
+                    body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                    recorder.event(request_id, "request_transform", original_cap=original_cap, forwarded_cap=cap,
+                                   original_sha256=original_hash, forwarded_sha256=hashlib.sha256(body).hexdigest())
+                except (ValueError, UnicodeError):
+                    recorder.event(request_id, "error", error="InvalidRequestForCapTransform")
+                    self.send_error(400)
+                    return
             upstream = http.client.HTTPConnection("localhost", upstream_port, timeout=300)
             try:
                 headers = {key: value for key, value in self.headers.items() if key.lower() not in HOP_HEADERS}
                 headers["Content-Length"] = str(len(body))
                 recorder.event(request_id, "send")
-                upstream.request("POST", self.path, body=body, headers=headers)
+                deadline = time.monotonic() + retry_seconds
+                while True:
+                    try:
+                        upstream.request("POST", self.path, body=body, headers=headers)
+                        break
+                    except ConnectionRefusedError:
+                        upstream.close()
+                        if time.monotonic() >= deadline:
+                            raise
+                        recorder.event(request_id, "upstream_wait")
+                        time.sleep(0.25)
+                        upstream = http.client.HTTPConnection("localhost", upstream_port, timeout=300)
                 response = upstream.getresponse()
                 recorder.event(request_id, "headers", status=response.status)
                 self.send_response(response.status)
@@ -141,13 +169,25 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--fault", choices=fault_transform.MODES)
     parser.add_argument("--fault-request", type=int, help="apply fault only to this one-based request index")
+    parser.add_argument("--request-caps", help="cycle these comma-separated request max_tokens values")
+    parser.add_argument("--retry-seconds", type=int, default=0, help="retry connection refusal before sending, for real restart tests")
     args = parser.parse_args()
     if not 1024 <= args.listen_port <= 65535 or not 1024 <= args.upstream_port <= 65535 or args.listen_port == args.upstream_port:
         parser.error("ports must be distinct and in 1024..65535")
     if args.fault_request is not None and (args.fault is None or args.fault_request < 1):
         parser.error("--fault-request requires a fault and a positive request index")
+    if not 0 <= args.retry_seconds <= 300:
+        parser.error("--retry-seconds must be in 0..300")
+    caps = None
+    if args.request_caps:
+        try:
+            caps = [int(value) for value in args.request_caps.split(",")]
+            if not caps or any(value < 1 or value > 65536 for value in caps):
+                raise ValueError("invalid cap")
+        except ValueError:
+            parser.error("--request-caps must be comma-separated integers in 1..65536")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds))
     try:
         server.serve_forever()
     finally:

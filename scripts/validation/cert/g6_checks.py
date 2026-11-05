@@ -54,6 +54,28 @@ def server_usage(trace_text):
     return result
 
 
+def metrics_model_label(before, after, model, revision, served_models, offline_cache):
+    if not isinstance(served_models, dict) or not any(row.get("id") == model for row in served_models.get("data", []) if isinstance(row, dict)):
+        raise ValueError("model identity missing from server model inventory")
+    labels_by_snapshot = []
+    for text in (before, after):
+        labels = set()
+        for line in text.splitlines():
+            match = metrics_oracle.SAMPLE.fullmatch(line.strip())
+            if match and match.group(1) in metrics_oracle.METRICS:
+                labels.add(dict(metrics_oracle.parse_labels(match.group(2))).get("model_name"))
+        labels_by_snapshot.append(labels)
+    if len(labels_by_snapshot[0]) != 1 or labels_by_snapshot[0] != labels_by_snapshot[1]:
+        raise ValueError("token counter model labels are ambiguous or changed")
+    label = next(iter(labels_by_snapshot[0]))
+    if label == model:
+        return label, "model-id"
+    expected = f"/root/.cache/huggingface/hub/models--{model.replace('/', '--')}/snapshots/{revision}"
+    if offline_cache and label == expected:
+        return label, "pinned-cache-snapshot"
+    raise ValueError("counter model label does not match the served model or pinned cached revision")
+
+
 def evaluate(data_text, trace_text, before, after, model):
     rows = [json.loads(line) for line in data_text.splitlines() if line.strip()]
     requests = [row for row in rows if "request.v" in row.get("schema_version", "") and row.get("phase", "measure") == "measure"]

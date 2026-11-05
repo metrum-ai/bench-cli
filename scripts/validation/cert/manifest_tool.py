@@ -79,7 +79,7 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         expected = prompt.get("sha256")
         if not isinstance(expected, str) or not SHA.fullmatch(expected) or sha256_file(prompt["path"]) != expected:
             raise ValueError("prompt set hash mismatch")
-    if lane in ("L1", "R", "D", "G1", "G2", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
+    if lane in ("L1", "R", "D", "G1", "G2", "G3", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
         raise ValueError("this lane requires the pinned Qwen3-8B model")
     if lane == "G6":
         strategic = config.get("strategic_binary")
@@ -105,7 +105,7 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         if noise is not None:
             if not isinstance(noise, dict) or not isinstance(noise.get("path"), str) or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]:
                 raise ValueError("G7 noise floor must be a pinned file")
-    if lane in ("R", "D", "G1", "G2", "G6"):
+    if lane in ("R", "D", "G1", "G2", "G3", "G6"):
         if "default" not in prompt_sets:
             raise ValueError(f"{lane} requires a default prompt set")
         proxy_port = config.get("proxy_port")

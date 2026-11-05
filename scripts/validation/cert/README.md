@@ -5,15 +5,15 @@
 
 Metrum AI maintains the case catalog in
 [`docs/RELEASE_CERTIFICATION_CATALOG.csv`](../../../docs/RELEASE_CERTIFICATION_CATALOG.csv).
-L1, R, G6 and G7 contain draft real-server runners for GPU-box debugging; they
-have not yet been run on a GPU and must not be treated as certified. D, G1 and
-G2 have partial runners; their unimplemented cases and the remaining GPU lanes
-remain fail-closed prototypes. CPU tools do not certify GPU tests.
+L1, R and G6 have been exercised during real GPU development, not release
+certification. G3 and G7 are draft real-server runners, not yet validated on a
+GPU. D, G1 and G2 are partial; unimplemented cases and remaining lanes stay
+fail-closed. CPU tools do not certify GPU tests.
 
 Run the offline tests and tracked-documentation archive dry-run:
 
 ```sh
-python3 -m unittest discover -s scripts/validation/cert -p 'test_cert.py' -v
+python3 -m unittest discover -s scripts/validation/cert -p 'test*.py' -v
 python3 scripts/validation/cert/check_package_docs.py --dry-run
 ```
 
@@ -22,7 +22,7 @@ name; it does not compile platform binaries or run a release container. The
 weekly job additionally checks the actual published archives against their tag.
 `check_live_docs.py` crawls only links within the published documentation tree.
 
-## GPU development runners (not yet validated)
+## GPU development runners (not release certification)
 
 Run only on an authorized, user-provided NVIDIA GPU host. Prepare Docker with
 NVIDIA support, the exact Qwen/Qwen3-8B model revision and a vLLM image pinned
@@ -36,7 +36,10 @@ LLM binary hashes; `lanes.L1`, `lanes.R` and `lanes.G6` each specify `image`,
 `prompt_sets.default`. L1 additionally pins `prompt_binary` beside the candidate
 LLM and a matching JSON `sut`; R and G6 specify a distinct `proxy_port` and
 `server_flags` containing `--reasoning-parser qwen3` and
-`--no-enable-prefix-caching`. G6 also pins `strategic_binary`. G7 instead
+`--no-enable-prefix-caching`. D, G1, G2 and G3 use the same reasoning pins;
+G3 actually kills and restarts only its own serving container, recording the
+interruption, request-cap changes and original response bytes. G6 also pins
+`strategic_binary`. G7 instead
 requires pinned `prompt_sets.W1` and `.W2`, a distinct proxy port, disabled
 prefix caching, and optionally a pre-recorded pinned `noise_floor` JSON. All
 pinned file entries are `{ "path": "...", "sha256": "..." }`.
