@@ -8,7 +8,7 @@ An untouched frame is passed through exactly, including its line endings.
 """
 import json
 
-MODES = ("remove_usage", "remove_reasoning_split", "remove_finish", "duplicate_finish", "nonlength_finish", "corrupt")
+MODES = ("remove_usage", "remove_reasoning_split", "remove_finish", "remove_finish_and_done", "remove_output", "duplicate_finish", "nonlength_finish", "corrupt")
 
 
 def transform(frame, mode):
@@ -17,8 +17,10 @@ def transform(frame, mode):
     newline = b"\r\n" if b"\r\n" in frame else b"\n"
     lines = frame.split(newline)
     data_lines = [line[5:].lstrip() for line in lines if line.startswith(b"data:")]
-    if not data_lines or b"\n".join(data_lines) == b"[DONE]":
+    if not data_lines:
         return frame, False
+    if b"\n".join(data_lines) == b"[DONE]":
+        return (b"", True) if mode == "remove_finish_and_done" else (frame, False)
     try:
         event = json.loads(b"\n".join(data_lines))
     except (ValueError, UnicodeError):
@@ -39,14 +41,22 @@ def transform(frame, mode):
         if isinstance(details, dict) and "reasoning_tokens" in details:
             del details["reasoning_tokens"]
             changed = True
-    elif mode in ("remove_finish", "duplicate_finish", "nonlength_finish"):
+    elif mode == "remove_output":
+        for choice in event.get("choices") or []:
+            delta = choice.get("delta") if isinstance(choice, dict) else None
+            if isinstance(delta, dict):
+                for key in ("content", "reasoning", "reasoning_content", "tool_calls", "function_call"):
+                    if key in delta:
+                        del delta[key]
+                        changed = True
+    elif mode in ("remove_finish", "remove_finish_and_done", "duplicate_finish", "nonlength_finish"):
         choices = event.get("choices")
         if not isinstance(choices, list):
             return frame, False
         for choice in choices:
             if not isinstance(choice, dict) or choice.get("finish_reason") is None:
                 continue
-            if mode == "remove_finish":
+            if mode in ("remove_finish", "remove_finish_and_done"):
                 choice["finish_reason"] = None
                 changed = True
             elif mode == "nonlength_finish" and choice["finish_reason"] == "length":
