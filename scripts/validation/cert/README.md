@@ -44,8 +44,11 @@ bash scripts/validation/cert/lane-l1.sh --manifest /path/frozen.json \
 `--plan` prints a lane's assigned cases without running a server. The D
 field-reported configuration and the reference comparison use separate
 invocations (`lane-d.sh` and `lane-comp002.sh`); the former records the
-unexecuted comparison as FAIL, not PASS. GPU 010, 011, 013 and the r3 runner for 015 have CPU-only development
-coverage, not GPU verification. G4 requires a pinned tokenizer.json and a
+unexecuted comparison as FAIL, not PASS. GPU 003, 010, 011, 013 and the r3 runner for 015 have CPU-only development
+coverage, not GPU verification. G1 pins a tool-use prompt set and requires the
+Hermes tool parser and automatic tool choice alongside the qwen3 reasoning
+parser. Its reordered/batched tests retain real source and forwarded frames;
+missing source populations fail. G4 requires a pinned tokenizer.json and a
 candidate built with tokenizer support for 010; 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct

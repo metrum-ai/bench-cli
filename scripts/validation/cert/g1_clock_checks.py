@@ -7,7 +7,7 @@ import json
 import math
 
 
-def stream_clocks(trace):
+def stream_clocks(trace, chunk_kind="chunk"):
     groups = {}
     for event in (json.loads(line) for line in trace.splitlines() if line.strip()):
         groups.setdefault(event["request"], []).append(event)
@@ -21,7 +21,7 @@ def stream_clocks(trace):
         first = visible = None
         reasoning_seen = False
         for event in events:
-            if event["kind"] != "chunk":
+            if event["kind"] != chunk_kind:
                 continue
             buf += base64.b64decode(event["bytes_b64"], validate=True).replace(b"\r\n", b"\n")
             while b"\n\n" in buf:
@@ -30,18 +30,29 @@ def stream_clocks(trace):
                 if not data or data == b"[DONE]":
                     continue
                 item = json.loads(data)
-                for choice in item.get("choices", []):
-                    if choice.get("index", 0) != 0:
+                for position, choice in enumerate(item.get("choices", [])):
+                    index = choice.get("index")
+                    numeric_index = isinstance(index, int) and not isinstance(index, bool) and index >= 0
+                    if (index != 0 if numeric_index else position != 0):
                         continue
                     delta = choice.get("delta") or {}
-                    reason = delta.get("reasoning_content") or delta.get("reasoning")
-                    answer = delta.get("content")
-                    tools = delta.get("tool_calls") or delta.get("function_call")
+                    reason = any(isinstance(delta.get(key), str) and delta[key] for key in ("reasoning_content", "reasoning"))
+                    content = delta.get("content") if isinstance(delta.get("content"), str) else choice.get("text")
+                    answer = isinstance(content, str) and bool(content)
+                    function = delta.get("function_call") or {}
+                    args = function.get("arguments") if isinstance(function, dict) else None
+                    tool_output = isinstance(args, str) and bool(args)
+                    calls = delta.get("tool_calls")
+                    if isinstance(calls, list):
+                        for call in calls:
+                            function = call.get("function") if isinstance(call, dict) else None
+                            args = function.get("arguments") if isinstance(function, dict) else None
+                            tool_output |= isinstance(args, str) and bool(args)
                     if reason:
                         reasoning_seen = True
-                    if first is None and (reason or answer or tools):
+                    if first is None and (reason or answer or tool_output):
                         first = event["monotonic_ns"]
-                    if visible is None and answer:
+                    if visible is None and (answer or tool_output):
                         visible = event["monotonic_ns"]
         if buf.strip():
             raise ValueError("unterminated SSE frame")
@@ -50,10 +61,10 @@ def stream_clocks(trace):
     return sorted(output, key=lambda row: row["send"])
 
 
-def evaluate(data, trace, exit_code):
+def evaluate(data, trace, exit_code, chunk_kind="chunk", require_reasoning=True):
     rows = [json.loads(line) for line in data.splitlines() if line.strip()]
     requests = sorted((row for row in rows if ".request." in row.get("schema_version", "") and row.get("phase") == "measure"), key=lambda row: row["seq"])
-    streams = stream_clocks(trace)
+    streams = stream_clocks(trace, chunk_kind)
     if exit_code != 0 or not requests or len(requests) != len(streams):
         raise ValueError("serial request and real stream coverage incomplete")
     reasoning = compared = visible_compared = 0
@@ -81,7 +92,7 @@ def evaluate(data, trace, exit_code):
         elif row.get("ttft_visible_answer_s") is not None:
             raise ValueError("CLI visible-answer clock without server answer")
         reasoning += int(stream["reasoning_seen"])
-    if not reasoning or not visible_compared:
-        raise ValueError("reasoning and visible-answer streams required")
+    if (require_reasoning and not reasoning) or not visible_compared:
+        raise ValueError("required reasoning and visible-answer streams missing")
     return {"requests": len(requests), "reasoning_streams": reasoning, "first_any_compared": compared,
             "visible_compared": visible_compared, "max_clock_error_s": 0.05}

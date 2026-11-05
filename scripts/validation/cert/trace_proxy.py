@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import fault_transform
+import sse_reorder
 
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length"}
 
@@ -113,7 +114,7 @@ def wait_for_upstream(port, recorder, request_id, retry_seconds):
         time.sleep(.25)
 
 
-def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False, delay_request=None, delay_seconds=0, record_image_identity=False):
+def make_handler(upstream_port, recorder, fault=None, fault_request=None, request_caps=None, retry_seconds=0, record_identity=False, delay_request=None, delay_seconds=0, record_image_identity=False, reorder=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -214,6 +215,11 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                         recorder.event(request_id, "delay", seconds=delay_seconds)
                         time.sleep(delay_seconds)
                         delayed = True
+                    if reorder:
+                        buffer += chunk
+                        if len(buffer) > 16 * 1024 * 1024:
+                            raise ValueError('source stream exceeds reorder limit')
+                        continue
                     if not selected:
                         forward(chunk)
                         continue
@@ -233,9 +239,21 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                             transformed += 1
                             recorder.event(request_id, "transformation", mode=fault)
                         forward(result)
-                if buffer:
+                if reorder:
+                    frames = []
+                    while buffer:
+                        frame, buffer = take_frame(buffer)
+                        if frame is None:
+                            raise ValueError('incomplete source stream')
+                        frames.append(frame)
+                    output = sse_reorder.transform(frames, reorder)
+                    recorder.event(request_id, 'transformation', mode=reorder, original_frames=len(frames), forwarded_frames=len(output))
+                    transformed += 1
+                    for frame in output:
+                        forward(frame)
+                elif buffer:
                     forward(buffer)
-                recorder.event(request_id, "complete", fault=fault if selected else None, transformations=transformed)
+                recorder.event(request_id, "complete", fault=reorder or (fault if selected else None), transformations=transformed)
             except (OSError, ValueError, http.client.HTTPException) as exc:
                 recorder.event(request_id, "error", error=type(exc).__name__)
                 self.close_connection = True
@@ -251,6 +269,7 @@ def main():
     parser.add_argument("--upstream-port", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--fault", choices=fault_transform.MODES)
+    parser.add_argument('--reorder', choices=sse_reorder.MODES, help='transform complete real SSE streams for clock-boundary tests')
     parser.add_argument("--fault-request", type=int, help="apply fault only to this one-based request index")
     parser.add_argument("--request-caps", help="cycle these comma-separated request max_tokens values")
     parser.add_argument("--retry-seconds", type=int, default=0, help="wait for real-server readiness before sending during restart tests")
@@ -261,6 +280,8 @@ def main():
     args = parser.parse_args()
     if not 1024 <= args.listen_port <= 65535 or not 1024 <= args.upstream_port <= 65535 or args.listen_port == args.upstream_port:
         parser.error("ports must be distinct and in 1024..65535")
+    if args.reorder and (args.fault or args.delay_request or args.request_caps or args.retry_seconds):
+        parser.error('--reorder cannot be combined with other proxy transformations')
     if args.fault_request is not None and (args.fault is None or args.fault_request < 1):
         parser.error("--fault-request requires a fault and a positive request index")
     if args.delay_request is not None and (args.delay_request < 1 or not 0 < args.delay_seconds <= 30):
@@ -278,7 +299,7 @@ def main():
         except ValueError:
             parser.error("--request-caps must be comma-separated integers in 1..65536")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity, args.delay_request, args.delay_seconds, args.record_image_identity))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request, caps, args.retry_seconds, args.record_request_identity, args.delay_request, args.delay_seconds, args.record_image_identity, args.reorder))
     try:
         server.serve_forever()
     finally:
