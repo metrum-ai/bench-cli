@@ -14,6 +14,24 @@ env:
   CERT_VERSION: '1.8.0'
 
 jobs:
+  verify:
+    name: Verify candidate package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Verify candidate and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
+          crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          test "$crate_version" = "$CERT_VERSION"
+          cargo publish --dry-run --locked --features otlp
+
   codeql:
     name: BC-CI-006 CodeQL candidate
     runs-on: ubuntu-latest
@@ -63,6 +81,7 @@ jobs:
 
   dummy-binaries:
     name: Build dummy ${{ matrix.target }}
+    needs: verify
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -140,8 +159,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
-          test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
+          test "$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)" = "$CERT_CANDIDATE"
           root="metrum-ai-bench-cli-v${CERT_VERSION}-${{ matrix.target }}"
           mkdir -p "$root/bin"
           mapfile -t bins < <(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; m=json.load(sys.stdin); [print(t["name"]) for t in m["packages"][0]["targets"] if "bin" in t.get("kind", [])]')
@@ -156,19 +174,24 @@ jobs:
           test -x "$root/bin/metrum-ai-bench-cli"
           test -x "$root/bin/metrum-ai-bench-cli-mock-server"
           cp LICENSE NOTICE THIRD_PARTY_LICENSES README.md TRADEMARKS.md "$root/"
-          git archive "$CERT_CANDIDATE" docs | tar -x -C "$root"
+          git -c safe.directory="$GITHUB_WORKSPACE" archive HEAD docs | tar -x -C "$root"
           cp -a examples "$root/"
           cp -a test-data "$root/"
           tar -czf "$root.tar.gz" "$root"
-          python3 scripts/validation/cert/check_package_docs.py --revision "$CERT_CANDIDATE" --archive "$root.tar.gz"
           python3 scripts/check_release_readme_links.py "$root.tar.gz"
           sha256sum "$root.tar.gz" > "$root.tar.gz.sha256"
+      - name: Generate CycloneDX SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json
+          mv metrum-ai-bench-cli.cdx.json "metrum-ai-bench-cli-${{ matrix.target }}.cdx.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pretag-release-${{ matrix.target }}
           path: |
             metrum-ai-bench-cli-v*-${{ matrix.target }}.tar.gz
             metrum-ai-bench-cli-v*-${{ matrix.target }}.tar.gz.sha256
+            metrum-ai-bench-cli-${{ matrix.target }}.cdx.json
           if-no-files-found: error
 
   smoke:
@@ -202,6 +225,9 @@ jobs:
           root="metrum-ai-bench-cli-v${CERT_VERSION}-${{ matrix.target }}"
           archive="$root.tar.gz"
           shasum -a 256 -c "$archive.sha256"
+          test -s "metrum-ai-bench-cli-${{ matrix.target }}.cdx.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["bomFormat"] == "CycloneDX"' "metrum-ai-bench-cli-${{ matrix.target }}.cdx.json"
+          python3 ../scripts/validation/cert/check_package_docs.py --revision "$CERT_CANDIDATE" --archive "$archive"
           tar -xzf "$archive"
           test -f "$root/TRADEMARKS.md"
           test -f "$root/docs/RESULTS_PUBLICATION_POLICY.md"
