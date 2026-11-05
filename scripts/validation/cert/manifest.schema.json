@@ -29,6 +29,7 @@
           "prompt_binary": {"$ref": "#/$defs/pinnedFile"},
           "strategic_binary": {"$ref": "#/$defs/pinnedFile"},
           "reference_order": {"$ref": "#/$defs/pinnedFile"},
+          "comparison_cap": {"type": "integer", "minimum": 1},
           "sut": {"$ref": "#/$defs/pinnedFile"},
           "server_flags": {"type": "array", "items": {"type": "string", "minLength": 1}},
           "prompt_sets": {

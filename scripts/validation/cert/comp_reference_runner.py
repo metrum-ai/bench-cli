@@ -81,16 +81,24 @@ def main():
     passed = False
     container = "cert-ref-" + secrets.token_hex(12)
     cleanup_failed = False
+    cap = 1024  # Frozen prospectively for the ShareGPT loader's 2048-token limit.
     try:
         config = json.loads(args.manifest.read_text(encoding="utf-8"))["lanes"]["D"]
         prompts = pinned_file(config["prompt_sets"]["reference"], "reference prompts")
+        sharegpt = pinned_file(config["prompt_sets"]["reference_sharegpt"], "reference ShareGPT dataset")
+        if config.get("comparison_cap") != cap:
+            raise ValueError("frozen reference comparison cap differs")
         order_path = pinned_file(config["reference_order"], "reference order")
         order = [json.loads(line) for line in order_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         dataset = [json.loads(line) for line in prompts.read_text(encoding="utf-8").splitlines() if line.strip()]
-        if len(dataset) != 64 or len(order) != 64:
+        sharegpt_rows = json.loads(sharegpt.read_text(encoding="utf-8"))
+        if len(dataset) != 64 or len(order) != 64 or not isinstance(sharegpt_rows, list) or len(sharegpt_rows) != 64:
             raise ValueError("64 frozen reference prompts and slots required")
         for index, (slot, item) in enumerate(zip(order, dataset)):
             prompt = item.get("prompt")
+            turns = sharegpt_rows[index].get("conversations", [])
+            if not isinstance(turns, list) or len(turns) != 2 or turns[0].get("value") != prompt or turns[1].get("value") != "placeholder":
+                raise ValueError("reference dataset does not reproduce the frozen prompt sequence")
             if not isinstance(prompt, str) or slot.get("seq") != index or slot.get("prompt_index") != index:
                 raise ValueError("reference order does not match frozen prompt IDs")
             digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
@@ -110,17 +118,17 @@ def main():
                      "--api-key", "dummy", "--scenario", "comp-reference-candidate", "--num-requests", "64",
                      "--concurrency", "1", "--prompts", str(prompts), "--prompt-sequence", str(order_path),
                      "--mode", "chat", "--streaming", "--model", args.model, "--data-log", str(candidate_data),
-                     "--max-tokens", "4096", "--temperature", "0", "--seed", "42", "--request-timeout", "21600",
+                     "--max-tokens", str(cap), "--temperature", "0", "--seed", "42", "--request-timeout", "21600",
                      "--extra-body-json", '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}']
         reference = ["docker", "run", "--name", container, "--pull", "never", "--network", "host",
                      "--env", "HF_HUB_OFFLINE=1", "--env", "TRANSFORMERS_OFFLINE=1", "--env", "OPENAI_API_KEY=dummy",
                      "--mount", f"type=bind,src={Path(cache).resolve()},dst=/root/.cache/huggingface/hub,readonly",
-                     "--mount", f"type=bind,src={prompts},dst=/inputs/prompts.jsonl,readonly",
+                     "--mount", f"type=bind,src={sharegpt},dst=/inputs/prompts.json,readonly",
                      "--mount", f"type=bind,src={evidence},dst=/evidence", "--entrypoint", "vllm", args.image,
                      "bench", "serve", "--backend", "openai-chat", "--base-url", f"http://localhost:{args.proxy_port}",
                      "--endpoint", "/v1/chat/completions", "--model", args.model, "--tokenizer", tokenizer,
-                     "--dataset-name", "custom", "--dataset-path", "/inputs/prompts.jsonl", "--skip-chat-template",
-                     "--disable-shuffle", "--no-oversample", "--custom-output-len", "4096", "--num-prompts", "64",
+                     "--dataset-name", "sharegpt", "--dataset-path", "/inputs/prompts.json",
+                     "--disable-shuffle", "--no-oversample", "--sharegpt-output-len", str(cap), "--num-prompts", "64",
                      "--max-concurrency", "1", "--temperature", "0", "--seed", "42", "--num-warmups", "0",
                      "--extra-body", '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}', "--disable-tqdm",
                      "--save-result", "--save-detailed", "--result-dir", "/evidence", "--result-filename", "comp-reference-result.json"]
@@ -150,7 +158,7 @@ def main():
             raise ValueError("candidate, reference or reference container cleanup failed")
         result["aligned_observations"] = checks.compare(candidate_data.read_text(encoding="utf-8"),
                                                         candidate_trace.read_text(encoding="utf-8"), native,
-                                                        reference_trace.read_text(encoding="utf-8"), order, args.model, 4096)
+                                                        reference_trace.read_text(encoding="utf-8"), order, args.model, cap)
         if not result["aligned_observations"]["reference_ttft_aligned"] or not result["aligned_observations"]["throughput_within_10_percent"]:
             raise ValueError("approved r3 TTFT alignment or throughput tolerance failed")
         passed = True
@@ -169,7 +177,7 @@ def main():
               "start_utc": args.start_utc, "end_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
               "owner": args.owner, "evidence_link": args.evidence_link, "gpu_class": gpu[0].strip(),
               "driver": gpu[1].strip() if len(gpu) > 1 else "", "observed_values": result,
-              "thresholds": {"requests_per_tool": 64, "answers_per_tool": 64, "max_tokens": 4096,
+              "thresholds": {"requests_per_tool": 64, "answers_per_tool": 64, "max_tokens": cap,
                              "throughput_tolerance_pct": 10, "first_choices_ttft_tolerance_pct": 20,
                              "first_choices_ttft_absolute_tolerance_s": .05, "approved_prospective_r3": True},
               "versions": {"server_and_reference_image": args.image, "model": args.model, "model_revision": args.revision,

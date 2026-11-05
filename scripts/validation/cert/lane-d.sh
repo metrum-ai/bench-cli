@@ -15,7 +15,7 @@ CERT_OWNER="$(cert_manifest owner)"
 CERT_EVIDENCE_LINK="$(cert_manifest evidence_link)"
 CERT_PROXY_PORT="$(cert_manifest proxy_port)"
 python3 "$CERT_DIR/failure_writer.py" --out "$CERT_OUT" --id BC-COMP-002 --sha "$CERT_SHA" \
-  --start "$CERT_START_UTC" --reason 'independent reference-tool comparison not implemented; no test executed'
+  --start "$CERT_START_UTC" --reason 'reference comparison runs separately via lane-comp002.sh; not executed in this lane invocation'
 cert_start_server
 cert_server_logs
 cert_run python3 "$CERT_DIR/d_default_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
