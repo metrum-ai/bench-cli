@@ -8,6 +8,8 @@ CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cert_parse() {
   CERT_LANE=$1; shift
   CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT='' CERT_AUX_OWNER=''
+  CERT_PERF_FINALIZE=0
+  [[ "$CERT_LANE" != P1 && "$CERT_LANE" != P2 ]] || CERT_PERF_FINALIZE=1
   while (($#)); do
     case "$1" in
       --plan) python3 "$CERT_DIR/lane.py" "$CERT_LANE" --plan; return 10 ;;
@@ -125,7 +127,9 @@ cert_on_exit() {
       fi
     fi
     if ((owned == 1)); then
-      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1
+      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1 || {
+        [[ "${CERT_PERF_FINALIZE:-0}" != 1 ]] || rc=1
+      }
       if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
         echo 'failed to stop owned server container' >&2
         rc=1
@@ -155,6 +159,16 @@ cert_on_exit() {
         echo 'performance container owner mismatch; refusing removal' >&2
       fi
     fi
+  fi
+  # Performance records are provisional until both exporter and nested server
+  # cleanup have been checked. A killed shell cannot publish a passing record.
+  if [[ "${CERT_PERF_FINALIZE:-0}" == 1 ]]; then
+    local -a finalize_args=(--out "$CERT_OUT")
+    if ((rc == 0)); then
+      printf '{"cleanup":"verified"}\n' > "$CERT_OUT/evidence/cleanup-verified.json" || rc=1
+    fi
+    ((rc == 0)) || finalize_args+=(--fail)
+    python3 "$CERT_DIR/finalize_perf.py" "${finalize_args[@]}" "${CERT_CASES[@]}" || rc=1
   fi
   local case_id
   for case_id in "${CERT_CASES[@]:-}"; do

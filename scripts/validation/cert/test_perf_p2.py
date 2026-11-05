@@ -25,15 +25,16 @@ class PerfP2Tests(unittest.TestCase):
             hardware = unittest.mock.Mock(stdout='NVIDIA RTX PRO 6000 Blackwell Server Edition, GPU-fixture, 98304\n')
             with patch('sys.argv', argv), patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0', 'CERT_ATTEMPT': '1'}), \
                  patch.object(p2.manifest_tool, 'load_manifest', return_value=({'candidate_sha': 'a' * 40}, config)), \
-                 patch.object(p2.subprocess, 'run', return_value=hardware), patch.object(p2.l1_runner, 'call', return_value=1), \
-                 patch.object(p2.result_writer, 'write_record') as result:
+                 patch.object(p2.subprocess, 'run', return_value=hardware), patch.object(p2.l1_runner, 'call', return_value=1):
                 self.assertEqual(p2.main(), 1)
-                self.assertEqual(result.call_args.args[1]['result'], 'FAIL')
-                self.assertIn('cleanup', result.call_args.args[1]['observed_values']['error'])
+                record = json.loads((evidence / 'provisional-BC-PERF-002.json').read_text())
+                self.assertEqual(record['result'], 'FAIL')
+                self.assertIn('cleanup', record['observed_values']['error'])
                 config['noise_floor'] = {'path': str(manifest), 'sha256': '0' * 64,
                                          'recorded_utc': '2026-01-02T00:00:00Z', 'evidence_link': 'fixture'}
                 self.assertEqual(p2.main(), 1)
-                self.assertIn('prior timestamp', result.call_args.args[1]['observed_values']['error'])
+                record = json.loads((evidence / 'provisional-BC-PERF-002.json').read_text())
+                self.assertIn('prior timestamp', record['observed_values']['error'])
 
 
 if __name__ == '__main__': unittest.main()

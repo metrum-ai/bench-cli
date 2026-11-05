@@ -161,6 +161,9 @@ run_one() { # binary workload concurrency pass tool-label out-dir duration
   if [[ -n "${TELEMETRY_YAML:-}" ]]; then
     args+=(--ndjson "$out/run.ndjson" --telemetry "$TELEMETRY_YAML" --require-telemetry)
   fi
+  if [[ "${CERT_PERF_SEQUENCE:-0}" == 1 && "$out" != */warmup ]]; then
+    args+=(--prompt-sequence-log "$out/prompt-sequence.jsonl")
+  fi
   echo "{\"tool\":\"$label\",\"workload\":\"$w\",\"concurrency\":$c,\"pass\":\"$pass\",\"start\":$(date +%s.%N)}" > "$out/point.json" || return 1
   if ! python3 - "$out/command.json" "$bin" "$DATASETS_DIR/$w.jsonl" "${args[@]}" <<'PY'
 import hashlib, json, pathlib, sys

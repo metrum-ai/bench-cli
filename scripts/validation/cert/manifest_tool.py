@@ -115,6 +115,19 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         if noise is not None and (not isinstance(noise, dict) or not isinstance(noise.get("path"), str)
                                   or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]):
             raise ValueError("27B noise floor must be a pinned file")
+        if lane == "P1":
+            for key in ("all_smi_binary", "all_smi_protoc_crate", "telemetry_config"):
+                item = config.get(key)
+                if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                        or not SHA.fullmatch(str(item.get("sha256", ""))) or sha256_file(item["path"]) != item["sha256"]):
+                    raise ValueError(f"P1 requires pinned {key}")
+            if not os.access(config["all_smi_binary"]["path"], os.X_OK):
+                raise ValueError("all-smi binary must be executable")
+            if not isinstance(config.get("all_smi_checkout"), str) or not Path(config["all_smi_checkout"]).is_dir():
+                raise ValueError("P1 requires the pinned all-smi source checkout")
+            preset = Path(__file__).resolve().parents[3] / "docs/telemetry/examples/all-smi.yaml"
+            if Path(config["telemetry_config"]["path"]).resolve() != preset.resolve():
+                raise ValueError("P1 telemetry config must be the tracked loopback all-smi preset")
     if lane == "G6":
         strategic = config.get("strategic_binary")
         if not isinstance(strategic, dict) or not isinstance(strategic.get("path"), str) or not SHA.fullmatch(str(strategic.get("sha256", ""))):
@@ -237,7 +250,7 @@ def main():
     parser.add_argument("--lane", required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--baseline", type=Path, required=True)
-    parser.add_argument("--field", choices=["image", "model", "revision", "port", "proxy_port", "candidate_sha", "server_flags", "prompt_default", "prompt_W1", "prompt_W2", "sut_path", "strategic_path", "owner", "evidence_link"], required=True)
+    parser.add_argument("--field", choices=["image", "model", "revision", "port", "proxy_port", "candidate_sha", "server_flags", "prompt_default", "prompt_W1", "prompt_W2", "sut_path", "strategic_path", "all_smi_binary_path", "telemetry_config_path", "owner", "evidence_link"], required=True)
     args = parser.parse_args()
     try:
         data, config = load_manifest(args.manifest, args.lane, args.candidate, args.baseline,
@@ -252,6 +265,10 @@ def main():
             value = config["sut"]["path"]
         elif args.field == "strategic_path":
             value = config["strategic_binary"]["path"]
+        elif args.field == "all_smi_binary_path":
+            value = config["all_smi_binary"]["path"]
+        elif args.field == "telemetry_config_path":
+            value = config["telemetry_config"]["path"]
         else:
             value = config.get(args.field, [])
         if isinstance(value, list):

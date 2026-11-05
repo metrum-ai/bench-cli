@@ -66,13 +66,45 @@ until reviewed and redacted.
 
 For v1.8.0 P1/P2, the approved previous release is the SHA256-verified v1.7.2
 release asset, not the historical v1.5.4 study-build entry in the unchanged
-perf spec. The prospective P2 runner requires the release archive pin in
+perf spec. The prospective P1/P2 runners require the release archive pin in
 `baseline_asset`, the exact spec model/server/input pins, and a prepopulated
-`CERT_HF_HUB_CACHE`. A wider pre-recorded noise floor must be pinned with
-`recorded_utc` and `evidence_link` and independently reviewed; the default is
-5%. Candidate native first-any TTFT and throughput are informational alongside
-legacy-cohort gate values. P1, telemetry and the two-model comparability barrier
-remain unfinished; none of these CPU checks establishes a GPU result.
+`CERT_HF_HUB_CACHE`. P1 additionally requires the spec-pinned all-smi checkout,
+a binary reproduced offline from its committed tree, an architecture-specific
+locked protoc crate and the pinned telemetry preset. A wider pre-recorded noise
+floor must be pinned with `recorded_utc` and `evidence_link` and independently
+reviewed; the default is 5%. Measured prompt sequences and independent legacy
+cohorts are checked for all six points per model. Candidate native first-any
+TTFT and throughput are informational alongside legacy-cohort gate values.
+The lanes publish performance results only after owned-container cleanup is
+verified. These runners are prospective and have not been GPU-verified.
+
+After both lanes finish, the separate comparability barrier rechecks their
+retained evidence under the same frozen manifest and candidate. Its output and
+the underlying bundles are private:
+
+```sh
+python3 scripts/validation/cert/perf_comp001_barrier.py \
+  --p1-out P1_OUTPUT --p2-out P2_OUTPUT --manifest MANIFEST.json \
+  --out NEW_OUTPUT --owner OWNER --evidence-link PRIVATE_EVIDENCE_LINK
+```
+
+This requires twelve passing legacy points and retains the candidate's native
+headlines separately. CPU fixtures do not establish GPU results.
+
+To prepare the P1 exporter offline on the target architecture, first populate the
+locked Cargo cache and obtain the architecture-specific `protoc-bin-vendored`
+3.2.0 crate matching the source Cargo.lock. Then run:
+
+```sh
+python3 scripts/validation/cert/perf_all_smi_prepare.py \
+  --checkout PINNED_ALL_SMI_CHECKOUT --protoc-crate PINNED_PROTOC.crate \
+  --output NEW_ALL_SMI_BINARY --evidence NEW_BUILD_EVIDENCE_DIR
+```
+
+It builds twice from the committed tree with normalized paths and fails if the
+bytes differ. Pin the reported binary SHA only after success and retain the
+build evidence; the P1 lane independently rebuilds it again. The build and
+CPU fixture results are not NVIDIA or release-certification evidence.
 
 For release evidence, generate and freeze the selection described in
 [the release policy](../../../docs/RELEASE_CERTIFICATION.md). The validator

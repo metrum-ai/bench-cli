@@ -14,8 +14,8 @@ import sys
 import l1_runner
 import manifest_tool
 import perf_evidence_checks
+import perf_legacy_oracle
 import perf_baseline
-import result_writer
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -63,7 +63,8 @@ def main():
         target = evidence / 'perf'
         env = os.environ.copy()
         env.pop('TELEMETRY_YAML', None)
-        env.update({'DATASETS_DIR': str(dataset), 'VLLM_IMAGE': args.image, 'PERF_OFFLINE': '1', 'WARMUP': '30', 'DURATION': '180'})
+        env.update({'DATASETS_DIR': str(dataset), 'VLLM_IMAGE': args.image, 'PERF_OFFLINE': '1', 'WARMUP': '30',
+                    'DURATION': '180', 'CERT_PERF_SEQUENCE': '1'})
         command = ['bash', str(ROOT / 'scripts/validation/perf/runner.sh'), 'q38-27b-nvfp4',
                    str(args.baseline), str(args.candidate), str(target), '1']
         code = l1_runner.call(command, evidence / 'p2-runner-stdout.txt', evidence / 'p2-runner-stderr.txt', 14400, env=env)
@@ -75,7 +76,9 @@ def main():
         if 'FlashInferCutlassNvFp4LinearKernel' not in (target / 'vllm.log').read_text(encoding='utf-8', errors='replace'):
             raise ValueError('expected NVFP4 kernel missing from server startup log')
         observed['provenance'] = perf_evidence_checks.verify(target, args.model, versions['candidate_binary_sha256'],
-                                  versions['baseline_binary_sha256'], {w: config['prompt_sets'][w]['sha256'] for w in ('W1', 'W2')})
+                                  versions['baseline_binary_sha256'], {w: config['prompt_sets'][w]['sha256'] for w in ('W1', 'W2')},
+                                  prompt_paths={w: config['prompt_sets'][w]['path'] for w in ('W1', 'W2')})
+        observed['prompt_sequences'] = perf_evidence_checks.verify_sequences(target)
         comparison = target / 'comparison.json'
         compare_command = [sys.executable, str(ROOT / 'scripts/validation/perf/compare.py'),
                  '--baseline-root', str(target / 'bench-rel'), '--candidate-root', str(target / 'bench-src'),
@@ -94,7 +97,9 @@ def main():
         perf_baseline.verify(config['baseline_asset']['path'], args.baseline)
         perf_evidence_checks.verify_candidate_headlines(value['points'])
         observed['comparison'] = value
-        passed = code == 0 and value.get('verdict') == 'PASS'
+        floor_data = json.loads(noise_copy.read_text(encoding='utf-8')) if noise_copy else {}
+        observed['independent_legacy'] = perf_legacy_oracle.verify_grid(target, value, 'q38-27b-nvfp4', floor_data)
+        passed = code == 0 and value.get('verdict') == 'PASS' and observed['independent_legacy']['result'] == 'PASS'
         if not passed:
             observed['error'] = f'legacy-cohort performance gates did not pass (exit {code})'
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
@@ -110,7 +115,7 @@ def main():
               'observed_values': observed, 'thresholds': {'points': 6, 'warmup_seconds': 30,
                   'measurement_seconds': 180, 'legacy_throughput_and_tpot_tolerance_pct': '5 or pre-recorded wider point floor',
                   'expected_kernel': 'FlashInferCutlassNvFp4LinearKernel'}, 'evidence_paths': files}
-    result_writer.write_record(args.out, record)
+    (evidence / 'provisional-BC-PERF-002.json').write_text(json.dumps(record, indent=2, allow_nan=False) + '\n', encoding='utf-8')
     return 0 if passed else 1
 
 
