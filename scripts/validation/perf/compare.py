@@ -23,7 +23,7 @@
 # gate tolerance is max(--tolerance-pct, its noise floor) per metric. A point
 # directory missing from either root is a FAIL verdict ("missing"), because a
 # run that did not produce the full grid is not a valid PASS.
-import argparse, csv, json, pathlib, statistics, sys
+import argparse, csv, datetime, json, math, pathlib, statistics, sys
 
 
 def pct(a, p):
@@ -36,13 +36,33 @@ def pct(a, p):
 
 
 def iso(s):
-    import datetime
-    s = s.strip()
-    if "." in s:
-        head, tail = s.split(".", 1)
-        frac = "".join(c for c in tail if c.isdigit())[:6]
-        s = head + "." + frac
-    return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    value = datetime.datetime.fromisoformat(s.strip().replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        raise ValueError('request timestamp lacks timezone')
+    return value.timestamp()
+
+
+def legacy_window(rows, successes):
+    if not rows or not successes:
+        raise ValueError('legacy comparison needs measured and successful requests')
+    offsets = [row.get('send_offset_s') for row in rows]
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in offsets):
+        starts = offsets
+    elif all(v is None for v in offsets):
+        starts = [iso(row['started_at']) for row in rows]
+    else:
+        raise ValueError('mixed or invalid send-clock sources')
+    sends = {id(row): start for row, start in zip(rows, starts)}
+    ends = []
+    for row in successes:
+        latency = row.get('latency_s')
+        if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(latency) or latency <= 0:
+            raise ValueError('invalid successful request latency')
+        ends.append(sends[id(row)] + latency)
+    window = max(ends) - min(starts)
+    if not math.isfinite(window) or window <= 0:
+        raise ValueError('invalid legacy success window')
+    return window
 
 
 def select_run(records):
@@ -69,19 +89,24 @@ def select_run(records):
 def extract_point(folder):
     folder = pathlib.Path(folder)
     meta = json.loads((folder / "point.json").read_text())
-    rows = [json.loads(l) for l in (folder / "requests.jsonl").open()]
+    with (folder / 'requests.jsonl').open(encoding='utf-8') as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
     rows, summary = select_run(rows)
+    if summary is None or not (folder / 'DONE').is_file():
+        raise ValueError('complete summary and successful process marker required')
     rows = [x for x in rows if x.get("phase") == "measure"]
-    ok = [x for x in rows if not x.get("error")]
-    dur = None
-    if summary and summary.get("window_seconds") is not None:
-        dur = summary["window_seconds"]
-    if dur is None and ok:
-        dur = max(iso(x["completed_at"]) for x in ok) - min(iso(x["started_at"]) for x in rows)
+    ok = [x for x in rows if x.get('error') is None and x.get('outcome') != 'reasoning_truncated']
+    if any(row.get('first_reasoning_s') is not None for row in ok):
+        raise ValueError('reasoning observed in the thinking-off legacy comparison')
+    dur = legacy_window(rows, ok)
     r = {"workload": meta["workload"], "concurrency": meta["concurrency"],
          "sample_count": len(ok), "tool_wall_time_s": dur,
          "error_rate": (len(rows) - len(ok)) / max(len(rows), 1),
-         "requests_s": len(ok) / dur if dur else None}
+         "requests_s": len(ok) / dur if dur else None,
+         "window_definition": "first measured send to last legacy-success terminal",
+         "headline": ({key: summary.get(key) for key in ('attempted', 'successes', 'errors', 'ttft_coverage',
+                       'window_seconds', 'completion_tokens_per_second', 'completion_tokens_total', 'prompt_tokens_total',
+                       'usage_missing_count', 'ttft_first_any_s', 'legacy_success_completion_tokens_per_second')} if summary else None)}
     for metric, ps in [("ttft", [50, 90]), ("tpot", [50, 90])]:
         vals = []
         for x in ok:
@@ -124,7 +149,8 @@ def load_noise_floor(path, model):
     """{model: {W: {cN: {metric: pct}}}} -> {(W, c): {metric: pct}} for `model`."""
     if not path:
         return {}
-    data = json.load(open(path))
+    with open(path, encoding='utf-8') as stream:
+        data = json.load(stream)
     out = {}
     for w, cc_map in (data.get(model) or {}).items():
         for c_key, metrics in (cc_map or {}).items():
@@ -132,7 +158,10 @@ def load_noise_floor(path, model):
                 c = int(str(c_key).lstrip("c"))
             except ValueError:
                 raise ValueError(f"noise floor: bad concurrency key {c_key!r} under {model}.{w}")
-            out[(w, c)] = {k: float(v) for k, v in (metrics or {}).items()}
+            parsed = {k: float(v) for k, v in (metrics or {}).items()}
+            if any(not math.isfinite(v) or v < 0 for v in parsed.values()):
+                raise ValueError('noise floors must be finite and non-negative')
+            out[(w, c)] = parsed
     return out
 
 
@@ -180,6 +209,8 @@ def main():
                 continue
             b = extract_point(b_dir)
             k = extract_point(k_dir)
+            if any(point['workload'] != w or point['concurrency'] != c for point in (b, k)):
+                raise ValueError('point metadata does not match the frozen workload and concurrency')
             row = {"workload": w, "concurrency": c, "baseline": b, "candidate": k, "checks": {}}
             for m in ("system_output_tok_s", "tpot_p50_ms"):
                 d = rel_delta(k.get(m), b.get(m))
@@ -215,6 +246,18 @@ def main():
             f"{f(k.get('system_output_tok_s'))} | {f(ch['system_output_tok_s']['delta_pct'])} | "
             f"{f(b.get('tpot_p50_ms'))} | {f(k.get('tpot_p50_ms'))} | {f(ch['tpot_p50_ms']['delta_pct'])} | "
             f"{f(b.get('ttft_p50_ms'))} / {f(k.get('ttft_p50_ms'))} | {'PASS' if ok else 'FAIL'} |")
+    lines += ["", "Candidate native headline (informational; not the legacy-cohort gate):", "",
+              "| point | headline window s | headline completion tok/s | first-any TTFT p50 ms |",
+              "|---|---:|---:|---:|"]
+    for row in rows:
+        if not row.get('candidate'):
+            continue
+        headline = row['candidate'].get('headline') or {}
+        first_any = headline.get('ttft_first_any_s') or {}
+        first_any_p50 = first_any.get('p50') if isinstance(first_any, dict) else None
+        lines.append(f"| {row['workload']} c{row['concurrency']} | {f(headline.get('window_seconds'))} | "
+                     f"{f(headline.get('completion_tokens_per_second'))} | "
+                     f"{f(first_any_p50 * 1000 if first_any_p50 is not None else None)} |")
     gate_note = f"gate: output tok/s and TPOT p50 within {a.tolerance_pct}%"
     if noise:
         floors = sorted({tol for (_, _), m in noise.items() for tol in m.values()})

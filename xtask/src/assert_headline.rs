@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{bail, Context, Result};
-use flate2::read::ZlibDecoder;
 use serde_json::Value;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub fn run(modality: &str, log: &Path, artifact_dir: Option<&Path>) -> Result<()> {
@@ -178,10 +176,11 @@ pub fn evaluate(
             let mut files = Vec::new();
             collect_images(dir, &mut files)?;
             let good: Vec<_> = files.iter().filter(|p| decodes(p)).collect();
-            if good.is_empty() {
+            if files.is_empty() || good.len() != files.len() {
                 failures.push(format!(
-                    "no decodable PNG/JPEG artifacts in {} ({} image files)",
+                    "not all PNG/JPEG artifacts decode in {} ({}/{} decoded)",
                     dir.display(),
+                    good.len(),
                     files.len()
                 ));
             }
@@ -230,39 +229,11 @@ fn collect_images(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 }
 
 fn decodes(path: &Path) -> bool {
-    let Ok(b) = std::fs::read(path) else {
-        return false;
-    };
-    if b.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let mut pos = 8usize;
-        let mut idat = Vec::new();
-        let mut w = 0u64;
-        while pos + 8 <= b.len() {
-            let size = u32::from_be_bytes([b[pos], b[pos + 1], b[pos + 2], b[pos + 3]]) as usize;
-            let kind = &b[pos + 4..pos + 8];
-            if pos + 8 + size > b.len() {
-                break;
-            }
-            let data = &b[pos + 8..pos + 8 + size];
-            if kind == b"IHDR" && data.len() >= 8 {
-                let width = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as u64;
-                let height = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as u64;
-                w = width.saturating_mul(height);
-            } else if kind == b"IDAT" {
-                idat.extend_from_slice(data);
-            }
-            pos += 12 + size;
-        }
-        let mut dec = ZlibDecoder::new(&idat[..]);
-        let mut buf = Vec::new();
-        return w > 0 && dec.read_to_end(&mut buf).is_ok() && !buf.is_empty();
-    }
-    // JPEG: SOI .. EOI after stripping trailing NULs
-    let mut end = b.len();
-    while end > 0 && b[end - 1] == 0 {
-        end -= 1;
-    }
-    b.starts_with(b"\xff\xd8") && end >= 2 && b[end - 2] == 0xff && b[end - 1] == 0xd9
+    image::ImageReader::open(path)
+        .and_then(|reader| reader.with_guessed_format())
+        .ok()
+        .and_then(|reader| reader.decode().ok())
+        .is_some_and(|image| image.width() > 0 && image.height() > 0)
 }
 
 #[cfg(test)]
@@ -390,6 +361,8 @@ mod tests {
             std::fs::create_dir_all(&art_good).unwrap();
             std::fs::copy(&repo_png, art_good.join("000001-0.png")).unwrap();
             assert!(evaluate("imagegen", &img_ok, Some(&art_good), 1.0).is_ok());
+            std::fs::write(art_good.join("broken.jpg"), [0xff, 0xd8, 0xff, 0xd9]).unwrap();
+            assert!(evaluate("imagegen", &img_ok, Some(&art_good), 1.0).is_err());
         }
 
         let mut truncated = std::fs::File::create(work.join("truncated.jsonl")).unwrap();

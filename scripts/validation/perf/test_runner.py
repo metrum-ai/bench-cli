@@ -24,9 +24,13 @@ class RunnerCacheTests(unittest.TestCase):
         docker = self.bin / "docker"
         docker.write_text(
             '#!/bin/sh\n'
-            'test -d "$HOME/.cache/huggingface" && '
-            'test -w "$HOME/.cache" || exit 78\n'
+            'test -d "$HOME/.cache/huggingface/hub" && test -w "$HOME/.cache" || exit 78\n'
             'echo "$1" >> "$FAKE_DOCKER_CALLS"\n'
+            'case "$1" in\n'
+            'run) for arg in "$@"; do case "$arg" in metrum.cert.owner=*) echo "${arg#*=}" > "$FAKE_OWNER";; esac; done; touch "$FAKE_STATE"; echo fixture;;\n'
+            'ps) test ! -f "$FAKE_STATE" || echo fixture;;\n'
+            'inspect) if [ -n "$FAKE_WRONG_OWNER" ]; then echo wrong; else IFS= read -r owner < "$FAKE_OWNER"; echo "$owner"; fi;;\n'
+            'rm) rm -f "$FAKE_STATE";; logs) :;; *) exit 2;; esac\n'
             'exit 0\n'
         )
         docker.chmod(0o755)
@@ -35,8 +39,9 @@ class RunnerCacheTests(unittest.TestCase):
         curl.chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.home),
                         PATH=f"{self.bin}:{os.environ['PATH']}",
-                        DATASETS_DIR=str(self.root / "datasets"),
-                        FAKE_DOCKER_CALLS=str(self.calls))
+                        DATASETS_DIR=str(self.root / "datasets"), CUDA_VISIBLE_DEVICES="0",
+                        FAKE_DOCKER_CALLS=str(self.calls), FAKE_OWNER=str(self.root / 'owner'),
+                        FAKE_STATE=str(self.root / 'state'))
 
     def run_runner(self, *args):
         return subprocess.run(
@@ -48,8 +53,33 @@ class RunnerCacheTests(unittest.TestCase):
     def test_fresh_home_cache_exists_before_docker(self):
         result = self.run_runner()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.home / ".cache/huggingface").is_dir())
-        self.assertEqual(self.calls.read_text().splitlines(), ["rm", "run", "logs"])
+        self.assertTrue((self.home / ".cache/huggingface/hub").is_dir())
+        self.assertEqual(self.calls.read_text().splitlines(), ["run", "logs", "ps", "inspect", "logs", "rm", "ps"])
+        self.assertFalse((self.root / 'state').exists())
+
+    def test_capture_commands_and_hashes_with_cpu_fixture(self):
+        datasets = self.root / 'datasets'; datasets.mkdir()
+        (datasets / 'W1.jsonl').write_text('fixture one\\n')
+        (datasets / 'W2.jsonl').write_text('fixture two\\n')
+        self.env.update({'WARMUP': '0', 'DURATION': '0'})
+        result = subprocess.run(['bash', str(RUNNER), 'q38-27b', '/bin/true', '/bin/true',
+                                 str(self.root / 'output'), '1'], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        import json
+        point = self.root / 'output/bench-src/1/W1/c1'
+        command = json.loads((point / 'command.json').read_text())
+        self.assertEqual(command['binary_sha256'], command['binary_sha256_end'])
+        self.assertEqual(command['prompt_sha256'], command['prompt_sha256_end'])
+        self.assertTrue((point / 'DONE').is_file())
+        # This only exercises collection plumbing: there are no request logs or GPU results.
+        self.assertFalse((point / 'requests.jsonl').exists())
+
+    def test_mismatched_owner_is_never_removed(self):
+        self.env['FAKE_WRONG_OWNER'] = '1'
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('rm', self.calls.read_text().splitlines())
+        self.assertTrue((self.root / 'state').exists())
 
     def test_plan_has_no_cache_or_docker_side_effects(self):
         result = self.run_runner("--plan")

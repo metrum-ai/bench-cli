@@ -40,6 +40,27 @@ pub struct ServeArgs {
     ready_timeout_seconds: u64,
     #[arg(long)]
     logs_output: Option<PathBuf>,
+    /// Use an explicit container name rather than the shared modality name.
+    #[arg(long)]
+    container_name: Option<String>,
+    /// Fail instead of removing an existing container on start.
+    #[arg(long)]
+    no_replace: bool,
+    /// Publish the server only on loopback.
+    #[arg(long)]
+    loopback_only: bool,
+    /// Mount HF_HOME as the hub cache only, excluding parent credentials.
+    #[arg(long)]
+    hub_cache_only: bool,
+    /// Pin the actual served model revision and SUT declaration.
+    #[arg(long)]
+    model_revision: Option<String>,
+    /// Attach a random certification ownership token to the container.
+    #[arg(long)]
+    cert_owner: Option<String>,
+    /// Disable model downloads inside the server container.
+    #[arg(long)]
+    offline: bool,
 }
 
 struct Config {
@@ -126,29 +147,51 @@ fn prepare_hf_cache(cache: &std::path::Path) -> Result<()> {
         .with_context(|| format!("create Hugging Face cache directory {}", cache.display()))
 }
 
+struct DockerOptions<'a> {
+    name: &'a str,
+    port: u16,
+    cache: &'a std::path::Path,
+    loopback_only: bool,
+    hub_cache_only: bool,
+    cert_owner: Option<&'a str>,
+    offline: bool,
+}
+
 fn docker_args(
     config: &Config,
     image: &str,
     model: &str,
     args: &[String],
-    port: u16,
-    cache: &std::path::Path,
+    options: &DockerOptions<'_>,
 ) -> Vec<String> {
-    let name = format!("metrum-live-{}", config.modality);
     let mut command = vec![
         "run".into(),
         "-d".into(),
         "--name".into(),
-        name,
+        options.name.into(),
         "--gpus".into(),
         env::var("GPU_DEVICES").unwrap_or_else(|_| "device=0".into()),
         "--ipc=host".into(),
         "-p".into(),
-        format!("{port}:8000"),
+        if options.loopback_only {
+            format!("127.0.0.1:{}:8000", options.port)
+        } else {
+            format!("{}:8000", options.port)
+        },
         "-v".into(),
-        format!("{}:/root/.cache/huggingface", cache.display()),
+        format!(
+            "{}:/root/.cache/huggingface{}",
+            options.cache.display(),
+            if options.hub_cache_only { "/hub" } else { "" }
+        ),
     ];
-    if env::var_os("HF_TOKEN").is_some() {
+    if let Some(owner) = options.cert_owner {
+        command.extend(["--label".into(), format!("metrum.cert.owner={owner}")]);
+    }
+    if options.offline {
+        command.extend(["-e".into(), "HF_HUB_OFFLINE=1".into()]);
+    }
+    if !options.offline && env::var_os("HF_TOKEN").is_some() {
         command.extend(["-e".into(), "HF_TOKEN".into()]);
     }
     for value in &config.env {
@@ -401,7 +444,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
     let config = load_config(&args)?;
     let model = args.model.as_deref().unwrap_or(&config.model);
     let image = args.image.as_deref().unwrap_or(&config.image);
-    let server_args = args
+    let mut server_args = args
         .args
         .as_deref()
         .map(|value| {
@@ -411,6 +454,22 @@ pub fn run(args: ServeArgs) -> Result<()> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_else(|| config.args.clone());
+    if let Some(revision) = &args.model_revision {
+        if revision.len() != 40
+            || !revision
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            bail!("--model-revision must be a full lowercase 40-character commit");
+        }
+        if server_args
+            .iter()
+            .any(|arg| arg == "--revision" || arg.starts_with("--revision="))
+        {
+            bail!("--model-revision conflicts with a revision in --args");
+        }
+        server_args.extend(["--revision".into(), revision.clone()]);
+    }
     validate_overrides(
         &config,
         model,
@@ -426,8 +485,45 @@ pub fn run(args: ServeArgs) -> Result<()> {
         &args.sources
     };
     let cache = hf_cache_path();
-    let docker = docker_args(&config, image, model, &server_args, args.port, &cache);
-    let container = format!("metrum-live-{}", config.modality);
+    let container = args
+        .container_name
+        .clone()
+        .unwrap_or_else(|| format!("metrum-live-{}", config.modality));
+    if container.is_empty()
+        || !container.as_bytes()[0].is_ascii_alphanumeric()
+        || !container
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+    {
+        bail!("invalid container name");
+    }
+    if let Some(owner) = &args.cert_owner {
+        if owner.len() != 32
+            || !owner
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            bail!("--cert-owner must be a 32-character lowercase hexadecimal token");
+        }
+        if !args.no_replace || args.container_name.is_none() {
+            bail!("--cert-owner requires --no-replace and an explicit --container-name");
+        }
+    }
+    let docker = docker_args(
+        &config,
+        image,
+        model,
+        &server_args,
+        &DockerOptions {
+            name: &container,
+            port: args.port,
+            cache: &cache,
+            loopback_only: args.loopback_only,
+            hub_cache_only: args.hub_cache_only,
+            cert_owner: args.cert_owner.as_deref(),
+            offline: args.offline,
+        },
+    );
     match args.operation.as_str() {
         "print" => println!(
             "docker {}",
@@ -437,23 +533,55 @@ pub fn run(args: ServeArgs) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(" ")
         ),
-        "sut" => println!(
-            "{}",
-            serde_json::to_string_pretty(&sut_json(SutInput {
-                config: &config,
-                image,
-                model,
-                args: &server_args,
-                docker: &docker,
-                sources,
-                notes,
-                revision: model_revision(model).as_deref(),
-            })?)?
-        ),
+        "sut" => {
+            let revision = args.model_revision.clone().or_else(|| {
+                if args.offline {
+                    None
+                } else {
+                    model_revision(model)
+                }
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&sut_json(SutInput {
+                    config: &config,
+                    image,
+                    model,
+                    args: &server_args,
+                    docker: &docker,
+                    sources,
+                    notes,
+                    revision: revision.as_deref(),
+                })?)?
+            );
+        }
         "stop" => {
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container])
-                .status();
+            if let Some(owner) = &args.cert_owner {
+                let inspected = Command::new("docker")
+                    .args([
+                        "inspect",
+                        "--format",
+                        "{{index .Config.Labels \"metrum.cert.owner\"}}",
+                        &container,
+                    ])
+                    .output()
+                    .context("inspect container ownership")?;
+                if !inspected.status.success()
+                    || String::from_utf8_lossy(&inspected.stdout).trim() != owner
+                {
+                    bail!("container ownership label is missing or mismatched; refusing removal");
+                }
+                let status = Command::new("docker")
+                    .args(["rm", "-f", &container])
+                    .status()?;
+                if !status.success() {
+                    bail!("owned container removal failed");
+                }
+            } else {
+                let _ = Command::new("docker")
+                    .args(["rm", "-f", &container])
+                    .status();
+            }
             println!("stopped {container}");
         }
         "logs" => {
@@ -483,6 +611,13 @@ pub fn run(args: ServeArgs) -> Result<()> {
                         .join(format!("live-results/serve-{}", config.modality))
                 });
             fs::create_dir_all(&output)?;
+            let revision = args.model_revision.clone().or_else(|| {
+                if args.offline {
+                    None
+                } else {
+                    model_revision(model)
+                }
+            });
             fs::write(
                 output.join("sut.json"),
                 format!(
@@ -495,13 +630,15 @@ pub fn run(args: ServeArgs) -> Result<()> {
                         docker: &docker,
                         sources,
                         notes,
-                        revision: model_revision(model).as_deref(),
+                        revision: revision.as_deref(),
                     })?)?
                 ),
             )?;
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container])
-                .status();
+            if !args.no_replace {
+                let _ = Command::new("docker")
+                    .args(["rm", "-f", &container])
+                    .status();
+            }
             let status = Command::new("docker")
                 .args(&docker)
                 .status()
@@ -550,6 +687,13 @@ mod tests {
             port: 8000,
             ready_timeout_seconds: 1,
             logs_output: None,
+            container_name: None,
+            no_replace: false,
+            loopback_only: false,
+            hub_cache_only: false,
+            model_revision: None,
+            cert_owner: None,
+            offline: false,
         }
     }
 
@@ -567,8 +711,15 @@ mod tests {
             &config.image,
             &config.model,
             &config.args,
-            8000,
-            &cache,
+            &DockerOptions {
+                name: "metrum-live-llm",
+                port: 8000,
+                cache: &cache,
+                loopback_only: false,
+                hub_cache_only: false,
+                cert_owner: None,
+                offline: false,
+            },
         );
         assert!(docker.contains(&format!("{}:/root/.cache/huggingface", cache.display())));
 
@@ -577,6 +728,44 @@ mod tests {
         let bad = file.join("huggingface");
         let error = prepare_hf_cache(&bad).unwrap_err();
         assert!(format!("{error:#}").contains(&bad.display().to_string()));
+    }
+
+    #[test]
+    fn isolated_docker_options_use_owned_name_loopback_and_hub_only() {
+        let config = load_config(&test_args("vlm")).unwrap();
+        let cache = std::path::Path::new("/tmp/cache");
+        let command = docker_args(
+            &config,
+            &config.image,
+            &config.model,
+            &config.args,
+            &DockerOptions {
+                name: "cert-vlm-a1",
+                port: 8123,
+                cache,
+                loopback_only: true,
+                hub_cache_only: true,
+                cert_owner: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                offline: true,
+            },
+        );
+        assert!(command
+            .windows(2)
+            .any(|pair| pair == ["--name", "cert-vlm-a1"]));
+        assert!(command
+            .windows(2)
+            .any(|pair| pair == ["-p", "127.0.0.1:8123:8000"]));
+        assert!(command
+            .windows(2)
+            .any(|pair| pair == ["-v", "/tmp/cache:/root/.cache/huggingface/hub"]));
+        assert!(command.windows(2).any(|pair| pair
+            == [
+                "--label",
+                "metrum.cert.owner=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ]));
+        assert!(command
+            .windows(2)
+            .any(|pair| pair == ["-e", "HF_HUB_OFFLINE=1"]));
     }
 
     #[test]
@@ -589,8 +778,15 @@ mod tests {
                 &config.image,
                 &config.model,
                 &config.args,
-                args.port,
-                &hf_cache_path(),
+                &DockerOptions {
+                    name: "metrum-live-test",
+                    port: args.port,
+                    cache: &hf_cache_path(),
+                    loopback_only: false,
+                    hub_cache_only: false,
+                    cert_owner: None,
+                    offline: false,
+                },
             );
             let sut = sut_json(SutInput {
                 config: &config,
