@@ -15,6 +15,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import fault_transform
+
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length"}
 
 
@@ -38,7 +40,17 @@ class Recorder:
             self.stream.flush()
 
 
-def make_handler(upstream_port, recorder):
+def take_frame(buffer):
+    boundaries = [(buffer.find(marker), marker) for marker in (b"\n\n", b"\r\n\r\n")]
+    boundaries = [(index, marker) for index, marker in boundaries if index >= 0]
+    if not boundaries:
+        return None, buffer
+    index, marker = min(boundaries, key=lambda item: item[0])
+    end = index + len(marker)
+    return buffer[:end], buffer[end:]
+
+
+def make_handler(upstream_port, recorder, fault=None, fault_request=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -77,15 +89,43 @@ def make_handler(upstream_port, recorder):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.close_connection = True
+                selected = fault is not None and (fault_request is None or fault_request == request_id)
+                buffer = b""
+                transformed = 0
+
+                def forward(chunk):
+                    recorder.event(request_id, "forwarded_chunk", chunk)
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+
                 while True:
                     chunk = response.read1(65536)
                     if not chunk:
                         break
                     recorder.event(request_id, "chunk", chunk)
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-                recorder.event(request_id, "complete")
-            except (OSError, http.client.HTTPException) as exc:
+                    if not selected:
+                        forward(chunk)
+                        continue
+                    buffer += chunk
+                    if len(buffer) > 16 * 1024 * 1024:
+                        raise ValueError("SSE frame exceeds recorder limit")
+                    while True:
+                        frame, buffer = take_frame(buffer)
+                        if frame is None:
+                            break
+                        # Corrupt only one real frame per selected request.
+                        if fault == "corrupt" and transformed:
+                            result, changed = frame, False
+                        else:
+                            result, changed = fault_transform.transform(frame, fault)
+                        if changed:
+                            transformed += 1
+                            recorder.event(request_id, "transformation", mode=fault)
+                        forward(result)
+                if buffer:
+                    forward(buffer)
+                recorder.event(request_id, "complete", fault=fault if selected else None, transformations=transformed)
+            except (OSError, ValueError, http.client.HTTPException) as exc:
                 recorder.event(request_id, "error", error=type(exc).__name__)
                 self.close_connection = True
             finally:
@@ -99,11 +139,15 @@ def main():
     parser.add_argument("--listen-port", type=int, required=True)
     parser.add_argument("--upstream-port", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--fault", choices=fault_transform.MODES)
+    parser.add_argument("--fault-request", type=int, help="apply fault only to this one-based request index")
     args = parser.parse_args()
     if not 1024 <= args.listen_port <= 65535 or not 1024 <= args.upstream_port <= 65535 or args.listen_port == args.upstream_port:
         parser.error("ports must be distinct and in 1024..65535")
+    if args.fault_request is not None and (args.fault is None or args.fault_request < 1):
+        parser.error("--fault-request requires a fault and a positive request index")
     recorder = Recorder(args.out)
-    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder))
+    server = ThreadingHTTPServer(("localhost", args.listen_port), make_handler(args.upstream_port, recorder, args.fault, args.fault_request))
     try:
         server.serve_forever()
     finally:

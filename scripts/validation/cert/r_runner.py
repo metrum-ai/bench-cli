@@ -20,15 +20,16 @@ import result_writer
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def run_cell(args, label, binary, count, cap, thinking, extra):
+def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None):
     evidence = args.out / "evidence"
     trace = evidence / f"{label}-trace.jsonl"
     data = evidence / f"{label}-requests.jsonl"
     stdout, stderr = evidence / f"{label}-stdout.txt", evidence / f"{label}-stderr.txt"
     command = [str(binary), "--url", f"http://localhost:{args.proxy_port}/v1/chat/completions",
                "--api-key", "dummy", "--scenario", label, "--num-requests", str(count),
-               "--concurrency", "16", "--prompts", str(args.prompt), "--mode", "chat", "--streaming",
-               "--model", args.model, "--data-log", str(data), "--max-tokens", str(cap),
+               "--concurrency", str(concurrency), "--prompts", str(args.prompt), "--mode", "chat", "--streaming",
+               "--model", args.model, "--data-log", str(data),
+               *( ["--max-tokens", str(cap)] if cap is not None else [] ),
                "--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", "600",
                "--debug-log", str(evidence / f"{label}-debug.log"), "--error-log", str(evidence / f"{label}-error.log"),
                "--extra-body-json", json.dumps({"chat_template_kwargs": {"enable_thinking": thinking}}), *extra]
@@ -36,14 +37,16 @@ def run_cell(args, label, binary, count, cap, thinking, extra):
     command_path.write_text(json.dumps(command, indent=2) + "\n", encoding="utf-8")
     proxy_err = evidence / f"{label}-proxy-error.txt"
     with proxy_err.open("wb") as stderr_file:
-        process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("trace_proxy.py")),
-                                    "--listen-port", str(args.proxy_port), "--upstream-port", str(args.port),
-                                    "--out", str(trace)], stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT)
+        proxy_command = [sys.executable, str(Path(__file__).with_name("trace_proxy.py")),
+                         "--listen-port", str(args.proxy_port), "--upstream-port", str(args.port), "--out", str(trace)]
+        if fault is not None:
+            proxy_command += ["--fault", fault]
+        process = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, process)
             exit_code = l1_runner.call(command, stdout, stderr, 3600)
             deadline = time.monotonic() + 15
-            while time.monotonic() < deadline:
+            while data.is_file() and time.monotonic() < deadline:
                 try:
                     if len(g6_checks.server_usage(trace.read_text(encoding="utf-8"))) == count:
                         break
@@ -60,7 +63,8 @@ def run_cell(args, label, binary, count, cap, thinking, extra):
                 process.kill()
                 process.wait(timeout=10)
     files = ["evidence/" + path.name for path in (trace, data, stdout, stderr, command_path, proxy_err) if path.is_file()]
-    return data.read_text(encoding="utf-8"), trace.read_text(encoding="utf-8"), exit_code, files
+    return (data.read_text(encoding="utf-8") if data.is_file() else "",
+            trace.read_text(encoding="utf-8") if trace.is_file() else "", exit_code, files)
 
 
 def baseline_observed(data, trace, count):

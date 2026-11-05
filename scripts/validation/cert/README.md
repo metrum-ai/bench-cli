@@ -5,9 +5,10 @@
 
 Metrum AI maintains the case catalog in
 [`docs/RELEASE_CERTIFICATION_CATALOG.csv`](../../../docs/RELEASE_CERTIFICATION_CATALOG.csv).
-L1, R and G6 contain draft real-server runners for GPU-box debugging; they
-have not yet been run on a GPU and must not be treated as certified. All other
-GPU lanes remain fail-closed prototypes. CPU tools do not certify GPU tests.
+L1, R, G6 and G7 contain draft real-server runners for GPU-box debugging; they
+have not yet been run on a GPU and must not be treated as certified. D, G1 and
+G2 have partial runners; their unimplemented cases and the remaining GPU lanes
+remain fail-closed prototypes. CPU tools do not certify GPU tests.
 
 Run the offline tests and tracked-documentation archive dry-run:
 
@@ -35,8 +36,10 @@ LLM binary hashes; `lanes.L1`, `lanes.R` and `lanes.G6` each specify `image`,
 `prompt_sets.default`. L1 additionally pins `prompt_binary` beside the candidate
 LLM and a matching JSON `sut`; R and G6 specify a distinct `proxy_port` and
 `server_flags` containing `--reasoning-parser qwen3` and
-`--no-enable-prefix-caching`. G6 also pins `strategic_binary`. All pinned file
-entries are `{ "path": "...", "sha256": "..." }`.
+`--no-enable-prefix-caching`. G6 also pins `strategic_binary`. G7 instead
+requires pinned `prompt_sets.W1` and `.W2`, a distinct proxy port, disabled
+prefix caching, and optionally a pre-recorded pinned `noise_floor` JSON. All
+pinned file entries are `{ "path": "...", "sha256": "..." }`.
 
 Use a **fresh** absolute output directory per lane and explicitly select one
 GPU by index or UUID. For example:
@@ -46,7 +49,7 @@ export CUDA_VISIBLE_DEVICES=0
 bash scripts/validation/cert/lane-l1.sh --manifest /path/frozen.json \
   --candidate /path/candidate/metrum-ai-bench-cli-llm \
   --baseline /path/previous/metrum-ai-bench-cli-llm --out /private/l1-attempt-1
-# Same arguments, different fresh --out: lane-r.sh and lane-g6.sh.
+# Same arguments, different fresh --out: lane-r.sh, lane-g6.sh and lane-g7.sh.
 ```
 
 Use `--plan` to see assigned case IDs without Docker or a GPU. A lane writes

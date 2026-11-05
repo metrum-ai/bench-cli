@@ -13,6 +13,8 @@ import threading
 import unittest
 from pathlib import Path
 
+import d_default_checks
+import g1_clock_checks
 import g6_checks
 import l1_runner
 import manifest_tool
@@ -66,17 +68,32 @@ class ManifestTests(unittest.TestCase):
         config = self.manifest["lanes"]["L1"].copy()
         config.update({"proxy_port": 8111, "server_flags": ["--reasoning-parser", "qwen3", "--no-enable-prefix-caching"]})
         self.manifest["lanes"]["R"] = config.copy()
+        self.manifest["lanes"]["G1"] = config.copy()
         strategic = self.root / "metrum-ai-bench-cli-strategic"
         strategic.write_text("binary")
         strategic.chmod(0o755)
         self.manifest["lanes"]["G6"] = {**config, "strategic_binary": {"path": str(strategic), "sha256": manifest_tool.sha256_file(strategic)}}
         self.path.write_text(json.dumps(self.manifest))
         manifest_tool.load_manifest(self.path, "R", self.candidate, self.baseline, "0")
+        manifest_tool.load_manifest(self.path, "G1", self.candidate, self.baseline, "0")
         manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
         self.manifest["lanes"]["G6"]["strategic_binary"]["sha256"] = "0" * 64
         self.path.write_text(json.dumps(self.manifest))
         with self.assertRaises(ValueError):
             manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
+
+    def test_g7_requires_both_frozen_workloads_and_proxy(self):
+        config = self.manifest["lanes"]["L1"].copy()
+        default = config["prompt_sets"]["default"]
+        config.update({"proxy_port": 8111, "server_flags": ["--no-enable-prefix-caching"],
+                       "prompt_sets": {"W1": default, "W2": default}})
+        self.manifest["lanes"]["G7"] = config
+        self.path.write_text(json.dumps(self.manifest))
+        manifest_tool.load_manifest(self.path, "G7", self.candidate, self.baseline, "0")
+        del config["prompt_sets"]["W2"]
+        self.path.write_text(json.dumps(self.manifest))
+        with self.assertRaises(ValueError):
+            manifest_tool.load_manifest(self.path, "G7", self.candidate, self.baseline, "0")
 
     def test_rejects_invalid_gpu_image_flags_and_hash(self):
         with self.assertRaises(ValueError):
@@ -154,6 +171,42 @@ class ReasoningEvaluatorTests(unittest.TestCase):
         self.assertEqual(64, r_checks.adequate_cell(data, trace, 64, 0)["answered"])
         with self.assertRaises(ValueError):
             r_checks.adequate_cell(data.replace('"ttft_visible_answer_s": 0.2', '"ttft_visible_answer_s": 0.01'), trace, 64, 0)
+
+
+class ClockTraceTests(unittest.TestCase):
+    def test_serial_real_byte_timing_join(self):
+        frame1 = b'data: {"choices":[{"index":0,"delta":{"reasoning_content":"r"}}]}\n\n'
+        frame2 = b'data: {"choices":[{"index":0,"delta":{"content":"answer"}}]}\n\ndata: [DONE]\n\n'
+        events = [{"request": 1, "kind": "send", "monotonic_ns": 1000000000},
+                  {"request": 1, "kind": "chunk", "monotonic_ns": 1100000000, "bytes_b64": base64.b64encode(frame1).decode()},
+                  {"request": 1, "kind": "chunk", "monotonic_ns": 1200000000, "bytes_b64": base64.b64encode(frame2).decode()},
+                  {"request": 1, "kind": "complete", "monotonic_ns": 1500000000}]
+        rows = [{"schema_version": "metrum-ai-bench-cli.request.v5", "phase": "measure", "seq": 0,
+                 "error": None, "latency_s": 0.5, "ttft_s": 0.1, "ttft_source": "stream", "ttft_visible_answer_s": 0.2}]
+        trace = "\n".join(map(json.dumps, events))
+        data = "\n".join(map(json.dumps, rows))
+        self.assertEqual(1, g1_clock_checks.evaluate(data, trace, 0)["visible_compared"])
+        rows[0]["ttft_s"] = 0.5
+        with self.assertRaises(ValueError):
+            g1_clock_checks.evaluate("\n".join(map(json.dumps, rows)), trace, 0)
+        events[-1]["monotonic_ns"] = 1700000000
+        with self.assertRaises(ValueError):
+            g1_clock_checks.evaluate(data, "\n".join(map(json.dumps, events)), 0)
+
+
+class DefaultCapTests(unittest.TestCase):
+    def test_warning_and_full_usage_required(self):
+        data, trace = ReasoningEvaluatorTests().fixture()
+        rows = [json.loads(line) for line in data.splitlines()]
+        rows[-1]["ttft_s"] = {"p50": 0.1}
+        rows[-1]["config"] = {"model": "test"}
+        data = "\n".join(map(json.dumps, rows))
+        warning = "warning: 64/64 measured requests exhausted the token budget on reasoning without an answer"
+        self.assertEqual(1.0, d_default_checks.evaluate(data, trace, warning, 0)["truncation_fraction"])
+        with self.assertRaises(ValueError):
+            d_default_checks.evaluate(data, trace, "no warning", 0)
+        with self.assertRaises(ValueError):
+            d_default_checks.evaluate("", "", "required: --max-tokens", 2)
 
 
 class SchemaEvaluatorTests(unittest.TestCase):
@@ -247,6 +300,44 @@ class ProxyTests(unittest.TestCase):
             captured = b"".join(base64.b64decode(event["bytes_b64"]) for event in events if event["kind"] == "chunk")
             self.assertEqual(body, captured)
             self.assertEqual("complete", events[-1]["kind"])
+
+
+    def test_fault_proxy_retains_original_and_forwarded_bytes(self):
+        body = b'data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3}}\n\ndata: [DONE]\n\n'
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "trace.jsonl"
+            recorder = trace_proxy.Recorder(path)
+            upstream = http.server.ThreadingHTTPServer(("localhost", 0), Upstream)
+            proxy = http.server.ThreadingHTTPServer(("localhost", 0), trace_proxy.make_handler(upstream.server_port, recorder, "remove_usage", 1))
+            threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (upstream, proxy)]
+            for thread in threads:
+                thread.start()
+            try:
+                client = http.client.HTTPConnection("localhost", proxy.server_port, timeout=5)
+                client.request("POST", "/v1/chat/completions", body=b"{}")
+                forwarded = client.getresponse().read()
+                client.close()
+            finally:
+                proxy.shutdown(); upstream.shutdown()
+                for thread in threads:
+                    thread.join(timeout=5)
+                proxy.server_close(); upstream.server_close(); recorder.stream.close()
+            events = [json.loads(line) for line in path.read_text().splitlines()]
+            original = b"".join(base64.b64decode(e["bytes_b64"]) for e in events if e["kind"] == "chunk")
+            captured = b"".join(base64.b64decode(e["bytes_b64"]) for e in events if e["kind"] == "forwarded_chunk")
+            self.assertEqual(body, original)
+            self.assertEqual(forwarded, captured)
+            self.assertNotIn(b'"usage"', forwarded)
+            self.assertTrue(any(e["kind"] == "transformation" and e["mode"] == "remove_usage" for e in events))
 
 
 class ResultWriterTests(unittest.TestCase):

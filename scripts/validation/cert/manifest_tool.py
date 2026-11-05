@@ -79,7 +79,7 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         expected = prompt.get("sha256")
         if not isinstance(expected, str) or not SHA.fullmatch(expected) or sha256_file(prompt["path"]) != expected:
             raise ValueError("prompt set hash mismatch")
-    if lane in ("L1", "R", "G6") and config["model"] != "Qwen/Qwen3-8B":
+    if lane in ("L1", "R", "D", "G1", "G2", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
         raise ValueError("this lane requires the pinned Qwen3-8B model")
     if lane == "G6":
         strategic = config.get("strategic_binary")
@@ -90,7 +90,22 @@ def load_manifest(path, lane, candidate, baseline, gpu):
             raise ValueError("G6 strategic binary must be executable beside the candidate")
         if sha256_file(strategic_path) != strategic["sha256"]:
             raise ValueError("strategic binary hash mismatch")
-    if lane in ("R", "G6"):
+    if lane == "G7":
+        if not {"W1", "W2"} <= prompt_sets.keys():
+            raise ValueError("G7 requires pinned W1 and W2 prompt sets")
+        proxy_port = config.get("proxy_port")
+        if not isinstance(proxy_port, int) or isinstance(proxy_port, bool) or not 1024 <= proxy_port <= 65535 or proxy_port == port:
+            raise ValueError("G7 requires a distinct proxy port")
+        if "--no-enable-prefix-caching" not in flags:
+            raise ValueError("G7 requires disabled prefix caching")
+        for key in ("owner", "evidence_link"):
+            if not isinstance(config.get(key), str) or not config[key].strip():
+                raise ValueError(f"G7 requires {key}")
+        noise = config.get("noise_floor")
+        if noise is not None:
+            if not isinstance(noise, dict) or not isinstance(noise.get("path"), str) or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]:
+                raise ValueError("G7 noise floor must be a pinned file")
+    if lane in ("R", "D", "G1", "G2", "G6"):
         if "default" not in prompt_sets:
             raise ValueError(f"{lane} requires a default prompt set")
         proxy_port = config.get("proxy_port")
@@ -139,7 +154,7 @@ def main():
     parser.add_argument("--lane", required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--baseline", type=Path, required=True)
-    parser.add_argument("--field", choices=["image", "model", "revision", "port", "proxy_port", "candidate_sha", "server_flags", "prompt_default", "sut_path", "strategic_path", "owner", "evidence_link"], required=True)
+    parser.add_argument("--field", choices=["image", "model", "revision", "port", "proxy_port", "candidate_sha", "server_flags", "prompt_default", "prompt_W1", "prompt_W2", "sut_path", "strategic_path", "owner", "evidence_link"], required=True)
     args = parser.parse_args()
     try:
         data, config = load_manifest(args.manifest, args.lane, args.candidate, args.baseline,
@@ -148,6 +163,8 @@ def main():
             value = data[args.field]
         elif args.field == "prompt_default":
             value = config["prompt_sets"]["default"]["path"]
+        elif args.field in ("prompt_W1", "prompt_W2"):
+            value = config["prompt_sets"][args.field.removeprefix("prompt_")]["path"]
         elif args.field == "sut_path":
             value = config["sut"]["path"]
         elif args.field == "strategic_path":
