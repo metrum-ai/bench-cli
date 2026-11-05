@@ -131,7 +131,7 @@ cert_on_exit() {
         rc=1
       elif [[ -n "${CERT_CONTAINER_OWNER:-}" ]]; then
         local remaining
-        remaining="$(docker ps -a --filter "name=^/${CERT_CONTAINER}$" --format '{{.ID}}')" || rc=1
+        remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_CONTAINER_OWNER" --format '{{.ID}}')" || rc=1
         [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
       fi
     fi

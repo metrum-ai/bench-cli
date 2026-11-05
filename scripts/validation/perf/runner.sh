@@ -20,9 +20,9 @@
 # exits 0 without touching docker, the GPU or the bench binaries. Needs no
 # DATASETS_DIR/HF_TOKEN — CI-safe on a lint-only host.
 #
-# Required env: HF_TOKEN (from a 0600 file, never argv), DATASETS_DIR with
-# W1.jsonl and W2.jsonl. Optional: VLLM_IMAGE (default: spec digest),
-# TELEMETRY_YAML, ALL_SMI_BIN (enables exporter + power sampling).
+# Required env: DATASETS_DIR with W1.jsonl and W2.jsonl and exactly one
+# CUDA_VISIBLE_DEVICES selection. PERF_OFFLINE=1 uses a prepared hub cache and
+# already-present image. Optional: VLLM_IMAGE and TELEMETRY_YAML.
 set -euo pipefail
 
 PLAN=0
@@ -56,9 +56,9 @@ if [[ $PLAN -eq 1 ]]; then
        "W2=$([[ -f ${DATASETS_DIR:-/nonexistent}/W2.jsonl ]] && echo ok || echo MISSING)"
   echo "  warmup/measure: ${WARMUP}s / ${DURATION}s"
   echo "  serve:"
-  echo "    docker run -d --name perfval-vllm --gpus all --ipc=host \\"
+  echo "    docker run -d --name <owned-unique-name> --gpus device=<selected-gpu> --ipc=host \\"
   echo "      -p 127.0.0.1:8000:8000 -e HF_TOKEN \\"
-  echo "      -v \$HOME/.cache/huggingface:/root/.cache/huggingface \\"
+  echo "      -v <hub-cache>:/root/.cache/huggingface/hub \\"
   echo "      $VLLM_IMAGE --model $MODEL --revision $REV \\"
   echo "      --max-model-len 16384 --max-num-seqs 128 --gpu-memory-utilization 0.90 \\"
   echo "      --default-chat-template-kwargs '{\"enable_thinking\": false}' ${EXTRA[*]:-} \\"
@@ -78,23 +78,63 @@ if [[ $PLAN -eq 1 ]]; then
 fi
 
 : "${DATASETS_DIR:?set DATASETS_DIR with W1.jsonl and W2.jsonl}"
+: "${CUDA_VISIBLE_DEVICES:?select one CUDA_VISIBLE_DEVICES GPU}"
+[[ "$CUDA_VISIBLE_DEVICES" =~ ^([0-9]+|GPU-[0-9a-fA-F-]+)$ ]] || { echo 'select exactly one GPU' >&2; exit 2; }
 mkdir -p "$OUT"
+OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+CONTAINER="perfval-${OWNER}"
+STARTED=0 SAMPLE_PID=''
+# Called by the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+  local rc=$1 owner remaining
+  trap - EXIT INT TERM
+  set +e
+  if [[ -n "$SAMPLE_PID" ]]; then kill "$SAMPLE_PID" 2>/dev/null; wait "$SAMPLE_PID" 2>/dev/null; fi
+  if ((STARTED)); then
+    remaining="$(docker ps -a --filter "label=metrum.cert.owner=$OWNER" --format '{{.ID}}')" || rc=1
+    if [[ -n "$remaining" ]]; then
+      owner="$(docker inspect --format '{{index .Config.Labels "metrum.cert.owner"}}' "$CONTAINER" 2>/dev/null)" || owner=''
+      if [[ "$owner" != "$OWNER" ]]; then
+        echo 'container ownership mismatch; refusing removal' >&2; rc=1
+      else
+        docker logs "$CONTAINER" > "$OUT/vllm.log" 2>&1
+        docker rm -f "$CONTAINER" > "$OUT/container-stop.txt" 2>&1 || rc=1
+        remaining="$(docker ps -a --filter "label=metrum.cert.owner=$OWNER" --format '{{.ID}}')" || rc=1
+        [[ -z "$remaining" ]] || rc=1
+      fi
+    fi
+  fi
+  exit "$rc"
+}
+trap 'cleanup "$?"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 serve() {
-  # Create the host mount as the invoking user before the Docker daemon can
-  # create a root-owned ~/.cache on a fresh machine.
-  mkdir -p "$HOME/.cache/huggingface"
-  docker rm -f perfval-vllm >/dev/null 2>&1 || true
-  docker run -d --name perfval-vllm --gpus all --ipc=host \
-    -p 127.0.0.1:8000:8000 -e HF_TOKEN \
-    -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+  local hub="${CERT_HF_HUB_CACHE:-$HOME/.cache/huggingface/hub}"
+  local -a offline=() token=()
+  if [[ "${PERF_OFFLINE:-0}" == 1 ]]; then
+    [[ -d "$hub" ]] || { echo 'offline hub cache is missing' >&2; return 1; }
+    offline=(--pull=never -e HF_HUB_OFFLINE=1)
+  else
+    mkdir -p "$hub"
+    [[ -z "${HF_TOKEN:-}" ]] || token=(-e HF_TOKEN)
+  fi
+  hub="$(realpath "$hub")"
+  [[ "$hub" != *:* && "$hub" != *$'\n'* ]] || { echo 'invalid hub cache path' >&2; return 1; }
+  STARTED=1
+  docker run -d --name "$CONTAINER" --label "metrum.cert.owner=$OWNER" --gpus "device=$CUDA_VISIBLE_DEVICES" --ipc=host \
+    -p 127.0.0.1:8000:8000 "${offline[@]}" "${token[@]}" \
+    -v "$hub:/root/.cache/huggingface/hub" \
     "$VLLM_IMAGE" --model "$MODEL" --revision "$REV" \
     --max-model-len 16384 --max-num-seqs 128 --gpu-memory-utilization 0.90 \
     --default-chat-template-kwargs '{"enable_thinking": false}' \
     "${EXTRA[@]}" --no-enable-prefix-caching > "$OUT/container.id"
   for ((i=0;i<1800;i++)); do
-    docker logs perfval-vllm > "$OUT/vllm.log" 2>&1 || true
+    docker logs "$CONTAINER" > "$OUT/vllm.log" 2>&1 || true
     curl -fsS http://127.0.0.1:8000/v1/models > "$OUT/models.json" 2>/dev/null && return 0
+    docker inspect --format '{{.State.Running}}' "$CONTAINER" | grep -qx true || return 1
     sleep 2
   done
   echo "server did not become ready" >&2; return 1
@@ -105,9 +145,9 @@ run_one() { # binary workload concurrency pass tool-label out-dir duration
   local mt=512; [[ $w == W1 ]] && mt=128
   mkdir -p "$out"
   if command -v nvidia-smi >/dev/null; then
-    nvidia-smi --query-gpu=timestamp,power.draw,power.limit,temperature.gpu,utilization.gpu,memory.used \
+    nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=timestamp,uuid,power.draw,power.limit,temperature.gpu,utilization.gpu,memory.used \
       --format=csv -lms 1000 > "$out/nvidia.csv" 2>/dev/null &
-    local npid=$!
+    SAMPLE_PID=$!
   fi
   local args=(
     --scenario "$w" --url http://127.0.0.1:8000/v1/chat/completions --api-key dummy
@@ -123,7 +163,7 @@ run_one() { # binary workload concurrency pass tool-label out-dir duration
   echo "{\"tool\":\"$label\",\"workload\":\"$w\",\"concurrency\":$c,\"pass\":\"$pass\",\"start\":$(date +%s.%N)}" > "$out/point.json"
   local rc=0
   "$bin" "${args[@]}" > "$out/stdout.log" 2>&1 || rc=$?
-  [[ -n "${npid:-}" ]] && kill "$npid" 2>/dev/null || true
+  if [[ -n "$SAMPLE_PID" ]]; then kill "$SAMPLE_PID" 2>/dev/null || true; wait "$SAMPLE_PID" 2>/dev/null || true; SAMPLE_PID=''; fi
   python3 - "$out/point.json" <<'PY'
 import json, sys, time
 p = sys.argv[1]
@@ -134,6 +174,7 @@ PY
 }
 
 serve
+ANY_FAILED=0
 for ((p=1;p<=PASSES;p++)); do
   for w in W1 W2; do
     for c in 1 8 32; do
@@ -143,10 +184,15 @@ for ((p=1;p<=PASSES;p++)); do
         [[ -f "$out/DONE" ]] && { echo "skip $label/$p/$w/c$c"; continue; }
         echo "=== $label pass$p $w c$c $(date -u +%FT%TZ) ==="
         [[ $WARMUP -gt 0 ]] && run_one "$bin" "$w" "$c" "$p" "$label" "$out/warmup" "$WARMUP"
-        run_one "$bin" "$w" "$c" "$p" "$label" "$out" "$DURATION" \
-          && echo "OK $label/$p/$w/c$c" || echo "FAIL $label/$p/$w/c$c"
+        if run_one "$bin" "$w" "$c" "$p" "$label" "$out" "$DURATION"; then
+          echo "OK $label/$p/$w/c$c"
+        else
+          echo "FAIL $label/$p/$w/c$c"
+          ANY_FAILED=1
+        fi
       done
     done
   done
 done
 echo "RUNNER $TAG DONE $(date -u +%FT%TZ)"
+exit "$ANY_FAILED"

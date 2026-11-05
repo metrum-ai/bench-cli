@@ -50,6 +50,7 @@ def write_point(root, workload, concurrency, pass_, tok_s=None, tpot_ms=10.0,
             "seq": seq, "run_id": run_id, "phase": "measure",
             "started_at": "2026-10-26T12:00:00Z",
             "completed_at": "2026-10-26T12:01:40Z",
+            "send_offset_s": (window - latency) * seq / (REQUESTS_PER_POINT - 1),
             "error": None, "prompt_tokens": 100,
             "completion_tokens": TOKENS_PER_REQUEST,
             "ttft_s": TTFT_S, "latency_s": latency,
@@ -65,6 +66,7 @@ def write_point(root, workload, concurrency, pass_, tok_s=None, tpot_ms=10.0,
     (d / "point.json").write_text(json.dumps(
         {"tool": "synthetic", "workload": workload, "concurrency": concurrency,
          "pass": str(pass_)}))
+    (d / 'DONE').touch()
     return d
 
 
@@ -102,6 +104,56 @@ class ComparePower(unittest.TestCase):
             rc, out, data = run_compare(b, k)
             self.assertEqual(rc, 0, out)
             self.assertEqual(data["points"][0]["baseline"]["power_mean_w"], 150.0)
+
+
+class CompareLegacyWindow(unittest.TestCase):
+    def test_late_error_does_not_extend_legacy_window(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = write_point(root, 'W1', 1, 1)
+            data = path / 'requests.jsonl'
+            rows = [json.loads(line) for line in data.read_text().splitlines()]
+            failed = dict(rows[0], seq=99, send_offset_s=200.0, latency_s=100.0,
+                          error={'kind': 'timeout'})
+            rows.insert(-1, failed)
+            rows[-1]['window_seconds'] = 300.0
+            data.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            sys.path.insert(0, str(HERE))
+            import compare
+            result = compare.extract_point(path)
+            self.assertAlmostEqual(result['tool_wall_time_s'], 100.0)
+            self.assertAlmostEqual(result['system_output_tok_s'], 24 / 100)
+            self.assertEqual(result['headline']['window_seconds'], 300.0)
+
+    def test_early_failure_remains_in_legacy_start_window(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = write_point(root, 'W1', 1, 1)
+            data = path / 'requests.jsonl'
+            rows = [json.loads(line) for line in data.read_text().splitlines()]
+            for row in rows[:-1]: row['send_offset_s'] += 5
+            rows.insert(0, dict(rows[0], seq=99, send_offset_s=0.0, latency_s=1.0, error={'kind': 'timeout'}))
+            data.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            sys.path.insert(0, str(HERE))
+            import compare
+            self.assertAlmostEqual(compare.extract_point(path)['tool_wall_time_s'], 105.0)
+
+    def test_missing_success_marker_is_not_comparable(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = write_point(root, 'W1', 1, 1)
+            (path / 'DONE').unlink()
+            sys.path.insert(0, str(HERE))
+            import compare
+            with self.assertRaises(ValueError): compare.extract_point(path)
+
+    def test_reasoning_in_thinking_off_is_not_comparable(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = write_point(root, 'W1', 1, 1)
+            data = path / 'requests.jsonl'
+            rows = [json.loads(line) for line in data.read_text().splitlines()]
+            rows[0]['first_reasoning_s'] = .01
+            data.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            sys.path.insert(0, str(HERE))
+            import compare
+            with self.assertRaises(ValueError): compare.extract_point(path)
 
 
 class CompareToleranceVerdicts(unittest.TestCase):
@@ -184,6 +236,14 @@ class CompareNoiseFloor(unittest.TestCase):
                 rc, _, data = run_compare(b, k, "--noise-floor", str(floor))
                 self.assertEqual(rc, 1)
                 self.assertEqual(data["verdict"], "FAIL")
+
+    def test_nonfinite_noise_floor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = pathlib.Path(root) / 'noise.json'
+            path.write_text('{"q38-27b":{"W1":{"c1":{"system_output_tok_s":Infinity}}}}')
+            sys.path.insert(0, str(HERE))
+            import compare
+            with self.assertRaises(ValueError): compare.load_noise_floor(path, 'q38-27b')
 
     def test_bad_noise_floor_key_is_an_error(self):
         with tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as k:

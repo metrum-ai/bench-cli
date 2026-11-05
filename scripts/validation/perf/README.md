@@ -18,12 +18,18 @@ Standard, versioned test that answers "did the performance numbers move?" for
   point with `DONE` is skipped. `runner.sh --plan` is a dry run: it resolves
   the pins, prints the serve command and the full grid with binary/dataset
   checks, and exits 0 with no side effects — no docker, no GPU, no requests
-  (CI exercises it on every change here).
+  (CI exercises it on every change here). Metrum AI: real runs select exactly
+  one `CUDA_VISIBLE_DEVICES` GPU, use an owned container and hub-only cache,
+  and fail if owned cleanup fails. `PERF_OFFLINE=1` requires a prepared cache
+  and locally available pinned image.
 - `compare.py` — derives per-point scalars from the raw logs and emits a
   per-point PASS/FAIL table (markdown + JSON). Gate: `system_output_tok_s` and
   `tpot_p50_ms` within tolerance (default 5%, or the point's noise floor if
   wider — `--noise-floor noise.json` with `{"<model>": {"W1": {"c1": {metric:
-  pct}}}}`). TTFT is printed for information only (#313 cohort caveats).
+  pct}}}}`). Metrum AI: reconstruct the same legacy success-only token
+  numerator and first-measured-send to last-success-terminal window for both
+  binaries; report the emitted headline separately. Reject reasoning in this
+  thinking-off comparison. TTFT is informational only (#313 cohort caveats).
   `--reference` adds informational deltas against a previous study. A point
   missing from either root is a FAIL verdict, listed in the table footer.
 - `lint_spec.py` — structural spec check (required keys, runner-known model
