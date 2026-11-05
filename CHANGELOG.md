@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Metrum AI: schedule nightly and weekly CPU release-quality checks, track test
+  cadence, and export certification evidence tables and reports. GPU lane
+  automation remains separate; missing evidence blocks release certification.
+
 ## 1.8.0
 
 ### Breaking measurement and schema changes

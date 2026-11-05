@@ -35,3 +35,21 @@ cases run only after release publication; a POST failure is an incident, not
 a pre-tag pass. The separate wrapper integration case needs wrapper owner
 signoff. See [RELEASING.md](RELEASING.md) for the release workflow and gate
 responsibilities.
+
+## Regular test cadence
+
+The catalog's `Cadence` field lists per-PR, per-release, nightly, weekly,
+monthly and on-upstream-change selections. `.github/workflows/regular-tests.yml`
+runs nightly CPU checks covering the full suite, repeated connection-reuse
+checks, offline certification fixtures, historical schemas, archive
+documentation comparison, history secret scan, dependency policy and
+published-docs links. Weekly CPU checks cover installation and released
+assets; the weekly dependency hygiene report remains in `ci.yml`. A failed
+nightly opens or updates a single issue labeled `nightly-failure`.
+
+The planned weekly GPU regression smoke uses the R, G6 and L1 lanes against
+main and the latest certified release on one NVIDIA GPU; monthly runs cover
+all 17 lanes. A new upstream serving minor also triggers the weekly selection
+and the small-model performance comparison. These are agent-operated tasks,
+not GPU jobs or cloud credentials in Actions. The real GPU lane runners are
+not yet implemented and must not be treated as completed certification tests.

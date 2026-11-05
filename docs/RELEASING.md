@@ -7,6 +7,10 @@ This document covers deliberate publish gates, pre-release (rc) policy, and
 how to verify signed release artifacts. See Metrum AI's
 [release certification policy and case catalog](RELEASE_CERTIFICATION.md)
 for candidate-wide criteria, evidence and prospective N/A requirements.
+Before tagging, include a certification table in the release PR for every
+required case on the exact candidate SHA. A missing, failed or unimplemented
+case blocks the tag; only a prospectively approved N/A can satisfy a genuinely
+inapplicable case. Post-tag checks are tracked separately.
 
 ## Repository variables (publish gates)
 
@@ -65,13 +69,10 @@ harness (Metrum AI):
 - `baselines/` records each validated run (one JSON per box/date) so drift
   is reviewable in git.
 
-Before tagging a release: run the grid on the reference box with the last
-release and the candidate, link the `compare.py` table (verdict PASS) and
-the recorded baseline JSON in the release PR, and state the run's cost.
-If the release only changes docs or packaging (no Rust source), the A/B
-run may be skipped with a one-line justification in the release PR
-instead. Teardown of the rented box is verified as part of the run
-record.
+Before tagging a release, run the grid with the previous release and the
+candidate, and link the `compare.py` PASS table and recorded baseline JSON in
+the release PR. A docs-only or packaging-only change does not automatically
+waive this requirement. Verify resource teardown as part of the run record.
 
 | Variable | Effect |
 |----------|--------|
@@ -90,21 +91,20 @@ access. Configure it as a repository secret before switching the gate to
 gated models. A future secret needed by the gate must be declared in
 `workflow_call.secrets` and passed explicitly by the caller.
 
-`LIVE_GATE_REQUIRED` is off by default because no runner carries `gpu-h100`
-yet. With it on and no such runner, the `live-gate` jobs queue until GitHub
-times them out and the release never publishes. Turn it on once the GPU runner
-is registered and one manual dispatch is green; until then the rule above is
-enforced by review, not by the workflow.
+The workflow variables control automation, not the release requirement: a
+missing runner or skipped workflow never waives the pre-tag live gate. Execute
+and record the equivalent real-server cells against the candidate before the
+tag. Today the workflow can skip the tag-triggered gate when these variables
+are unset, so the release lead must verify the pre-tag evidence independently.
 
 ## Zero-success smoke cells block a release
 
 Any smoke cell (live gate, `cargo xtask local-smoke`, campaign skill sweep,
 or a manual smoke cited in release notes) with 0 successful requests is a release
-blocker until it is triaged in a GitHub issue. The issue must state the
-cause (client bug, fixture, server configuration, or server bug) and either
-link the fix or record a decision, signed off in the issue, to ship with the
-modality marked unverified in [CLAIMS_LEDGER.md](CLAIMS_LEDGER.md). Recording
-the cell as "all-error measurements" in a results document is not triage.
+blocker. Triage must identify the cause (client bug, fixture, server
+configuration, or server bug) and link the fix. A decision to mark the
+modality unverified does not turn a failed certification case into a PASS or
+N/A. Recording the cell as "all-error measurements" is not triage.
 Campaign `matrix-20260915-195537` (0 of 472 ASR transcriptions succeeded) is
 the example this rule exists for.
 

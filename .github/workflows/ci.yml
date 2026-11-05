@@ -21,6 +21,14 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  certification-validator:
+    name: certification validator offline tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run CPU-only certification validator tests
+        run: python3 -m unittest discover -s scripts/validation/cert -p 'test_cert.py' -v
+
   external-docs-version:
     name: external docs version
     runs-on: ubuntu-latest
