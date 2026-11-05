@@ -148,6 +148,12 @@ class ManifestTests(unittest.TestCase):
         self.manifest["lanes"]["G7"] = config
         self.path.write_text(json.dumps(self.manifest))
         manifest_tool.load_manifest(self.path, "G7", self.candidate, self.baseline, "0")
+        floor = self.root / 'floor.json'; floor.write_text('{}')
+        config['noise_floor'] = {'path': str(floor), 'sha256': manifest_tool.sha256_file(floor)}
+        self.path.write_text(json.dumps(self.manifest))
+        with self.assertRaises(ValueError): manifest_tool.load_manifest(self.path, 'G7', self.candidate, self.baseline, '0')
+        config['noise_floor'].update({'recorded_utc': '2026-01-01T00:00:00Z', 'evidence_link': 'fixture'})
+        self.path.write_text(json.dumps(self.manifest)); manifest_tool.load_manifest(self.path, 'G7', self.candidate, self.baseline, '0')
         del config["prompt_sets"]["W2"]
         self.path.write_text(json.dumps(self.manifest))
         with self.assertRaises(ValueError):

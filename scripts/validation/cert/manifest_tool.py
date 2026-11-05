@@ -170,8 +170,11 @@ def load_manifest(path, lane, candidate, baseline, gpu):
                 raise ValueError(f"G7 requires {key}")
         noise = config.get("noise_floor")
         if noise is not None:
-            if not isinstance(noise, dict) or not isinstance(noise.get("path"), str) or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]:
-                raise ValueError("G7 noise floor must be a pinned file")
+            if (not isinstance(noise, dict) or not isinstance(noise.get("path"), str)
+                    or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]
+                    or not isinstance(noise.get("recorded_utc"), str) or not noise["recorded_utc"].strip()
+                    or not isinstance(noise.get("evidence_link"), str) or not noise["evidence_link"].strip()):
+                raise ValueError("G7 noise floor requires a pinned file and prior independently reviewable evidence")
     if lane in ("L2", "L3", "L4"):
         modality, expected_model = {
             "L2": ("vlm", "Qwen/Qwen3-VL-8B-Instruct"),

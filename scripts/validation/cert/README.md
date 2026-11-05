@@ -26,7 +26,10 @@ weekly job additionally checks the actual published archives against their tag.
 L1, R and G6 have been exercised on a real NVIDIA GPU. Selected cases in D,
 G2, G3 and G5 have also been exercised; other cases failed, require different
 hardware, or are unimplemented. G1 and G7 remain development work. These
-results do not establish a release certification.
+results do not establish a release certification. G7 keeps the 5% gate unless
+a per-point noise-floor file is SHA256-pinned with a `recorded_utc` before the
+run and an independently reviewable `evidence_link`; the retained copy and
+all frozen inputs are rechecked after collection.
 
 Run only on an authorized GPU. Freeze the candidate and previous-release binary
 hashes, pinned server image digest, model revision and prompt hashes in a

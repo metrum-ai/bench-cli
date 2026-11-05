@@ -5,6 +5,8 @@
 import argparse
 import datetime as dt
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -98,17 +100,39 @@ def main():
                 "manifest_sha256": manifest_tool.sha256_file(args.manifest)}
     failures = []
     try:
-        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-        config = manifest["lanes"]["G7"]
-        noise = json.loads(Path(config["noise_floor"]["path"]).read_text(encoding="utf-8")) if config.get("noise_floor") else {}
-        if config.get("noise_floor"):
-            versions["noise_floor_sha256"] = config["noise_floor"]["sha256"]
+        manifest, config = manifest_tool.load_manifest(args.manifest, 'G7', args.candidate, args.baseline,
+                                                       os.environ['CUDA_VISIBLE_DEVICES'])
+        if (manifest['candidate_sha'] != args.sha or config['model'] != args.model or config['revision'] != args.revision
+                or config['image'] != args.image):
+            raise ValueError('G7 manifest identity differs from invocation')
+        noise, noise_copy = {}, None
+        if config.get('noise_floor'):
+            floor = config['noise_floor']
+            recorded = dt.datetime.fromisoformat(floor['recorded_utc'].replace('Z', '+00:00'))
+            started = dt.datetime.fromisoformat(args.start_utc.replace('Z', '+00:00'))
+            if recorded.tzinfo is None or started.tzinfo is None or recorded >= started:
+                raise ValueError('G7 noise floor must predate the run')
+            noise_copy = evidence / 'g7-noise-floor.json'
+            shutil.copyfile(floor['path'], noise_copy)
+            if manifest_tool.sha256_file(noise_copy) != floor['sha256']:
+                raise ValueError('G7 noise floor changed before collection')
+            noise = json.loads(noise_copy.read_text(encoding='utf-8'))
+            if not isinstance(noise, dict): raise ValueError('G7 noise floor must be an object')
+            versions['noise_floor_sha256'] = floor['sha256']
+            versions['noise_floor_recorded_utc'] = floor['recorded_utc']
+            versions['noise_floor_evidence_link'] = floor['evidence_link']
         for workload, concurrency in compare_small.POINTS:
             for label, binary in (("baseline", args.baseline), ("candidate", args.candidate)):
                 try:
                     run_cell(args, config, label, binary, workload, concurrency)
                 except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
                     failures.append(f"{label}/{workload}/c{concurrency}: {exc}")
+        # Revalidate every frozen input after collection, not just the point metadata.
+        manifest_tool.load_manifest(args.manifest, 'G7', args.candidate, args.baseline, os.environ['CUDA_VISIBLE_DEVICES'])
+        if manifest_tool.sha256_file(args.manifest) != versions['manifest_sha256']:
+            raise ValueError('G7 manifest changed during collection')
+        if noise_copy is not None and manifest_tool.sha256_file(noise_copy) != versions['noise_floor_sha256']:
+            raise ValueError('retained G7 noise floor changed during collection')
         observed = compare_small.compare(evidence / "baseline", evidence / "candidate",
                                          versions["baseline_binary_sha256"], versions["candidate_binary_sha256"], noise)
         observed["execution_failures"] = failures
@@ -118,6 +142,7 @@ def main():
     comparison = evidence / "g7-comparison.json"
     comparison.write_text(json.dumps(observed, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     files = ["evidence/gpu.csv", "evidence/server.log", "evidence/binary-hashes.txt", "evidence/g7-comparison.json"]
+    if (evidence / 'g7-noise-floor.json').is_file(): files.append('evidence/g7-noise-floor.json')
     files.extend(str(path.relative_to(args.out)) for label in ("baseline", "candidate")
                  for path in (evidence / label).rglob("*") if path.is_file())
     record = {"ID": "BC-PERF-003", "result": "PASS" if passed else "FAIL", "candidate_sha": args.sha,
