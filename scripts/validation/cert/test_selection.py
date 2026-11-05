@@ -127,7 +127,7 @@ class PublicCatalogTests(unittest.TestCase):
         output = subprocess.run(['git', 'ls-files', 'src/**'], cwd=root, check=True, capture_output=True, text=True).stdout
         paths = output.splitlines()
         self.assertTrue(paths)
-        unmapped = [path for path in paths if path not in select.PATH_AREAS and not path.startswith('src/bin/')]
+        unmapped = [path for path in paths if path.endswith('.rs') and path not in select.PATH_AREAS]
         self.assertEqual([], unmapped, f'map newly tracked source paths explicitly: {unmapped}')
 
     def test_docs_plus_changelog_is_sampled_not_full(self):
