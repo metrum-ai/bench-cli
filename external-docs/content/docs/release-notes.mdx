@@ -13,6 +13,19 @@ in the repository `CHANGELOG.md`.
 
 ---
 
+## Metrum AI Bench CLI 1.8.0
+
+**Breaking metric and schema change:** headline streaming TTFT now measures the
+first reasoning or visible output delta; visible-answer TTFT is separate.
+Completion-token throughput includes reported reasoning and uses the window
+from first measured send to last terminal completion. Incomplete usage makes
+the headline unavailable. Reasoning-only length truncations are unanswered and
+non-failing by default; use strict mode or `--ci-safety` to reject them.
+Request and summary schemas are v5. Segment dashboards and TTFT SLOs by schema
+and semantics instead of mixing v4 and v5. See [Reasoning models](./reasoning-models).
+
+---
+
 ## Metrum AI Bench CLI 1.7.2
 
 **Behavior change:** a completed stream without a visible answer is a request

@@ -10,6 +10,43 @@ use serde::Serialize;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
+/// Whether the selected non-streaming choice contains visible text or tool output.
+/// This does not imply a first-token timestamp was observed.
+pub fn response_has_visible_output(response: &serde_json::Value) -> bool {
+    let Some(choices) = response
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return false;
+    };
+    let Some(choice) = choices
+        .iter()
+        .find(|c| c.get("index").and_then(serde_json::Value::as_u64) == Some(0))
+        .or_else(|| choices.first().filter(|c| c.get("index").is_none()))
+    else {
+        return false;
+    };
+    let nonempty = |value: &serde_json::Value| value.as_str().is_some_and(|s| !s.is_empty());
+    if choice.get("text").is_some_and(nonempty) {
+        return true;
+    }
+    let Some(message) = choice.get("message") else {
+        return false;
+    };
+    message.get("content").is_some_and(|content| {
+        nonempty(content)
+            || content
+                .as_array()
+                .is_some_and(|parts| parts.iter().any(|p| p.get("text").is_some_and(nonempty)))
+    }) || message
+        .get("tool_calls")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|calls| !calls.is_empty())
+        || message
+            .get("function_call")
+            .is_some_and(serde_json::Value::is_object)
+}
+
 #[derive(Debug)]
 pub struct ChatStreamResult {
     pub latency: Duration,
@@ -23,6 +60,10 @@ pub struct ChatStreamResult {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    /// True only when both prompt and completion usage counts were reported.
+    pub usage_complete: bool,
+    pub prompt_tokens_present: bool,
+    pub completion_tokens_present: bool,
     /// Server-reported reasoning tokens from the usage chunk; `None` when absent.
     pub reasoning_tokens: Option<u64>,
     pub completion_text: String,
@@ -43,6 +84,37 @@ impl ChatStreamResult {
         } else {
             Some(RequestError::NoOutputToken)
         }
+    }
+}
+
+/// Server usage observed before a stream error. Incomplete counts stay marked
+/// missing and therefore cannot be promoted into full aggregate rates.
+#[derive(Debug, Clone, Default)]
+pub struct PartialUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub usage_complete: bool,
+    pub prompt_tokens_present: bool,
+    pub completion_tokens_present: bool,
+}
+
+/// Stream failure with any usage that arrived before the failure.
+#[derive(Debug)]
+pub struct ChatStreamFailure {
+    pub error: RequestError,
+    pub usage: PartialUsage,
+}
+
+impl std::fmt::Display for ChatStreamFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.error, f)
+    }
+}
+impl std::error::Error for ChatStreamFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
     }
 }
 
@@ -68,6 +140,8 @@ struct Consumer {
     prompt_tokens: u64,
     completion_tokens: u64,
     total_tokens: u64,
+    prompt_tokens_present: bool,
+    completion_tokens_present: bool,
     reasoning_tokens: Option<u64>,
     done: bool,
     saw_finish: bool,
@@ -76,6 +150,18 @@ struct Consumer {
 }
 
 impl Consumer {
+    fn partial_usage(&self) -> PartialUsage {
+        PartialUsage {
+            prompt_tokens: self.prompt_tokens,
+            completion_tokens: self.completion_tokens,
+            total_tokens: self.total_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+            usage_complete: self.prompt_tokens_present && self.completion_tokens_present,
+            prompt_tokens_present: self.prompt_tokens_present,
+            completion_tokens_present: self.completion_tokens_present,
+        }
+    }
+
     fn feed(&mut self, bytes: &[u8], elapsed: Duration) -> Result<(), RequestError> {
         for event in self.parser.feed(bytes) {
             // Trace the event's categories and timing only (#313): no
@@ -127,6 +213,9 @@ impl Consumer {
                         });
                     }
                     if let Some(usage) = parsed.get("usage") {
+                        let (prompt_present, completion_present) = usage_presence(usage);
+                        self.prompt_tokens_present |= prompt_present;
+                        self.completion_tokens_present |= completion_present;
                         self.prompt_tokens = usage
                             .get("prompt_tokens")
                             .and_then(|v| v.as_u64())
@@ -168,7 +257,11 @@ impl Consumer {
                         }
                     }
                 }
-                crate::sse::SseEvent::Raw(_) => {}
+                crate::sse::SseEvent::Raw(_) => {
+                    return Err(RequestError::ParseError {
+                        message: "invalid JSON in SSE data event".into(),
+                    });
+                }
             }
         }
         Ok(())
@@ -194,6 +287,9 @@ impl Consumer {
             prompt_tokens: self.prompt_tokens,
             completion_tokens: self.completion_tokens,
             total_tokens: self.total_tokens,
+            usage_complete: self.prompt_tokens_present && self.completion_tokens_present,
+            prompt_tokens_present: self.prompt_tokens_present,
+            completion_tokens_present: self.completion_tokens_present,
             reasoning_tokens: self.reasoning_tokens,
             completion_text: self.completion_text,
             trace: self.trace,
@@ -210,6 +306,20 @@ fn measured_choices(choices: &[serde_json::Value]) -> impl Iterator<Item = &serd
             .map_or(position == 0, |index| index == 0);
         selected.then_some(choice)
     })
+}
+
+/// Whether the server supplied usable input and output counts in a usage object.
+pub fn usage_presence(usage: &serde_json::Value) -> (bool, bool) {
+    (
+        usage
+            .get("prompt_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .is_some(),
+        usage
+            .get("completion_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .is_some(),
+    )
 }
 
 /// Consume an HTTP body after the caller checks its status. `started` is the
@@ -237,20 +347,47 @@ where
     S: Stream<Item = Result<B, reqwest::Error>>,
     B: AsRef<[u8]>,
 {
+    consume_preserving_usage(stream, started, allow_missing_ttft, trace)
+        .await
+        .map_err(|failure| failure.error)
+}
+
+/// Consume a stream while retaining server usage observed before a failure.
+pub async fn consume_preserving_usage<S, B>(
+    stream: S,
+    started: Instant,
+    allow_missing_ttft: bool,
+    trace: bool,
+) -> Result<ChatStreamResult, ChatStreamFailure>
+where
+    S: Stream<Item = Result<B, reqwest::Error>>,
+    B: AsRef<[u8]>,
+{
     futures_util::pin_mut!(stream);
     let mut consumer = Consumer {
         trace: trace.then(Vec::new),
         ..Consumer::default()
     };
     while let Some(item) = stream.next().await {
-        let bytes = item.map_err(|error| RequestError::from_reqwest(&error))?;
-        consumer.feed(bytes.as_ref(), started.elapsed())?;
+        let bytes = item.map_err(|error| ChatStreamFailure {
+            error: RequestError::from_reqwest(&error),
+            usage: consumer.partial_usage(),
+        })?;
+        consumer
+            .feed(bytes.as_ref(), started.elapsed())
+            .map_err(|error| ChatStreamFailure {
+                error,
+                usage: consumer.partial_usage(),
+            })?;
         if consumer.done {
             break;
         }
     }
+    let usage = consumer.partial_usage();
     // Latency, TTFT and ITL are fixed here, before any post-`[DONE]` drain.
-    let result = consumer.finish(started.elapsed(), allow_missing_ttft);
+    let result = consumer
+        .finish(started.elapsed(), allow_missing_ttft)
+        .map_err(|error| ChatStreamFailure { error, usage });
     if result.is_ok() {
         drain_after_done(stream).await;
     }
@@ -295,6 +432,39 @@ mod tests {
             format!("data: {value}\n\n").as_bytes(),
             Duration::from_millis(ms),
         )
+    }
+
+    #[test]
+    fn nonstream_answer_detection_does_not_invent_a_clock() {
+        assert!(response_has_visible_output(
+            &json!({"choices":[{"index":0,"message":{"content":"answer"}}]})
+        ));
+        assert!(response_has_visible_output(
+            &json!({"choices":[{"index":0,"message":{"tool_calls":[{"id":"call"}]}}]})
+        ));
+        assert!(response_has_visible_output(
+            &json!({"choices":[{"text":"answer"}]})
+        ));
+        assert!(!response_has_visible_output(
+            &json!({"choices":[{"index":0,"message":{"content":"","reasoning":"think"}}]})
+        ));
+        assert!(!response_has_visible_output(
+            &json!({"choices":[{"index":1,"message":{"content":"wrong choice"}}]})
+        ));
+    }
+
+    #[test]
+    fn malformed_sse_payload_is_a_redacted_parse_error() {
+        let mut consumer = Consumer::default();
+        let error = consumer
+            .feed(b"data: {not-json}\n\n", Duration::from_millis(1))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            RequestError::ParseError {
+                message: "invalid JSON in SSE data event".into()
+            }
+        );
     }
 
     #[test]
@@ -426,6 +596,284 @@ mod tests {
             let result = consumer.finish(Duration::from_millis(30), true).unwrap();
             assert_eq!(result.output_error(), Some(expected));
         }
+    }
+
+    // BC-SSE-001: injected send-relative clocks, independent of wall-clock timing.
+    #[test]
+    fn bc_sse_001_first_any_visible_and_metadata_ordering() {
+        use crate::measurement::{resolve_ttft_with_fallback, TtftSource};
+        for (reasoning_ms, answer_ms) in [(1000, 3000), (3000, 1000), (1000, 1000)] {
+            let mut consumer = Consumer::default();
+            event(&mut consumer, json!({"choices":[{"index":1,"delta":{"content":"ignored"}},{"index":0,"delta":{"role":"assistant"}}]}), 100).unwrap();
+            let mut deltas = vec![
+                (reasoning_ms, json!({"reasoning_content":"think"})),
+                (answer_ms, json!({"content":"answer"})),
+            ];
+            deltas.sort_by_key(|(ms, _)| *ms);
+            for (ms, delta) in deltas {
+                event(
+                    &mut consumer,
+                    json!({"choices":[{"index":0,"delta":delta}]}),
+                    ms,
+                )
+                .unwrap();
+            }
+            event(
+                &mut consumer,
+                json!({"choices":[{"index":0,"finish_reason":"stop"}]}),
+                4000,
+            )
+            .unwrap();
+            let result = consumer.finish(Duration::from_secs(4), true).unwrap();
+            let resolved = resolve_ttft_with_fallback(
+                true,
+                result.ttft.map(|t| t.as_secs_f64()),
+                result.first_reasoning.map(|t| t.as_secs_f64()),
+                Some(0.1),
+                false,
+                false,
+            );
+            assert_eq!(resolved.ttft_s, Some(1.0));
+            assert_eq!(resolved.source, Some(TtftSource::Stream));
+            assert_eq!(result.ttft.unwrap().as_millis(), u128::from(answer_ms));
+        }
+        let mut same_event = Consumer::default();
+        event(
+            &mut same_event,
+            json!({"choices":[{"index":0,"delta":{"reasoning":"think","content":"answer"}}]}),
+            1000,
+        )
+        .unwrap();
+        event(
+            &mut same_event,
+            json!({"choices":[{"index":0,"finish_reason":"stop"}]}),
+            2000,
+        )
+        .unwrap();
+        let same = same_event.finish(Duration::from_secs(2), true).unwrap();
+        assert_eq!(same.first_reasoning, same.ttft);
+        let mut tool = Consumer::default();
+        event(&mut tool, json!({"choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{"}}]}}]}), 1000).unwrap();
+        event(
+            &mut tool,
+            json!({"choices":[{"index":0,"finish_reason":"tool_calls"}]}),
+            2000,
+        )
+        .unwrap();
+        assert_eq!(
+            tool.finish(Duration::from_secs(2), true).unwrap().ttft,
+            Some(Duration::from_secs(1))
+        );
+        let mut role = Consumer::default();
+        event(&mut role, json!({"choices":[{"index":0,"delta":{"role":"assistant"}},{"index":1,"delta":{"content":"ignore"}}]}), 1000).unwrap();
+        event(
+            &mut role,
+            json!({"choices":[{"index":0,"finish_reason":"stop"}]}),
+            2000,
+        )
+        .unwrap();
+        let empty = role.finish(Duration::from_secs(2), true).unwrap();
+        assert!(empty.ttft.is_none() && empty.first_reasoning.is_none());
+        assert_eq!(empty.output_error(), Some(RequestError::NoOutputToken));
+    }
+
+    // BC-SSE-002: finished, unfinished, empty, and repeated terminal events.
+    #[test]
+    fn bc_sse_002_reasoning_only_terminal_outcomes() {
+        for (finish, expected) in [
+            ("length", RequestError::ReasoningTruncated),
+            ("stop", RequestError::NoOutputToken),
+        ] {
+            let mut consumer = Consumer::default();
+            event(
+                &mut consumer,
+                json!({"choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}),
+                1000,
+            )
+            .unwrap();
+            for _ in 0..2 {
+                event(
+                    &mut consumer,
+                    json!({"choices":[{"index":0,"finish_reason":finish}]}),
+                    2000,
+                )
+                .unwrap();
+            }
+            let result = consumer.finish(Duration::from_secs(3), true).unwrap();
+            let output_error = result.output_error();
+            assert_eq!(output_error, Some(expected.clone()));
+            let now = chrono::Utc::now();
+            let record = crate::record::RequestRecord::success(
+                0,
+                crate::record::Phase::Measure,
+                "fixture".into(),
+                now,
+                now,
+                Duration::from_secs(3),
+                result.ttft,
+                result.first_reasoning,
+                result.itl,
+                0,
+                0,
+                0,
+            )
+            .with_chat_outcome(output_error, false);
+            let summary = crate::summary::RunSummary::from_records(&[record], 3.0, false);
+            assert_eq!(summary.attempted, 1);
+            assert_eq!(summary.answered_requests, 0);
+            assert_eq!(
+                summary.ttft_coverage.reasoning_truncated,
+                usize::from(finish == "length")
+            );
+        }
+        let mut unfinished = Consumer::default();
+        event(
+            &mut unfinished,
+            json!({"choices":[{"index":0,"delta":{"reasoning":"think"}}]}),
+            1000,
+        )
+        .unwrap();
+        assert_eq!(
+            unfinished.finish(Duration::from_secs(2), true).unwrap_err(),
+            RequestError::StreamTruncated
+        );
+        let mut empty = Consumer::default();
+        empty
+            .feed(b"data: [DONE]\n\n", Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(
+            empty
+                .finish(Duration::from_secs(1), true)
+                .unwrap()
+                .output_error(),
+            Some(RequestError::NoOutputToken)
+        );
+        assert_eq!(
+            Consumer::default()
+                .finish(Duration::from_secs(1), true)
+                .unwrap_err(),
+            RequestError::StreamTruncated
+        );
+    }
+
+    // BC-SSE-004: missing, partial and unsplit usage must not fabricate rates or clocks.
+    #[test]
+    fn bc_sse_004_usage_only_and_incomplete_usage() {
+        for (usage, complete, split, presence) in [
+            (None, false, false, (false, false)),
+            (
+                Some(json!({"completion_tokens":8})),
+                false,
+                false,
+                (false, true),
+            ),
+            (
+                Some(json!({"prompt_tokens":4})),
+                false,
+                false,
+                (true, false),
+            ),
+            (
+                Some(json!({"prompt_tokens":4,"completion_tokens":8,"total_tokens":12})),
+                true,
+                false,
+                (true, true),
+            ),
+            (
+                Some(
+                    json!({"prompt_tokens":4,"completion_tokens":8,"total_tokens":12,"completion_tokens_details":{"reasoning_tokens":3}}),
+                ),
+                true,
+                true,
+                (true, true),
+            ),
+        ] {
+            let mut consumer = Consumer::default();
+            if let Some(usage) = usage {
+                event(&mut consumer, json!({"choices":[],"usage":usage}), 500).unwrap();
+                assert!(
+                    consumer.first_token_time.is_none() && consumer.first_reasoning_time.is_none()
+                );
+            }
+            event(
+                &mut consumer,
+                json!({"choices":[{"index":0,"delta":{"content":"answer"}}]}),
+                1000,
+            )
+            .unwrap();
+            event(
+                &mut consumer,
+                json!({"choices":[{"index":0,"finish_reason":"stop"}]}),
+                2000,
+            )
+            .unwrap();
+            let result = consumer.finish(Duration::from_secs(2), true).unwrap();
+            assert_eq!(result.ttft, Some(Duration::from_secs(1)));
+            assert_eq!(result.usage_complete, complete);
+            assert_eq!(
+                (
+                    result.prompt_tokens_present,
+                    result.completion_tokens_present
+                ),
+                presence
+            );
+            let now = chrono::Utc::now();
+            let output_error = result.output_error();
+            let mut row = crate::record::RequestRecord::success(
+                0,
+                crate::record::Phase::Measure,
+                "fixture".into(),
+                now,
+                now,
+                Duration::from_secs(2),
+                result.ttft,
+                result.first_reasoning,
+                result.itl,
+                result.prompt_tokens,
+                result.completion_tokens,
+                result.total_tokens,
+            )
+            .with_reasoning_tokens(result.reasoning_tokens)
+            .with_chat_outcome(output_error, false);
+            row.usage_missing = !result.usage_complete;
+            let summary = crate::summary::RunSummary::from_records(&[row], 10.0, false);
+            assert_eq!(summary.usage_missing_count, usize::from(!complete));
+            assert_eq!(
+                summary.completion_tokens_per_second,
+                complete.then_some(0.8)
+            );
+            assert_eq!(
+                summary.non_reasoning_completion_tokens_per_second,
+                split.then_some(0.5)
+            );
+        }
+    }
+
+    #[test]
+    fn separated_usage_frames_cover_both_fields_without_starting_clock() {
+        let mut consumer = Consumer::default();
+        event(
+            &mut consumer,
+            json!({"choices":[],"usage":{"prompt_tokens":4}}),
+            100,
+        )
+        .unwrap();
+        event(
+            &mut consumer,
+            json!({"choices":[],"usage":{"completion_tokens":8}}),
+            200,
+        )
+        .unwrap();
+        assert!(consumer.first_reasoning_time.is_none() && consumer.first_token_time.is_none());
+        event(
+            &mut consumer,
+            json!({"choices":[{"index":0,"finish_reason":"stop"}]}),
+            300,
+        )
+        .unwrap();
+        let result = consumer.finish(Duration::from_secs(1), true).unwrap();
+        assert!(result.usage_complete);
+        assert_eq!((result.prompt_tokens, result.completion_tokens), (4, 8));
     }
 
     #[test]

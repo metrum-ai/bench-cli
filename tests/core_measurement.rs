@@ -41,7 +41,7 @@ fn summary_matches_hand_computed_reference_16_requests() {
     assert!((summary.itl_s.avg.unwrap() - 0.020).abs() < 1e-12);
     assert!((summary.tpot_s.avg.unwrap() - 0.020).abs() < 1e-12);
     assert!((summary.completion_tokens_per_second.unwrap() - 158.450_355_523).abs() < 1e-6);
-    assert!((summary.requests_per_second - 7.922_517_776).abs() < 1e-6);
+    assert!((summary.requests_per_second.unwrap() - 7.922_517_776).abs() < 1e-6);
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn summary_window_excludes_warmup_and_drain() {
     let summary = RunSummary::from_records(&records, 0.5, false);
     assert_eq!(summary.attempted, 1);
     assert_eq!(summary.latency_s.n, 1);
-    assert_eq!(summary.requests_per_second, 2.0);
+    assert_eq!(summary.requests_per_second, Some(2.0));
 }
 
 #[test]

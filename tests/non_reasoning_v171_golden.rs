@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Fixed-input compatibility against the v1.7.1 release, excluding only
-//! version identifiers and fields added by v1.7.2. The fixture was generated
+//! version identifiers and fields added since v1.7.1. The fixture was generated
 //! from v1.7.1 commit 3e80169 using the identical fixed inputs below; the
 //! environment is deliberately empty to avoid machine-specific evidence.
 use chrono::{TimeZone, Utc};
@@ -19,9 +19,17 @@ fn normalize(value: &mut Value) {
     record.remove("schema_version");
     record.remove("ttft_first_any_s");
     record.remove("finish_reason");
+    record.remove("ttft_visible_answer_s");
+    record.remove("outcome");
+    record.remove("answer_completed");
     let summary = root.get_mut("summary").unwrap().as_object_mut().unwrap();
     for key in [
         "schema_version",
+        "ttft_visible_answer_s",
+        "answered_requests",
+        "answered_requests_per_second",
+        "legacy_success_completion_tokens_per_second",
+        "non_reasoning_completion_tokens_per_second",
         "ttft_coverage",
         "observed_reasoning_tokens",
         "observed_reasoning_tokens_total",

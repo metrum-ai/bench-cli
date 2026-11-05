@@ -127,13 +127,11 @@ Workload section. This page focuses on measured fields.
     for older CSVs without it) and `service_latency_s`, so client queue delay
     is excluded. The window starts at the first measured send of any outcome
     (the same start as `window_seconds`) and lasts `window_seconds`, which
-    ends at the latest successful completion, so no success is clipped.
+    ends at the latest measured terminal completion, so no success is clipped.
     Strategic uses the same rule over the stage rows (first measured send to
-    latest successful `sent + service_latency_s`), which is the same stage
-    window behind `throughput` and the stage token rates (#224). Intervals are
-    clipped to the window. AIPerf ends its window at the final response of any
-    outcome; Bench ends it at the last successful completion, like
-    `window_seconds`.
+    latest terminal `sent + service_latency_s`), which is the same stage
+    window behind `throughput` and the stage token rates. Intervals are
+    clipped to that window.
   - **Failures are excluded.** Under errors or timeouts the server was also
     busy with the failed requests, so `effective_concurrency` understates
     server busyness. Compare it with `observed_concurrency`, which counts
@@ -158,10 +156,9 @@ Workload section. This page focuses on measured fields.
   - **`effective_prefill_concurrency`** (requests): requests between send and
     first generated token. Includes network, connect, and server queue time.
     This prefill is not the per-request `prefill_s`: that is
-    `ttft_s - connect_s` (visible TTFT, connect removed), while this split
+    `ttft_s - connect_s` (first-any TTFT, connect removed), while this split
     keeps connect time and ends at the first generated token, reasoning
-    included. On streaming runs without reasoning the two differ only by
-    connect time (0.18% on the parity mock).
+    included.
   - **`effective_decode_concurrency`** (requests): requests between first
     generated token and completion.
   - **`tokens_in_flight`** (tokens): KV-cache occupancy proxy. During prefill
@@ -178,9 +175,11 @@ Workload section. This page focuses on measured fields.
     tokens (`completion_tokens`, reasoning included) spread uniformly over
     its decode. Decode tokens include each request's first token, which
     arrives at the split point, so the full `completion_tokens` counts. `avg` over the full window equals output tokens of split rows
-    divided by `window_seconds`, so when every success streams and has a
-    positive decode time it matches `completion_tokens_per_second`;
-    otherwise it is lower. `active_avg` is the rate while at least
+    divided by `window_seconds`. It matches `completion_tokens_per_second`
+    only when the headline's complete reported usage is entirely covered by
+    successful split rows with positive decode time; usage on failed rows is
+    included in the headline but not this success-only phase proxy.
+    `active_avg` is the rate while at least
     one request decodes (the AIPerf "active" view); `max` is the peak
     aggregate rate. For both throughput blocks, rows whose phase has zero
     length or zero tokens have no defined rate and are skipped (`n`
@@ -232,8 +231,8 @@ Workload section. This page focuses on measured fields.
   `prefill_tps_per_user = isl_tokens / first_token_s`, where
   `first_token_s = min(first_reasoning_s, ttft_s)` (just `ttft_s` when the
   request streamed no reasoning delta). The denominator is the first generated
-  token of any kind: for a thinking model, visible `ttft_s` also covers the
-  whole reasoning phase, which would understate prefill speed. On modality summaries the ISL
+  token of any kind. In v1.8.0 `ttft_s` already uses this first-any clock.
+  On modality summaries the ISL
   follows the `isl_tokens` rule (server usage `prompt_tokens` wins, tokenizer
   count fills `usage_missing` rows, rows with no token accounting are
   skipped); strategic uses `input_tokens` from server usage only, with the
@@ -246,24 +245,22 @@ Workload section. This page focuses on measured fields.
   rate. It deliberately does not use `prefill_s` (`ttft_s - connect_s`): a
   TTFT-based rate stays comparable to AIPerf's per-user prefill throughput,
   and `prefill_s` exists only where connect timing is installed.
-- **Time to second token (`time_to_second_token_s`)**: per-request
-  `time_to_second_token_s = ttft_s + itl_s[0]`, seconds (#193). Only rows with
-  a TTFT and at least one ITL sample (two visible content chunks) contribute.
-  ITL is measured between SSE content chunks, so when a server packs several
-  tokens into one chunk this is the time to the second chunk, not strictly
-  the second token. It counts visible content chunks only: reasoning deltas
-  never enter `ttft_s` or `itl_s`. Same definition on modality summaries and strategic sweep
-  points.
-- **Request throughput**: measured successes divided by the explicit window.
-  The window is first measured send → last measured successful completion,
+- **Time to second visible chunk (`time_to_second_token_s`)**: per-request
+  `ttft_visible_answer_s + itl_s[0]`, seconds. Only rows with visible timing
+  and at least one ITL sample (two visible content chunks) contribute. ITL is
+  measured between visible SSE content chunks, not reasoning deltas; a chunk
+  can contain multiple tokens. The first-any headline `ttft_s` is not used as
+  the origin for visible-only ITL. The definition is shared by modality
+  summaries and strategic sweep points.
+- **Request throughput**: completed measured requests divided by the explicit window.
+  The window is first measured send → last measured terminal completion of any outcome,
   derived from monotonic `send_offset_s` (run-epoch `Instant`) plus
   `latency_s`. Wall-clock `started_at` is metadata only and must not be used
   to recompute the window (an NTP step would otherwise inflate it). The window
   excludes warmup and includes drain for requests issued during measurement.
   Strategic stages use the same rule over the stage rows (#224): the stage
   window runs from the earliest measured send of any outcome (the monotonic
-  CSV `send_offset_s`) to the latest successful `send + service_latency_s`
-  (the latest completion of any outcome when the stage has no success). Stage
+  CSV `send_offset_s`) to the latest terminal `send + service_latency_s`. Stage
   `throughput`, `goodput`, token rates, `cost_per_million_output_tokens`, the
   time-weighted blocks, and `compare` all share this window. `compare` reads
   CSVs written before `send_offset_s` existed on wall-clock `sent_unix_ns`,
@@ -284,40 +281,30 @@ Workload section. This page focuses on measured fields.
   `scheduled_offset_s`; closed-loop: `send_offset_s`), measured from the
   first measured request's offset. Each bin is divided by
   its **actual** width so a trailing partial bin is not under-normalized.
-- **Effective max concurrency**: stamped on `summary.v4.config` as
+- **Effective max concurrency**: stamped on `summary.v5.config` as
   `effective_max_concurrency`: `--max-concurrency` when set, otherwise the
   closed-loop `--concurrency` value that caps outstanding work.
-- **Token throughput**: successful server-usage tokens divided by that same
-  window. Optional local tokenizer counts are separate fields.
-- **Token totals and rates** (#193): summary `prompt_tokens_total` and
-  `completion_tokens_total` (integer tokens) sum per-request prompt and
-  completion tokens over measured successes. Server `usage` wins; tokenizer
-  counts fill only `usage_missing` rows. This is the accounting behind
-  `completion_tokens_per_second`:
+- **Token totals and rates**: summary `prompt_tokens_total` and
+  `completion_tokens_total` sum server-reported tokens over measured attempts,
+  including reported usage on unsuccessful outcomes. Tokenizer estimates do
+  not fill gaps in the headline. A missing usage row makes the total and rate
+  unavailable. Completion counts include reasoning. The shared window is
+  first measured send to last measured terminal completion:
   - `completion_tokens_per_second = completion_tokens_total / window_seconds`
   - `input_tokens_per_second = prompt_tokens_total / window_seconds`
   - `total_tokens_per_second = (prompt_tokens_total + completion_tokens_total) / window_seconds`
 
-  A total is `null` when no measured success reports tokens (ASR, imagegen)
-  or when any `usage_missing` row lacks a tokenizer count; its rate is then
-  `null` too. `completion_tokens_total` is `null` exactly when
-  `completion_tokens_per_second` is `null`. `total_tokens_per_second` is
-  `null` unless both totals exist. Strategic sweep points carry the same four
-  fields per stage from server usage only (no tokenizer fallback), summed over
-  successes that report usage (`input_tokens > 0` or `output_tokens > 0`) and
-  divided by the stage window (first measured send to latest successful
-  completion). Strategic `completion_tokens_total` (and so
-  `total_tokens_per_second`) is `null` for stages that generate no output
-  (`--kind embeddings`, `--kind rerank`, `--kind imagegen`); rerank `prompt_tokens_total` sums
-  `usage.total_tokens` (all input). A strategic total whose field sums to 0
-  (no row reported it) is `null`, as on the summary. The pre-existing
-  strategic `completion_tokens_per_second` is unchanged: it reads `0.0`, not
-  `null`, for any stage with successes but no reported output tokens
-  (including embeddings and rerank), so it can be `0.0` while
-  `completion_tokens_total` is `null`.
+  `total_tokens_per_second` is null unless both totals exist. The separately
+  named non-reasoning completion rate requires a complete reported reasoning
+  split; it is not necessarily a count of answer text. Rates with a zero or
+  non-finite window are null, not inflated by an artificial minimum duration.
+  Never count SSE chunks
+  as tokens. Strategic stages that do not generate output do not report a
+  completion-token rate.
 - **Error rate**: measured failures divided by measured attempts.
-- **Goodput**: measured successes satisfying every configured TTFT, TPOT,
-  E2E, and `user_tps` SLO divided by the window.
+- **Goodput**: answered measured successes satisfying every configured TTFT,
+  TPOT, E2E, and `user_tps` SLO divided by the window. Unanswered reasoning
+  truncations do not contribute.
 - **Cost per million output tokens**: when a declared hourly price is present
   (`--price-per-hour` or `sut.cost.price_per_hour`),
   `price_per_hour / (completion_tokens_per_second * 3600) * 1e6`.
@@ -386,17 +373,15 @@ Workload section. This page focuses on measured fields.
 
 ## Thinking models: TTFT vs first reasoning
 
-- **TTFT**: first visible output delta minus send; role and reasoning-only
-  deltas do not count. Includes connection setup, TLS and queueing. An
-  explicitly requested `first_token_fallback` or `first_byte_approx` is a
-  labelled substitute, not visible-answer TTFT. Non-streaming responses do
-  not have token TTFT. Completed reasoning-only streams ending in `length`
-  are `reasoning_truncated` errors; other no-answer streams are
-  `no_output_token` errors under every flag. `--ttft-fallback first-token`
-  uses a labelled real first token; `--allow-missing-ttft` relaxes the
-  missing-TTFT audit. `--infer-ttft-from-first-byte` instead uses HTTP header
-  timing, never a token. None makes a missing answer successful, and
-  `--ci-safety` remains strict.
+- **TTFT**: first nonempty reasoning or visible output delta minus send;
+  role, usage and finish frames do not count. Includes connection setup, TLS
+  and queueing. `ttft_visible_answer_s` separately records the first visible
+  delta. Non-streaming responses do not have token TTFT. A reasoning-only
+  `length` finish is `reasoning_truncated`, non-failing by default but not an
+  answer. Strict mode and `--ci-safety` reject it. Other no-answer streams
+  remain errors. `--ttft-fallback first-token` is a deprecated redundant
+  alias; `--allow-missing-ttft` only relaxes the missing-TTFT audit. Explicit
+  first-byte inference is labelled HTTP timing, never a token.
 - **First reasoning**: first non-empty `reasoning_content`/`reasoning` delta
   minus send. The summary and strategic point `first_reasoning_s` distribution
   includes measured completed no-answer streams. `ttft_first_any_s` is the
@@ -407,13 +392,15 @@ Workload section. This page focuses on measured fields.
   observations, reasoning-only streams, truncated outcomes, no-token errors,
   missing visible times, and source counts. The source counts partition
   measured requests; reasoning-only and truncated counts overlap. Fallback
-  times on failed requests have a separate `fallback_ttft_s` distribution and
-  do not enter the success-only headline, goodput or throughput.
+  times on failed requests have a separate `fallback_ttft_s` distribution;
+  completed reasoning-truncated streams contribute to first-any TTFT even
+  when strict mode classifies them as failures.
 - **Observed usage**: `observed_reasoning_tokens` and
   `observed_visible_completion_tokens` distributions/totals include measured
-  no-answer streams with server-reported usage. Missing usage stays null.
-  Legacy token and throughput aggregates remain success-only; completion-token
-  throughput includes reasoning, not just visible output.
+  no-answer streams with server-reported usage. Usage received before a stream
+  error is retained on the failed record; incomplete coverage keeps aggregate
+  token rates null. Completion-token throughput includes reasoning, not just visible output;
+  the separately named legacy rate uses the prior success cohort and window.
 - **Reasoning tokens** (`reasoning_tokens`, tokens): the server-reported
   count of reasoning tokens inside `completion_tokens` (#192). Read from the
   `usage` object (final usage chunk when streaming, response `usage`
@@ -480,7 +467,7 @@ to a modality run's single `measure` stage as well.
   (seconds). The `measure` stage window runs from the first measured send to
   the last measured completion. Mapping:
   [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md#modality-binaries).
-- **Summary telemetry counts**: `summary.v4.telemetry` (present only with
+- **Summary telemetry counts**: `summary.v5.telemetry` (present only with
   `--ndjson`) reports integer row counts per kind and
   `dropped_telemetry_rows`; a non-zero drop count means time-weighted
   telemetry math in that run has gaps. Strategic sweep points do not carry
@@ -536,7 +523,7 @@ full distributions are emitted independently per endpoint.
 ## Console vs JSONL
 
 Printed end-of-run statistics come from the same `RunSummary` / `DistSummary`
-values written as `summary.v4`. There is no separate nearest-rank console
+values written as `summary.v5`. There is no separate nearest-rank console
 estimator. The console prints First byte, Queue delay, First reasoning,
 ISL tokens (source), OSL tokens (source), Reasoning tokens (with the total),
 and Visible completion tokens lines only when that distribution has `n > 0`.

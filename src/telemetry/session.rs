@@ -45,7 +45,7 @@ pub struct TelemetryArgs {
     #[arg(
         long,
         value_name = "PATH",
-        help = "Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)"
+        help = "Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v3)"
     )]
     pub ndjson: Option<PathBuf>,
 
@@ -747,6 +747,12 @@ pub fn request_row(run_id: &str, record: &RequestRecord, base_ns: u64, load: f64
         ttft_source: record.ttft_source.map(|s| s.as_str().to_string()),
         first_reasoning_s: record.first_reasoning_s,
         ttft_first_any_s: record.ttft_first_any_s,
+        ttft_visible_answer_s: record.ttft_visible_answer_s,
+        outcome: record.outcome.clone(),
+        answer_completed: record.answer_completed,
+        usage_missing: Some(record.usage_missing),
+        usage_prompt_tokens_present: record.usage_prompt_tokens_present,
+        usage_completion_tokens_present: record.usage_completion_tokens_present,
         error: record.error.as_ref().map(|e| e.to_string()),
         telemetry_at_done: None,
         queue_sample_age_ms: None,

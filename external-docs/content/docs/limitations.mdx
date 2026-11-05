@@ -29,14 +29,14 @@ record its tag.
 
 ## Thinking streams and TTFT
 
-TTFT defaults to the first visible answer delta, not reasoning or HTTP headers.
-A reasoning-only length finish is `reasoning_truncated`; other completed
-no-answer streams are `no_output_token`. `--ttft-fallback first-token` and
-`--allow-missing-ttft` are exploratory options, not success overrides;
-`--ci-safety` still fails on errors. `--infer-ttft-from-first-byte` is an HTTP
+TTFT defaults to the first reasoning or visible output delta, not HTTP headers.
+A reasoning-only length finish is `reasoning_truncated`: non-failing by default
+but unanswered. Strict mode and `--ci-safety` reject it; other no-answer streams
+are errors. `--ttft-fallback first-token` is a deprecated redundant alias and
+`--allow-missing-ttft` relaxes only the audit. First-byte inference is an HTTP
 header approximation, not a token. Only choice index 0 is measured. Current
-request/summary output uses v4; compatible consumers can read historical v3
-logs. See [Output schema](./output-schema).
+request/summary output uses v5; v4 TTFT has different semantics. See
+[Output schema](./output-schema).
 
 ---
 

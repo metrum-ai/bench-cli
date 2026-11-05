@@ -128,9 +128,9 @@ collisions; `append` is the default.
 
 Each line in `--data-log` is a complete JSON object with `schema_version`.
 
-- **Request records** (`metrum-ai-bench-cli.request.v4`) flush on completion with
+- **Request records** (`metrum-ai-bench-cli.request.v5`) flush on completion with
   latency, optional TTFT / first-byte / ITL, errors, and modality metrics.
-- **Summary** (`metrum-ai-bench-cli.summary.v4`) carries counts, rates,
+- **Summary** (`metrum-ai-bench-cli.summary.v5`) carries counts, rates,
   distributions, goodput, environment metadata, optional `sut`, and `partial`.
 
 Printed end-of-run statistics come from the same summary values written to
@@ -138,6 +138,12 @@ JSONL. There is no separate console estimator.
 
 Multi-endpoint aggregates are labeled `pooled_mixture`. Use `per_endpoint`
 distributions for diagnosis; do not treat the pool as one homogeneous replica.
+
+For reasoning runs, inspect the truncation count and answered cohort. A null
+completion-token rate means reported usage is incomplete; visible chunks are
+not token counts. If reasoning is missing, check the configured parser. If
+answers are truncated, review the output cap and timeout before changing the
+workload. See [Reasoning models](./reasoning-models).
 
 Full field detail: [Output schema](./output-schema).
 

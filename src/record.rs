@@ -7,8 +7,10 @@ use serde::Serialize;
 use std::time::Duration;
 
 /// Request record schema (field-additive: config stamps, first_byte_s).
-pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench-cli.request.v4";
-pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench-cli.summary.v4";
+pub const SCHEMA_VERSION_REQUEST: &str = "metrum-ai-bench-cli.request.v5";
+pub const SCHEMA_VERSION_SUMMARY: &str = "metrum-ai-bench-cli.summary.v5";
+pub const SCHEMA_VERSION_REQUEST_V4: &str = "metrum-ai-bench-cli.request.v4";
+pub const SCHEMA_VERSION_SUMMARY_V4: &str = "metrum-ai-bench-cli.summary.v4";
 /// Previous field-additive schemas remain readable by audit consumers.
 pub const SCHEMA_VERSION_REQUEST_V3: &str = "metrum-ai-bench-cli.request.v3";
 pub const SCHEMA_VERSION_SUMMARY_V3: &str = "metrum-ai-bench-cli.summary.v3";
@@ -29,6 +31,8 @@ pub fn accepts_audit_schema(schema_version: &str) -> bool {
         schema_version,
         SCHEMA_VERSION_REQUEST
             | SCHEMA_VERSION_SUMMARY
+            | SCHEMA_VERSION_REQUEST_V4
+            | SCHEMA_VERSION_SUMMARY_V4
             | SCHEMA_VERSION_REQUEST_V3
             | SCHEMA_VERSION_SUMMARY_V3
             | SCHEMA_VERSION_REQUEST_V2
@@ -116,6 +120,15 @@ pub struct RequestRecord {
     pub chunks_received: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_s: Option<f64>,
+    /// First visible answer delta, distinct from first-any headline TTFT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_visible_answer_s: Option<f64>,
+    /// Completed-stream outcome, independent of strict error classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// Whether a completed chat stream contained visible answer output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_completed: Option<bool>,
     /// Provenance for `ttft_s`: `stream` or `first_byte_approx`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttft_source: Option<crate::measurement::TtftSource>,
@@ -160,6 +173,11 @@ pub struct RequestRecord {
     pub tokenized_completion_tokens: Option<u64>,
     #[serde(default)]
     pub usage_missing: bool,
+    /// Server usage-field presence; absent on older records or non-chat modalities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_prompt_tokens_present: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_completion_tokens_present: Option<bool>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub modality_metrics: std::collections::BTreeMap<String, f64>,
     /// String modality fields (e.g. imagegen artifact SHA-256 hex digests).
@@ -210,6 +228,9 @@ impl RequestRecord {
             decode_s: None,
             decode_tok_s: None,
             ttft_s: ttft.map(|d| d.as_secs_f64()),
+            ttft_visible_answer_s: ttft.map(|d| d.as_secs_f64()),
+            outcome: None,
+            answer_completed: None,
             ttft_source: ttft.map(|_| crate::measurement::TtftSource::Stream),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
             ttft_first_any_s: match (ttft, first_reasoning) {
@@ -228,6 +249,8 @@ impl RequestRecord {
             tokenized_prompt_tokens: None,
             tokenized_completion_tokens: None,
             usage_missing: false,
+            usage_prompt_tokens_present: None,
+            usage_completion_tokens_present: None,
             modality_metrics: std::collections::BTreeMap::new(),
             modality_labels: std::collections::BTreeMap::new(),
             error: None,
@@ -269,6 +292,9 @@ impl RequestRecord {
             decode_s: None,
             decode_tok_s: None,
             ttft_s: None,
+            ttft_visible_answer_s: None,
+            outcome: None,
+            answer_completed: None,
             ttft_source: None,
             first_reasoning_s: None,
             ttft_first_any_s: None,
@@ -282,12 +308,50 @@ impl RequestRecord {
             visible_completion_tokens: None,
             tokenized_prompt_tokens: None,
             tokenized_completion_tokens: None,
-            usage_missing: false,
+            usage_missing: true,
+            usage_prompt_tokens_present: None,
+            usage_completion_tokens_present: None,
             modality_metrics: std::collections::BTreeMap::new(),
             modality_labels: std::collections::BTreeMap::new(),
             error: Some(error),
             partial: false,
         }
+    }
+
+    /// Record a completed chat stream independently of strict error policy.
+    pub fn with_chat_outcome(mut self, error: Option<RequestError>, strict: bool) -> Self {
+        self.answer_completed = Some(self.ttft_visible_answer_s.is_some());
+        self.outcome = Some(
+            match &error {
+                Some(RequestError::ReasoningTruncated) => "reasoning_truncated",
+                Some(RequestError::NoOutputToken) => "no_output_token",
+                Some(_) => "error",
+                None => "answer",
+            }
+            .to_owned(),
+        );
+        self.error = match error {
+            Some(RequestError::ReasoningTruncated) if !strict => None,
+            other => other,
+        };
+        self.with_phase_metrics()
+    }
+
+    /// Record a non-streaming answer without fabricating a first-token clock.
+    pub fn with_nonstream_chat_outcome(mut self, answered: bool) -> Self {
+        self.answer_completed = Some(answered);
+        self.outcome = Some(
+            if answered {
+                "answer"
+            } else {
+                "no_output_token"
+            }
+            .to_owned(),
+        );
+        if !answered {
+            self.error = Some(RequestError::NoOutputToken);
+        }
+        self
     }
 
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
@@ -370,6 +434,15 @@ impl RequestRecord {
 
     pub fn is_success(&self) -> bool {
         self.error.is_none()
+    }
+
+    /// A terminal response can be transport-complete without containing an answer.
+    pub fn is_completed_response(&self) -> bool {
+        self.is_success()
+            || matches!(
+                self.outcome.as_deref(),
+                Some("reasoning_truncated" | "no_output_token")
+            )
     }
 
     pub fn with_schedule(mut self, scheduled_offset: Duration, queue_delay: Duration) -> Self {

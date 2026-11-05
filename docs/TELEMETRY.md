@@ -21,7 +21,7 @@ Every benchmark binary (`metrum-ai-bench-cli-llm`, `-vlm`, `-asr`,
 OpenMetrics exposition during a run and writes tagged NDJSON rows beside
 request and stage rows. All five share one writer and one lifecycle
 (`TelemetrySession` in `src/telemetry/session.rs`), so the YAML schema, the
-row kinds and `telemetry.v2` are the same everywhere (v1 remains readable).
+row kinds and `telemetry.v3` are the same everywhere (v1 and v2 remain readable).
 Hardware and engine signals reach the harness only
 through HTTP GET of a Prometheus `/metrics` endpoint. No
 NVML, ROCm, IPMI, or Redfish SDKs live in the binary: a new device is a YAML
@@ -67,7 +67,7 @@ Bench CLI writes the series matched by the YAML `include` into one NDJSON next
 to the per-request JSONL, so GPU series from any exporter can be correlated
 per request.
 
-Bench CLI splits the same job differently. `request.v4` and `summary.v4` are
+Bench CLI splits the same job differently. `request.v5` and `summary.v5` are
 the fixed client schema. Telemetry is not a second catalog in the binary:
 `TelemetryConfig::load` reads YAML at startup, `parse_exposition` keeps samples
 whose names match `include`, and the probe prints `matched_series` from the
@@ -108,13 +108,13 @@ Failure policy, the same for every binary:
   `scrape_error` row and the run continues. With it, N consecutive failures
   on one source stop the run from issuing new requests (or stages), the
   in-flight requests finish, and the binary exits non-zero. Modality
-  binaries still write `summary.v4` (with `partial: true`) and close the
+  binaries still write `summary.v5` (with `partial: true`) and close the
   NDJSON with `partial: true` before exiting. Strategic also closes its
   NDJSON with `partial: true` before exiting non-zero.
 - A scraper that exits without `--require-telemetry` (for example a panic)
   is a warning and never stops the run.
 - If the NDJSON itself cannot be written (for example a full disk), the
-  modality binary stops writing rows, still writes `summary.v4`, and then
+  modality binary stops writing rows, still writes `summary.v5`, and then
   exits non-zero.
 - `--require-telemetry` without `--telemetry` (or `--metrics-url` on
   strategic) is rejected at startup.
@@ -167,7 +167,7 @@ A modality run is one stage. Its NDJSON holds:
 
 - One `run` row first. `config.binary` names the binary; `config` never holds
   API keys.
-- One `request` row per `request.v4` record, written as each request
+- One `request` row per `request.v5` record, written as each request
   completes, joined on `seq` and `run_id`. Emission order is per-request
   completion order (the record channel's receive order), not `seq` order,
   and rows become visible to a tailing reader within the writer flush bound:
@@ -205,7 +205,7 @@ Boundary requests carry the header `x-metrum-telemetry-boundary:
 pre-measured`, so a real exporter or proxy can tell the synchronous
 baseline apart from periodic scrapes.
 
-`summary.v4` carries a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
+`summary.v5` carries a `telemetry` block (only with `--ndjson`): the NDJSON file name (no directories),
 `sources`, row counts per kind, and `dropped_telemetry_rows`. See
 [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
 

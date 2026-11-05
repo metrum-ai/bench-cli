@@ -63,7 +63,14 @@ metrum-ai-bench-cli-strategic \
   --mlperf-scenario server
 ```
 
-Each load stage is measured independently. `--warmup-requests` are issued and
+Each load stage is measured independently. In v1.8.0 chat and VLM headline
+TTFT is the first reasoning or visible delta; visible-answer timing is separate.
+The token-rate window runs from first measured send to last terminal completion,
+including failures, and incomplete usage makes the full token rate unavailable.
+Reasoning-only truncation is unanswered; strict mode and `--ci-safety` reject
+it. Compare older results only after aligning their cohorts and metric meanings.
+
+`--warmup-requests` are issued and
 fully completed at the start of every stage, then the measurement epoch resets.
 Warmup rows stay in the CSV (`warmup=true`) but are excluded from stage `n`,
 latency percentiles, throughput, goodput, and knee detection. Measured prompt

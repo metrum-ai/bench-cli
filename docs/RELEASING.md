@@ -4,7 +4,9 @@
 # Releasing Metrum AI Bench
 
 This document covers deliberate publish gates, pre-release (rc) policy, and
-how to verify signed release artifacts.
+how to verify signed release artifacts. See Metrum AI's
+[release certification policy and case catalog](RELEASE_CERTIFICATION.md)
+for candidate-wide criteria, evidence and prospective N/A requirements.
 
 ## Repository variables (publish gates)
 
@@ -119,8 +121,8 @@ site with `make -C external-docs build` to check both content and rendering.
 Every release states how many data points it tracks.
 [DATA_POINTS.md](DATA_POINTS.md) is generated from the serde schemas by
 `tests/data_points.rs`. Regenerate it with `cargo xtask render-data-points`
-after any change to `summary.v4`, `request.v4`, the strategic sweep point,
-or the `telemetry.v2` request row. Historical v3 logs remain readable by
+after any change to `summary.v5`, `request.v5`, the strategic sweep point,
+or the `telemetry.v3` request row. Historical v4 and v3 logs remain readable by
 compatible consumers. `cargo test` (CI) and the release `verify`
 job (`cargo xtask render-data-points --check`) fail when the committed file is
 stale. The `github-release` job builds the release body itself: GitHub's

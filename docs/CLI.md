@@ -95,15 +95,18 @@ Options:
           Enable streaming mode
 
       --infer-ttft-from-first-byte
-          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+          When actual first-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
 
       --ttft-fallback <TTFT_FALLBACK>
-          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+          Deprecated redundant alias: first actual streamed token is now the default
 
           [possible values: first-token]
 
       --allow-missing-ttft
           Allow missing TTFT in exploratory runs; request errors and safety gates still apply
+
+      --strict-reasoning-truncation
+          Fail reasoning-only length-truncated responses (implied by --ci-safety)
 
       --log-level <LOG_LEVEL>
           Log level: error, warn, info, debug, trace
@@ -241,7 +244,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v3)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -495,7 +498,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v3)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -512,15 +515,18 @@ Options:
           Enable streaming mode for measured TTFT/ITL
 
       --infer-ttft-from-first-byte
-          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+          When actual first-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
 
       --ttft-fallback <TTFT_FALLBACK>
-          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+          Deprecated redundant alias: first actual streamed token is now the default
 
           [possible values: first-token]
 
       --allow-missing-ttft
           Allow missing TTFT in exploratory runs; request errors and safety gates still apply
+
+      --strict-reasoning-truncation
+          Fail reasoning-only length-truncated responses (implied by --ci-safety)
 
       --max-tokens <MAX_TOKENS>
           Maximum number of tokens
@@ -768,7 +774,7 @@ Options:
           Suppress ASCII banner art (one-line identity still prints). Also set NO_BANNER=1.
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v3)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -1012,7 +1018,7 @@ Options:
           [default: append]
 
       --ndjson <PATH>
-          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v2)
+          Tagged NDJSON run log (run/stage/request/telemetry/summary rows, telemetry.v3)
 
       --telemetry <PATH>
           Telemetry scrape YAML (Prometheus /metrics or /metric sources); requires --ndjson
@@ -1251,15 +1257,24 @@ Options:
           Stream chat and vlm responses to measure TTFT; embeddings, rerank, asr and imagegen remain unary
 
       --infer-ttft-from-first-byte
-          When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
+          When actual first-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance
 
       --ttft-fallback <TTFT_FALLBACK>
-          Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful
+          Deprecated redundant alias: first actual streamed token is now the default
 
           [possible values: first-token]
 
       --allow-missing-ttft
           Allow missing TTFT in exploratory runs; request errors and safety gates still apply
+
+      --strict-reasoning-truncation
+          Fail reasoning-only length-truncated responses (implied by --ci-safety)
+
+      --fail-on-error
+          Exit non-zero when measured requests fail
+
+      --ci-safety
+          Enable strict reasoning truncation and fail on measured errors or interruption
 
       --requests-per-stage <REQUESTS_PER_STAGE>
           [default: 100]

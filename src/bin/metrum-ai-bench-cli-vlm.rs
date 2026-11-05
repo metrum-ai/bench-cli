@@ -199,11 +199,11 @@ struct Args {
     #[arg(
         long,
         default_value_t = false,
-        help = "When visible-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
+        help = "When actual first-token TTFT is missing, approximate it from HTTP time-to-first-byte and record provenance"
     )]
     infer_ttft_from_first_byte: bool,
 
-    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Use the first actual streamed token when visible TTFT is missing; does not make a missing answer successful")]
+    #[arg(long, value_parser = ["first-token"], conflicts_with = "infer_ttft_from_first_byte", help = "Deprecated redundant alias: first actual streamed token is now the default")]
     ttft_fallback: Option<String>,
 
     #[arg(
@@ -211,6 +211,12 @@ struct Args {
         help = "Allow missing TTFT in exploratory runs; request errors and safety gates still apply"
     )]
     allow_missing_ttft: bool,
+
+    #[arg(
+        long,
+        help = "Fail reasoning-only length-truncated responses (implied by --ci-safety)"
+    )]
+    strict_reasoning_truncation: bool,
 
     #[arg(long, help = "Maximum number of tokens")]
     max_tokens: u32,
@@ -311,6 +317,9 @@ async fn make_request(
         Option<u64>,
         Option<metrum_ai_bench::error::RequestError>,
         Option<String>,
+        bool,
+        (bool, bool),
+        Option<bool>,
     ),
     Box<dyn Error + Send + Sync>,
 > {
@@ -358,7 +367,7 @@ async fn make_request(
         .collect();
 
     if streaming {
-        let stream = metrum_ai_bench::chat_stream::consume_with_options(
+        let stream = metrum_ai_bench::chat_stream::consume_preserving_usage(
             metrum_ai_bench::connect_timing::counted(response.bytes_stream()),
             start_time,
             true,
@@ -380,6 +389,12 @@ async fn make_request(
             stream.reasoning_tokens,
             output_error,
             stream.finish_reason,
+            stream.usage_complete,
+            (
+                stream.prompt_tokens_present,
+                stream.completion_tokens_present,
+            ),
+            None,
         ));
     }
 
@@ -394,7 +409,12 @@ async fn make_request(
     let json_resp: Value = serde_json::from_str(&response_text)?;
     let total_time = start_time.elapsed();
 
-    let usage = json_resp.get("usage").ok_or("No usage information")?;
+    let usage = json_resp.get("usage").unwrap_or(&Value::Null);
+    let usage_complete = usage.get("prompt_tokens").and_then(Value::as_u64).is_some()
+        && usage
+            .get("completion_tokens")
+            .and_then(Value::as_u64)
+            .is_some();
     let prompt_tokens = usage
         .get("prompt_tokens")
         .and_then(|v| v.as_u64())
@@ -432,6 +452,11 @@ async fn make_request(
         reasoning_tokens,
         None,
         None,
+        usage_complete,
+        metrum_ai_bench::chat_stream::usage_presence(usage),
+        Some(metrum_ai_bench::chat_stream::response_has_visible_output(
+            &json_resp,
+        )),
     ))
 }
 
@@ -454,6 +479,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     args.common.apply_ci_safety_preset();
     if args.ttft_fallback.is_some() && !args.streaming {
         return Err("--ttft-fallback requires streaming".into());
+    }
+
+    if args.ttft_fallback.is_some() {
+        eprintln!("warning: --ttft-fallback is deprecated; first-any TTFT is now the default");
     }
 
     // Check for version-only flag first
@@ -1228,6 +1257,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let streaming = args.streaming;
         let infer_ttft = args.infer_ttft_from_first_byte;
         let first_token_fallback = args.ttft_fallback.is_some();
+        let strict_reasoning = args.strict_reasoning_truncation || args.common.ci_safety;
         let selected_images: Arc<[ImageData]> = selected_images.into();
         let phase = metrum_ai_bench::record::Phase::for_seq(slot.seq, args.common.warmup_requests);
         let seq = slot.seq;
@@ -1339,13 +1369,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     reasoning_tokens,
                     output_error,
                     finish_reason,
+                    usage_complete,
+                    usage_presence,
+                    nonstream_answer_completed,
                 )) => {
                     let completed_at =
                         metrum_ai_bench::runner::completed_at_from_start(started_at, response_time);
                     let tokenized_prompt_tokens = tokenizer.count(&prompt_text).ok().flatten();
                     let tokenized_completion_tokens =
                         tokenizer.count(&completion_text).ok().flatten();
-                    let usage_missing = completion_tokens == 0 && !completion_text.is_empty();
+                    let usage_missing = !usage_complete;
                     let resolved = metrum_ai_bench::measurement::resolve_ttft_with_fallback(
                         streaming,
                         ttft.map(|d| d.as_secs_f64()),
@@ -1376,12 +1409,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
-                    rec.error = output_error;
+                    if streaming {
+                        rec = rec.with_chat_outcome(output_error, strict_reasoning);
+                    } else if let Some(answered) = nonstream_answer_completed {
+                        rec = rec.with_nonstream_chat_outcome(answered);
+                    }
                     rec.finish_reason = finish_reason;
                     rec = rec.with_http_trace(http_trace);
                     rec.tokenized_prompt_tokens = tokenized_prompt_tokens;
                     rec.tokenized_completion_tokens = tokenized_completion_tokens;
                     rec.usage_missing = usage_missing;
+                    rec.usage_prompt_tokens_present = Some(usage_presence.0);
+                    rec.usage_completion_tokens_present = Some(usage_presence.1);
                     // Payload size is what the server actually received, so it
                     // reflects --max-image-dimension and --reencode-jpeg.
                     rec.modality_metrics
@@ -1455,6 +1494,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
+                    if let Some(failure) =
+                        e.downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
+                    {
+                        rec.prompt_tokens = failure.usage.prompt_tokens;
+                        rec.completion_tokens = failure.usage.completion_tokens;
+                        rec.total_tokens = failure.usage.total_tokens;
+                        rec = rec.with_reasoning_tokens(failure.usage.reasoning_tokens);
+                        rec.usage_missing = !failure.usage.usage_complete;
+                        rec.usage_prompt_tokens_present = Some(failure.usage.prompt_tokens_present);
+                        rec.usage_completion_tokens_present =
+                            Some(failure.usage.completion_tokens_present);
+                    } else {
+                        rec.usage_prompt_tokens_present = Some(false);
+                        rec.usage_completion_tokens_present = Some(false);
+                    }
                     if record_schedule {
                         rec = rec.with_schedule(scheduled_delay, queue_delay);
                     }
@@ -1516,12 +1570,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let (telemetry_info, telemetry_verdict) =
         metrum_ai_bench::telemetry::close_session(telemetry, stop.is_stopped()).await;
+    // No measured span means an undefined rate, not elapsed setup/warmup time.
     let window_seconds = metrum_ai_bench::runner::window_seconds_from_records(&records);
-    let window_seconds = if window_seconds > 0.0 {
-        window_seconds
-    } else {
-        start_time.elapsed().as_secs_f64()
-    };
     let slos = args.common.parse_slos()?;
     let vlm_system = args
         .common
@@ -1606,6 +1656,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             if args.allow_missing_ttft {
                 map.insert("allow_missing_ttft".into(), serde_json::json!(true));
             }
+            map.insert(
+                "strict_reasoning_truncation".into(),
+                serde_json::json!(args.strict_reasoning_truncation || args.common.ci_safety),
+            );
             if args.infer_ttft_from_first_byte {
                 map.insert("infer_ttft_from_first_byte".into(), serde_json::json!(true));
             }
@@ -1641,13 +1695,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         warn!("Failed to write summary JSONL: {e}");
     }
     shared_summary.print_console();
+    let truncated = shared_summary.ttft_coverage.reasoning_truncated;
+    if truncated > 0 {
+        eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", shared_summary.attempted);
+    }
     ttft_audit?;
     telemetry_verdict?;
     let measure_errors = records
         .iter()
         .filter(|r| r.phase == metrum_ai_bench::record::Phase::Measure && !r.is_success())
         .count();
-    if args.common.fail_on_error && measure_errors > 0 {
+    if (args.strict_reasoning_truncation && truncated > 0)
+        || (args.common.fail_on_error && measure_errors > 0)
+    {
         Err("Test completed with errors".into())
     } else if args.common.fail_on_partial && stop.is_stopped() {
         // Interrupted run rejected by the agent/CI preset (#303). The

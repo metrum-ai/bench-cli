@@ -101,6 +101,25 @@ pub struct BenchRecord {
     /// older CSV readers keep their positions.
     #[serde(default)]
     pub send_offset_s: Option<f64>,
+    /// Visible-answer timing, independent of the first-any headline.
+    #[serde(default)]
+    pub ttft_visible_answer_s: Option<f64>,
+    /// Completed stream outcome, independent of strict failure policy.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub answer_completed: Option<bool>,
+    /// Older CSVs have no completeness marker; do not assume their usage is complete.
+    #[serde(default = "unknown_usage_is_missing")]
+    pub usage_missing: bool,
+    #[serde(default)]
+    pub usage_prompt_tokens_present: Option<bool>,
+    #[serde(default)]
+    pub usage_completion_tokens_present: Option<bool>,
+}
+
+fn unknown_usage_is_missing() -> bool {
+    true
 }
 
 fn serialize_itl_s<S>(itl: &[f64], serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -132,6 +151,15 @@ where
 }
 
 impl BenchRecord {
+    /// A terminal response can be transport-complete without containing an answer.
+    pub fn is_completed_response(&self) -> bool {
+        self.success
+            || matches!(
+                self.outcome.as_deref(),
+                Some("reasoning_truncated" | "no_output_token")
+            )
+    }
+
     /// First observed visible or reasoning delta, never an HTTP approximation.
     pub fn first_any_s(&self) -> Option<f64> {
         let visible = if self.ttft_source == Some(crate::measurement::TtftSource::Stream) {
@@ -201,7 +229,7 @@ pub struct SweepPoint {
     pub load: f64,
     pub n: usize,
     pub errors: usize,
-    pub throughput: f64,
+    pub throughput: Option<f64>,
     /// Type-7 latency distribution over successful requests.
     pub latency_s: crate::stats::DistSummary,
     pub p50_s: Option<f64>,
@@ -212,7 +240,7 @@ pub struct SweepPoint {
     pub validity_rate: Option<f64>,
     /// Schema-valid successes that also meet optional `--slo` thresholds.
     /// Without SLOs this equals validity-filtered throughput (often == throughput).
-    pub goodput: f64,
+    pub goodput: Option<f64>,
     /// True when no SLO thresholds were applied (goodput is validity-only).
     pub goodput_equals_throughput: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,6 +254,12 @@ pub struct SweepPoint {
     pub users_meeting_user_tps: Option<usize>,
     /// Stage output-token throughput (success tokens / window).
     pub completion_tokens_per_second: Option<f64>,
+    pub non_reasoning_completion_tokens_per_second: Option<f64>,
+    /// v1.7.2 successful completion tokens over first send to last old-style success.
+    pub legacy_success_completion_tokens_per_second: Option<f64>,
+    pub answered_requests: usize,
+    pub answered_requests_per_second: Option<f64>,
+    pub ttft_visible_answer_s: crate::stats::DistSummary,
     /// Sum of server `usage` input tokens over stage successes that report
     /// usage; null when no success reports usage.
     pub prompt_tokens_total: Option<u64>,
@@ -239,7 +273,7 @@ pub struct SweepPoint {
     /// Per-request prefill rate `input_tokens / min(first_reasoning_s, ttft_s)` over successes with both
     /// and visible-token TTFT (first-byte approximations excluded).
     pub prefill_tps_per_user: crate::stats::DistSummary,
-    /// Per-request `ttft_s + itl_s[0]`; streaming successes with two or more content chunks.
+    /// Visible TTFT plus first visible ITL; successes with two or more visible chunks.
     pub time_to_second_token_s: crate::stats::DistSummary,
     /// `$ / 1M output tokens` from declared price and stage token rate; null when absent.
     pub cost_per_million_output_tokens: Option<f64>,
@@ -253,7 +287,7 @@ pub struct SweepPoint {
     pub prefill_s: crate::stats::DistSummary,
     pub decode_s: crate::stats::DistSummary,
     pub decode_tok_s: crate::stats::DistSummary,
-    /// Type-7 TTFT distribution over measured successes with a recorded TTFT.
+    /// Type-7 TTFT distribution over measured successes and completed truncations.
     #[serde(default)]
     pub ttft_s: crate::stats::DistSummary,
     /// Send to response headers over measured successes.
@@ -350,8 +384,8 @@ fn strategic_meets_slos(record: &BenchRecord, slos: &crate::summary::SloConfig) 
 
 /// Time-weighted blocks for one stage. Times are seconds from the first
 /// measured send on the [`SendClock`] (monotonic when recorded).
-/// The window runs from the first measured send (any outcome) to the latest
-/// successful completion, the same rule as `runner::window_seconds_from_records`,
+/// The window runs from the first measured send to the latest terminal
+/// completion of any outcome, the same rule as `runner::window_seconds_from_records`,
 /// so no success is clipped. Token rules match the stage `isl_tokens` /
 /// `osl_tokens` (server `usage`, rows reporting none skipped).
 fn stage_time_weighted(
@@ -390,12 +424,11 @@ fn stage_time_weighted(
 
 /// Stage window in seconds behind every stage rate (`throughput`, `goodput`,
 /// the token rates): the earliest measured send (any outcome) to the latest
-/// successful completion, the same rule as the time-weighted blocks and
-/// `runner::window_seconds_from_records`. Taking min and max over the rows,
-/// not the first and last spawned, keeps an earlier request that finishes
-/// last inside the window (#224). A stage with no success ends at the latest
-/// completion of any outcome. Warmup rows are ignored. `None` when the stage
-/// has no measured rows.
+/// terminal completion of any outcome, the same rule as the time-weighted
+/// blocks and `runner::window_seconds_from_records`. Taking min and max over
+/// the rows, not the first and last spawned, keeps an earlier request that
+/// finishes last inside the window. Warmup rows are ignored. `None` means no
+/// measured rows; a zero-duration measured stage returns `Some(0.0)`.
 pub fn stage_window_seconds<'a>(records: impl IntoIterator<Item = &'a BenchRecord>) -> Option<f64> {
     let measured: Vec<&BenchRecord> = records.into_iter().filter(|r| !r.warmup).collect();
     let clock = SendClock::new(&measured)?;
@@ -409,13 +442,8 @@ pub fn stage_window_seconds<'a>(records: impl IntoIterator<Item = &'a BenchRecor
         };
         clock.send_s(r) + latency
     };
-    let end = measured
-        .iter()
-        .filter(|r| r.success)
-        .map(end_of)
-        .max_by(f64::total_cmp)
-        .or_else(|| measured.iter().map(end_of).max_by(f64::total_cmp))?;
-    Some(end.max(f64::EPSILON))
+    let end = measured.iter().map(end_of).max_by(f64::total_cmp)?;
+    Some(end.max(0.0))
 }
 
 /// Send times for one stage, in seconds from its earliest measured send.
@@ -535,10 +563,14 @@ pub fn summarize_stage_with_options(
     let good = measured
         .iter()
         .filter(|record| {
-            record.success && record.valid.unwrap_or(true) && strategic_meets_slos(record, slos)
+            record.success
+                && record.answer_completed != Some(false)
+                && record.valid.unwrap_or(true)
+                && strategic_meets_slos(record, slos)
         })
         .count();
-    let elapsed = seconds.max(f64::EPSILON);
+    let valid_window = seconds.is_finite() && seconds > 0.0;
+    let elapsed = if valid_window { seconds } else { 1.0 };
     let user_rates: Vec<f64> = success_rows
         .iter()
         .filter_map(|record| record.user_tps())
@@ -557,8 +589,50 @@ pub fn summarize_stage_with_options(
             load * (meeting as f64 / successes as f64)
         }
     });
-    let output_tokens: u64 = success_rows.iter().map(|record| record.output_tokens).sum();
-    let completion_tokens_per_second = (successes > 0).then_some(output_tokens as f64 / elapsed);
+    let legacy_rows: Vec<&&BenchRecord> = success_rows
+        .iter()
+        .filter(|r| r.outcome.as_deref() != Some("reasoning_truncated"))
+        .collect();
+    let legacy_success_completion_tokens_per_second = SendClock::new(&measured).and_then(|clock| {
+        if legacy_rows.is_empty() || legacy_rows.iter().any(|r| r.usage_missing) {
+            return None;
+        }
+        let end = legacy_rows
+            .iter()
+            .map(|r| clock.send_s(r) + r.service_latency_s.max(0.0))
+            .max_by(f64::total_cmp)?;
+        (end.is_finite() && end > 0.0)
+            .then(|| legacy_rows.iter().map(|r| r.output_tokens).sum::<u64>() as f64 / end)
+    });
+    let complete_usage = !measured.is_empty() && measured.iter().all(|r| !r.usage_missing);
+    let output_tokens: u64 = measured.iter().map(|record| record.output_tokens).sum();
+    let completion_tokens_per_second = (valid_window && complete_usage && generates_output)
+        .then_some(output_tokens as f64 / elapsed);
+    let non_reasoning_completion_tokens_per_second = if valid_window
+        && complete_usage
+        && generates_output
+        && measured
+            .iter()
+            .all(|r| r.reasoning_tokens.is_some_and(|n| n <= r.output_tokens))
+    {
+        Some(
+            measured
+                .iter()
+                .map(|r| r.output_tokens - r.reasoning_tokens.unwrap_or(0))
+                .sum::<u64>() as f64
+                / elapsed,
+        )
+    } else {
+        None
+    };
+    let answered_requests = measured
+        .iter()
+        .filter(|r| r.answer_completed == Some(true))
+        .count();
+    let visible_ttft: Vec<f64> = measured
+        .iter()
+        .filter_map(|r| r.ttft_visible_answer_s)
+        .collect();
     let cost_per_million_output_tokens = match (price_per_hour, completion_tokens_per_second) {
         (Some(price), Some(rate)) => crate::summary::cost_per_million_output_tokens(price, rate),
         _ => None,
@@ -579,9 +653,10 @@ pub fn summarize_stage_with_options(
         .iter()
         .filter_map(|record| record.decode_tok_s)
         .collect();
-    let ttft: Vec<f64> = success_rows
+    let ttft: Vec<f64> = measured
         .iter()
-        .filter_map(|record| record.ttft_s)
+        .filter(|r| r.is_completed_response())
+        .filter_map(|r| r.ttft_s)
         .collect();
     let first_byte: Vec<f64> = success_rows
         .iter()
@@ -613,7 +688,6 @@ pub fn summarize_stage_with_options(
     for record in &measured {
         match record.ttft_source {
             Some(crate::measurement::TtftSource::Stream) => {
-                coverage.visible += 1;
                 coverage.stream += 1;
             }
             Some(crate::measurement::TtftSource::FirstTokenFallback) => {
@@ -624,12 +698,15 @@ pub fn summarize_stage_with_options(
             }
             None => coverage.unresolved += 1,
         }
-        if record.first_reasoning_s.is_some()
-            && record.ttft_source != Some(crate::measurement::TtftSource::Stream)
-        {
+        if record.ttft_visible_answer_s.is_some() {
+            coverage.visible += 1;
+        }
+        if record.first_reasoning_s.is_some() && record.ttft_visible_answer_s.is_none() {
             coverage.reasoning_only += 1;
         }
-        if record.error.as_deref() == Some("reasoning truncated before visible output") {
+        if record.outcome.as_deref() == Some("reasoning_truncated")
+            || record.error.as_deref() == Some("reasoning truncated before visible output")
+        {
             coverage.reasoning_truncated += 1;
         }
         if record.error.as_deref() == Some("no output token") && record.first_reasoning_s.is_none()
@@ -666,6 +743,7 @@ pub fn summarize_stage_with_options(
     let observed_reasoning: Vec<u64> = measured.iter().filter_map(|r| r.reasoning_tokens).collect();
     let observed_visible: Vec<u64> = measured
         .iter()
+        .filter(|r| !r.usage_missing)
         .filter_map(|r| {
             crate::usage::visible_completion_tokens(r.output_tokens, r.reasoning_tokens)
         })
@@ -688,21 +766,14 @@ pub fn summarize_stage_with_options(
     } else {
         Vec::new()
     };
-    // A field no row reported (sum 0) is not applicable, never a 0 total;
-    // same rule as the modality summary.
-    let field_total = |pick: fn(&BenchRecord) -> u64| {
-        crate::summary::total(&token_rows.iter().map(|r| pick(r)).collect::<Vec<_>>())
-            .filter(|&tokens| tokens > 0)
-    };
-    let prompt_tokens_total = field_total(|r| r.input_tokens);
-    let completion_tokens_total = if generates_output {
-        field_total(|r| r.output_tokens)
-    } else {
-        None
-    };
-    let input_tokens_per_second = prompt_tokens_total.map(|t| t as f64 / elapsed);
+    let prompt_tokens_total =
+        complete_usage.then(|| measured.iter().map(|r| r.input_tokens).sum::<u64>());
+    let completion_tokens_total = (complete_usage && generates_output).then_some(output_tokens);
+    let input_tokens_per_second = prompt_tokens_total
+        .filter(|_| valid_window)
+        .map(|t| t as f64 / elapsed);
     let total_tokens_per_second = match (prompt_tokens_total, completion_tokens_total) {
-        (Some(p), Some(c)) => Some(p.saturating_add(c) as f64 / elapsed),
+        (Some(p), Some(c)) if valid_window => Some(p.saturating_add(c) as f64 / elapsed),
         _ => None,
     };
     let prefill_rates: Vec<f64> = success_rows
@@ -719,7 +790,15 @@ pub fn summarize_stage_with_options(
         .collect();
     let second_token: Vec<f64> = success_rows
         .iter()
-        .filter_map(|record| Some(record.ttft_s? + record.itl_s.first()?))
+        .filter_map(|record| {
+            let visible = record.ttft_visible_answer_s.or_else(|| {
+                (record.first_reasoning_s.is_none()
+                    && !crate::summary::ttft_is_first_byte_approx(record.ttft_source))
+                .then_some(record.ttft_s)
+                .flatten()
+            })?;
+            Some(visible + record.itl_s.first()?)
+        })
         .collect();
     let reasoning: Vec<u64> = success_rows
         .iter()
@@ -774,7 +853,13 @@ pub fn summarize_stage_with_options(
         load,
         n: measured.len(),
         errors,
-        throughput: successes as f64 / elapsed,
+        throughput: valid_window.then(|| {
+            measured
+                .iter()
+                .filter(|r| r.is_completed_response())
+                .count() as f64
+                / elapsed
+        }),
         latency_s: latency_s.clone(),
         p50_s: latency_s.p50,
         p95_s: latency_s.p95,
@@ -786,13 +871,23 @@ pub fn summarize_stage_with_options(
             Some(errors as f64 / measured.len() as f64)
         },
         validity_rate: (validity_count > 0).then_some(valid as f64 / successes.max(1) as f64),
-        goodput: good as f64 / elapsed,
-        goodput_equals_throughput: no_slos,
+        goodput: valid_window.then_some(good as f64 / elapsed),
+        goodput_equals_throughput: no_slos
+            && good
+                == measured
+                    .iter()
+                    .filter(|r| r.is_completed_response())
+                    .count(),
         slo_thresholds_s: (!no_slos).then_some(thresholds),
         user_tps,
         users_at_slo,
         users_meeting_user_tps: meeting_user_tps,
         completion_tokens_per_second,
+        non_reasoning_completion_tokens_per_second,
+        legacy_success_completion_tokens_per_second,
+        answered_requests,
+        answered_requests_per_second: valid_window.then_some(answered_requests as f64 / elapsed),
+        ttft_visible_answer_s: crate::stats::DistSummary::from_values(&visible_ttft),
         prompt_tokens_total,
         completion_tokens_total,
         input_tokens_per_second,
@@ -1022,14 +1117,17 @@ fn first_saturated_stage(points: &[SweepPoint], axis: KneeLoadAxis) -> Option<us
         let one_wave = previous.load >= previous.n as f64 && point.load >= point.n as f64;
         if axis == KneeLoadAxis::Concurrency
             && !one_wave
-            && previous.throughput > 0.0
             && previous.load > 0.0
             && point.load > previous.load
         {
-            let gain = (point.throughput - previous.throughput) / previous.throughput;
-            let load_gain = (point.load - previous.load) / previous.load;
-            if gain < KNEE_MIN_MARGINAL_GAIN * load_gain {
-                return Some(index);
+            if let (Some(previous_rate), Some(rate)) = (previous.throughput, point.throughput) {
+                if previous_rate > 0.0 {
+                    let gain = (rate - previous_rate) / previous_rate;
+                    let load_gain = (point.load - previous.load) / previous.load;
+                    if gain < KNEE_MIN_MARGINAL_GAIN * load_gain {
+                        return Some(index);
+                    }
+                }
             }
         }
         if let Some(rate) = point.error_rate {
@@ -1103,7 +1201,7 @@ pub fn detect_knee_on_axis(points: &[SweepPoint], axis: KneeLoadAxis) -> KneeDet
     let curve: Vec<(usize, f64, f64)> = points
         .iter()
         .enumerate()
-        .filter_map(|(index, point)| point.p95_s.map(|p95| (index, point.throughput, p95)))
+        .filter_map(|(index, point)| Some((index, point.throughput?, point.p95_s?)))
         .collect();
     let mut detection = KneeDetection::new(axis, curve.len());
     if curve.len() < KNEE_MIN_POINTS {
@@ -1409,6 +1507,12 @@ struct CsvBenchRecord {
     send_offset_s: Option<f64>,
     #[serde(getter = "BenchRecord::first_any_s")]
     ttft_first_any_s: Option<f64>,
+    ttft_visible_answer_s: Option<f64>,
+    outcome: Option<String>,
+    answer_completed: Option<bool>,
+    usage_missing: bool,
+    usage_prompt_tokens_present: Option<bool>,
+    usage_completion_tokens_present: Option<bool>,
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
@@ -1489,7 +1593,7 @@ pub fn export_html(
 
     let max_x = points
         .iter()
-        .map(|point| point.throughput)
+        .filter_map(|point| point.throughput)
         .fold(0.0_f64, f64::max)
         .max(1.0);
     let max_y = points
@@ -1504,15 +1608,14 @@ pub fn export_html(
     let coordinates: Vec<_> = points
         .iter()
         .map(|point| {
-            (
-                map_x(point.throughput),
-                map_y(point.p95_s.unwrap_or_default()),
-            )
+            point
+                .throughput
+                .map(|rate| (map_x(rate), map_y(point.p95_s.unwrap_or_default())))
         })
         .collect();
     let polyline = coordinates
         .iter()
-        .map(|(x, y)| format!("{x:.1},{y:.1}"))
+        .filter_map(|coordinate| coordinate.map(|(x, y)| format!("{x:.1},{y:.1}")))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -1569,22 +1672,23 @@ pub fn export_html(
     let dots: String = coordinates
         .iter()
         .enumerate()
-        .map(|(index, (x, y))| {
+        .filter_map(|(index, coordinate)| {
+            let (x, y) = (*coordinate)?;
             let label = points
                 .get(index)
                 .map(|p| {
                     format!(
-                        "load={:.3} thr={:.2} p95={}",
+                        "load={:.3} thr={} p95={}",
                         p.load,
-                        p.throughput,
+                        p.throughput.map(|value| format!("{value:.2}")).unwrap_or_else(|| "-".into()),
                         format_tick(p.p95_s.unwrap_or_default())
                     )
                 })
                 .unwrap_or_default();
-            format!(
+            Some(format!(
                 r##"<circle cx="{x:.1}" cy="{y:.1}" r="3.5" fill="#2563eb"><title>{}</title></circle>"##,
                 escape_html(&label)
-            )
+            ))
         })
         .collect();
 
@@ -1593,7 +1697,7 @@ pub fn export_html(
         .enumerate()
         .map(|(index, point)| {
             format!(
-                "<tr{}><td>{:.2}</td><td>{}</td><td>{:.2}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>",
+                "<tr{}><td>{:.2}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 if knee.index == Some(index) {
                     " class=knee"
                 } else {
@@ -1601,7 +1705,7 @@ pub fn export_html(
                 },
                 point.load,
                 point.n,
-                point.throughput,
+                point.throughput.map(|value| format!("{value:.2}")).unwrap_or_else(|| "-".into()),
                 point
                     .p95_s
                     .map(|value| format!("{value:.3}"))
@@ -1614,13 +1718,13 @@ pub fn export_html(
                     .error_rate
                     .map(|value| format!("{:.2}%", value * 100.0))
                     .unwrap_or_else(|| "-".to_string()),
-                point.goodput
+                point.goodput.map(|value| format!("{value:.2}")).unwrap_or_else(|| "-".into())
             )
         })
         .collect::<String>();
     let knee_circle = knee
         .index
-        .and_then(|index| coordinates.get(index))
+        .and_then(|index| coordinates.get(index).copied().flatten())
         .map(|(x, y)| {
             format!(
                 r##"<circle cx="{x:.1}" cy="{y:.1}" r="7" fill="#ef4444"><title>knee</title></circle>"##
@@ -1844,7 +1948,7 @@ mod tests {
             load: throughput,
             n: 1,
             errors: 0,
-            throughput,
+            throughput: Some(throughput),
             latency_s: latency_s.clone(),
             p50_s: Some(latency),
             p95_s: Some(latency),
@@ -1852,7 +1956,12 @@ mod tests {
             p99_unreliable: latency_s.p99_unreliable,
             error_rate: Some(0.0),
             validity_rate: None,
-            goodput: throughput,
+            goodput: Some(throughput),
+            legacy_success_completion_tokens_per_second: None,
+            ttft_visible_answer_s: crate::stats::DistSummary::from_values(&[]),
+            answered_requests: 0,
+            answered_requests_per_second: Some(0.0),
+            non_reasoning_completion_tokens_per_second: None,
             goodput_equals_throughput: true,
             slo_thresholds_s: None,
             user_tps: crate::stats::DistSummary::from_values(&[]),
@@ -2379,7 +2488,7 @@ mod tests {
             load: 1.0,
             n: 2,
             errors: 0,
-            throughput: 10.0,
+            throughput: Some(10.0),
             latency_s: latency_s.clone(),
             p50_s: Some(0.1),
             p95_s: Some(0.2),
@@ -2387,7 +2496,12 @@ mod tests {
             p99_unreliable: true,
             error_rate: Some(0.0),
             validity_rate: None,
-            goodput: 10.0,
+            goodput: Some(10.0),
+            legacy_success_completion_tokens_per_second: None,
+            ttft_visible_answer_s: crate::stats::DistSummary::from_values(&[]),
+            answered_requests: 0,
+            answered_requests_per_second: Some(0.0),
+            non_reasoning_completion_tokens_per_second: None,
             goodput_equals_throughput: true,
             slo_thresholds_s: None,
             user_tps: crate::stats::DistSummary::from_values(&[]),
@@ -2540,6 +2654,7 @@ mod tests {
             bytes_received: Some(1),
             chunks_received: Some(1),
             send_offset_s: Some(1.0),
+            ..Default::default()
         };
         let failure = BenchRecord {
             error: Some("failed".into()),
@@ -2627,6 +2742,7 @@ mod tests {
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let slos = crate::summary::SloConfig::default();
         // Closed loop: scheduled == sent on every row, queue delay not applicable.
@@ -2712,6 +2828,7 @@ mod tests {
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let point = summarize_stage_with_options(
             1.0,
@@ -2733,6 +2850,70 @@ mod tests {
         assert!(point.input_tokens_per_second.is_some());
         assert!(point.completion_tokens_total.is_none());
         assert!(point.total_tokens_per_second.is_none());
+    }
+
+    #[test]
+    fn legacy_csv_without_usage_marker_is_conservatively_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("requests.csv");
+        let record = BenchRecord {
+            success: true,
+            input_tokens: 10,
+            output_tokens: 20,
+            ..Default::default()
+        };
+        export_csv(&path, &[record]).unwrap();
+        let mut reader = csv::Reader::from_path(path).unwrap();
+        let header = reader.headers().unwrap().clone();
+        assert_eq!(header.get(header.len() - 3), Some("usage_missing"));
+        let row = reader.records().next().unwrap().unwrap();
+        let mut writer = csv::Writer::from_writer(Vec::new());
+        writer
+            .write_record(header.iter().take(header.len() - 3))
+            .unwrap();
+        writer.write_record(row.iter().take(row.len() - 3)).unwrap();
+        let csv = writer.into_inner().unwrap();
+        let legacy: BenchRecord = csv::Reader::from_reader(csv.as_slice())
+            .deserialize()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert!(legacy.usage_missing);
+        let point = summarize_stage(
+            1.0,
+            &[legacy],
+            1.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert!(point.completion_tokens_per_second.is_none());
+    }
+
+    #[test]
+    fn strategic_undefined_window_rates_are_null() {
+        let record = BenchRecord {
+            success: true,
+            input_tokens: 10,
+            output_tokens: 20,
+            answer_completed: Some(true),
+            ..Default::default()
+        };
+        let point = summarize_stage(
+            1.0,
+            &[record],
+            0.0,
+            &crate::summary::SloConfig::default(),
+            None,
+        );
+        assert!(point.throughput.is_none());
+        assert!(point.goodput.is_none());
+        assert!(point.answered_requests_per_second.is_none());
+        assert!(point.completion_tokens_per_second.is_none());
+        assert!(point.input_tokens_per_second.is_none());
+        assert!(point.total_tokens_per_second.is_none());
+        let json = serde_json::to_value(point).unwrap();
+        assert!(json["throughput"].is_null());
+        assert!(json["goodput"].is_null());
     }
 
     #[test]
@@ -2772,6 +2953,7 @@ mod tests {
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let mut second = base.clone();
         second.seq = 1;
@@ -2785,7 +2967,7 @@ mod tests {
         unary.seq = 2;
         unary.ttft_s = None;
         unary.itl_s = Vec::new();
-        // Failed rows never count.
+        // Failed rows with reported usage count toward aggregate token work.
         let mut failed = base.clone();
         failed.seq = 3;
         failed.success = false;
@@ -2798,9 +2980,8 @@ mod tests {
             &crate::summary::SloConfig::default(),
             None,
         );
-        let ok = [&base, &second, &unary];
-        let prompt: u64 = ok.iter().map(|r| r.input_tokens).sum();
-        let completion: u64 = ok.iter().map(|r| r.output_tokens).sum();
+        let prompt: u64 = rows.iter().map(|r| r.input_tokens).sum();
+        let completion: u64 = rows.iter().map(|r| r.output_tokens).sum();
         assert_eq!(point.prompt_tokens_total, Some(prompt));
         assert_eq!(point.completion_tokens_total, Some(completion));
         assert_eq!(point.input_tokens_per_second, Some(prompt as f64 / window));
@@ -2833,6 +3014,7 @@ mod tests {
         let mut bare = base.clone();
         bare.input_tokens = 0;
         bare.output_tokens = 0;
+        bare.usage_missing = true;
         let empty = summarize_stage(
             1.0,
             &[bare],
@@ -2845,21 +3027,21 @@ mod tests {
         assert!(empty.input_tokens_per_second.is_none());
         assert!(empty.total_tokens_per_second.is_none());
         assert_eq!(empty.prefill_tps_per_user.n, 0);
-        // Usage with output only: the prompt total is not applicable, not 0.
+        // A reported zero prompt count is distinct from missing usage.
         let mut output_only = base.clone();
         output_only.input_tokens = 0;
         let slos = crate::summary::SloConfig::default();
         let point = summarize_stage(1.0, &[output_only], 1.0, &slos, None);
-        assert!(point.prompt_tokens_total.is_none());
-        assert!(point.input_tokens_per_second.is_none());
-        assert!(point.total_tokens_per_second.is_none());
+        assert_eq!(point.prompt_tokens_total, Some(0));
+        assert_eq!(point.input_tokens_per_second, Some(0.0));
+        assert_eq!(point.total_tokens_per_second, Some(20.0));
         assert_eq!(point.completion_tokens_total, Some(20));
         // First-byte approximated TTFT never feeds the prefill rate.
         let mut approx = base.clone();
         approx.ttft_source = Some(crate::measurement::TtftSource::FirstByteApprox);
         let point = summarize_stage(1.0, &[approx], 1.0, &slos, None);
         assert_eq!(point.prefill_tps_per_user.n, 0);
-        assert_eq!(point.time_to_second_token_s.n, 1);
+        assert_eq!(point.time_to_second_token_s.n, 0);
     }
 
     #[test]
@@ -2899,6 +3081,7 @@ mod tests {
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let mut other = row.clone();
         other.reasoning_tokens = Some(7);
@@ -2972,6 +3155,7 @@ mod tests {
             bytes_received: Some(900),
             chunks_received: Some(9),
             send_offset_s: Some(1.25),
+            ..Default::default()
         };
         let mut untraced = row.clone();
         untraced.connection_reused = None;
@@ -2990,7 +3174,7 @@ mod tests {
             .lines()
             .next()
             .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s"));
+            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present"));
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
@@ -3074,6 +3258,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let mut cold = measured.clone();
         cold.seq = 0;
@@ -3129,6 +3314,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let slos = crate::summary::SloConfig {
             ttft_s: Some(0.5),
@@ -3141,8 +3327,8 @@ true,,64,16,,,,false\n";
         timed.ttft_s = Some(0.6);
         assert!(!strategic_meets_slos(&timed, &slos));
         let point = summarize_stage(1.0, &[timed], 1.0, &slos, None);
-        assert_eq!(point.goodput, 0.0);
-        assert_eq!(point.throughput, 1.0);
+        assert_eq!(point.goodput, Some(0.0));
+        assert_eq!(point.throughput, Some(1.0));
 
         let point = summarize_stage(
             1.0,
@@ -3208,6 +3394,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         assert!((record.tpot_s().unwrap() - 0.04).abs() < 1e-12);
         assert!((record.user_tps().unwrap() - 21.0).abs() < 1e-12);
@@ -3280,6 +3467,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         export_mlperf(directory.path(), MlperfScenario::Server, &[record], 1.0)
             .expect("export MLPerf logs");
@@ -3366,6 +3554,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         export_otlp(
             &reqwest::Client::new(),
@@ -3437,11 +3626,12 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         // Spawn order: row 0 (sent 1.5 s, ends 6.5 s), a failure (sent 1 s,
         // ends 10.5 s), row 1 (sent 2.5 s, ends 3.5 s). The window starts at
         // the failure's send, not at the warmup row (sent 0 s, ends 20 s) or
-        // the first success, and ends at row 0, not the failure or row 1.
+        // the first success, and ends at the late failure.
         let rows = [
             row(9, 0.0, 20.0, true, true),
             row(0, 1.5, 5.0, true, false),
@@ -3449,7 +3639,7 @@ true,,64,16,,,,false\n";
             row(1, 2.5, 1.0, true, false),
         ];
         let window = stage_window_seconds(&rows).expect("window");
-        assert!((window - 5.5).abs() < 1e-9, "{window}");
+        assert!((window - 9.5).abs() < 1e-9, "{window}");
 
         // Every stage rate and the time-weighted blocks share that window.
         let point = summarize_stage(
@@ -3459,12 +3649,12 @@ true,,64,16,,,,false\n";
             &crate::summary::SloConfig::default(),
             None,
         );
-        assert!((point.throughput - 2.0 / 5.5).abs() < 1e-9);
-        assert!((point.goodput - 2.0 / 5.5).abs() < 1e-9);
+        assert!((point.throughput.unwrap() - 2.0 / 9.5).abs() < 1e-9);
+        assert!((point.goodput.unwrap() - 2.0 / 9.5).abs() < 1e-9);
         let tokens = point.completion_tokens_per_second.expect("token rate");
-        assert!((tokens - 40.0 / 5.5).abs() < 1e-9);
+        assert!((tokens - 60.0 / 9.5).abs() < 1e-9);
         let avg = point.time_weighted.effective_concurrency.avg.expect("avg");
-        assert!((avg - 6.0 / 5.5).abs() < 1e-9, "{avg}");
+        assert!((avg - 6.0 / 9.5).abs() < 1e-9, "{avg}");
 
         // A non-finite latency (hand-edited CSV) counts as 0, no overflow.
         let odd = [
@@ -3515,7 +3705,7 @@ true,,64,16,,,,false\n";
             &crate::summary::SloConfig::default(),
             None,
         );
-        assert!((point.throughput - 2.0 / 3.0).abs() < 1e-9);
+        assert!((point.throughput.unwrap() - 2.0 / 3.0).abs() < 1e-9);
         // Spans are on the same clock: 4 s of work over a 3 s window.
         let avg = point.time_weighted.effective_concurrency.avg.expect("avg");
         assert!((avg - 4.0 / 3.0).abs() < 1e-9, "{avg}");
@@ -3566,6 +3756,7 @@ true,,64,16,,,,false\n";
             bytes_received: None,
             chunks_received: None,
             send_offset_s: None,
+            ..Default::default()
         };
         let mut warmup = row(9, 0.0, 3.0, 0.1, 999, 999);
         warmup.warmup = true;

@@ -1,0 +1,33 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Reasoning models
+
+Thinking models can emit reasoning before a visible answer. Metrum AI Bench
+CLI v1.8.0 measures both phases. This changes headline TTFT and throughput
+semantics from v1.7.2; do not merge dashboard series across schema versions
+without translating their definitions and cohorts.
+
+| Metric | Definition |
+| --- | --- |
+| Headline TTFT | Send to the first nonempty reasoning or visible output delta. |
+| Visible-answer TTFT | Send to the first visible answer delta; absent if no answer arrives. |
+| First reasoning | Send to the first reasoning delta, when present. |
+| Output token throughput | Server-reported completion tokens, including reasoning, over the measured first-send to last-terminal-completion window. Missing token usage makes the full rate unavailable. |
+| Non-reasoning completion throughput | Completion tokens minus server-reported reasoning tokens over the same window, when the split is available. This is not necessarily an exact answer-token count. |
+| Answer goodput | Answered requests meeting configured SLOs over the same window. |
+
+A completed reasoning-only response with `finish_reason=length` is recorded
+as `reasoning_truncated`, but is not an error by default. It has no visible
+answer. `--strict-reasoning-truncation` makes it an error; `--ci-safety`
+implies strictness for answer-required CI runs. Transport failures, incomplete
+streams and other no-output responses remain failures. First-byte timing is
+HTTP-header timing, not a token time.
+
+Set `max_tokens` and request timeout to match the model, task and context
+limits. A larger cap such as 8192 can be an experiment where supported, not a
+universal default. Record the effective cap and thinking mode. Disabling
+thinking changes the workload. If token splits are missing, check whether your
+server and reasoning parser provide usage; never assume SSE chunks equal
+model tokens. Consult [Performance Methodology](performance-methodology),
+[Output Schema](output-schema) and [CLI Reference](cli-reference).
