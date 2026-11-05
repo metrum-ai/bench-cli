@@ -96,5 +96,6 @@ The agent-operated GPU regression smoke uses the R, G6 and L1 lanes against
 main and the latest certified release when main changes or a new serving-stack
 minor is available; the latter also triggers the small-model performance
 comparison. There is no monthly full GPU schedule. These are agent-operated tasks,
-not GPU jobs or cloud credentials in Actions. The real GPU lane runners are
-not yet implemented and must not be treated as completed certification tests.
+not GPU jobs or cloud credentials in Actions. The GPU lane runners are implemented
+and CPU-tested, but those checks do not establish GPU evidence or release
+certification.
