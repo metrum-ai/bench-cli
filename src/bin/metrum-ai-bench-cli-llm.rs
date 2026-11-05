@@ -190,6 +190,7 @@ struct Args {
 
     #[arg(
         long,
+        hide = true,
         conflicts_with = "slos",
         help = "Exploratory same-cohort answered e2e median threshold for goodput; requires at least two distinct answered latencies and zero scheduling delay; not a prospective service SLO"
     )]

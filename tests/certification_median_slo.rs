@@ -9,6 +9,18 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 #[test]
+fn certification_option_is_hidden_from_public_help() {
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("--cert-e2e-median-slo"));
+}
+
+#[test]
 fn tool_evaluates_the_same_answered_cohort_at_its_median() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!(

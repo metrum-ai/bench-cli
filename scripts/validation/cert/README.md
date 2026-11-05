@@ -55,7 +55,10 @@ loopback-only container and fail closed on cleanup. V pins a thinking-capable VL
 compatible parser, VLM binary, image and prompt. G1 pins a tool-use prompt set and requires the
 Hermes tool parser and automatic tool choice alongside the qwen3 reasoning
 parser. Its reordered/batched tests retain real source and forwarded frames;
-missing source populations fail. G4 requires a pinned tokenizer.json and a
+missing source populations fail. G3 uses the hidden certification-only
+`--cert-e2e-median-slo` option to calculate an exploratory answered-cohort e2e
+median for BC-GPU-009. It requires at least two distinct answered latencies and
+zero scheduling delay, and is not a prospective service SLO. G4 requires a pinned tokenizer.json and a
 candidate built with tokenizer support for 010; 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct

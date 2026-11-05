@@ -8,7 +8,8 @@
   cap and distinguish first-choices timing from first-any. Fix G2 at eight
   requests per cell, define BC-GPU-009's same-cohort median SLO, retarget
   BC-GPU-015 to one NVIDIA GPU with at least 48 GB, and require all six complete
-  180-second G7 issuance windows. GPU-003 records source and forwarded real
+  180-second G7 issuance windows. The same-cohort median selector is a hidden
+  certification-only option, not a public service SLO. GPU-003 records source and forwarded real
   SSE for selected-choice, tool-output and transformed ordering checks, and
   REASON-005 pins a thinking-capable vision model and image. LIVE-002–004
   add pinned, isolated modality smoke runners; the image headline check now
