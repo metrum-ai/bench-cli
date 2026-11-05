@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Frozen GPU certification manifest",
+  "type": "object",
+  "required": ["candidate_sha", "candidate_binary_sha256", "baseline_binary_sha256", "lanes"],
+  "$defs": {
+    "pinnedFile": {"type": "object", "required": ["path", "sha256"], "properties": {
+      "path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    }}
+  },
+  "properties": {
+    "candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "baseline_binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lanes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["image", "model", "revision", "port", "prompt_sets"],
+        "properties": {
+          "image": {"type": "string", "pattern": "@sha256:[0-9a-f]{64}$"},
+          "model": {"type": "string", "minLength": 1},
+          "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+          "proxy_port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+          "owner": {"type": "string", "minLength": 1},
+          "evidence_link": {"type": "string", "minLength": 1},
+          "prompt_binary": {"$ref": "#/$defs/pinnedFile"},
+          "strategic_binary": {"$ref": "#/$defs/pinnedFile"},
+          "reference_order": {"$ref": "#/$defs/pinnedFile"},
+          "comparison_cap": {"type": "integer", "minimum": 1},
+          "sut": {"$ref": "#/$defs/pinnedFile"},
+          "server_flags": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "prompt_sets": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object", "required": ["path", "sha256"],
+              "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Metrum AI: add development GPU certification runners and independent evidence
+  checks; unsupported cases remain fail-closed. Revise BC-COMP-002 prospectively
+  to distinguish reference first-choices timing from first-any output timing.
+
 - Metrum AI: qualify releases using frozen core plus stratified extended case
   selection, with changed-area and rotation coverage, selected-only lane plans
   and explicit NOT-SELECTED results. Skip unchanged full nightly runs and use
