@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Certification result",
+  "type": "object",
+  "required": [
+    "ID",
+    "result",
+    "observed_values",
+    "thresholds",
+    "evidence_paths",
+    "attempt",
+    "start_utc",
+    "end_utc",
+    "gpu_class",
+    "driver",
+    "versions"
+  ],
+  "properties": {
+    "ID": {
+      "type": "string",
+      "pattern": "^BC-[A-Z]+-[0-9]{3}$"
+    },
+    "result": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "N-A"
+      ]
+    },
+    "observed_values": {
+      "type": "object"
+    },
+    "thresholds": {
+      "type": "object"
+    },
+    "evidence_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "start_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "end_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "gpu_class": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "driver": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "versions": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}
