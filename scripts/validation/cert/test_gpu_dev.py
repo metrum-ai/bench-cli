@@ -72,6 +72,7 @@ class ManifestTests(unittest.TestCase):
         config.update({"proxy_port": 8111, "server_flags": ["--reasoning-parser", "qwen3", "--no-enable-prefix-caching"]})
         self.manifest["lanes"]["R"] = config.copy()
         self.manifest["lanes"]["G1"] = config.copy()
+        self.manifest["lanes"]["G5"] = config.copy()
         strategic = self.root / "metrum-ai-bench-cli-strategic"
         strategic.write_text("binary")
         strategic.chmod(0o755)
@@ -79,6 +80,7 @@ class ManifestTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.manifest))
         manifest_tool.load_manifest(self.path, "R", self.candidate, self.baseline, "0")
         manifest_tool.load_manifest(self.path, "G1", self.candidate, self.baseline, "0")
+        manifest_tool.load_manifest(self.path, "G5", self.candidate, self.baseline, "0")
         manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
         self.manifest["lanes"]["G6"]["strategic_binary"]["sha256"] = "0" * 64
         self.path.write_text(json.dumps(self.manifest))

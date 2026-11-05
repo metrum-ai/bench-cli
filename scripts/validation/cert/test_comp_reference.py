@@ -19,7 +19,7 @@ class ReferenceChecksTests(unittest.TestCase):
         for i in range(64):
             prompt = f"question-{i}"
             body = {"messages": [{"role": "user", "content": prompt}], "model": model,
-                    "max_tokens": 4096, "temperature": 0, "seed": 42, "chat_template_kwargs": {"enable_thinking": True}}
+                    "max_tokens": 4096, "temperature": 0, "seed": 42, "stream": True, "chat_template_kwargs": {"enable_thinking": True}}
             identity = trace_proxy.request_identity(json.dumps(body).encode())
             order.append({"seq": i, "prompt_sha256_16": identity["prompt_sha256"][:16], "prompt_sha256": identity["prompt_sha256"]})
             sent = 1_000_000_000 + i * 2_000_000_000

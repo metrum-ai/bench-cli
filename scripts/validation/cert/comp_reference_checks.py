@@ -33,7 +33,8 @@ def traces(text, order, model, cap):
         identity = ids[0]
         if (identity.get("prompt_sha256") != order[index].get("prompt_sha256") or
             identity.get("model") != model or identity.get("max_tokens") != cap or isinstance(identity.get("max_tokens"), bool) or
-            identity.get("temperature") != 0 or identity.get("seed") != 42 or identity.get("thinking") is not True):
+            identity.get("temperature") != 0 or identity.get("seed") != 42 or identity.get("thinking") is not True or
+            identity.get("streaming") is not True):
             raise ValueError("prompt order or frozen request settings differ")
         buf = b""; choices = first_any = None; reasoning = visible = False
         for event in events:

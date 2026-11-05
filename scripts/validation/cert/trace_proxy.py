@@ -64,7 +64,8 @@ def request_identity(body):
     cap = data.get("max_tokens", data.get("max_completion_tokens"))
     thinking = data.get("chat_template_kwargs", {}).get("enable_thinking")
     return {"prompt_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "max_tokens": cap,
-            "model": data.get("model"), "temperature": data.get("temperature"), "seed": data.get("seed"), "thinking": thinking}
+            "model": data.get("model"), "temperature": data.get("temperature"), "seed": data.get("seed"),
+            "thinking": thinking, "streaming": data.get("stream", False)}
 
 
 def wait_for_upstream(port, recorder, request_id, retry_seconds):

@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None, field_reported=False,
-             fault_request=None, delay_request=None, delay_seconds=0, request_timeout=600):
-    if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None or fault_request is not None or delay_request is not None or request_timeout != 600):
+             fault_request=None, delay_request=None, delay_seconds=0, request_timeout=600, streaming=True, record_identity=False):
+    if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None or fault_request is not None or delay_request is not None or request_timeout != 600 or not streaming):
         raise ValueError("field-reported case requires 64 requests, thinking ON, cap 512, and no other overrides")
     evidence = args.out / "evidence"
     trace = evidence / f"{label}-trace.jsonl"
@@ -30,7 +30,7 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
     stdout, stderr = evidence / f"{label}-stdout.txt", evidence / f"{label}-stderr.txt"
     command = [str(binary), "--url", f"http://localhost:{args.proxy_port}/v1/chat/completions",
                "--api-key", "dummy", "--scenario", label, "--num-requests", str(count),
-               "--concurrency", str(concurrency), "--prompts", str(args.prompt), "--mode", "chat", "--streaming",
+               "--concurrency", str(concurrency), "--prompts", str(args.prompt), "--mode", "chat", *(["--streaming"] if streaming else []),
                "--model", args.model, "--data-log", str(data),
                *( ["--max-tokens", str(cap)] if cap is not None else [] ),
                *([] if field_reported else ["--warmup-requests", "0", "--seed", "42", "--temperature", "0", "--request-timeout", str(request_timeout)]),
@@ -48,6 +48,8 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
             proxy_command += ["--fault-request", str(fault_request)]
         if delay_request is not None:
             proxy_command += ["--delay-request", str(delay_request), "--delay-seconds", str(delay_seconds)]
+        if record_identity:
+            proxy_command += ["--record-request-identity"]
         (evidence / f"{label}-proxy-command.json").write_text(json.dumps(proxy_command, indent=2) + "\n", encoding="utf-8")
         process = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT)
         try:
