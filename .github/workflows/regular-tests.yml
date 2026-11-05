@@ -1,0 +1,144 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+name: Regular CPU tests
+
+on:
+  schedule:
+    - cron: '31 5 * * *'
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      cadence:
+        description: Select CPU program
+        type: choice
+        options: [nightly, weekly]
+        required: true
+        default: nightly
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  nightly:
+    if: github.event.schedule == '31 5 * * *' || (github.event_name == 'workflow_dispatch' && inputs.cadence == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: dummy-model-server/go.sum
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build required dummy server
+        working-directory: dummy-model-server
+        run: go build -o "$RUNNER_TEMP/dummy-model-server" ./cmd/dummy-model-server
+      - name: Full suite and ignored tests
+        env:
+          METRUM_BENCH_REQUIRE_DUMMY: '1'
+          METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
+        run: |
+          cargo --locked test --all-targets --all-features
+          cargo --locked test --all-targets --all-features -- --ignored
+      - name: Connection reuse regression repeated twenty times
+        run: |
+          set -euo pipefail
+          for iteration in {1..20}; do
+            echo "connection reuse iteration $iteration/20"
+            cargo --locked test --test e2e_http_trace strategic_points_report_http_phase_trace -- --exact
+          done
+      - name: Mock certification and schema-history fixtures
+        env:
+          METRUM_BENCH_REQUIRE_DUMMY: '1'
+          METRUM_BENCH_DUMMY_BIN: ${{ runner.temp }}/dummy-model-server
+        run: |
+          cargo --locked test --test e2e_catalog_reasoning --test certification_modes --test certification_math --test certification_strategic --test schema_history --test schema_migration
+          python3 -m unittest discover -s scripts/validation/cert -p 'test_cert.py' -v
+      - name: Packaging dry-run and full tracked docs tree
+        run: |
+          cargo --locked package --allow-dirty --target-dir "$RUNNER_TEMP/pkg"
+          python3 scripts/validation/cert/check_package_docs.py --dry-run
+      - name: Full-history secret scan
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          "$(go env GOPATH)/bin/gitleaks" git --redact --config .gitleaks.toml --log-opts='--all'
+      - name: Dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+      - name: Published documentation links
+        run: python3 scripts/validation/cert/check_live_docs.py
+
+  nightly-failure:
+    needs: nightly
+    if: always() && needs.nightly.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    concurrency:
+      group: nightly-failure-issue
+      cancel-in-progress: false
+    steps:
+      - name: Open or update one failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          labels="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 1000 --json name --jq '.[].name')"
+          if ! grep -Fxq 'nightly-failure' <<<"$labels"; then
+            gh label create nightly-failure --repo "$GITHUB_REPOSITORY" --color d73a4a --description 'Nightly CPU regression'
+          fi
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --label nightly-failure --state open --limit 100 --json number --jq '.[0].number // empty')"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [[ -n "$issue" ]]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Nightly CPU checks failed: ${run_url}"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title 'Nightly CPU tests failed' --label nightly-failure --body "Nightly CPU checks failed: ${run_url}"
+          fi
+
+  weekly:
+    if: github.event.schedule == '17 7 * * 1' || (github.event_name == 'workflow_dispatch' && inputs.cadence == 'weekly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Install latest release from crates.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "$tag" > "$RUNNER_TEMP/release-tag"
+          cargo install --locked metrum-ai-bench-cli --version "=${tag#v}" --features otlp --root "$RUNNER_TEMP/bench-install"
+          "$RUNNER_TEMP/bench-install/bin/metrum-ai-bench-cli" --version
+          "$RUNNER_TEMP/bench-install/bin/metrum-ai-bench-cli" selftest
+      - name: Verify published archives and tracked docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(<"$RUNNER_TEMP/release-tag")"
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+            archive="metrum-ai-bench-cli-${tag}-${target}.tar.gz"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/release-assets" --pattern "$archive" --pattern "$archive.sha256" --pattern "$archive.sigstore.json"
+            (cd "$RUNNER_TEMP/release-assets" && sha256sum -c "$archive.sha256")
+            cosign verify-blob --bundle "$RUNNER_TEMP/release-assets/$archive.sigstore.json" \
+              --certificate-identity-regexp 'https://github.com/metrum-ai/bench-cli/' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$RUNNER_TEMP/release-assets/$archive"
+            python3 scripts/validation/cert/check_package_docs.py --revision "$tag" --archive "$RUNNER_TEMP/release-assets/$archive"
+          done
+      # The existing weekly-hygiene job in ci.yml runs on its independent Monday schedule.
