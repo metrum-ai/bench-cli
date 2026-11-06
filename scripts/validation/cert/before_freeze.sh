@@ -11,6 +11,14 @@ python3 -c 'import sys; sys.version_info >= (3, 12) or sys.exit("certification h
 cd "$ROOT/scripts/validation/cert"
 python3 -m unittest test_release_prerelease
 cd "$ROOT"
+# Documentation command fixtures and generated-help tools resolve binaries at
+# the checkout-local target/debug path; an inherited shared target cannot serve
+# that contract. Build every required CLI fixture before running the audit.
+unset CARGO_TARGET_DIR
+cargo build --locked --bins
+cargo xtask check-headers
 cargo xtask check-docs
+cargo xtask render-cli-help --check
+cargo xtask render-data-points --check
 cargo test --test schema_migration --test data_points --test cli_docs
 printf 'BEFORE-FREEZE-OK %s\n' "$1"
