@@ -31,7 +31,21 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.release-kind.outputs.prerelease }}
     steps:
+      - name: Classify release tag
+        id: release-kind
+        shell: bash
+        run: |
+          is_prerelease() {
+            [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]
+          }
+          if is_prerelease "${RELEASE_TAG}"; then
+            echo 'prerelease=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -462,28 +476,27 @@ jobs:
             metrum-ai-bench-cli-docs-versions.json
 
   crates-io:
-    # Deliberate gate: never publish -rc. tags; require CRATES_IO_PUBLISH=true.
-    # workflow_dispatch publish_crate is allowed only for non-rc release tags.
+    # Deliberate gate: never publish prerelease tags; require CRATES_IO_PUBLISH=true.
     if: >-
       always() &&
       needs.smoke-linux.result == 'success' &&
       needs.smoke-macos.result == 'success' &&
       (needs.live-gate.result == 'success' || needs.live-gate.result == 'skipped') &&
       vars.CRATES_IO_PUBLISH == 'true' &&
+      needs.verify.result == 'success' &&
+      needs.verify.outputs.prerelease == 'false' &&
       (
         (
           github.event_name == 'push' &&
-          startsWith(github.ref, 'refs/tags/v') &&
-          !contains(github.ref, '-rc.')
+          startsWith(github.ref, 'refs/tags/v')
         ) ||
         (
           github.event_name == 'workflow_dispatch' &&
           inputs.publish_crate == true &&
-          startsWith(inputs.release_tag, 'v') &&
-          !contains(inputs.release_tag, '-rc.')
+          startsWith(inputs.release_tag, 'v')
         )
       )
-    needs: [smoke-linux, smoke-macos, live-gate]
+    needs: [verify, smoke-linux, smoke-macos, live-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

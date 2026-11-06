@@ -52,15 +52,14 @@ metrum-ai-bench-cli-llm \
 
 `--mode` is `chat` or `completion`. LLM uses one global `--max-tokens`
 (per-request caps are out of scope). In streaming chat and VLM, TTFT defaults
-to the first visible answer delta, while first reasoning and first-any-token
-clocks are reported separately for choice 0. Reasoning-only length finishes
-are `reasoning_truncated`; other completed no-answer streams are
-`no_output_token`. `--ttft-fallback first-token` labels a real-token fallback;
-`--allow-missing-ttft` relaxes the audit. HTTP header approximation via
-`--infer-ttft-from-first-byte` is not a token, and none of these options makes
-an unanswered stream successful. `--ci-safety` remains strict. Current
-request/summary output uses v4; compatible consumers can read historical v3
-logs. For accelerator measurements, strongly recommend the
+to the first reasoning or visible delta for choice 0; visible-answer timing is
+separate. A reasoning-only length finish is `reasoning_truncated`, unanswered
+but non-failing by default; strict mode and `--ci-safety` reject it. Other
+completed no-answer streams are `no_output_token` errors.
+`--ttft-fallback first-token` is a deprecated redundant alias;
+`--allow-missing-ttft` relaxes the audit. `--infer-ttft-from-first-byte` is
+a labelled HTTP header approximation, not a token. Current request/summary
+output uses v5; compatible consumers can read historical v4 and v3 logs. For accelerator measurements, strongly recommend the
 [Metrum AI all-smi fork](./system-telemetry).
 
 `--extra-body-json` merges a JSON object into supported request bodies. A

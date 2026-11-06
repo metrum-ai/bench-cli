@@ -10,8 +10,9 @@ sampling/thinking parameters, and supported concurrency, then choose the sweep
 and request counts. Record sources and choices in the SUT. See
 [SERVING.md](SERVING.md).
 
-For agent-bench, start from the streaming LLM/chat path so TTFT measures visible
-output as it arrives. The unary strategic path cannot measure TTFT. Strategic
+For agent-bench, start from the streaming LLM/chat path so TTFT measures the
+first reasoning or visible output delta. Unary chat/VLM can instead opt into a
+labelled HTTP first-byte approximation, not token TTFT. Strategic
 chat turns opt in with `--streaming`, including `--sessions`; their per-turn CSV
 records include `first_byte_s` and `ttft_s`, and measured TTFT enforces `--slo ttft=`.
 Streaming is off by default and applies to chat and vlm. Embeddings, rerank,
@@ -51,8 +52,7 @@ fully completed at the start of every stage, then the measurement epoch resets.
 Warmup rows are written to the CSV with `warmup=true` and excluded from stage
 `n`, latency percentiles, throughput, goodput, and knee detection. Stage
 throughput, goodput, and token rates divide by the stage window: earliest
-measured send (any outcome) to the latest successful completion, or the
-latest completion of any outcome when the stage has no success (#224).
+measured send to the latest terminal completion of any outcome (#224).
 Measured prompt indexing restarts at zero after warmup so the mix is not
 shifted.
 Prefer a warmup count at least as large as stage concurrency on GPU endpoints
@@ -98,10 +98,10 @@ and token throughput is not comparable across configs. Stage `config` stamps
 
 The report plots achieved throughput against p95 latency and marks the
 unit-normalized Kneedle result. In each point, `load` is the selected sweep
-axis and `throughput` is successful requests per second. There is no
+axis and `throughput` is completed responses per second. There is no
 `knee_rps` field. `knee` is null when no index is selected; otherwise use
 `knee.load`, with the diagnostic details in `knee_detection`. Modality
-`summary.v4` output does not contain a knee; historical v3 logs remain readable.
+`summary.v5` output does not contain a knee; historical v3 logs remain readable.
 
 Knee detection needs at least 5 measured stages (stages with a p95): both
 endpoints plus 3 interior candidates. Stages with no successes have no p95
@@ -186,10 +186,11 @@ value, so overload cannot hide behind coordinated omission. Each sweep point
 carries `n`, `errors`, a full `latency_s` DistSummary (including reliability
 flags), redacted stage `config`, and `goodput`.
 
-Use repeatable `--slo e2e=…` so goodput counts only schema-valid successes that
-also meet the end-to-end latency threshold. Without `--slo`,
-`goodput_equals_throughput` is true and goodput is validity-filtered throughput
-(often identical to throughput when no validity checker is configured).
+Use repeatable `--slo e2e=…` so goodput counts valid successes that meet the
+end-to-end latency threshold, excluding explicitly unanswered rows. Unmarked
+legacy rows and ASR/imagegen successes are treated as answered for goodput. Without `--slo`,
+`goodput_equals_throughput` is true only when the goodput and completed-response
+counts match; unanswered or invalid responses can make them differ.
 With `--streaming`, `ttft=` and `tpot=` use captured stream timings (ITL is
 retained on each CSV row; TPOT is `(service_latency - ttft) / (output_tokens - 1)`).
 `user_tps=` is a minimum output tok/s per in-flight request
@@ -285,7 +286,7 @@ metrum-ai-bench-cli-strategic --kind imagegen \
 Every sweep point keeps the usual stage summary (throughput, latency, HTTP
 phases, time-weighted blocks, `knee_detection`) and adds `modality_metrics`:
 one distribution per key over measured successes, with the key names the
-modality binaries use on `request.v4` records. VLM: `image_count`,
+modality binaries use on `request.v5` records. VLM: `image_count`,
 `image_bytes`. ASR: `wer`, `cer` (with references), `rtfx_client` and
 `audio_duration_s` (when the sample row has `duration`). Imagegen:
 `images_requested`, `images_returned`, plus `image_digests` (`images`,

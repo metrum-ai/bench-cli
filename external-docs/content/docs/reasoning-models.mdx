@@ -10,12 +10,12 @@ without translating their definitions and cohorts.
 
 | Metric | Definition |
 | --- | --- |
-| Headline TTFT | Send to the first nonempty reasoning or visible output delta. |
+| Headline TTFT | Normally send to the first nonempty reasoning or visible output delta; explicit first-byte inference may supply a labelled HTTP approximation. |
 | Visible-answer TTFT | Send to the first visible answer delta; absent if no answer arrives. |
 | First reasoning | Send to the first reasoning delta, when present. |
 | Output token throughput | Server-reported completion tokens, including reasoning, over the measured first-send to last-terminal-completion window. Missing token usage makes the full rate unavailable. |
 | Non-reasoning completion throughput | Completion tokens minus server-reported reasoning tokens over the same window, when the split is available. This is not necessarily an exact answer-token count. |
-| Answer goodput | Answered requests meeting configured SLOs over the same window. |
+| Answer goodput | Successes meeting configured SLOs over the same window, excluding explicitly unanswered rows; unmarked legacy/ASR/imagegen rows are treated as answered for goodput. |
 
 A completed reasoning-only response with `finish_reason=length` is recorded
 as `reasoning_truncated`, but is not an error by default. It has no visible
