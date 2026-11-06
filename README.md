@@ -474,6 +474,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [pinned local chat rendering](docs/CHAT_RENDERING.md),
 [synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [public document inputs](docs/PUBLIC_DOCUMENTS.md),
+[public dataset command](docs/PUBLIC_DATASET_CLI.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).

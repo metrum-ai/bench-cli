@@ -27,6 +27,15 @@ canonical generated group IDs, effective row order, measured token-overlap repor
 requested/achieved group counts and a deterministic profile fingerprint. It does
 not alter existing runner JSONL and does not assert observed server cache hits.
 
+## Public dataset job/report
+
+The `public-dataset-job.v1` command configuration and metadata-only profile report
+are documented in [PUBLIC_DATASET_CLI.md](PUBLIC_DATASET_CLI.md). Inputs use pinned
+origin/files, reviewed rights, declared JSON/JSONL/Parquet/ZIP formats, mapping and
+explicit budgets. Report output includes the validation manifest, optional measured
+overlap artifact and a human summary. Missing token validation remains Unknown;
+canonical payload JSONL is separate and must not be published by default.
+
 ## Public document adapter output
 
 The standalone document adapter emits canonical `DocumentQuestion` records from
