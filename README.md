@@ -472,6 +472,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
 [trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
