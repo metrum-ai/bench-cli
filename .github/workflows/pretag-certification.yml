@@ -1,0 +1,49 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+name: Published asset certification smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-smoke:
+    name: Published archive ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04}
+          - {target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm}
+          - {target: x86_64-apple-darwin, runner: macos-15-intel}
+          - {target: aarch64-apple-darwin, runner: macos-15}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v1.8.0
+          persist-credentials: false
+      - name: Download and smoke published archive on matching platform
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = bfdb520426484a6e580203f0f220815ebd67a03d
+          root="metrum-ai-bench-cli-v1.8.0-${{ matrix.target }}"
+          archive="$root.tar.gz"
+          mkdir published && cd published
+          gh release download v1.8.0 --repo "$GITHUB_REPOSITORY" --pattern "$archive" --pattern "$archive.sha256"
+          shasum -a 256 -c "$archive.sha256"
+          python3 ../scripts/validation/cert/check_package_docs.py --revision HEAD --archive "$archive"
+          tar -xzf "$archive"
+          test "$("$root/bin/metrum-ai-bench-cli" --version)" = 'metrum-ai-bench-cli 1.8.0'
+          "$root/bin/metrum-ai-bench-cli" --help | grep -qi benchmark
+          "$root/bin/metrum-ai-bench-cli" selftest
+          "$root/bin/metrum-ai-bench-cli-mock-server" --help | grep -qi mock
+          dummy_help=$("$root/bin/dummy-model-server" -h 2>&1 || true)
+          printf '%s\n' "$dummy_help" | grep -qi 'Listen port'
+          echo 'Published archive matching-platform install/version/help/selftest PASS'
