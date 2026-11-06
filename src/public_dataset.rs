@@ -555,7 +555,14 @@ impl ValidationManifest {
 /// Bounded JSONL decoding in source order. No scripts or format auto-detection.
 pub fn read_jsonl(reader: impl Read, limits: IngestionLimits) -> Result<Vec<serde_json::Value>> {
     use std::io::BufRead;
-    let mut input = std::io::BufReader::new(reader.take(limits.max_file_bytes.saturating_add(1)));
+    let mut input = std::io::BufReader::new(
+        reader.take(
+            limits
+                .max_file_bytes
+                .min(limits.max_total_bytes)
+                .saturating_add(1),
+        ),
+    );
     let mut rows = Vec::new();
     let mut total = 0u64;
     loop {
