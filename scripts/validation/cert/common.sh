@@ -6,6 +6,7 @@ set -euo pipefail
 CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cert_parse() {
+  python3 -c 'import sys; sys.version_info >= (3, 12) or sys.exit("certification harness requires Python 3.12 or newer")'
   CERT_LANE=$1; shift
   CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT='' CERT_AUX_OWNER=''
   CERT_PERF_FINALIZE=0
@@ -47,7 +48,7 @@ cert_parse() {
   CERT_CONTAINER="cert-${CERT_LANE,,}-$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
   CERT_STARTED=0
   CERT_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  export CERT_SHA CERT_START_UTC
+  export CERT_SHA CERT_START_UTC CERT_MANIFEST CERT_CANDIDATE CERT_BASELINE
   CERT_MANIFEST_SHA="$(sha256sum "$CERT_MANIFEST" | cut -d' ' -f1)"
   trap 'cert_on_exit "$?"' EXIT
   trap 'exit 130' INT

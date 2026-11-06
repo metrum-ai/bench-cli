@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
   "title": "Certification result",
   "type": "object",
   "required": [
@@ -72,6 +73,31 @@
     },
     "reason": {
       "type": "string"
+    },
+    "input_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "output_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "infra_history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {"type": {"enum": ["completed", "failed_or_interrupted"]}}
+      }
+    },
+    "carry_over_eligibility": {
+      "type": "object",
+      "required": ["eligible", "reason"],
+      "properties": {
+        "eligible": {"type": "boolean"},
+        "reason": {"type": "string"}
+      }
     }
   }
 }

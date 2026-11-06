@@ -8,12 +8,14 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from execution_evidence import enrich, require_python
 
 CASE = re.compile(r"BC-[A-Z]+-[0-9]{3}\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def write_record(root, record):
+    require_python()
     root = Path(root).resolve()
     # The lane-level attempt number is supplied by the operator for an
     # unchanged rerun; never overwrite an earlier attempt directory.
@@ -44,6 +46,7 @@ def write_record(root, record):
         evidence = (root / item).resolve()
         if not evidence.is_relative_to(root) or not evidence.is_file():
             raise ValueError("evidence path does not resolve inside the run directory")
+    record = enrich(root, record)
     directory = root / "results"
     directory.mkdir(exist_ok=True)
     target = directory / (case + ".json")

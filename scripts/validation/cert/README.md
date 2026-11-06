@@ -21,6 +21,46 @@ name; it does not compile platform binaries or run a release container. The
 weekly job additionally checks the actual published archives against their tag.
 `check_live_docs.py` crawls only links within the published documentation tree.
 
+## Execution-time records and freeze checks
+
+The harness requires Python 3.12 or newer. The shared result writer atomically
+publishes a case record, evidence SHA256 hashes, candidate identity, typed
+infrastructure history and conservative carry-over eligibility. The shared lane
+entry exports frozen manifest and binary locations so their hashes are captured
+at write time. Interrupted cases retain null unknown request/error counts.
+`execution_evidence.py RUN_DIRECTORY` checks retained output hashes and derives
+JSON report/sheet rows; it never constructs a PASS for a missing result. Full
+catalog acceptance still requires `validate_results.py`.
+
+Append phase observations at the actual event, never reconstruct them later:
+
+```sh
+python3 scripts/validation/cert/execution_evidence.py RUN_DIRECTORY --case BC-GPU-001 --phase inputs-ready
+```
+
+Supported append-only events are `rent`, `ssh-ready`, `inputs-ready`,
+`server-ready`, `first-request`, `last-request`, and `record-validated`.
+Provisioning events belong to the external operator; runners must supply request
+observations and validators must supply validation events. Never substitute
+runner start/end for actual first/last request times.
+
+`case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
+candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
+and content pin, all-smi executable pin, every input pin and each launcher pin.
+It is offline and does not allocate hardware or start a server. Its manifest
+contains `candidate_sha`; `candidate`, `sut`, `all_smi`, `tokenizer` pin objects
+(`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
+and `cases`, mapping selected IDs to a pinned `launcher` and literal `command`
+argv. Each launcher must execute only its named case and retain its own attempt
+record. Launch one case with `--case ID`, or omit `--case` for the whole selected
+set. Pins are rechecked before each launch; no shell evaluation is performed.
+
+Before candidate freeze, run `bash scripts/validation/cert/before_freeze.sh SHA`
+in a clean candidate checkout. This combines REL-001 prerelease-classifier tests,
+the repository documentation audit and CLI/schema/export-surface tests. It is a
+pre-freeze gate, not a substitute for final pre-tag certification. Existing
+performance gate configurations are unchanged.
+
 ## GPU development runners
 
 L1, R and G6 have been exercised on a real NVIDIA GPU. Selected cases in D,

@@ -19,7 +19,7 @@ def main():
     result_writer.write_record(args.out, {"ID": args.id, "candidate_sha": args.sha, "result": "FAIL",
                                          "reason": args.reason, "attempt": 1, "start_utc": args.start,
                                          "end_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-                                         "observed_values": {}, "thresholds": {}, "evidence_paths": [],
+                                         "observed_values": {"request_count": None, "error_count": None}, "thresholds": {}, "evidence_paths": [],
                                          "gpu_class": None, "driver": None, "versions": {}})
 
 
