@@ -69,13 +69,13 @@ const BLESS_ENV: &str = "METRUM_BENCH_BLESS_DATA_POINTS";
 
 // Conditions
 
-/// What a run needs for an optional field to fire. An optional field lists
-/// one or more conditions and fires when any of them holds.
+/// What a run needs for an optional field to fire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Condition {
     HttpPath,
     Usage,
     Streaming,
+    VisibleAnswer,
     TtftApprox,
     ReasoningStream,
     ReasoningUsage,
@@ -89,6 +89,8 @@ enum Condition {
     Validation,
     MeasuredSuccess,
     PositiveWindow,
+    PositiveCompletionRate,
+    OutputGenerating,
     VlmSweep,
     AsrSweep,
     ImagegenSweep,
@@ -100,6 +102,7 @@ impl Condition {
             Self::HttpPath => "http",
             Self::Usage => "usage",
             Self::Streaming => "streaming",
+            Self::VisibleAnswer => "visible-answer",
             Self::TtftApprox => "ttft-approx",
             Self::ReasoningStream => "reasoning-stream",
             Self::ReasoningUsage => "reasoning-usage",
@@ -113,6 +116,8 @@ impl Condition {
             Self::Validation => "validation",
             Self::MeasuredSuccess => "measured-success",
             Self::PositiveWindow => "positive-window",
+            Self::PositiveCompletionRate => "positive-completion-rate",
+            Self::OutputGenerating => "output-generating",
             Self::VlmSweep => "vlm-sweep",
             Self::AsrSweep => "asr-sweep",
             Self::ImagegenSweep => "imagegen-sweep",
@@ -133,6 +138,7 @@ impl Condition {
                 "`--streaming` chat or vlm. `itl_s` needs two or more content \
                  chunks, `decode_tok_s` a positive decode time and output tokens."
             }
+            Self::VisibleAnswer => "A visible answer or tool output delta was observed; absent for reasoning-only truncation.",
             Self::TtftApprox => {
                 "This condition refers only to `--infer-ttft-from-first-byte`, \
                  which approximates missing TTFT from HTTP response headers, not \
@@ -158,6 +164,10 @@ impl Condition {
             Self::Validation => "Strategic response validation (`--json-schema` or `--tools`).",
             Self::MeasuredSuccess => "The stage has at least one measured request or success.",
             Self::PositiveWindow => "The measured terminal window is finite and strictly positive.",
+            Self::PositiveCompletionRate => {
+                "The completion-token rate is finite and strictly positive."
+            }
+            Self::OutputGenerating => "The strategic stage kind generates output tokens.",
             Self::VlmSweep => "`metrum-ai-bench-cli-strategic --kind vlm`.",
             Self::AsrSweep => {
                 "`metrum-ai-bench-cli-strategic --kind asr`. `wer` and `cer` are \
@@ -178,12 +188,15 @@ use Condition::*;
 const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("answered_requests_per_second", &[PositiveWindow]),
     ("requests_per_second", &[PositiveWindow]),
-    ("completion_tokens_per_second", &[Usage]),
+    ("completion_tokens_per_second", &[Usage, PositiveWindow]),
     ("completion_tokens_total", &[Usage]),
     ("connection_reuse_rate", &[HttpPath]),
     ("connections_reused", &[HttpPath]),
-    ("cost_per_million_output_tokens", &[Price]),
-    ("input_tokens_per_second", &[Usage]),
+    (
+        "cost_per_million_output_tokens",
+        &[Price, PositiveCompletionRate],
+    ),
+    ("input_tokens_per_second", &[Usage, PositiveWindow]),
     ("isl_osl", &[IslOslTargets]),
     (
         "legacy_success_completion_tokens_per_second",
@@ -191,7 +204,7 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ),
     (
         "non_reasoning_completion_tokens_per_second",
-        &[ReasoningUsage],
+        &[Usage, PositiveWindow, ReasoningUsage],
     ),
     ("observed_concurrency", &[HttpPath]),
     ("observed_reasoning_tokens_total", &[ReasoningUsage]),
@@ -203,7 +216,7 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
     ("prompt_tokens_total", &[Usage]),
     ("reasoning_tokens_total", &[ReasoningUsage]),
     ("telemetry", &[Ndjson]),
-    ("total_tokens_per_second", &[Usage]),
+    ("total_tokens_per_second", &[Usage, PositiveWindow]),
     ("ttft_approx_count", &[TtftApprox]),
     ("visible_completion_tokens_total", &[ReasoningUsage]),
 ];
@@ -230,7 +243,7 @@ const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("tokenized_prompt_tokens", &[Tokenizer]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
-    ("ttft_visible_answer_s", &[Streaming]),
+    ("ttft_visible_answer_s", &[Streaming, VisibleAnswer]),
     ("visible_completion_tokens", &[ReasoningUsage]),
 ];
 
@@ -240,18 +253,24 @@ const SWEEP_ROWS: &[(&str, &[Condition])] = &[
     ("answered_requests_per_second", &[PositiveWindow]),
     ("throughput", &[PositiveWindow]),
     ("goodput", &[PositiveWindow]),
-    ("completion_tokens_per_second", &[Usage]),
-    ("completion_tokens_total", &[Usage]),
+    (
+        "completion_tokens_per_second",
+        &[Usage, PositiveWindow, OutputGenerating],
+    ),
+    ("completion_tokens_total", &[Usage, OutputGenerating]),
     ("connection_reuse_rate", &[HttpPath]),
     ("connections_reused", &[HttpPath]),
-    ("cost_per_million_output_tokens", &[Price]),
+    (
+        "cost_per_million_output_tokens",
+        &[Price, PositiveCompletionRate],
+    ),
     ("error_rate", &[MeasuredSuccess]),
     ("image_digests", &[ImagegenSweep]),
     (
         "non_reasoning_completion_tokens_per_second",
-        &[ReasoningUsage],
+        &[Usage, PositiveWindow, ReasoningUsage, OutputGenerating],
     ),
-    ("input_tokens_per_second", &[Usage]),
+    ("input_tokens_per_second", &[Usage, PositiveWindow]),
     ("isl_osl", &[IslOslTargets]),
     ("observed_concurrency", &[HttpPath]),
     ("observed_reasoning_tokens_total", &[ReasoningUsage]),
@@ -265,7 +284,10 @@ const SWEEP_ROWS: &[(&str, &[Condition])] = &[
     ("prompt_tokens_total", &[Usage]),
     ("reasoning_tokens_total", &[ReasoningUsage]),
     ("slo_thresholds_s", &[Slo]),
-    ("total_tokens_per_second", &[Usage]),
+    (
+        "total_tokens_per_second",
+        &[Usage, PositiveWindow, OutputGenerating],
+    ),
     ("ttft_approx_count", &[TtftApprox]),
     ("users_at_slo", &[UserTpsSlo]),
     ("users_meeting_user_tps", &[UserTpsSlo]),
@@ -280,7 +302,7 @@ const REQUEST_ROW_ROWS: &[(&str, &[Condition])] = &[
     ("t_first_ns", &[HttpPath]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
-    ("ttft_visible_answer_s", &[Streaming]),
+    ("ttft_visible_answer_s", &[Streaming, VisibleAnswer]),
 ];
 
 /// One optional field and the conditions that fire it.
@@ -326,7 +348,7 @@ fn modality_kinds() -> [(&'static [&'static str], &'static [Condition]); 3] {
 
 /// Conditions a plain closed-loop `--streaming` llm run against a server
 /// that reports usage meets (the parity harness `plain` scenario).
-const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, PositiveWindow];
+const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, VisibleAnswer, PositiveWindow];
 
 // Fixtures
 
@@ -1013,10 +1035,37 @@ fn conditions_of(table: &[Row], key: &str) -> &'static [Condition] {
         .unwrap_or_else(|| panic!("optional field {key} has no documented condition"))
 }
 
+#[derive(Clone, Copy)]
+enum ConditionMode {
+    Any,
+    All,
+}
+
+fn condition_mode(key: &str, conditions: &[Condition]) -> ConditionMode {
+    if key == "completion_tokens_total" && conditions.contains(&OutputGenerating) {
+        return ConditionMode::All;
+    }
+    match key {
+        "ttft_visible_answer_s"
+        | "completion_tokens_per_second"
+        | "input_tokens_per_second"
+        | "total_tokens_per_second"
+        | "non_reasoning_completion_tokens_per_second"
+        | "cost_per_million_output_tokens" => ConditionMode::All,
+        _ => ConditionMode::Any,
+    }
+}
+
 fn fires(table: &[Row], key: &str, active: &[Condition]) -> bool {
-    conditions_of(table, key)
-        .iter()
-        .any(|condition| active.contains(condition))
+    let conditions = conditions_of(table, key);
+    match condition_mode(key, conditions) {
+        ConditionMode::Any => conditions
+            .iter()
+            .any(|condition| active.contains(condition)),
+        ConditionMode::All => conditions
+            .iter()
+            .all(|condition| active.contains(condition)),
+    }
 }
 
 struct Schemas {
@@ -1085,7 +1134,10 @@ fn condition_cell(table: &[Row], key: &str, optional: bool) -> String {
         .iter()
         .map(|c| format!("`{}`", c.name()))
         .collect::<Vec<_>>()
-        .join(" or ")
+        .join(match condition_mode(key, conditions_of(table, key)) {
+            ConditionMode::Any => " or ",
+            ConditionMode::All => " and ",
+        })
 }
 
 fn quantity_table(out: &mut String, schema: &QuantitySchema, table: &[Row]) {
@@ -1198,7 +1250,7 @@ harness counts agree on what a quantity is.
   Counts describe a successful request; a failed one carries the always set
   plus the request-side `http` fields.
 - **Optional:** in the maximal record but absent or `null` in the minimal
-  one. Each optional field fires when any condition in its row holds.
+  one. A row uses `or` for alternatives and `and` for required conjunctions.
 
 ## Conditions
 
@@ -1263,6 +1315,7 @@ harness counts agree on what a quantity is.
     for condition in used {
         let _ = writeln!(out, "| `{}` | {} |", condition.name(), condition.describe());
     }
+    out.push_str("\nReasoning-usage for non-reasoning rates must be complete and consistent for every measured row. Cost also requires a finite nonnegative price and a finite strictly positive completion-token rate. Totals do not require a positive window.\n");
     let plain = PLAIN_RUN
         .iter()
         .map(|c| format!("`{}`", c.name()))
@@ -1308,6 +1361,62 @@ fn doc_path() -> PathBuf {
 }
 
 // Tests
+
+#[test]
+fn visible_answer_clock_requires_stream_and_visible_output() {
+    for table in [request_optional(), request_row_optional()] {
+        assert!(!fires(&table, "ttft_visible_answer_s", &[Streaming]));
+        assert!(!fires(&table, "ttft_visible_answer_s", &[VisibleAnswer]));
+        assert!(fires(
+            &table,
+            "ttft_visible_answer_s",
+            &[Streaming, VisibleAnswer]
+        ));
+    }
+}
+
+#[test]
+fn rate_and_cost_conditions_require_all_prerequisites() {
+    let summary = summary_optional();
+    assert!(!fires(&summary, "completion_tokens_per_second", &[Usage]));
+    assert!(fires(
+        &summary,
+        "completion_tokens_per_second",
+        &[Usage, PositiveWindow]
+    ));
+    assert!(!fires(
+        &summary,
+        "non_reasoning_completion_tokens_per_second",
+        &[Usage, PositiveWindow]
+    ));
+    assert!(fires(
+        &summary,
+        "non_reasoning_completion_tokens_per_second",
+        &[Usage, PositiveWindow, ReasoningUsage]
+    ));
+    assert!(!fires(&summary, "cost_per_million_output_tokens", &[Price]));
+    assert!(fires(
+        &summary,
+        "cost_per_million_output_tokens",
+        &[Price, PositiveCompletionRate]
+    ));
+    assert!(fires(
+        &summary,
+        "legacy_success_completion_tokens_per_second",
+        &[Tokenizer]
+    ));
+    let sweep = sweep_optional();
+    assert!(!fires(
+        &sweep,
+        "completion_tokens_per_second",
+        &[Usage, PositiveWindow]
+    ));
+    assert!(fires(
+        &sweep,
+        "completion_tokens_per_second",
+        &[Usage, PositiveWindow, OutputGenerating]
+    ));
+}
 
 /// One `pub` field of a schema struct, read from its source.
 struct DeclaredField {
@@ -1755,12 +1864,14 @@ fn published_counts_match_real_llm_runs() {
         PositiveWindow,
         Usage,
         Streaming,
+        VisibleAnswer,
         ReasoningStream,
         ReasoningUsage,
         OpenLoop,
         Slo,
         UserTpsSlo,
         Price,
+        PositiveCompletionRate,
         IslOslTargets,
         Ndjson,
     ];

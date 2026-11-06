@@ -48,9 +48,9 @@ W2 TTFT audit:
   (event index, ms-from-send, categories) for the first N requests in
   `<data-log>.sse-trace.jsonl` — no prompt text, content, or secrets —
   for auditing first-visible vs first-reasoning timing.
-- Summaries report the two clocks separately: `ttft_s` (first visible
-  content token) and, when a reasoning row exists, `ttft_first_any_s`
-  (first token of any category).
+- Summaries report `ttft_s` (first reasoning or visible delta, or an explicit
+  HTTP first-byte approximation), `ttft_visible_answer_s` (first visible
+  delta), and `ttft_first_any_s` (first real reasoning or visible delta).
 
 Compare the shared summary to `test-data/reference-result.json`. Scheduling
 and counts must match exactly. On an unloaded machine mean TTFT should be

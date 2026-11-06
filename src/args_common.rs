@@ -187,7 +187,7 @@ pub struct CommonBenchArgs {
     #[arg(
         long,
         value_name = "PATH",
-        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut"
+        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut"
     )]
     pub sut: Option<std::path::PathBuf>,
 

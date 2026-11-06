@@ -64,7 +64,8 @@ metrum-ai-bench-cli-strategic \
 ```
 
 Each load stage is measured independently. In v1.8.0 chat and VLM headline
-TTFT is the first reasoning or visible delta; visible-answer timing is separate.
+TTFT normally uses the first reasoning or visible delta; explicit first-byte
+inference may provide a labelled HTTP approximation. Visible-answer timing is separate.
 The token-rate window runs from first measured send to last terminal completion,
 including failures, and incomplete usage makes the full token rate unavailable.
 Reasoning-only truncation is unanswered; strict mode and `--ci-safety` reject
@@ -131,10 +132,11 @@ and `goodput`.
 
 ### Goodput on strategic
 
-Use repeatable `--slo e2e=…` so goodput counts only schema-valid successes that
-also meet the end-to-end latency threshold. Without `--slo`,
-`goodput_equals_throughput` is true and goodput is validity-filtered throughput
-(often identical to throughput when no validity checker is configured).
+Use repeatable `--slo e2e=…` so goodput counts valid successes that meet the
+end-to-end latency threshold, excluding explicitly unanswered rows. Unmarked
+legacy rows and ASR/imagegen successes are treated as answered for goodput. Without `--slo`,
+`goodput_equals_throughput` is true only when the goodput and completed-response
+counts match; unanswered or invalid responses can make them differ.
 
 With `--streaming`, `ttft=` and `tpot=` use captured stream timings (ITL is
 retained on each CSV row; TPOT is `(service_latency - ttft) / (output_tokens - 1)`).

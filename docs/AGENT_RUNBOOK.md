@@ -251,7 +251,7 @@ Check that proves success: every reported number traces to a local summary line 
 
 Failure: no retry. A missing input stays missing and is reported as such.
 
-Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v4` has no knee field. Compatible readers can still read historical v3 logs, which also lack this field.
+Knee fields are `knee` (the stage index) and `knee_detection` (`index`, `reason`, `points`, `min_points`, `method`, `p95_rise`, `saturated_index`, `min_p95_rise`, `min_marginal_gain`, `max_error_rate_rise`). `reason` is null exactly when `index` is set. `knee` is null when the sweep has no bend, and `summary.v5` has no knee field. Compatible readers can still read historical v3 logs, which also lack this field.
 
 ## Step 9: Agent session resilience
 
