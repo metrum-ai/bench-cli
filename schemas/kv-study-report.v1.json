@@ -84,8 +84,22 @@
         "concurrency": {"type": ["integer", "null"], "minimum": 1},
         "input_distribution": {"$ref": "#/$defs/nullable_string"},
         "output_distribution": {"$ref": "#/$defs/nullable_string"},
-        "warmup_isolation": {"enum": ["token_prefix_disjoint", "reset_after_warmup", "unverified", "none"]}
-      }
+        "warmup_isolation": {"enum": ["token_prefix_disjoint", "reset_after_warmup", "unverified", "none"]},
+        "warmup_overlap": {
+          "type": "object", "additionalProperties": false,
+          "required": ["warmup_body_digests_sha256", "measured_body_digests_sha256", "verdict", "override_unverified"],
+          "properties": {
+            "warmup_body_digests_sha256": {"$ref": "#/$defs/digest"},
+            "measured_body_digests_sha256": {"$ref": "#/$defs/digest"},
+            "verdict": {"enum": ["Pass", "Fail", "Unknown"]},
+            "override_unverified": {"type": "boolean"}
+          }
+        }
+      },
+      "allOf": [{"if": {"properties": {"warmup_isolation": {"const": "token_prefix_disjoint"}}}, "then": {
+        "required": ["warmup_overlap"],
+        "properties": {"warmup_overlap": {"properties": {"verdict": {"const": "Pass"}}}}
+      }}]
     },
     "reset": {
       "type": "object", "additionalProperties": false,

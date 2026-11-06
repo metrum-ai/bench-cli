@@ -7,7 +7,9 @@
 
 - Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
   validation references, effective workload digests, explicit unknowns and
-  phase/reset evidence. Add schema and offline mock contract tests. This does
+  phase/reset evidence and timestamps. Retain warmup isolation overrides with
+  both rendered-body digest-list bindings; unknown verdicts cannot claim a Pass.
+  Add schema and offline mock contract tests. This does
   not yet add runner emission or live engine/cache validation (#421).
 
 ## Unreleased

@@ -78,6 +78,27 @@ fn version_and_required_provenance_are_strict() {
 }
 
 #[test]
+fn warmup_override_retains_both_body_bindings_without_claiming_a_pass() {
+    let validator = validator();
+    let mut value = manifest();
+    value["workload"]["warmup_overlap"] = json!({
+        "warmup_body_digests_sha256": "a".repeat(64),
+        "measured_body_digests_sha256": "b".repeat(64),
+        "verdict": "Unknown", "override_unverified": true
+    });
+    assert!(validator.is_valid(&value));
+    value["workload"]["warmup_isolation"] = json!("token_prefix_disjoint");
+    assert!(!validator.is_valid(&value));
+    value["workload"]["warmup_overlap"]["verdict"] = json!("Pass");
+    assert!(validator.is_valid(&value));
+    value["workload"]["warmup_overlap"]
+        .as_object_mut()
+        .unwrap()
+        .remove("measured_body_digests_sha256");
+    assert!(!validator.is_valid(&value));
+}
+
+#[test]
 fn cold_claim_requires_scoped_acknowledged_ready_settled_reset() {
     let validator = validator();
     let mut value = manifest();

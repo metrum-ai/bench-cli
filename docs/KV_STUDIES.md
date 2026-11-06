@@ -84,7 +84,16 @@ use monotonic clocks for durations. Verified resets require all four timestamps.
 
 Warm kernels/connections with token-prefix-disjoint held-out inputs, then reset
 intended tiers for cold measurement. Different files or session IDs do not prove
-prefix isolation. Drain requests and asynchronous transfers before boundaries.
+prefix isolation. The offline `validate_prefix_disjoint` interface consumes
+`RenderedBody` records bound to SHA-256 of exact final HTTP body bytes, pinned
+tokenizer/template identity and fully rendered token IDs. Tokenizer/template
+mismatch is `Unknown`, never `Pass`. Default passing threshold is zero shared
+full cache blocks, not merely different content hashes. Fail/Unknown must stop
+measured issuance unless an explicit override is recorded. `workload.warmup_overlap`
+retains `verdict`, `override_unverified`, `warmup_body_digests_sha256` and
+`measured_body_digests_sha256`. Each digest-list hash covers a sorted JSON array
+of final body SHA-256 strings, retaining multiplicity. An override does not turn
+unknown isolation into a Pass or physical cache evidence. Drain requests and asynchronous transfers before boundaries.
 Reset hooks are opt-in trusted operator commands, never dataset commands. Fail
 closed on timeout, nonzero exit, JSON `success=false`, readiness failure or
 unacknowledged tier reset; HTTP success alone is insufficient. Failed/unverified
