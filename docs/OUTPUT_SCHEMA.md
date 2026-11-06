@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Public document adapter output
+
+The standalone document adapter emits canonical `DocumentQuestion` records from
+the dataset contract; mapping and pinned fixture provenance are documented in
+[PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
+separate units. The adapter does not change runner JSONL or certify token lengths,
+window feasibility, rights beyond caller policy, or observed cache reuse.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses integer

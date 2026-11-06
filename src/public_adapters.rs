@@ -246,7 +246,7 @@ mod tests {
         mapping.question_array = true;
         let row = json!({"id":"row", "doc_id":"doc", "context":"shared", "question":["one", "two"], "outputs":["SECRET1", "SECRET2"]});
         let a = documents(
-            &[row.clone()],
+            std::slice::from_ref(&row),
             &origin,
             &origin.files[0].sha256,
             &rights,
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(
             a,
             documents(
-                &[row.clone()],
+                std::slice::from_ref(&row),
                 &origin,
                 &origin.files[0].sha256,
                 &rights,
@@ -322,7 +322,7 @@ mod tests {
         .is_err());
         origin.config = "wrong".into();
         assert!(documents(
-            &[row.clone()],
+            std::slice::from_ref(&row),
             &origin,
             &origin.files[0].sha256,
             &rights,
@@ -333,7 +333,7 @@ mod tests {
         origin.config = "longdep_qa".into();
         rights.decision = AccessDecision::Denied;
         assert!(documents(
-            &[row.clone()],
+            std::slice::from_ref(&row),
             &origin,
             &origin.files[0].sha256,
             &rights,
@@ -344,7 +344,7 @@ mod tests {
         rights.decision = AccessDecision::Allowed;
         limits.max_targets = 0;
         assert!(documents(
-            &[row.clone()],
+            std::slice::from_ref(&row),
             &origin,
             &origin.files[0].sha256,
             &rights,
