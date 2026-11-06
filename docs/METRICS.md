@@ -231,7 +231,8 @@ Workload section. This page focuses on measured fields.
   `prefill_tps_per_user = isl_tokens / first_token_s`, where
   `first_token_s = min(first_reasoning_s, ttft_s)` (just `ttft_s` when the
   request streamed no reasoning delta). The denominator is the first generated
-  token of any kind. In v1.8.0 `ttft_s` already uses this first-any clock.
+  token of any kind. In v1.8.0 real-delta `ttft_s` uses this first-any clock;
+  explicit first-byte approximations are excluded as described below.
   On modality summaries the ISL
   follows the `isl_tokens` rule (server usage `prompt_tokens` wins, tokenizer
   count fills `usage_missing` rows, rows with no token accounting are
@@ -302,9 +303,10 @@ Workload section. This page focuses on measured fields.
   as tokens. Strategic stages that do not generate output do not report a
   completion-token rate.
 - **Error rate**: measured failures divided by measured attempts.
-- **Goodput**: answered measured successes satisfying every configured TTFT,
-  TPOT, E2E, and `user_tps` SLO divided by the window. Unanswered reasoning
-  truncations do not contribute.
+- **Goodput**: measured successes satisfying every configured TTFT, TPOT,
+  E2E, and `user_tps` SLO divided by the window, excluding rows explicitly
+  marked unanswered. Unmarked legacy rows and ASR/imagegen successes are
+  treated as answered for goodput. Unanswered reasoning truncations do not contribute.
 - **Cost per million output tokens**: when a declared hourly price is present
   (`--price-per-hour` or `sut.cost.price_per_hour`),
   `price_per_hour / (completion_tokens_per_second * 3600) * 1e6`.

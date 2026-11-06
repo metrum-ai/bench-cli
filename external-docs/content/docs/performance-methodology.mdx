@@ -149,7 +149,7 @@ measurement is valid only when the client is not the limiting factor.
 | **Throughput bins** | Fixed-width bins over send offsets (open-loop: `scheduled_offset_s`; closed-loop: `send_offset_s`), measured from the first measured request's offset. Each bin is divided by its **actual** width so a trailing partial bin is not under-normalized. |
 | **Token throughput** | Server-reported completion tokens, including reasoning, divided by the same window. Incomplete usage makes the headline unavailable; local tokenizer estimates do not fill the gap. |
 | **Error rate** | Measured failures divided by measured attempts. |
-| **Goodput** | Answered measured successes satisfying all configured SLOs, divided by the window. |
+| **Goodput** | Measured successes satisfying all configured SLOs, excluding explicitly unanswered rows, divided by the window. Unmarked legacy/ASR/imagegen rows are treated as answered for goodput. |
 
 **Effective max concurrency** is stamped on `summary.v5.config` as
 `effective_max_concurrency` - `--max-concurrency` when set, otherwise the

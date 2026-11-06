@@ -75,6 +75,7 @@ enum Condition {
     HttpPath,
     Usage,
     Streaming,
+    VisibleAnswer,
     TtftApprox,
     ReasoningStream,
     ReasoningUsage,
@@ -101,6 +102,7 @@ impl Condition {
             Self::HttpPath => "http",
             Self::Usage => "usage",
             Self::Streaming => "streaming",
+            Self::VisibleAnswer => "visible-answer",
             Self::TtftApprox => "ttft-approx",
             Self::ReasoningStream => "reasoning-stream",
             Self::ReasoningUsage => "reasoning-usage",
@@ -136,6 +138,7 @@ impl Condition {
                 "`--streaming` chat or vlm. `itl_s` needs two or more content \
                  chunks, `decode_tok_s` a positive decode time and output tokens."
             }
+            Self::VisibleAnswer => "A visible answer or tool output delta was observed; absent for reasoning-only truncation.",
             Self::TtftApprox => {
                 "This condition refers only to `--infer-ttft-from-first-byte`, \
                  which approximates missing TTFT from HTTP response headers, not \
@@ -240,7 +243,7 @@ const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("tokenized_prompt_tokens", &[Tokenizer]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
-    ("ttft_visible_answer_s", &[Streaming]),
+    ("ttft_visible_answer_s", &[Streaming, VisibleAnswer]),
     ("visible_completion_tokens", &[ReasoningUsage]),
 ];
 
@@ -299,7 +302,7 @@ const REQUEST_ROW_ROWS: &[(&str, &[Condition])] = &[
     ("t_first_ns", &[HttpPath]),
     ("ttft_first_any_s", &[Streaming]),
     ("ttft_s", &[Streaming, TtftApprox]),
-    ("ttft_visible_answer_s", &[Streaming]),
+    ("ttft_visible_answer_s", &[Streaming, VisibleAnswer]),
 ];
 
 /// One optional field and the conditions that fire it.
@@ -345,7 +348,7 @@ fn modality_kinds() -> [(&'static [&'static str], &'static [Condition]); 3] {
 
 /// Conditions a plain closed-loop `--streaming` llm run against a server
 /// that reports usage meets (the parity harness `plain` scenario).
-const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, PositiveWindow];
+const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, VisibleAnswer, PositiveWindow];
 
 // Fixtures
 
@@ -1043,7 +1046,8 @@ fn condition_mode(key: &str, conditions: &[Condition]) -> ConditionMode {
         return ConditionMode::All;
     }
     match key {
-        "completion_tokens_per_second"
+        "ttft_visible_answer_s"
+        | "completion_tokens_per_second"
         | "input_tokens_per_second"
         | "total_tokens_per_second"
         | "non_reasoning_completion_tokens_per_second"
@@ -1357,6 +1361,19 @@ fn doc_path() -> PathBuf {
 }
 
 // Tests
+
+#[test]
+fn visible_answer_clock_requires_stream_and_visible_output() {
+    for table in [request_optional(), request_row_optional()] {
+        assert!(!fires(&table, "ttft_visible_answer_s", &[Streaming]));
+        assert!(!fires(&table, "ttft_visible_answer_s", &[VisibleAnswer]));
+        assert!(fires(
+            &table,
+            "ttft_visible_answer_s",
+            &[Streaming, VisibleAnswer]
+        ));
+    }
+}
 
 #[test]
 fn rate_and_cost_conditions_require_all_prerequisites() {
@@ -1847,6 +1864,7 @@ fn published_counts_match_real_llm_runs() {
         PositiveWindow,
         Usage,
         Streaming,
+        VisibleAnswer,
         ReasoningStream,
         ReasoningUsage,
         OpenLoop,

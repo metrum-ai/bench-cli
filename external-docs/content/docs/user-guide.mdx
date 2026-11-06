@@ -47,7 +47,7 @@ already operate, measures what the client observes, and writes JSONL.
 | **Phase** | Warmup, measure, or drain | Warmup excluded from measured distributions |
 | **Data log** | JSONL file of request records plus summary | `--data-log results.jsonl` |
 | **SUT** | Operator-declared system-under-test block | `--sut sut.json` |
-| **Goodput** | Answered successes meeting configured SLOs (and strategic validity checks) | `--slo ttft=250ms --slo e2e=2s` |
+| **Goodput** | Successes meeting configured SLOs (and strategic validity checks), excluding explicitly unanswered rows; unmarked legacy/ASR/imagegen rows are treated as answered for goodput | `--slo ttft=250ms --slo e2e=2s` |
 
 Read it as a sentence: choose a **modality**, label a **scenario**, execute a
 **run**, inspect the **data log**, and optionally attach a declared **SUT**

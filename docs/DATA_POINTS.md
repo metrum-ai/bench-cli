@@ -80,6 +80,7 @@ harness counts agree on what a quantity is.
 | `http` | Set by the bundled binaries' HTTP request path (llm, vlm, asr, imagegen, strategic). Response body fields (`receive_s`, `bytes_received`, `chunks_received`) are on successes only. |
 | `usage` | The server reports complete `usage` token counts for the relevant population. |
 | `streaming` | `--streaming` chat or vlm. `itl_s` needs two or more content chunks, `decode_tok_s` a positive decode time and output tokens. |
+| `visible-answer` | A visible answer or tool output delta was observed; absent for reasoning-only truncation. |
 | `ttft-approx` | This condition refers only to `--infer-ttft-from-first-byte`, which approximates missing TTFT from HTTP response headers, not a token. `--ttft-fallback first-token` is a deprecated redundant alias; `--allow-missing-ttft` relaxes the audit. Reasoning-only truncation is unanswered and `--ci-safety` rejects it. |
 | `reasoning-stream` | The server streams `reasoning_content` deltas. |
 | `reasoning-usage` | The server reports `usage.completion_tokens_details.reasoning_tokens` (or an accepted variant). |
@@ -105,7 +106,7 @@ Reasoning-usage for non-reasoning rates must be complete and consistent for ever
 
 A closed-loop `metrum-ai-bench-cli-llm --mode chat --streaming` run against a
 server that reports usage, with no reasoning, SLO, price, ISL/OSL targets,
-tokenizer, or `--ndjson`, meets `http`, `usage`, `streaming`, `positive-window`. It fires **56**
+tokenizer, or `--ndjson`, meets `http`, `usage`, `streaming`, `visible-answer`, `positive-window`. It fires **56**
 summary quantities and **23** per-request fields (schema fields
 plus the llm `modality_metrics` keys).
 `tests/data_points.rs` runs exactly that against dummy-model-server and
@@ -315,7 +316,7 @@ than the schema `values` here, which counts every numeric slot.
 | `total_tokens` | always |
 | `ttft_first_any_s` | `streaming` |
 | `ttft_s` | `streaming` or `ttft-approx` |
-| `ttft_visible_answer_s` | `streaming` |
+| `ttft_visible_answer_s` | `streaming` and `visible-answer` |
 | `visible_completion_tokens` | `reasoning-usage` |
 
 ## `telemetry.v3` `request` row fields (`--ndjson`)
@@ -336,4 +337,4 @@ than the schema `values` here, which counts every numeric slot.
 | `t_sent_ns` | always |
 | `ttft_first_any_s` | `streaming` |
 | `ttft_s` | `streaming` or `ttft-approx` |
-| `ttft_visible_answer_s` | `streaming` |
+| `ttft_visible_answer_s` | `streaming` and `visible-answer` |

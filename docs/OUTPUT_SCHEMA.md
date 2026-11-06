@@ -12,14 +12,16 @@ that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)
 
 `metrum-ai-bench-cli.request.v5` records are flushed immediately on completion;
 audit readers also accept earlier supported versions including v4. In v5,
-`ttft_s` is first-any reasoning or visible output, while
-`ttft_visible_answer_s` is the first visible output and `ttft_first_any_s`
-retains the first-any alias. `outcome` and `answer_completed` separate
-transport completion from an answer. A reasoning-only length finish is
-`reasoning_truncated`, non-failing by default but an error under strict mode.
-`ttft_source` distinguishes streamed timing from the explicit HTTP
-`first_byte_approx`. Historical v4 `ttft_s` means first-visible output; do not
-mix versions without mapping their semantics and cohorts.
+`ttft_s` normally records the first reasoning or visible output delta; opt-in
+`--infer-ttft-from-first-byte` may instead use HTTP headers, labelled
+`first_byte_approx`. `ttft_visible_answer_s` is the first visible output and
+`ttft_first_any_s` records the first real reasoning or visible delta. `outcome`
+and `answer_completed` separate transport completion from an answer. A
+reasoning-only length finish is `reasoning_truncated`, non-failing by default
+but an error under strict mode. Historical v4 `ttft_s` normally means first
+visible output, but can use a labelled `first_token_fallback` or explicit
+`first_byte_approx` when enabled.
+Do not mix versions without mapping their semantics and cohorts.
 
 Records contain:
 
@@ -89,7 +91,8 @@ on `request.v5` (no parallel `imagegen.request.v1` lines).
 
 `first_byte_s` is the monotonic elapsed time from send start until response
 headers are received (after a successful `.send()`). It is distinct from
-`ttft_s` (first reasoning or visible output), which includes connect/TLS/queue.
+real-delta `ttft_s`, which includes connect/TLS/queue, unless explicit
+first-byte inference supplies the labelled approximation.
 
 `connect_s` is the HTTP connector duration for establishing a new TCP/TLS
 session (DNS + TCP + TLS). `0.0` means a pooled connection was reused. TCP and
@@ -112,7 +115,7 @@ including no-answer outcomes), `fallback_ttft_s` (failed-request fallback
 samples) and `observed_reasoning_tokens` / `observed_visible_completion_tokens`
 distributions and totals (server-reported usage including completed no-answer
 streams). `first_reasoning_s` and `ttft_first_any_s` include these streams;
-v5 uses first-any headline TTFT and all-attempt usage with completeness gating. See
+v5 normally uses first-any headline TTFT (or labelled first-byte approximation) and all-attempt usage with completeness gating. See
 [METRICS.md](METRICS.md#thinking-models-ttft-vs-first-reasoning).
 
 Other summary fields:
