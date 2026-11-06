@@ -86,7 +86,7 @@ Selected summary fields:
 | `completion_tokens_source` | `"server_usage"` when the headline rate is available |
 | `ttft_approx_count` | Measured requests with TTFT from HTTP time-to-first-byte (`--infer-ttft-from-first-byte`) |
 | `ttft_warning` | Optional note when TTFT was approximated or left unmeasured |
-| Per-request `ttft_source` | `"stream"`, `"first_token_fallback"` or `"first_byte_approx"` when `ttft_s` is present |
+| Per-request `ttft_source` | `"stream"` or `"first_byte_approx"` when `ttft_s` is present; older records may use `"first_token_fallback"` |
 | `isl_osl.length_basis` | `"server_usage"` or `"tokenizer"` for published ISL/OSL means |
 
 Every `DistSummary` carries `p90_unreliable`, `p95_unreliable`, and

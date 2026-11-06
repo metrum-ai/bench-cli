@@ -20,11 +20,11 @@
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Banner carried by every emitted file.
-pub const DISCLAIMER: &str = "EXPLICITLY NON-CERTIFYING: this bundle was produced by Metrum AI Bench CLI's Endpoints-compatible artifact adapter. It is NOT an MLPerf or Endpoints submission, and bench-native metric definitions (visible-token TTFT, per-request TPOT, closed-loop arrival) must not be read as Endpoints metric definitions without a definition review.";
+pub const DISCLAIMER: &str = "EXPLICITLY NON-CERTIFYING: this bundle was produced by Metrum AI Bench CLI's Endpoints-compatible artifact adapter. It is NOT an MLPerf or Endpoints submission, and bench-native metric definitions (TTFT with input-dependent provenance, per-request TPOT, closed-loop arrival) must not be read as Endpoints metric definitions without a definition review.";
 
 /// Adapter bundle schema version.
 pub const ADAPTER_SCHEMA_VERSION: &str = "metrum-ai-bench-cli.endpoints-adapter.v1";
@@ -163,6 +163,37 @@ fn select_complete_run(rows: &[Value]) -> Result<BenchRun> {
 
 fn f64_field(row: &Value, key: &str) -> Option<f64> {
     row.get(key).and_then(Value::as_f64)
+}
+
+/// Describe only the successful finite TTFT samples actually used in percentiles.
+fn ttft_provenance(records: &[Value]) -> String {
+    let mut sources = BTreeSet::new();
+    for row in records.iter().filter(|r| {
+        r.get("error").is_none_or(Value::is_null)
+            && f64_field(r, "ttft_s").is_some_and(f64::is_finite)
+    }) {
+        let source = row.get("ttft_source").and_then(Value::as_str);
+        let version = row
+            .get("schema_version")
+            .and_then(Value::as_str)
+            .and_then(|v| v.rsplit_once(".request.v"))
+            .and_then(|(_, v)| v.parse::<u32>().ok());
+        let label = match (source, version) {
+            (Some("first_byte_approx"), _) => "HTTP first-byte approximation",
+            (Some("stream"), Some(5)) => "v5 first-any reasoning or visible output delta",
+            (Some("stream") | None, Some(1..=4)) => "historical visible output token",
+            (Some("first_token_fallback"), _) => {
+                "historical first-token fallback (semantics require review)"
+            }
+            _ => "unknown TTFT provenance",
+        };
+        sources.insert(label);
+    }
+    if sources.is_empty() {
+        "no TTFT samples; provenance unavailable".to_string()
+    } else {
+        sources.into_iter().collect::<Vec<_>>().join("; ")
+    }
 }
 
 /// Native bench metrics for one point, each with unit, definition and a
@@ -330,7 +361,7 @@ fn native_metrics(run: &BenchRun) -> Result<NativeMetrics> {
         );
     }
 
-    // Latency percentiles: E2E plus TTFT (visible token) and per-request
+    // Latency percentiles: E2E plus source-labelled TTFT and per-request
     // TPOT, all type-7 percentiles of finite values.
     let latency: Vec<f64> = ok
         .iter()
@@ -339,6 +370,7 @@ fn native_metrics(run: &BenchRun) -> Result<NativeMetrics> {
     let latency = crate::stats::sort_finite(latency);
     let ttft: Vec<f64> = ok.iter().filter_map(|r| f64_field(r, "ttft_s")).collect();
     let ttft = crate::stats::sort_finite(ttft);
+    let ttft_definition = ttft_provenance(records);
     let mut tpot: Vec<f64> = Vec::new();
     for r in &ok {
         let (n, t, lat) = (
@@ -365,8 +397,8 @@ fn native_metrics(run: &BenchRun) -> Result<NativeMetrics> {
             name,
             percentile_ms(&ttft, p),
             "ms",
-            "type-7 percentile of visible-token TTFT (first content token, not first byte)",
-            "flag-definition: bench TTFT is first visible content token; Endpoints TTFT semantics differ — review before comparing",
+            &format!("type-7 percentile of TTFT: {ttft_definition}"),
+            "flag-definition: bench TTFT provenance varies; Endpoints TTFT semantics differ — review before comparing",
             summary
                 .pointer(&format!("/ttft_s/p{:.0}", p as u64))
                 .and_then(Value::as_f64)
@@ -420,6 +452,7 @@ pub fn export_bundle(options: &ExportOptions) -> Result<BundleSummary> {
         .collect::<std::result::Result<_, _>>()?;
     let run = select_complete_run(&rows)?;
     let metrics = native_metrics(&run)?;
+    let ttft_definition = ttft_provenance(&run.records);
 
     std::fs::create_dir_all(options.out_dir.join("performance"))?;
     std::fs::create_dir_all(options.out_dir.join("accuracy"))?;
@@ -492,6 +525,7 @@ pub fn export_bundle(options: &ExportOptions) -> Result<BundleSummary> {
     if let Some(notes) = &options.notes {
         point_yaml.push_str(&format!("  operator_notes: {notes:?}\n"));
     }
+    point_yaml.push_str(&format!("  ttft_definition: {ttft_definition:?}\n"));
     point_yaml.push_str("  units:\n    latency: ms\n    throughput: output tokens/s or requests/s per metric definition\n    power: W (board power only, declared descriptors only)\n  provenance: bench data log converted by the adapter; see NONCOMPLIANCE.md for the checks that remain impossible\n");
     write_file(&options.out_dir.join("point.yaml"), point_yaml)?;
     files.push("point.yaml".into());
@@ -615,7 +649,7 @@ pub fn export_bundle(options: &ExportOptions) -> Result<BundleSummary> {
                 "90.0": ttft_bucket(90.0).map(|v| v * 1e6),
                 "99.0": ttft_bucket(99.0).map(|v| v * 1e6),
             },
-            "bench_definition": "bench visible-token TTFT (first content token), ns; NOT the first-byte clock; do not equate with Endpoints TTFT without a definition review",
+            "bench_definition": format!("bench TTFT, ns: {ttft_definition}; do not equate with Endpoints TTFT without a definition review"),
         },
         "tpot": {
             "early_stopping_percentiles": {
@@ -725,7 +759,7 @@ pub fn export_bundle(options: &ExportOptions) -> Result<BundleSummary> {
             - The pinned upstream PointSummary cross-check (checker commit fda43ef88fffcef4e9da81df2b71dbb355dd78e8 is not publicly fetchable; supply it as an operator step and record results in crosscheck.json).\n\
             - Power Working Group evidence: system_power.json carries operator-declared descriptors only; PDU/whole-system facts are never synthesized.\n\
             - Scenario conformance: bench has no LoadStair/Pareto arrival pattern and no native Offline burst mode (#309); such intent labels are exported with an explicit disclosure, never as equivalent runs.\n\n\
-            Metric definitions that differ from Endpoints: visible-token TTFT (first content token, not first byte) and per-request TPOT are flagged per metric in performance/result_summary.json and point.yaml.\n"
+            Metric definitions requiring Endpoints review: TTFT ({ttft_definition}) and per-request TPOT are described in performance/result_summary.json and point.yaml.\n"
         ),
     )?;
     files.push("NONCOMPLIANCE.md".into());
@@ -851,7 +885,7 @@ mod tests {
         assert!(result["ttft"]["bench_definition"]
             .as_str()
             .unwrap()
-            .contains("first content token"));
+            .contains("historical visible output token"));
 
         let cross: Value = serde_json::from_str(
             &std::fs::read_to_string(dir.path().join("bundle/crosscheck.json")).unwrap(),
@@ -890,6 +924,65 @@ mod tests {
 
         // The adapter's own API surface also flows through the CLI.
         assert!(summary.files.iter().any(|f| f == "crosscheck.json"));
+    }
+
+    #[test]
+    fn ttft_labels_follow_sample_provenance_without_changing_values() {
+        for (version, source, expected) in [
+            ("v4", "stream", "historical visible output token"),
+            (
+                "v5",
+                "stream",
+                "v5 first-any reasoning or visible output delta",
+            ),
+            ("v5", "first_byte_approx", "HTTP first-byte approximation"),
+            ("v5", "unknown", "unknown TTFT provenance"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut rows = run_rows();
+            for row in &mut rows[..2] {
+                row["schema_version"] = json!(format!("metrum-ai-bench-cli.request.{version}"));
+                row["ttft_source"] = json!(source);
+            }
+            export(dir.path(), &rows, ScenarioKind::Server, None).unwrap();
+            let result: Value = serde_json::from_str(
+                &std::fs::read_to_string(dir.path().join("bundle/performance/result_summary.json"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(result["ttft"]["bench_definition"]
+                .as_str()
+                .unwrap()
+                .contains(expected));
+            assert!(
+                (result["ttft"]["early_stopping_percentiles"]["50.0"]
+                    .as_f64()
+                    .unwrap()
+                    - 150_000_000.0)
+                    .abs()
+                    < 1.0
+            );
+            for path in ["point.yaml", "NONCOMPLIANCE.md"] {
+                assert!(
+                    std::fs::read_to_string(dir.path().join("bundle").join(path))
+                        .unwrap()
+                        .contains(expected)
+                );
+            }
+            let metrics = native_metrics(&select_complete_run(&rows).unwrap()).unwrap();
+            assert!(metrics.values["ttft_p50_ms"]["definition"]
+                .as_str()
+                .unwrap()
+                .contains(expected));
+        }
+        let mut rows = run_rows();
+        rows[0]["schema_version"] = json!("metrum-ai-bench-cli.request.v5");
+        rows[0]["ttft_source"] = json!("stream");
+        rows[1]["ttft_source"] = json!("first_byte_approx");
+        let provenance = ttft_provenance(&select_complete_run(&rows).unwrap().records);
+        assert!(
+            provenance.contains("first-any") && provenance.contains("first-byte approximation")
+        );
     }
 
     #[test]

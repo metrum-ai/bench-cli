@@ -4,8 +4,8 @@
 # Metric definitions
 
 All intervals use `std::time::Instant`. ISO timestamps are metadata only.
-Current request and summary records use v4; compatible readers can still read
-historical v3 logs.
+Current request and summary records use v5; compatible readers can still read
+historical v4 and v3 logs.
 
 Workload (prompt source, ISL/OSL, profiles, warmup, client headroom) is defined
 in the live docs
@@ -120,8 +120,7 @@ Workload section. This page focuses on measured fields.
   time-weighted averages of a step function over the benchmark window, with
   "active" variants restricted to time when the phase has a request in
   flight.
-  - **Intervals**: one per measured success (failures and warmup excluded,
-    like every rate in the summary): `[send, send + latency_s]`, where `send`
+  - **Intervals**: one per measured success (failures and warmup excluded): `[send, send + latency_s]`, where `send`
     is the monotonic `send_offset_s`. Strategic uses its own monotonic
     `send_offset_s` (#224; `compare` falls back to wall-clock `sent_unix_ns`
     for older CSVs without it) and `service_latency_s`, so client queue delay
@@ -150,7 +149,8 @@ Workload section. This page focuses on measured fields.
     `n = 0` or the window is not positive; `active_avg` is also `null` when
     `active_s = 0`. Never 0-filled.
   - **`effective_concurrency`** (requests): requests in flight. Unclipped,
-    `avg = requests_per_second * mean(latency_s)` (Little's law). This is
+    `avg = (successes / window_seconds) * mean(success latency_s)`
+    (Little's law). This is
     not `observed_concurrency`, the client semaphore gauge sampled at each
     send, which is unchanged.
   - **`effective_prefill_concurrency`** (requests): requests between send and
@@ -332,7 +332,7 @@ Workload section. This page focuses on measured fields.
   are built with the same library builders as the modality binaries.
   `SweepPoint.modality_metrics` holds one type-7 distribution per key over
   measured successes, with the same names and definitions as modality
-  `request.v4` `modality_metrics`: VLM `image_count` (count) and
+  `request.v5` `modality_metrics`: VLM `image_count` (count) and
   `image_bytes` (bytes); ASR `wer`, `cer` (ratios, as above),
   `rtfx_client` (`audio_duration_s / service_latency_s`), and
   `audio_duration_s` (seconds); imagegen `images_requested` and
@@ -368,8 +368,9 @@ Workload section. This page focuses on measured fields.
     `completion_tokens_total` from server usage (asr only when the server
     reports usage); imagegen generates no tokens, so `osl_tokens` is `n=0`
     and `completion_tokens_total` is `null`, as for embeddings and rerank.
-    TTFT is measured only for streaming chat and vlm; asr and imagegen
-    stages report `ttft_s` with `n=0`.
+    Real token TTFT requires streaming chat or vlm; unary chat/vlm can opt into
+    labelled HTTP first-byte approximation. ASR and imagegen stages report
+    `ttft_s` with `n=0`.
 
 ## Thinking models: TTFT vs first reasoning
 
@@ -453,14 +454,14 @@ Operator guidance for `--max-tokens`, `reasoning_effort`, and probe runs:
 Scraped Prometheus gauges/counters land in a separate `--ndjson` file, not
 inside modality `--data-log` request rows. Strategic and, since #196, the
 LLM, VLM, ASR, and imagegen binaries write the same
-`metrum-ai-bench-cli.telemetry.v2` rows, so the derived metrics below apply
+`metrum-ai-bench-cli.telemetry.v3` rows, so the derived metrics below apply
 to a modality run's single `measure` stage as well.
 
 - **Shared epoch**: every `*_ns` field is nanoseconds from one run-start
   `Instant`, shared by request and telemetry rows. `run.t0_wall` is ISO 8601
   UTC metadata.
 - **Modality request timing**: a modality `request` row is derived from its
-  `request.v4` record: `t_sent_ns` is `send_offset_s` (same origin: the run
+  `request.v5` record: `t_sent_ns` is `send_offset_s` (same origin: the run
   clock starts at the NDJSON epoch),
   `t_done_ns = t_sent_ns + latency_s`, `service_latency_s` is the record's
   `latency_s`, and the row's `latency_s = queue_delay_s + latency_s`

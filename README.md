@@ -249,7 +249,7 @@ Quality evidence stays separate from throughput claims. Example:
 [examples/sut.strict.example.json](examples/sut.strict.example.json).
 
 `--require-sut` implies `--redact-hostname`. Every closing-card or blog number
-must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v4`
+must trace to a `summary.json` (or the closing `metrum-ai-bench-cli.summary.v5`
 line in a published results directory); see the
 [results publication policy](docs/RESULTS_PUBLICATION_POLICY.md).
 
@@ -456,7 +456,7 @@ is never touched).
 | Metric | Meaning |
 |--------|---------|
 | E2E latency | Send → body complete (`latency_s`) |
-| TTFT | First reasoning or visible output token (`ttft_s`); not first-byte headers |
+| TTFT | First reasoning or visible output delta (`ttft_s`) by default; explicit first-byte inference may substitute labelled HTTP-header timing |
 | Visible-answer TTFT | First visible output, absent when no answer is observed |
 | First byte | Headers received (`first_byte_s`) |
 | Window rps | Completed requests / first-send to last-terminal-completion window |

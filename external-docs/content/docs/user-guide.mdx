@@ -47,7 +47,7 @@ already operate, measures what the client observes, and writes JSONL.
 | **Phase** | Warmup, measure, or drain | Warmup excluded from measured distributions |
 | **Data log** | JSONL file of request records plus summary | `--data-log results.jsonl` |
 | **SUT** | Operator-declared system-under-test block | `--sut sut.json` |
-| **Goodput** | Successes that also meet configured SLOs | `--slo ttft=250ms --slo e2e=2s` |
+| **Goodput** | Answered successes meeting configured SLOs (and strategic validity checks) | `--slo ttft=250ms --slo e2e=2s` |
 
 Read it as a sentence: choose a **modality**, label a **scenario**, execute a
 **run**, inspect the **data log**, and optionally attach a declared **SUT**
@@ -187,7 +187,7 @@ a published number may be described as a Metrum AI Bench CLI result.
 | Symptom | What to check |
 | --- | --- |
 | Immediate auth / HTTP errors | URL path, API key, TLS (`--insecure` / `--ca-cert` only when you intend them) |
-| `ttft_s` always null | Enable `--streaming`; non-streaming responses leave TTFT undefined |
+| `ttft_s` always null | Enable `--streaming` for token TTFT; explicit first-byte inference gives only a labelled HTTP approximation |
 | Unexpected mix lengths after prompt library | Set `--num-requests` to the extractor `selected_count` and `--warmup-requests 0` |
 | Tail percentiles look extreme at small *n* | p99 is flagged unreliable below 100 samples |
 | Partial summary | Ctrl-C / interrupt set `partial: true`; do not treat as a complete campaign cell |
