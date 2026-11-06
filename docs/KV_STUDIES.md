@@ -70,6 +70,18 @@ A verified-cold claim requires a verified reset with nonempty tier scope,
 acknowledgement, readiness and transfer settling. Schema validity alone cannot
 verify that every intended tier was actually reset or that evidence is truthful.
 
+The cold-phase ordering is: token-prefix-disjoint held-out machine warmup →
+wait for all warmup requests to drain → once-per-stage reset hook → require scoped
+acknowledgement and readiness → optional transfer-settle delay → measured issuance.
+This preserves warm kernels/connections while preventing warmup from leaving
+measured prefixes resident. Never reset between measured requests. An optional
+pre-warmup reset is off by default and does not replace the post-warmup reset.
+`reset` describes the post-warmup reset; optional `pre_warmup_reset` records the
+additional operation. Both retain `started_unix_ns`, `acknowledged_unix_ns`,
+`ready_unix_ns` and `settled_unix_ns` (UTC Unix nanoseconds; null if unknown).
+Consumers must check timestamp ordering and record any wall-clock discontinuity;
+use monotonic clocks for durations. Verified resets require all four timestamps.
+
 Warm kernels/connections with token-prefix-disjoint held-out inputs, then reset
 intended tiers for cold measurement. Different files or session IDs do not prove
 prefix isolation. Drain requests and asynchronous transfers before boundaries.

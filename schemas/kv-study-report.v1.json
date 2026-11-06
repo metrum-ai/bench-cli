@@ -89,17 +89,23 @@
     },
     "reset": {
       "type": "object", "additionalProperties": false,
-      "required": ["scope", "acknowledged", "ready", "settled", "status", "reason"],
+      "required": ["scope", "acknowledged", "ready", "settled", "status", "reason", "started_unix_ns", "acknowledged_unix_ns", "ready_unix_ns", "settled_unix_ns"],
       "properties": {
         "scope": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "acknowledged": {"type": "boolean"},
         "ready": {"type": "boolean"},
         "settled": {"type": "boolean"},
         "status": {"enum": ["verified", "failed", "unverified", "not_requested"]},
-        "reason": {"$ref": "#/$defs/nullable_string"}
+        "reason": {"$ref": "#/$defs/nullable_string"},
+        "started_unix_ns": {"type": ["integer", "null"], "minimum": 0},
+        "acknowledged_unix_ns": {"type": ["integer", "null"], "minimum": 0},
+        "ready_unix_ns": {"type": ["integer", "null"], "minimum": 0},
+        "settled_unix_ns": {"type": ["integer", "null"], "minimum": 0}
       },
       "allOf": [{"if": {"properties": {"status": {"const": "verified"}}}, "then": {"properties": {
-        "scope": {"minItems": 1}, "acknowledged": {"const": true}, "ready": {"const": true}, "settled": {"const": true}
+        "scope": {"minItems": 1}, "acknowledged": {"const": true}, "ready": {"const": true}, "settled": {"const": true},
+        "started_unix_ns": {"type": "integer"}, "acknowledged_unix_ns": {"type": "integer"},
+        "ready_unix_ns": {"type": "integer"}, "settled_unix_ns": {"type": "integer"}
       }}}]
     },
     "phase": {
@@ -110,6 +116,7 @@
         "kind": {"enum": ["warmup", "cold_populate", "resident_warm", "pressure", "rehit"]},
         "cache_state": {"enum": ["verified_cold", "observed_resident", "observed_external", "unknown"]},
         "reset": {"$ref": "#/$defs/reset"},
+        "pre_warmup_reset": {"$ref": "#/$defs/reset"},
         "requests": {"type": "integer", "minimum": 0},
         "errors": {"type": "integer", "minimum": 0},
         "cached_token_known": {"type": "integer", "minimum": 0},

@@ -34,7 +34,9 @@ fn manifest() -> Value {
         "phases": [{
             "id": "populate-1", "kind": "cold_populate", "cache_state": "unknown",
             "reset": {"scope": [], "acknowledged": false, "ready": false, "settled": false,
-                "status": "unverified", "reason": "No reset evidence"},
+                "status": "unverified", "reason": "No reset evidence",
+                "started_unix_ns": null, "acknowledged_unix_ns": null,
+                "ready_unix_ns": null, "settled_unix_ns": null},
             "requests": 1, "errors": 0, "cached_token_known": 0, "cached_token_unknown": 1
         }],
         "limitations": ["Offline contract fixture only; no engine validation"]
@@ -83,12 +85,24 @@ fn cold_claim_requires_scoped_acknowledged_ready_settled_reset() {
     assert!(!validator.is_valid(&value));
     value["phases"][0]["reset"] = json!({
         "scope": ["resident", "external"], "acknowledged": true, "ready": true,
-        "settled": true, "status": "verified", "reason": null
+        "settled": true, "status": "verified", "reason": null,
+        "started_unix_ns": 10, "acknowledged_unix_ns": 20,
+        "ready_unix_ns": 30, "settled_unix_ns": 40
     });
     assert!(validator.is_valid(&value));
     for field in ["acknowledged", "ready", "settled"] {
         let mut bad = value.clone();
         bad["phases"][0]["reset"][field] = json!(false);
+        assert!(!validator.is_valid(&bad));
+    }
+    for field in [
+        "started_unix_ns",
+        "acknowledged_unix_ns",
+        "ready_unix_ns",
+        "settled_unix_ns",
+    ] {
+        let mut bad = value.clone();
+        bad["phases"][0]["reset"][field] = Value::Null;
         assert!(!validator.is_valid(&bad));
     }
     value["phases"][0]["reset"]["scope"] = json!([]);
