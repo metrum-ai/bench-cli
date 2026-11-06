@@ -469,6 +469,8 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
+[sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
+[trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
 [offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),

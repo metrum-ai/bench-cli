@@ -56,6 +56,7 @@ PATH_AREAS = {
     'src/record.rs': {'SCHEMA', 'MATH', 'GPU', 'REASON', 'INTEG'},
     'src/request.rs': {'CLI', 'SSE', 'REASON', 'GPU', 'MATH'},
     'src/runner.rs': {'*'},
+    'src/stage_lifecycle.rs': {'*'},
     'src/strategic.rs': {'MODE', 'MATH', 'GPU', 'PERF', 'COMP', 'SCHEMA', 'INTEG'},
     'src/sut.rs': {'HW', 'SCHEMA', 'LIVE', 'GPU', 'INTEG'},
     'src/sweep_modality.rs': {'MODE', 'LIVE', 'GPU', 'MATH'},
