@@ -46,6 +46,29 @@ def selected_delta(event):
     return delta
 
 
+def has_selected_output(frames):
+    """Validate framing and identify actual selected answer or tool arguments."""
+    events = [decode(frame) for frame in frames]
+    if not events or events[-1] is not None or sum(event is None for event in events) != 1:
+        raise ValueError('source stream must finish with exactly one DONE')
+    for event in events:
+        for pos, choice in enumerate((event or {}).get('choices') or []):
+            if choice.get('index', pos) != 0:
+                continue
+            delta = choice.get('delta') or {}
+            if not isinstance(delta, dict):
+                raise ValueError('invalid delta')
+            content = delta.get('content') if isinstance(delta.get('content'), str) else choice.get('text')
+            if isinstance(content, str) and content:
+                return True
+            function = delta.get('function_call') or {}
+            calls = delta.get('tool_calls') or []
+            functions = [function] + [call.get('function') or {} for call in calls]
+            if any(isinstance(fn.get('arguments'), str) and fn['arguments'] for fn in functions):
+                return True
+    return False
+
+
 def transform(frames, mode):
     if mode not in MODES or not frames:
         raise ValueError('unknown or empty transformation')
@@ -88,16 +111,27 @@ def transform(frames, mode):
         if delta is None:
             continue
         keys = [key for key in ('reasoning_content', 'reasoning') if isinstance(delta.get(key), str) and delta[key]]
-        answer = delta.get('content')
-        if len(keys) > 1 or keys and isinstance(answer, str) and answer:
+        choice = event['choices'][0]
+        answer = delta.get('content') if isinstance(delta.get('content'), str) else choice.get('text')
+        function = delta.get('function_call') or {}
+        calls = delta.get('tool_calls') or []
+        functions = [function] + [call.get('function') or {} for call in calls]
+        answer_present = (isinstance(answer, str) and bool(answer)) or any(
+            isinstance(fn.get('arguments'), str) and fn['arguments'] for fn in functions)
+        if len(keys) > 1 or keys and answer_present:
             raise ValueError('source frame has ambiguous output fields')
         if reason_index is None and keys:
             reason_index, reason_key = i, keys[0]
-        if answer_index is None and isinstance(answer, str) and answer:
+        if answer_index is None and answer_present:
             answer_index = i
     if reason_index is None or answer_index is None or reason_index >= answer_index:
         raise ValueError('real source must contain reasoning before a visible answer')
     answer_choice = events[answer_index]['choices'][0]
+    answer_fields = answer_choice.get('delta') or {}
+    if ('tool_calls' in answer_fields or 'function_call' in answer_fields) and any(
+            (selected_delta(event) or {}).get('tool_calls') or (selected_delta(event) or {}).get('function_call')
+            for event in events[reason_index:answer_index]):
+        raise ValueError('cannot move tool arguments before preceding tool metadata')
     if answer_choice.get('finish_reason') is not None or 'role' in (answer_choice.get('delta') or {}):
         raise ValueError('cannot move output frame with terminal or role metadata')
     if mode == 'answer-first':
