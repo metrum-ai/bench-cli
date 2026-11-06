@@ -1385,6 +1385,17 @@ Options:
       --sessions <SESSIONS>
 
 
+      --session-request-roles <SESSION_REQUEST_ROLES>
+          Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior
+
+          [possible values: user, tool, system, assistant, developer, function]
+
+      --session-mode <SESSION_MODE>
+          Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only
+
+          [default: legacy]
+          [possible values: legacy, closed-loop]
+
       --prefix-control <PREFIX_CONTROL>
           [default: shared]
           [possible values: shared, unique, none]

@@ -5,6 +5,11 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
+  recorded-history sessions, with sequential turns and no overlapping duplicate
+  session when cycling a small pool. Rate-sweep combinations fail before traffic;
+  request budgets can end at partial sessions (#413, scheduling slice).
+
 - Add opt-in strategic `--session-request-roles` for recorded-history request
   boundaries, preserving original message indices and legacy defaults. Record
   boundary/history policy in summary config (#413, first implementation slice).

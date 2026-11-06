@@ -377,7 +377,7 @@ fn strategic_session_request_roles_keep_only_selected_boundaries() {
     let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
         .args([
             "--url",
-            &server.url("/v1/chat/completions"),
+            &format!("http://{}/v1/chat/completions", server.address),
             "--model",
             "mock",
             "--sweep",
@@ -421,6 +421,95 @@ fn strategic_session_request_roles_keep_only_selected_boundaries() {
         serde_json::json!(["user", "tool"])
     );
     assert_eq!(summary["config"]["session_history_mode"], "recorded");
+}
+
+#[test]
+fn strategic_closed_loop_sessions_never_overlap_even_when_pool_cycles() {
+    let server = common::spawn_mock(&["--latency-ms", "10"]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sessions.jsonl");
+    let fixtures: Vec<String> = ["a", "b"]
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "session_id": id, "messages": [
+                    {"role": "user", "content": "first"},
+                    {"role": "assistant", "content": "recorded"},
+                    {"role": "user", "content": "second"}
+                ]
+            })
+            .to_string()
+        })
+        .collect();
+    fs::write(&path, fixtures.join("\n")).unwrap();
+    for concurrency in [1, 4] {
+        let csv = dir.path().join("records.csv");
+        let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+            .args([
+                "--url",
+                &format!("http://{}/v1/chat/completions", server.address),
+                "--model",
+                "mock",
+                "--sweep",
+                &concurrency.to_string(),
+                "--requests-per-stage",
+                "12",
+                "--max-tokens",
+                "4",
+                "--session-mode",
+                "closed-loop",
+                "--session-request-roles",
+                "user",
+            ])
+            .arg("--sessions")
+            .arg(&path)
+            .arg("--csv")
+            .arg(&csv)
+            .arg("--html")
+            .arg(dir.path().join("report.html"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<metrum_ai_bench::strategic::BenchRecord> = csv::Reader::from_path(csv)
+            .unwrap()
+            .deserialize()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows.len(), 12);
+        assert!(rows.iter().all(|row| row.success));
+        for id in ["a", "b"] {
+            let mut session: Vec<_> = rows
+                .iter()
+                .filter(|row| row.session_id.as_deref() == Some(id))
+                .collect();
+            session.sort_by_key(|row| row.sent_unix_ns);
+            assert!(!session.is_empty());
+            for (index, row) in session.iter().enumerate() {
+                assert_eq!(row.turn, Some(if index % 2 == 0 { 1 } else { 3 }));
+            }
+            for pair in session.windows(2) {
+                let terminal = pair[0].sent_unix_ns + (pair[0].service_latency_s * 1e9) as u128;
+                assert!(pair[1].sent_unix_ns >= terminal, "session {id} overlapped");
+            }
+        }
+        if concurrency > 1 {
+            assert!(
+                rows.iter().any(|left| rows.iter().any(|right| {
+                    left.session_id != right.session_id
+                        && right.sent_unix_ns >= left.sent_unix_ns
+                        && right.sent_unix_ns
+                            < left.sent_unix_ns + (left.service_latency_s * 1e9) as u128
+                })),
+                "independent sessions should overlap"
+            );
+        }
+        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(summary["config"]["session_mode"], "closed-loop");
+    }
 }
 
 #[test]
