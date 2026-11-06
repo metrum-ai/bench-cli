@@ -377,7 +377,7 @@ fn strategic_session_request_roles_keep_only_selected_boundaries() {
     let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
         .args([
             "--url",
-            &server.url("/v1/chat/completions"),
+            &format!("http://{}/v1/chat/completions", server.address),
             "--model",
             "mock",
             "--sweep",
