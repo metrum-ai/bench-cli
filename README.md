@@ -470,6 +470,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [rendered-token validation](docs/PREFIX_VALIDATION.md),
+[synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
