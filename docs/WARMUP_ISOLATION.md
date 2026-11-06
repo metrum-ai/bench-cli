@@ -35,8 +35,14 @@ maxima are placeholders, not measurements, and identity fields are empty.
 - `max_shared_prefix_tokens`: maximum exact leading-token match across the sets.
 - `max_shared_full_blocks`: floor(max_shared_prefix_tokens / block_size_tokens).
   Partial shared blocks do not count as full reusable blocks.
-- `pairs_over_threshold`: ordered `(warmup_request_id, measured_request_id,
+- `pairs_over_threshold`: bounded `(warmup_request_id, measured_request_id,
   shared_prefix_tokens)` triples exceeding the permitted **full-block** threshold.
+  Stable order is measured input order, then warmup token-lexicographic order
+  with original warmup position breaking ties. Duplicate records count separately.
+- `pairs_over_threshold_total`: exact offending pair count including duplicates;
+  `null` on Unknown, never an inferred zero.
+- `pairs_over_threshold_truncated`: true when the stored list omits offending
+  pairs; false on Unknown (the total remains null and the verdict is authoritative).
 - `tokenizer_revision`, `chat_template_sha256`, and `verdict` (`Pass`, `Fail`,
   `Unknown`). Enum JSON spellings preserve these exact capitalized names.
 
@@ -44,6 +50,20 @@ Default threshold is zero: any shared full block means `Fail`.
 `validate_prefix_disjoint_with_threshold` allows a configured full-block threshold;
 callers must record any non-default threshold. IDs remain non-sensitive stable
 opaque request identities. Report tuples should not expose real-user identifiers.
+
+Both existing functions retain their signatures and store at most 1,000 pairs by
+default. `validate_prefix_disjoint_with_limits(warmup, measured, block_size_tokens,
+allowed_shared_full_blocks, max_reported_pairs)` permits an explicit cap, including
+zero. A zero cap can return Fail with an empty stored list: consult the verdict
+and total. Caps never change exact maxima, totals, digest multiplicity or verdict.
+The two fields extend the unreleased `kv-token-overlap.v1` in place; schema and
+consumer mappings must account for them before release.
+
+A compressed warmup token trie references existing token spans rather than
+allocating a node per token. Descendant intervals preserve duplicate counts.
+Measured bodies are walked once; extra per-pair LCP work is limited to stored
+pairs. Warmup lexicographic indexing and construction are separate setup work.
+No quadratic scan of every warmup/measured pair is performed for totals/maxima.
 
 ## Issuance/report integration
 
@@ -57,4 +77,19 @@ does not establish that different bodies were actually issued.
 
 Offline unit fixtures cover mismatched tokenizers/templates, invalid phases and
 pins, identical prefixes with different request IDs, partial blocks, configurable
-thresholds and sorted digest multiplicity. No credentials or Hub access are used.
+thresholds, sorted digest multiplicity, brute-force parity across branch/prefix/
+duplicate cases, and caps including zero. Normal CI always runs the full CPU-only
+2,000 warmup by 2,000 measured bodies of 8,000 tokens, checks all 4,000,000
+offending pairs are counted while only 1,000 are stored, and verifies long
+duplicate edges do not allocate per token. The test prints validation elapsed
+time; use `-- --nocapture` to display successful-test output. Only
+`BENCH_PERF_ASSERT=1` enforces the 30-second wall-clock bound, avoiding timing
+flakes on loaded runners without skipping any full-size correctness assertions:
+
+```sh
+BENCH_PERF_ASSERT=1 cargo test --lib --all-features \
+  token_overlap::tests::bounded_large_study_2k_by_2k_by_8k_tokens -- --nocapture
+```
+
+This is an algorithm regression, not a serving-performance claim. No credentials
+or Hub access are used.
