@@ -473,6 +473,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [held-out warmup boundary](docs/STRATEGIC_BENCHMARKING.md#held-out-warmup-integration-boundary-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [canonical workload consumption](docs/CANONICAL_WORKLOADS.md),

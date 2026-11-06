@@ -94,7 +94,8 @@ replaced by the dataset implementation rather than a competing overlap algorithm
 ## Trusted stage reset lifecycle (v1.9.0 development)
 
 `--stage-hook CMD --stage-reset-scope resident,external` is an explicit opt-in
-**trusted operator shell command**, never a dataset-provided command. It runs
+**trusted operator shell command**, executed on Unix as `/bin/sh -c CMD`,
+never a dataset-provided command. Non-Unix execution is unsupported. It runs
 once per cold stage after machine warmup requests have drained, before any
 measured issuance. It never runs between measured requests. Intended ordering:
 held-out token-prefix-disjoint machine warmup → drain → reset → scoped
@@ -110,7 +111,9 @@ The hook must exit zero and write one bounded JSON object (at most 64 KiB):
 All intended tiers must be acknowledged exactly; missing/malformed fields,
 `success=false`, unsettled transfers, nonzero exit or timeout abort before measured
 requests. The total `--stage-hook-timeout-seconds` deadline (default 60) includes
-execution, readiness and `--stage-settle-ms` (default 0). An optional
+execution, readiness and `--stage-settle-ms` (default 0). The settle delay must
+be strictly smaller than the total timeout; equal or larger delays fail validation
+without executing the hook. An optional
 `--stage-ready-url` must return successful HTTP with JSON `ready=true` and no
 false/malformed `success`; HTTP 200 alone is insufficient. Without that probe,
 the hook itself must acknowledge `ready=true`.
@@ -122,12 +125,21 @@ validate the actual engine/tier reset mechanism; a trusted command's declaration
 is not independent physical cache evidence or a live support claim.
 
 The command receives `BENCH_STAGE_INDEX` (one-based), `BENCH_STAGE_LOAD`, and
-`BENCH_RESET_SCOPE`. Run only trusted scripts; use environment-based credentials,
-never command-line tokens. Commands/output are excluded from summary/errors;
-config retains a command digest and non-sensitive lifecycle metadata. Hooks must
-not daemonize; use `exec` for a long-running subprocess so timeout cancellation
-can terminate it. Ensure asynchronous transfers have drained before acknowledging
-settled state. A settle delay is not proof of completed transfers on its own.
+`BENCH_RESET_SCOPE` as environment variables, never interpolated into `CMD`.
+Run only trusted scripts; use environment-based credentials, never command-line
+tokens. The raw command and stdout are not copied into failure diagnostics;
+config retains a command digest and non-sensitive lifecycle metadata. On failure,
+up to the first 4 KiB of stderr is included, escaped and explicitly marked complete
+or truncated. Do not emit secrets on stderr. Extra stderr is drained and discarded
+rather than allowed to block the command.
+
+Each hook starts its own Unix process group. Timeout or cancellation/drop kills
+the whole group, including backgrounded children/grandchildren; residual group
+members are also terminated after the shell exits. Hooks must not daemonize,
+create a different session/process group, or rely on detached/remote work being
+cancelled by this local mechanism. Ensure asynchronous transfers have drained
+before acknowledging settled state. A settle delay is not proof of completed
+transfers on its own.
 
 Default behavior is unchanged when no hook is supplied. These hooks do not yet
 provide held-out warmup input or prove prefix-disjointness; do not claim that the
