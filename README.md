@@ -470,6 +470,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [strategic telemetry](docs/TELEMETRY.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
