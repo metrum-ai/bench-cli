@@ -36,6 +36,29 @@ class ExecutionEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 evidence.report_rows(root)
 
+    def test_lane_pins_are_rechecked_and_missing_input_is_retained_on_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prompt = root / "prompt.jsonl"
+            prompt.write_text("original")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"lanes": {"G1": {"prompt": {"path": str(prompt), "sha256": evidence.digest(prompt)}},
+                                                    "G2": {"unused": {"path": str(root / "not-local"), "sha256": "0" * 64}}}}))
+            record = {"ID": "BC-GPU-001", "result": "FAIL", "candidate_sha": "a" * 40, "evidence_paths": []}
+            with patch.dict("os.environ", {"CERT_MANIFEST": str(manifest), "CERT_LANE": "G1"}, clear=True):
+                saved = evidence.enrich(root, record)
+                self.assertEqual(saved["input_hashes"]["lane.G1.prompt"], evidence.digest(prompt))
+                self.assertNotIn("input_integrity_errors", saved)
+                prompt.write_text("changed")
+                with self.assertRaisesRegex(ValueError, "input changed"):
+                    evidence.enrich(root, {**record, "result": "PASS"})
+                saved = evidence.enrich(root, record)
+                self.assertTrue(saved["input_integrity_errors"])
+                prompt.unlink()
+                saved = evidence.enrich(root, record)
+                self.assertIsNone(saved["input_hashes"]["lane.G1.prompt"])
+                self.assertTrue(saved["input_integrity_errors"])
+
     def test_request_phases_use_observed_clocks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -14,6 +14,8 @@ from execution_evidence import digest, require_python
 def load_set(selection_path, catalog_path, index_path):
     require_python()
     selection = json.loads(Path(selection_path).read_text())
+    if selection.get("catalog_sha256") != digest(catalog_path):
+        raise ValueError("selection was frozen against a different catalog")
     with Path(catalog_path).open(newline="") as stream:
         gpu = {row["ID"] for row in csv.DictReader(stream) if row["Tier"] == "RC-GPU"}
     required = set(selection["selected"]) & gpu

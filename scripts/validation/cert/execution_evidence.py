@@ -82,26 +82,60 @@ def enrich(root, record):
         if not path.is_relative_to(root) or not path.is_file():
             raise ValueError("unsafe or missing evidence path")
         output[item] = digest(path)
-    inputs = {}
-    for name in ("CERT_MANIFEST", "CERT_CANDIDATE", "CERT_BASELINE"):
-        if os.environ.get(name):
-            inputs[name] = digest(os.environ[name])
-    if os.environ.get("CERT_INPUT_MANIFEST"):
-        manifest_path = Path(os.environ["CERT_INPUT_MANIFEST"])
-        inputs["execution_manifest"] = digest(manifest_path)
-        manifest = json.loads(manifest_path.read_text())
-        if manifest["candidate_sha"] != record["candidate_sha"]:
-            raise ValueError("execution manifest candidate mismatch")
-        if os.environ.get("CERT_CASE_ID") != record["ID"]:
-            raise ValueError("runner wrote a case outside the selected launcher")
-        pins = {name: manifest[name] for name in ("candidate", "sut", "all_smi", "tokenizer")}
-        pins.update({f"input-{i}": pin for i, pin in enumerate(manifest.get("inputs", []))})
-        pins["launcher"] = manifest["cases"][record["ID"]]["launcher"]
-        for name, pin in pins.items():
-            actual = digest(pin["path"])
-            if actual != pin["sha256"]:
-                raise ValueError("input changed during case execution")
+    inputs, integrity_errors = {}, []
+    def capture(name, path, expected=None):
+        try:
+            actual = digest(path)
             inputs[name] = actual
+            if expected is not None and actual != expected:
+                integrity_errors.append(f"{name}: input changed during case execution")
+        except (OSError, TypeError, ValueError) as exc:
+            inputs[name] = None
+            integrity_errors.append(f"{name}: {exc}")
+    def load(name, path):
+        capture(name, path)
+        try:
+            value = json.loads(Path(path).read_text())
+            if not isinstance(value, dict):
+                raise ValueError("input manifest must be an object")
+            return value
+        except (OSError, ValueError) as exc:
+            integrity_errors.append(f"{name}: invalid or unavailable input manifest: {exc}")
+            return None
+    def nested_pins(value, prefix):
+        if isinstance(value, dict):
+            if "path" in value and "sha256" in value:
+                capture(prefix, value["path"], value["sha256"])
+            for key, child in value.items():
+                nested_pins(child, prefix + "." + str(key))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                nested_pins(child, prefix + "." + str(index))
+    for name in ("CERT_CANDIDATE", "CERT_BASELINE"):
+        if os.environ.get(name):
+            capture(name, os.environ[name])
+    if os.environ.get("CERT_MANIFEST"):
+        lane_manifest = load("CERT_MANIFEST", os.environ["CERT_MANIFEST"])
+        lane = os.environ.get("CERT_LANE")
+        if lane and isinstance(lane_manifest, dict):
+            selected = lane_manifest.get("lanes", {}).get(lane)
+            if selected is None:
+                integrity_errors.append("selected lane is absent from input manifest")
+            nested_pins(selected, "lane." + lane)
+        else:
+            nested_pins(lane_manifest, "lane")
+    if os.environ.get("CERT_INPUT_MANIFEST"):
+        manifest = load("execution_manifest", os.environ["CERT_INPUT_MANIFEST"])
+        if manifest is not None:
+            if manifest.get("candidate_sha") != record["candidate_sha"]:
+                integrity_errors.append("execution manifest candidate mismatch")
+            if os.environ.get("CERT_CASE_ID") != record["ID"]:
+                raise ValueError("runner wrote a case outside the selected launcher")
+            nested_pins(manifest, "execution")
+    if integrity_errors and record["result"] == "PASS":
+        raise ValueError("; ".join(integrity_errors))
+    if integrity_errors:
+        record = {**record, "input_integrity_errors": integrity_errors}
     clocks = request_clocks(root, record.get("evidence_paths", []))
     record = {**record, "request_clocks": clocks}
     phase_root = Path(os.environ.get("CERT_PHASE_ROOT", root))

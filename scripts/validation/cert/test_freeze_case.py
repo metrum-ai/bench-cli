@@ -25,6 +25,8 @@ class FreezeCaseTests(unittest.TestCase):
             selection.write_text(json.dumps({"candidate_sha": "a" * 40, "selected": {"BC-GPU-001": ["core"]}}))
             catalog = root / "catalog.csv"
             catalog.write_text("ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\n")
+            selection.write_text(json.dumps({"candidate_sha": "a" * 40, "catalog_sha256": digest(catalog),
+                                             "selected": {"BC-GPU-001": ["core"]}}))
             lane = root / "lane.json"
             lane.write_text(json.dumps({"candidate_sha": "a" * 40, "candidate_binary_sha256": digest(binary), "baseline_binary_sha256": digest(binary)}))
             args = SimpleNamespace(selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,

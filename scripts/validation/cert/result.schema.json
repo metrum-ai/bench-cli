@@ -84,7 +84,11 @@
     },
     "input_hashes": {
       "type": "object",
-      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      "additionalProperties": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+    },
+    "input_integrity_errors": {
+      "type": "array",
+      "items": {"type": "string"}
     },
     "output_hashes": {
       "type": "object",

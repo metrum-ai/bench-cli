@@ -22,6 +22,8 @@ def pin(path):
 def freeze(args):
     require_python()
     selection = json.loads(args.selection.read_text())
+    if selection.get("catalog_sha256") != digest(args.catalog):
+        raise ValueError("selection was frozen against a different catalog")
     if args.case not in selection["selected"]:
         raise ValueError("case is not selected")
     with args.catalog.open(newline="") as stream:

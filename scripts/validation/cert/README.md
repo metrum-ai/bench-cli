@@ -27,7 +27,10 @@ The harness requires Python 3.12 or newer. The shared result writer atomically
 publishes a case record, evidence SHA256 hashes, candidate identity, typed
 infrastructure history and conservative carry-over eligibility. The shared lane
 entry exports frozen manifest and binary locations so their hashes are captured
-at write time. Interrupted cases retain null unknown request/error counts.
+at write time, including every nested input pin for the selected lane.
+Interrupted cases retain null unknown request/error counts. Missing or changed
+inputs prevent PASS; failed attempts retain actual/null hashes with explicit
+`input_integrity_errors` rather than losing their failure record.
 `execution_evidence.py RUN_DIRECTORY` checks retained output hashes and derives
 JSON report/sheet rows; it never constructs a PASS for a missing result. Full
 catalog acceptance still requires `validate_results.py`.
