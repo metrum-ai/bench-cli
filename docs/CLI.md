@@ -222,7 +222,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -476,7 +476,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -752,7 +752,7 @@ Options:
           Exit non-zero when measured OSL mismatches exceed --osl-tolerance (publishable gate)
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname
@@ -1032,7 +1032,7 @@ Options:
           [default: 3]
 
       --summary-json <SUMMARY_JSON>
-          Optional path to write summary.v4 JSON (same schema as the data-log summary line)
+          Optional path to write summary.v5 JSON (same schema as the data-log summary line)
 
       --debug-log <DEBUG_LOG>
           [default: debug.log]
@@ -1062,7 +1062,7 @@ Options:
           Declared platform cost ($/hour); overrides sut.cost.price_per_hour for cost_per_million_output_tokens
 
       --sut <PATH>
-          Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut
+          Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut
 
       --require-sut
           Refuse to run without a complete --sut block (gpu.model, gpu.count, driver_version, runtime.name/version/config, host_os); implies --redact-hostname

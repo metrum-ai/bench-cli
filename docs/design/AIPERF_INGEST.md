@@ -12,9 +12,9 @@
 
 > **Version note:** This historical proposal describes the v3 design as it
 > stood in 2026; it is not an implemented importer. Current Bench output is
-> `request.v4`, `summary.v4`, and `telemetry.v2`. Compatible readers can still
-> read historical v3 request and summary logs. A future importer must review
-> the v4 fields and no-answer classification before implementation.
+> `request.v5`, `summary.v5`, and `telemetry.v3`. Compatible readers can still
+> read historical v4 and v3 request and summary logs. A future importer must review
+> the v5 fields and no-answer classification before implementation.
 
 ## Question
 
@@ -103,9 +103,9 @@ All counts below come from real files.
 | Bake-off evidence [`evidence-aiperf-bakeoff-rtxpro6000-20260924`](https://github.com/metrum-ai/bench-cli/releases/download/evidence-aiperf-bakeoff-rtxpro6000-20260924/evidence-aiperf-bakeoff-rtxpro6000-20260924.zip) (sha256 `8cc7b81965871d4204eb7ee61f1fe523ee768289eb64bac543328afb5522386f`), `raw/aiperf/c4/` inside the zip | 0.11.0, JSON export schema `1.3` | A real vLLM-served model, c=4, 16 requests, streaming chat. Same three files plus CSVs |
 | Upstream docs at tag `v0.13.0` | 0.13.0 | [Profile exports](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/tutorials/working-with-profile-exports.md), [JSON export schema](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/reference/json-export-schema.md), [metrics reference](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/metrics-reference.md), [server metrics](https://github.com/ai-dynamo/aiperf/blob/v0.13.0/docs/server-metrics/server-metrics.md) |
 
-Current Bench targets are `request.v4` and `summary.v4` in
+Current Bench targets are `request.v5` and `summary.v5` in
 [OUTPUT_SCHEMA.md](../OUTPUT_SCHEMA.md), definitions in
-[METRICS.md](../METRICS.md), and `telemetry.v2` in
+[METRICS.md](../METRICS.md), and `telemetry.v3` in
 [TELEMETRY.md](../TELEMETRY.md). The v3/v1 mapping tables below document the
 historical proposal and must be updated before implementation.
 
@@ -277,8 +277,8 @@ follows those decisions and does not widen `request.v3` itself.
 
 ### Semantic traps the mapping must handle
 
-1. **TTFT.** AIPerf `time_to_first_token` counts reasoning tokens. Bench
-   `ttft_s` is the first visible token, which is AIPerf
+1. **TTFT.** AIPerf `time_to_first_token` counts reasoning tokens. The
+   historical Bench v3 `ttft_s` was the first visible token, which is AIPerf
    `time_to_first_output_token`. In the `reasoning` scenario, AIPerf TTFT p50
    is 52.46 ms and TTFO p50 is 181.62 ms. The parity table shows the
    difference: median TTFT/E2E 0.109 for AIPerf against 0.374 for Bench.

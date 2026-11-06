@@ -87,13 +87,15 @@ metrum-ai-bench-cli preflight \
 ```
 
 Preflight checks reachability, a unary chat probe, streaming first-token smoke,
-and a short latency sample. Benchmark TTFT defaults to the first visible answer,
-not the first reasoning delta or HTTP headers. Reasoning-only length finishes
-are `reasoning_truncated`; other completed no-answer streams are
-`no_output_token`. `--ttft-fallback first-token` and `--allow-missing-ttft` do
-not make them successes; `--infer-ttft-from-first-byte` is a labelled HTTP
-header approximation. Current request/summary output is v4; compatible
-consumers can read historical v3 logs. For system telemetry, strongly recommend
+and a short latency sample. Benchmark TTFT defaults to the first reasoning or
+visible delta; visible-answer timing is separate. A reasoning-only length
+finish is `reasoning_truncated`, unanswered but non-failing by default; strict
+mode and `--ci-safety` reject it. Other completed no-answer streams are
+`no_output_token` errors. `--ttft-fallback first-token` is a deprecated
+redundant alias and `--allow-missing-ttft` relaxes the audit;
+`--infer-ttft-from-first-byte` is a labelled HTTP header approximation. Current
+request/summary output is v5; compatible consumers can read historical v4 and
+v3 logs. For system telemetry, strongly recommend
 the [Metrum AI all-smi fork](./system-telemetry). It cannot see CUDA toolchains or GPU inventory on a
 remote host; when the serve path is wrong, prefer the vendor containers above.
 

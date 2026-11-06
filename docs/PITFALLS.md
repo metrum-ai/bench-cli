@@ -89,9 +89,9 @@ Fix: keep to the allowed keys. Put a GPU UUID or index in `notes` (string) and i
 
 Symptom: a report crashes or shows a knee of 0 where there is none.
 
-Cause: there is no `knee_rps`. A sweep point's `load` is the sweep axis and `throughput` is successful requests per second. `knee` is the stage index and is null when there is no bend. `knee_detection.reason` is null exactly when `index` is set. A rising throughput curve with less than a 20 percent p95 rise reports `no_bend`, and `summary.v4` has no knee field at all. Compatible readers can still read historical v3 logs, which also lack a knee field.
+Cause: there is no `knee_rps`. A sweep point's `load` is the sweep axis and `throughput` is completed responses per second. `knee` is the stage index and is null when there is no bend. `knee_detection.reason` is null exactly when `index` is set. A rising throughput curve with less than a 20 percent p95 rise reports `no_bend`, and `summary.v5` has no knee field at all. Compatible readers can still read historical v3 logs, which also lack a knee field.
 
-Fix: read `knee` and `knee_detection` from the strategic stdout or summary. Report null, not 0, when there is no knee. Do not look for a knee in a modality `summary.v4`.
+Fix: read `knee` and `knee_detection` from the strategic stdout or summary. Report null, not 0, when there is no knee. Do not look for a knee in a modality `summary.v5`.
 
 ## 12. Mix preservation and requests per stage
 
