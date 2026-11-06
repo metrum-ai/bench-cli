@@ -35,6 +35,8 @@ pub mod public_profile;
 pub mod record;
 pub mod request;
 pub mod runner;
+#[cfg(feature = "tokenizer")]
+pub mod runtime_rendering;
 pub mod sse;
 pub mod stage_lifecycle;
 pub mod stats;

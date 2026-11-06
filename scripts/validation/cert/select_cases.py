@@ -32,6 +32,7 @@ PATH_AREAS = {
     'src/archive_inputs.rs': {'*'},
     'src/canonical_input.rs': {'*'},
     'src/chat_rendering.rs': {'*'},
+    'src/runtime_rendering.rs': {'*'},
     'src/dataset_formats.rs': {'*'},
     'src/prefix_families.rs': {'*'},
     'src/prefix_validation.rs': {'*'},
