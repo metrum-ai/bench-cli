@@ -112,7 +112,10 @@ mod tests {
         assert_eq!(report.pairs_over_threshold_total, None);
         assert!(!report.pairs_over_threshold_truncated);
         let value = serde_json::to_value(&report).unwrap();
-        assert!(value["pairs_over_threshold_total"].is_null());
+        assert_eq!(
+            value.get("pairs_over_threshold_total"),
+            Some(&serde_json::Value::Null)
+        );
         assert_eq!(value["pairs_over_threshold_truncated"], false);
         assert_eq!(report.max_shared_full_blocks, 0); // Unknown maxima are not measurements.
         let reordered = validate_prefix_disjoint(&[b.clone(), a.clone()], &[], 16);

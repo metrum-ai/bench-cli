@@ -1299,6 +1299,9 @@ Options:
       --prompts <PROMPTS>
           JSONL prompt file (objects with "prompt"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests
 
+      --canonical-jsonl <CANONICAL_JSONL>
+          Canonical JSONL; fails closed until the canonical loader is integrated
+
       --max-tokens <MAX_TOKENS>
           Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps
 
