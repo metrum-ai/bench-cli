@@ -191,7 +191,7 @@ mod tests {
         let warm = vec![body("w", Phase::Warmup, &[1])];
         let base = body("m", Phase::Measured, &[2]);
         assert_eq!(
-            validate_prefix_disjoint(&warm, &[base.clone()], 1).verdict,
+            validate_prefix_disjoint(&warm, std::slice::from_ref(&base), 1).verdict,
             Verdict::Pass
         );
         for field in 0..6 {
@@ -210,7 +210,7 @@ mod tests {
             );
         }
         assert_eq!(
-            validate_prefix_disjoint(&warm, &[base.clone()], 0).verdict,
+            validate_prefix_disjoint(&warm, std::slice::from_ref(&base), 0).verdict,
             Verdict::Unknown
         );
         assert_eq!(
@@ -231,7 +231,7 @@ mod tests {
             body_digests_sha256(&[b.clone(), a.clone()])
         );
         assert_ne!(
-            body_digests_sha256(&[a.clone()]),
+            body_digests_sha256(std::slice::from_ref(&a)),
             body_digests_sha256(&[a.clone(), a.clone()])
         );
         let mut changed = a.clone();
