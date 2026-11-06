@@ -11,6 +11,15 @@ arrival_offset_ms(u64), typed inert messages, expected_output_tokens(u32), and t
 agreed dataset source envelope. Null metadata remains unknown. This adds a new
 loader without changing legacy Vec<String> APIs or runner output schema versions.
 
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses string

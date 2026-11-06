@@ -27,6 +27,7 @@ pub mod public_dataset;
 pub mod record;
 pub mod request;
 pub mod runner;
+pub mod session_inputs;
 pub mod sse;
 pub mod stats;
 pub mod strategic;

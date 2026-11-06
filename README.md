@@ -470,6 +470,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
+[typed public session normalization](docs/PUBLIC_SESSIONS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
