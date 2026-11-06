@@ -78,8 +78,18 @@ does not establish that different bodies were actually issued.
 Offline unit fixtures cover mismatched tokenizers/templates, invalid phases and
 pins, identical prefixes with different request IDs, partial blocks, configurable
 thresholds, sorted digest multiplicity, brute-force parity across branch/prefix/
-duplicate cases, and caps including zero. A CPU-only regression validates 2,000
-warmup by 2,000 measured bodies of 8,000 tokens within 30 seconds, checks all
-4,000,000 offending pairs are counted while only 1,000 are stored, and verifies
-long duplicate edges do not allocate per token. This is an algorithm regression,
-not a serving-performance claim. No credentials or Hub access are used.
+duplicate cases, and caps including zero. Normal CI always runs the full CPU-only
+2,000 warmup by 2,000 measured bodies of 8,000 tokens, checks all 4,000,000
+offending pairs are counted while only 1,000 are stored, and verifies long
+duplicate edges do not allocate per token. The test prints validation elapsed
+time; use `-- --nocapture` to display successful-test output. Only
+`BENCH_PERF_ASSERT=1` enforces the 30-second wall-clock bound, avoiding timing
+flakes on loaded runners without skipping any full-size correctness assertions:
+
+```sh
+BENCH_PERF_ASSERT=1 cargo test --lib --all-features \
+  token_overlap::tests::bounded_large_study_2k_by_2k_by_8k_tokens -- --nocapture
+```
+
+This is an algorithm regression, not a serving-performance claim. No credentials
+or Hub access are used.
