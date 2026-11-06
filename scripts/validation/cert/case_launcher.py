@@ -58,6 +58,9 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
+    if "BC-GPU-010" in cases:
+        from tokenizer_probe import probe
+        probe(binary, tokenizer["path"])
     return list(cases)
 
 

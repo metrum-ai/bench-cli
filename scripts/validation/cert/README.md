@@ -54,8 +54,14 @@ Never substitute runner start/end for actual first/last request times.
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
 and content pin, all-smi executable pin, every input pin and each launcher pin.
-It is offline and does not allocate hardware or start a server. Its manifest
-contains `candidate_sha`; `candidate`, `sut`, `all_smi`, `tokenizer` pin objects
+BC-GPU-010 also probes actual tokenizer fallback against a one-request loopback
+CPU fixture with no server usage. Its runner tokenizer must match the probed
+bytes. Missing `tokenizer` build support or unusable tokenizer data blocks
+preflight before GPU work. The synthetic probe inherits no API/exporter
+credentials and never becomes a GPU record or actual request-phase measurement;
+its temporary fixture server and files are cleaned up on success or failure.
+Preflight is offline and allocates no hardware or model-serving process.
+Its manifest contains `candidate_sha`; `candidate`, `sut`, `all_smi`, `tokenizer` pin objects
 (`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
 and `cases`, mapping selected IDs to a pinned `launcher`, a fresh `out`
 directory and literal `command` argv containing that exact `--out` value.

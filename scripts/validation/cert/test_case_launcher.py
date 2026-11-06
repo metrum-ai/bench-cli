@@ -29,6 +29,12 @@ class CaseLauncherTests(unittest.TestCase):
             with patch.object(case_launcher.subprocess, "run") as run:
                 self.assertEqual(case_launcher.preflight(manifest), ["BC-GPU-001"])
                 run.assert_called_once()
+            guarded = copy.deepcopy(manifest)
+            guarded["cases"] = {"BC-GPU-010": manifest["cases"]["BC-GPU-001"]}
+            with patch.object(case_launcher.subprocess, "run"), patch("tokenizer_probe.probe", side_effect=ValueError("missing tokenizer capability")) as probe:
+                with self.assertRaisesRegex(ValueError, "missing tokenizer capability"):
+                    case_launcher.preflight(guarded)
+                probe.assert_called_once_with(binary.resolve(), str(binary))
             for field in ("host_os", "memory_gb"):
                 bad = {"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}
                 bad.pop(field)

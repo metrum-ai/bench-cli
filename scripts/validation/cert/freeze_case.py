@@ -19,6 +19,12 @@ def pin(path):
     return {"path": str(path), "sha256": digest(path)}
 
 
+def check_case_tokenizer(case, config, path):
+    item = config.get("tokenizer")
+    if case == "BC-GPU-010" and (not isinstance(item, dict) or item.get("sha256") != digest(path)):
+        raise ValueError("BC-GPU-010 must probe the same tokenizer bytes as its runner")
+
+
 def freeze(args):
     require_python()
     selection = json.loads(args.selection.read_text())
@@ -41,6 +47,7 @@ def freeze(args):
         _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0")
         if args.tokenizer_revision != config["revision"]:
             raise ValueError("tokenizer revision must match the frozen model revision")
+        check_case_tokenizer(args.case, config, args.tokenizer)
     root = Path(__file__).parent
     if args.command_json:
         command = json.loads(args.command_json.read_text())
