@@ -27,12 +27,15 @@ unknown formats must not be interpreted as scripts.
 HF_TOKEN is used only as an HTTP authorization header. Never put credentials,
 acceptance tokens or raw real-user payloads into provenance or evidence.
 
-## Canonical schemas
+## Source schemas and runtime boundary
 
-`CanonicalRecord` preserves source-row/file identity separately from target,
-group IDs, zero-based `turn_index` and output budget. Canonical identity fields
-are exactly `record_id`, `session_id`, `trace_id`, `turn_index`. `CanonicalBody` distinguishes single
-prompts, document/question inputs, typed sessions and structural traces.
+`public_dataset::IngestionRecord` and `IngestionBody` are rich source-stage types:
+they retain source-file lineage and prompt, document/question, session or structural
+trace representations. They are not runtime records. Only
+[`canonical_input::CanonicalRecord` and `CanonicalBody`](CANONICAL_INPUTS.md)
+use the canonical names; that document contains the exact final runtime definition.
+Do not serialize source metadata into user text or substitute ingestion JSON for
+runtime JSONL. Source-row identity remains separate from target identity.
 Answers/gold patches must remain outside request bodies. Source rows and target
 counts are different units. Sessions explicitly declare recorded versus
 generated history; recorded assistant text cannot certify future live reuse.
@@ -42,6 +45,40 @@ Structural traces declare timestamp units, optional source block size/hashes,
 input/output lengths and post-template status. Missing hashes mean overlap is
 unknown. Lengths or session IDs alone do not establish prefix identity. Source
 hashes cannot be presented as recovered original text or physical cache hits.
+
+### Checked ingestion-to-runtime conversion
+
+Use `ingestion.into_canonical(source_envelope)?`, equivalently the checked
+`TryFrom<(IngestionRecord, DatasetEnvelopeRef)> for CanonicalRecord` implementation:
+
+```rust
+let runtime: canonical_input::CanonicalRecord = (ingestion, source_envelope).try_into()?;
+```
+
+The source envelope is mandatory conversion context because an ingestion target
+does not own enough metadata to construct it. Its file list must contain the
+record's source-file digest; missing source IDs/row IDs/target IDs fail, not become
+fabricated defaults. Envelope/digest and request-boundary validation also apply.
+Unknown optional provenance stays unknown; structural conversion is not clearance.
+
+The conversion preserves record/source-row/session/group/trace identities, maps
+source output_budget to expected_output_tokens, and checks u64 source turn/output
+integers against u32 without narrowing. Unknown arrival remains None. Prompt stays
+Prompt with exact text. DocumentQuestion becomes a one-user-message Chat using
+`document + "\n\nQuestion:\n" + question`; empty fields fail. Recorded sessions
+preserve typed text roles and validate causality, matching session identity and
+request boundary. No future assistant answer is appended. Generated history must
+first be materialized by the session runner: recorded references cannot stand in
+for generated replies. Legacy ingestion tool IDs without function metadata cannot
+be upgraded by inventing functions/arguments; use a complete typed tool adapter.
+Structural traces fail this generic text conversion until an explicit measured
+hash-to-text renderer supplies a request. No text, arrival or reuse is guessed.
+
+Tests cover Prompt/Chat mapping, lineage/envelope preservation, integer boundaries
+and overflow, missing identities/provenance, session mismatch, generated-history
+and incomplete-tool rejection, and structural traces without original text.
+Runtime payload and source-row IDs are not default-public evidence; apply the
+source's redistribution/privacy policy before publishing either.
 
 ## Validation manifest and report integration
 

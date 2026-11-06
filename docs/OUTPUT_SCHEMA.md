@@ -6,9 +6,9 @@
 ## Canonical runtime input JSONL
 
 [CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input
-contract: record_id/session_id/turn_index(u32)/group_id/trace_id,
-arrival_offset_ms(u64), typed inert messages, expected_output_tokens(u32), and the
-agreed dataset source envelope. Null metadata remains unknown. This adds a new
+contract: record_id/source_row_id/session_id/turn_index(u32)/group_id/trace_id,
+arrival_offset_ms(u64), body: CanonicalBody::Prompt(String) or Chat(Vec<Message>),
+expected_output_tokens(u32), and required source: DatasetEnvelopeRef. Null metadata remains unknown. This adds a new
 loader without changing legacy Vec<String> APIs or runner output schema versions.
 
 ## Local pinned chat rendering
