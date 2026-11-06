@@ -197,6 +197,8 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                 self.end_headers()
                 self.close_connection = True
                 selected = fault is not None and (fault_request is None or fault_request == request_id)
+                # Error bodies are not SSE; preserve them rather than attempting reordering.
+                stream_reorder = reorder if 200 <= response.status < 300 else None
                 buffer = b""
                 transformed = 0
                 delayed = False
@@ -215,7 +217,7 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                         recorder.event(request_id, "delay", seconds=delay_seconds)
                         time.sleep(delay_seconds)
                         delayed = True
-                    if reorder:
+                    if stream_reorder:
                         buffer += chunk
                         if len(buffer) > 16 * 1024 * 1024:
                             raise ValueError('source stream exceeds reorder limit')
@@ -239,7 +241,7 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                             transformed += 1
                             recorder.event(request_id, "transformation", mode=fault)
                         forward(result)
-                if reorder:
+                if stream_reorder:
                     frames = []
                     while buffer:
                         frame, buffer = take_frame(buffer)
@@ -253,7 +255,7 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                         forward(frame)
                 elif buffer:
                     forward(buffer)
-                recorder.event(request_id, "complete", fault=reorder or (fault if selected else None), transformations=transformed)
+                recorder.event(request_id, "complete", fault=stream_reorder or (fault if selected else None), transformations=transformed)
             except (OSError, ValueError, http.client.HTTPException) as exc:
                 recorder.event(request_id, "error", error=type(exc).__name__)
                 self.close_connection = True
