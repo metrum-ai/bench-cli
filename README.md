@@ -472,6 +472,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [rendered-token validation](docs/PREFIX_VALIDATION.md),
 [pinned local chat rendering](docs/CHAT_RENDERING.md),
+[synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).

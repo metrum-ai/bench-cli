@@ -19,6 +19,14 @@ and the full rendering identity. See [CHAT_RENDERING.md](CHAT_RENDERING.md).
 It does not change existing runner output. Any body mutation after rendering
 invalidates its use as issuance or warmup-isolation evidence.
 
+## Synthetic prefix-family profile
+
+The standalone `prefix-families.v1` generator artifact is documented in
+[PREFIX_FAMILIES.md](PREFIX_FAMILIES.md). It preserves the requested configuration,
+canonical generated group IDs, effective row order, measured token-overlap report,
+requested/achieved group counts and a deterministic profile fingerprint. It does
+not alter existing runner JSONL and does not assert observed server cache hits.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses string
