@@ -269,6 +269,14 @@ struct Args {
     shuffle_prompts: bool,
     #[arg(long)]
     sessions: Option<PathBuf>,
+    #[arg(
+        long,
+        requires = "sessions",
+        value_delimiter = ',',
+        value_parser = ["user", "tool", "system", "assistant", "developer", "function"],
+        help = "Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior"
+    )]
+    session_request_roles: Vec<String>,
     #[arg(long, value_enum, default_value = "shared")]
     prefix_control: PrefixControl,
     #[arg(long)]
@@ -610,6 +618,21 @@ fn make_inputs(
         let mut inputs = Vec::new();
         for session in load_sessions(path)? {
             for turn in 1..=session.messages.len() {
+                if !args.session_request_roles.is_empty() {
+                    let role = session.messages[turn - 1]["role"].as_str().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "session {} message {turn} has no string role",
+                            session.session_id
+                        )
+                    })?;
+                    if !args
+                        .session_request_roles
+                        .iter()
+                        .any(|selected| selected == role)
+                    {
+                        continue;
+                    }
+                }
                 let messages = controlled_messages(
                     &session.messages[..turn],
                     args.shared_prefix.as_deref(),
@@ -636,6 +659,9 @@ fn make_inputs(
                     ..Input::default()
                 });
             }
+        }
+        if inputs.is_empty() {
+            bail!("session request-boundary selection produced no requests");
         }
         return Ok(inputs);
     }
@@ -1878,6 +1904,14 @@ async fn main() -> Result<()> {
     if args.infer_ttft_from_first_byte {
         redacted_config["infer_ttft_from_first_byte"] = json!(true);
     }
+    if args.sessions.is_some() {
+        redacted_config["session_request_roles"] = if args.session_request_roles.is_empty() {
+            json!("legacy_all_prefixes")
+        } else {
+            json!(args.session_request_roles)
+        };
+        redacted_config["session_history_mode"] = json!("recorded");
+    }
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
@@ -2172,6 +2206,70 @@ mod tests {
             EndpointKind::Rerank,
             &json!({"usage": {}})
         ));
+    }
+
+    #[test]
+    fn session_boundaries_preserve_history_and_original_message_indices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.jsonl");
+        std::fs::write(
+            &path,
+            json!({"session_id": "fixture", "messages": [
+                {"role": "system", "content": "context"},
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "recorded answer"},
+                {"role": "tool", "content": "result"},
+                {"role": "assistant", "content": "recorded continuation"}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let base = [
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--sessions",
+            path.to_str().unwrap(),
+        ];
+        let legacy = Args::try_parse_from(base).unwrap();
+        assert_eq!(make_inputs(&legacy, "mock", None, None).unwrap().len(), 5);
+        let selected = Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "user,tool"]),
+        )
+        .unwrap();
+        let inputs = make_inputs(&selected, "mock", None, None).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].turn, Some(2));
+        assert_eq!(inputs[1].turn, Some(4));
+        assert_eq!(inputs[1].body["messages"][2]["content"], "recorded answer");
+        assert_eq!(inputs[1].body["messages"][3]["role"], "tool");
+        let empty = Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "developer"]),
+        )
+        .unwrap();
+        assert!(make_inputs(&empty, "mock", None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("no requests"));
+        std::fs::write(
+            &path,
+            r#"{"session_id":"bad","messages":[{"content":"missing role"}]}"#,
+        )
+        .unwrap();
+        assert!(make_inputs(&selected, "mock", None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("no string role"));
+        assert!(Args::try_parse_from(["bench", "--session-request-roles", "user"]).is_err());
+        assert!(Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "invalid"])
+        )
+        .is_err());
     }
 
     #[test]

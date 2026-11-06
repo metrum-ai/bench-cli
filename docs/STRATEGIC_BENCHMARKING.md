@@ -24,6 +24,25 @@ asr and imagegen remain unary, and `--tools` cannot be combined with
 sessions, structured output, embeddings, reranking, VLM, ASR and image
 generation sweeps, server correlation and portable exports. Existing modality-specific binaries remain supported.
 
+## Session request boundaries (v1.9.0 development)
+
+With `--sessions FILE`, opt into `--session-request-roles user,tool` to emit
+requests only at selected terminal roles. System and assistant messages remain
+in recorded history; `turn` retains the original one-based message position,
+not the selected-request ordinal. Omit the option to preserve legacy every-prefix
+behavior. Invalid role options, missing string roles under selection, and an empty
+selected pool fail before traffic. The summary config records
+`session_request_roles` (or `legacy_all_prefixes`) and `session_history_mode=recorded`.
+The stage request count still controls issuance and cycles the selected pool.
+
+Boundary selection alone does **not** enforce sequential sessions or cold caches.
+Current scheduling remains flattened request scheduling. Recorded assistant history
+can differ from generated answers; do not infer reuse of generated KV. Held-out
+warmup needs token-prefix isolation, and cold measurement needs acknowledged tier
+reset after machine warmup; a new file/session ID is not sufficient. These lifecycle
+and scheduling enhancements are separate steps under #413. Generic prompt-library
+throughput profiles do not establish controlled KV reuse or offload evidence.
+
 ## Sweep and server correlation
 
 ```bash
