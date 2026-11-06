@@ -36,6 +36,14 @@ The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
 and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
 totals remain exact independently of that cap; an empty list can still mean Fail.
 
+## Source trace time metadata
+
+The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
+[TRACE_INPUTS.md](TRACE_INPUTS.md). It retains exact source decimal value/unit,
+positive rational scale, explicit rounding and a precision-loss flag. It does
+not represent an actual arrival or cache measurement, and is not embedded in
+runner JSONL. No runtime record or report schema version changes.
+
 ## Canonical runtime input JSONL
 
 [CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input

@@ -46,6 +46,7 @@ pub mod telemetry;
 pub mod time_weighted;
 pub mod token_overlap;
 pub mod tokenizer;
+pub mod trace_inputs;
 pub mod usage;
 pub mod vlm;
 

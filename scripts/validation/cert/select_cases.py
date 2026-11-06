@@ -78,6 +78,7 @@ PATH_AREAS = {
     'src/time_weighted.rs': {'MATH', 'TELEM', 'GPU'},
     'src/token_overlap.rs': {'*'},
     'src/tokenizer.rs': {'CLI', 'MATH', 'GPU', 'COMP', 'PERF'},
+    'src/trace_inputs.rs': {'*'},
     'src/vlm.rs': {'LIVE', 'REASON', 'GPU', 'MATH', 'SCHEMA'},
     'dummy-model-server/**': {'CI'},
     'README.md': {'REL', 'PACK', 'POST', 'CI'},
