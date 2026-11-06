@@ -74,6 +74,14 @@
     "reason": {
       "type": "string"
     },
+    "request_clocks": {
+      "type": "object",
+      "required": ["first_request_utc", "last_request_utc"],
+      "properties": {
+        "first_request_utc": {"type": ["string", "null"], "format": "date-time"},
+        "last_request_utc": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
     "input_hashes": {
       "type": "object",
       "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}

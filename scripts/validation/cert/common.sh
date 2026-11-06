@@ -55,11 +55,22 @@ cert_parse() {
   trap 'exit 143' TERM
   nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=name,driver_version --format=csv,noheader > "$CERT_OUT/evidence/gpu.csv"
   sha256sum "$CERT_CANDIDATE" "$CERT_BASELINE" > "$CERT_OUT/evidence/binary-hashes.txt"
+  cert_phase inputs-ready
 }
 
 cert_manifest() {
   python3 "$CERT_DIR/manifest_tool.py" --manifest "$CERT_MANIFEST" --lane "$CERT_LANE" \
     --candidate "$CERT_CANDIDATE" --baseline "$CERT_BASELINE" --field "$1"
+}
+
+cert_phase() {
+  local case_id
+  local -a cases=("${CERT_CASES[@]:-}")
+  [[ -z "${CERT_CASE_ID:-}" ]] || cases=("$CERT_CASE_ID")
+  for case_id in "${cases[@]}"; do
+    [[ -n "$case_id" ]] || continue
+    python3 "$CERT_DIR/execution_evidence.py" "${CERT_PHASE_ROOT:-$CERT_OUT}" --case "$case_id" --phase "$1"
+  done
 }
 
 cert_start_server() {
@@ -87,6 +98,7 @@ cert_start_server() {
   local attempt
   for ((attempt=0; attempt<900; attempt++)); do
     if curl --fail --silent --max-time 5 "http://localhost:${CERT_PORT}/v1/models" > "$CERT_OUT/evidence/models.json"; then
+      cert_phase server-ready
       return 0
     fi
     docker inspect "$CERT_CONTAINER" --format '{{.State.Running}}' | grep -qx true || return 1

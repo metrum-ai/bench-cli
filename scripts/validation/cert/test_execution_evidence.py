@@ -36,6 +36,25 @@ class ExecutionEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 evidence.report_rows(root)
 
+    def test_request_phases_use_observed_clocks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rows = [{"schema_version": "metrum-ai-bench-cli.request.v5",
+                     "started_at": "2026-01-01T00:00:01Z", "completed_at": "2026-01-01T00:00:03Z"},
+                    {"kind": "send", "utc": "2026-01-01T00:00:02Z"},
+                    {"kind": "complete", "utc": "2026-01-01T00:00:04Z"}]
+            (root / "observed.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n{interrupted")
+            with patch.dict("os.environ", {}, clear=True):
+                path = result_writer.write_record(root, {"ID": "BC-GPU-001", "result": "FAIL",
+                    "candidate_sha": "a" * 40, "evidence_paths": ["observed.jsonl"]})
+            record = json.loads(path.read_text())
+            self.assertEqual(record["request_clocks"], {"first_request_utc": "2026-01-01T00:00:01+00:00",
+                                                        "last_request_utc": "2026-01-01T00:00:04+00:00"})
+            events = [json.loads(line) for line in (root / "phases.jsonl").read_text().splitlines()]
+            self.assertEqual([event["phase"] for event in events], ["first-request", "last-request"])
+            self.assertEqual(events[0]["utc"], record["request_clocks"]["first_request_utc"])
+            self.assertEqual(evidence.request_clocks(root, []), {"first_request_utc": None, "last_request_utc": None})
+
     def test_interruption_keeps_unknown_counts(self):
         import failure_writer
         with tempfile.TemporaryDirectory() as temporary:

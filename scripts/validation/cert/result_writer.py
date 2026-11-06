@@ -46,12 +46,12 @@ def write_record(root, record):
         evidence = (root / item).resolve()
         if not evidence.is_relative_to(root) or not evidence.is_file():
             raise ValueError("evidence path does not resolve inside the run directory")
-    record = enrich(root, record)
     directory = root / "results"
     directory.mkdir(exist_ok=True)
     target = directory / (case + ".json")
     if target.exists():
         raise FileExistsError("refusing to overwrite an existing case result")
+    record = enrich(root, record)
     content = json.dumps(record, indent=2, sort_keys=True, allow_nan=False) + "\n"
     fd, temporary = tempfile.mkstemp(prefix=".result-", dir=directory)
     try:

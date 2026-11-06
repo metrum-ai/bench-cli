@@ -40,9 +40,13 @@ python3 scripts/validation/cert/execution_evidence.py RUN_DIRECTORY --case BC-GP
 
 Supported append-only events are `rent`, `ssh-ready`, `inputs-ready`,
 `server-ready`, `first-request`, `last-request`, and `record-validated`.
-Provisioning events belong to the external operator; runners must supply request
-observations and validators must supply validation events. Never substitute
-runner start/end for actual first/last request times.
+Provisioning events belong to the external operator. Shared lane lifecycle code
+records input/server readiness. At case-record finalization the writer derives
+first/last request timestamps from actual request `started_at`/`completed_at`
+fields or proxy send/complete observations (the proxy retains UTC alongside its
+monotonic clock). It appends those observed UTC values, not finalization time;
+missing clocks remain null. Per-case launch validation appends record validation.
+Never substitute runner start/end for actual first/last request times.
 
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
@@ -58,8 +62,8 @@ interrupt it stops its owned process group and preserves a typed FAIL with null
 unknown counts if the case did not publish a record. Existing records are never
 overwritten: a separate failure sentinel prevents an earlier PASS from masking
 a launcher/cleanup failure. A sibling `OUT-lifecycle` directory retains append-only
-input-ready and record-validated observations. External provisioning events and
-actual request events still need instrumentation at their respective sources. Launch one case with `--case ID`, or omit `--case` for the whole selected
+input-ready and record-validated observations. External provisioning events must
+still be supplied by the operator at their actual source. Launch one case with `--case ID`, or omit `--case` for the whole selected
 set. Pins are rechecked before each launch; no shell evaluation is performed.
 
 Before candidate freeze, run `bash scripts/validation/cert/before_freeze.sh SHA`

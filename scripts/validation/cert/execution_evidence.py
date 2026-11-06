@@ -39,6 +39,41 @@ def phase(root, case, name, timestamp=None):
     return event
 
 
+def request_clocks(root, paths):
+    """Use observed request clocks only, never runner-start or elapsed guesses."""
+    starts, ends = [], []
+    def clock(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.astimezone(dt.timezone.utc) if parsed.tzinfo else None
+        except ValueError:
+            return None
+    for name in paths:
+        if not name.endswith((".jsonl", ".ndjson")):
+            continue
+        with (Path(root) / name).open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue  # retain interrupted/truncated raw output without inventing clocks
+                if not isinstance(row, dict):
+                    continue
+                if ".request.v" in str(row.get("schema_version", "")):
+                    start, end = clock(row.get("started_at")), clock(row.get("completed_at"))
+                else:
+                    start = clock(row.get("utc")) if row.get("kind") == "send" else None
+                    end = clock(row.get("utc")) if row.get("kind") in ("complete", "error") else None
+                if start is not None:
+                    starts.append(start)
+                if end is not None:
+                    ends.append(end)
+    return {"first_request_utc": min(starts).isoformat() if starts else None,
+            "last_request_utc": max(ends).isoformat() if ends else None}
+
+
 def enrich(root, record):
     root = Path(root).resolve()
     output = {}
@@ -67,6 +102,12 @@ def enrich(root, record):
             if actual != pin["sha256"]:
                 raise ValueError("input changed during case execution")
             inputs[name] = actual
+    clocks = request_clocks(root, record.get("evidence_paths", []))
+    record = {**record, "request_clocks": clocks}
+    phase_root = Path(os.environ.get("CERT_PHASE_ROOT", root))
+    for key, name in (("first_request_utc", "first-request"), ("last_request_utc", "last-request")):
+        if clocks[key] is not None:
+            phase(phase_root, record["ID"], name, clocks[key])
     # Eligibility is only a proposal; reviewed ancestor/diff proof is still required.
     record = {**record, "input_hashes": inputs, "output_hashes": output,
               "carry_over_eligibility": {"eligible": False, "reason": "requires reviewed measurement-code diff and ancestry proof"}}
