@@ -1,4 +1,16 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Changelog
+
+## Unreleased (v1.9.0)
+
+- Add opt-in shared chat cache policy, effective prompt order and post-transform
+  wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
+  Preserve historical defaults, retain request/run nonce scope and digest-list
+  checksums, and extend fingerprint-first prescribed replay to strategic prompts.
+  Fix sequence logging to avoid applying original source indices twice after a
+  short prescription reorders the pool. No physical hit/offload claim (#414).
 
 ## Unreleased
 

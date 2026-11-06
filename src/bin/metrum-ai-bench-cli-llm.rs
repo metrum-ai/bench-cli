@@ -6,10 +6,10 @@ use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, trace, warn};
 use metrum_ai_bench::args_common::EffectiveCommonArgs;
+use metrum_ai_bench::cache_workload::{self, CachePolicy, OrderPolicy};
 use metrum_ai_bench::endpoints::resolve_endpoints;
 use metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts;
 use metrum_ai_bench::unique_id;
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use reqwest::{Client, Response};
 use serde_json::{json, Value};
@@ -213,6 +213,20 @@ struct Args {
         help = "Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)"
     )]
     prompt_sequence: Option<String>,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    cache_policy: CachePolicy,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    prompt_order: OrderPolicy,
+    #[arg(
+        long,
+        help = "Independent effective-order shuffle seed; defaults to --seed"
+    )]
+    order_seed: Option<u64>,
+    #[arg(
+        long,
+        help = "Independent arrival RNG seed; defaults to --seed plus one"
+    )]
+    arrival_seed: Option<u64>,
 
     #[arg(
         long,
@@ -268,6 +282,7 @@ async fn make_request(
     client: &Client,
     url: &str,
     payload: Value,
+    wire_body: Option<Vec<u8>>,
     mode: MetrumAiBenchLLMMode,
     streaming: bool,
     request_timeout: u64,
@@ -299,6 +314,10 @@ async fn make_request(
         serde_json::to_string_pretty(&payload).unwrap_or_default()
     );
 
+    let wire_bytes = match wire_body {
+        Some(bytes) => bytes,
+        None => serde_json::to_vec(&payload)?,
+    };
     if streaming {
         // Handle streaming response
         let response = match metrum_ai_bench::connect_timing::send(
@@ -306,7 +325,7 @@ async fn make_request(
                 .post(url)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", api_key))
-                .json(&payload)
+                .body(wire_bytes)
                 .timeout(Duration::from_secs(request_timeout)),
         )
         .await
@@ -393,7 +412,7 @@ async fn make_request(
                 .post(url)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", api_key))
-                .json(&payload)
+                .body(wire_bytes)
                 .timeout(Duration::from_secs(request_timeout)),
         )
         .await
@@ -593,6 +612,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut args = Args::parse();
+    if args.cache_policy != CachePolicy::LegacyUnspecified
+        && (!matches!(args.mode, MetrumAiBenchLLMMode::Chat) || args.common.unique_prompts)
+    {
+        return Err(
+            "explicit --cache-policy requires chat and conflicts with --unique-prompts".into(),
+        );
+    }
+    let cache_workload_enabled = args.cache_policy != CachePolicy::LegacyUnspecified
+        || args.prompt_order != OrderPolicy::LegacyUnspecified
+        || args.order_seed.is_some()
+        || args.arrival_seed.is_some();
+    let effective_order_policy = cache_workload::resolve_order_policy(
+        args.prompt_order,
+        OrderPolicy::SeededShuffle,
+        args.prompt_sequence.is_some(),
+    )?;
+    let effective_order_seed = args.order_seed.unwrap_or(args.common.seed);
+    let effective_arrival_seed = args
+        .arrival_seed
+        .unwrap_or(args.common.seed.wrapping_add(1));
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
     if args.ttft_fallback.is_some()
@@ -821,12 +860,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None => None,
     };
 
-    // Shuffle prompts once for even distribution, then cycle through them deterministically
+    // Both runners use the same opt-in order primitive; historical defaults differ.
     if prescribed_order.is_none() {
-        let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
-        prompts.shuffle(&mut shuffle_rng);
+        let order = cache_workload::ordered_indices(
+            prompts.len(),
+            effective_order_policy,
+            effective_order_seed,
+            None,
+        )?;
+        metrum_ai_bench::prompt_sequence::apply_prescribed_sequence(&mut prompts, &order);
     }
-    let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
+    let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(effective_arrival_seed);
+    if cache_workload_enabled {
+        for prompt in &prompts {
+            let body = build_request_body(
+                args.mode,
+                &args.model,
+                args.max_tokens,
+                args.temperature,
+                prompt,
+                args.streaming,
+                args.common.ignore_eos,
+                args.common.min_tokens,
+                args.common.extra_body_json.as_deref(),
+                args.common.system_prompt.as_deref(),
+            )?;
+            cache_workload::prepare_chat_body(body, args.cache_policy, &run_id, 0)?;
+        }
+    }
 
     // #313: opt-in reproducible start-stagger (never applied to scored or
     // existing runs by default; recorded in the run config).
@@ -928,7 +989,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &prompts,
             u64::from(args.num_requests),
             u64::from(concurrency_limit as u32),
-            prescribed_order.as_deref(),
+            // The pool already has its effective prescribed/shuffled order.
+            // Applying original pool indices again can double-map or index past it.
+            None,
         )
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
     }
@@ -1138,6 +1201,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
             .with_tracker(Arc::clone(&inflight_tracker));
     let mut measured_boundary_done = false;
+    let mut body_fingerprints = Vec::new();
     'request_loop: for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier
@@ -1241,7 +1305,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &run_id,
         );
 
-        let request_body = build_request_body(
+        let mut request_body = build_request_body(
             args.mode,
             &args.model,
             args.max_tokens,
@@ -1254,6 +1318,23 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.common.system_prompt.as_deref(),
         )?;
 
+        let prepared = if cache_workload_enabled {
+            let prepared = cache_workload::prepare_chat_body(
+                request_body,
+                args.cache_policy,
+                &run_id,
+                slot.seq,
+            )?;
+            request_body = serde_json::from_slice(&prepared.bytes)?;
+            Some(prepared)
+        } else {
+            None
+        };
+        let body_sha256 = prepared.as_ref().map(|body| body.sha256.clone());
+        if let Some(hash) = &body_sha256 {
+            body_fingerprints.push(hash.clone());
+        }
+        let wire_body = prepared.map(|body| body.bytes);
         let request_timeout = args.request_timeout;
         let mode = args.mode;
         let streaming = args.streaming;
@@ -1283,6 +1364,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     &client,
                     &url,
                     request_body,
+                    wire_body,
                     mode,
                     streaming,
                     request_timeout,
@@ -1309,7 +1391,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 Err(_) => None,
             };
             let run_id_trace = run_id_task.clone();
-            let record = match result {
+            let mut record = match result {
                 Ok(sm) => {
                     let completed_at =
                         metrum_ai_bench::runner::completed_at_from_start(started_at, sm.latency);
@@ -1409,6 +1491,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
             };
 
+            if let Some(body_sha256) = body_sha256 {
+                record
+                    .modality_labels
+                    .insert("cache_workload_version".into(), "cache-workload.v1".into());
+                record
+                    .modality_labels
+                    .insert("body_sha256".into(), body_sha256);
+            }
             if let Err(e) = sink_task.write(&record) {
                 warn!("Failed to write request JSONL: {e}");
             }
@@ -1528,6 +1618,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if cache_workload_enabled {
+                map.insert("cache_workload".into(), json!({
+                    "schema_version": "cache-workload.v1", "policy": args.cache_policy,
+                    "order": effective_order_policy, "order_seed": effective_order_seed,
+                    "arrival_seed": effective_arrival_seed,
+                    "body_fingerprints_sha256": cache_workload::sha256(&serde_json::to_vec(&body_fingerprints)?),
+                    "effective_order_sha256": cache_workload::sha256(&serde_json::to_vec(&body_fingerprints.iter().map(|hash| format!("body:{hash}")).collect::<Vec<_>>())?),
+                    "fingerprinted_requests": body_fingerprints.len(),
+                    "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
+                    "nonce_placement": args.cache_policy.nonce_placement(),
+                    "nonce_scope": args.cache_policy.nonce_scope()
+                }));
+            }
             if let Some(fallback) = &args.ttft_fallback {
                 map.insert("ttft_fallback".into(), serde_json::json!(fallback));
             }

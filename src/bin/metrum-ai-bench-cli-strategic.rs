@@ -6,6 +6,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
+use metrum_ai_bench::cache_workload::{self, CachePolicy, OrderPolicy};
 use metrum_ai_bench::strategic::{
     controlled_messages, detect_knee_on_axis, export_csv, export_html, export_mlperf,
     load_sessions, now_unix_ns, scrape_metrics, summarize_stage_with_options, BenchRecord,
@@ -267,6 +268,16 @@ struct Args {
     seed: u64,
     #[arg(long, help = "Shuffle --prompts with --seed before cycling")]
     shuffle_prompts: bool,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    cache_policy: CachePolicy,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    prompt_order: OrderPolicy,
+    #[arg(long)]
+    order_seed: Option<u64>,
+    #[arg(long, requires = "prompts")]
+    prompt_sequence: Option<PathBuf>,
+    #[arg(long, requires = "prompts")]
+    prompt_sequence_log: Option<PathBuf>,
     #[arg(long)]
     sessions: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "shared")]
@@ -590,6 +601,29 @@ fn make_inputs(
     tools: Option<&Value>,
 ) -> Result<Vec<Input>> {
     validate_chat_controls(args)?;
+    if args.cache_policy != CachePolicy::LegacyUnspecified
+        && (!matches!(args.kind, EndpointKind::Chat)
+            || matches!(args.prefix_control, PrefixControl::Unique))
+    {
+        bail!("explicit --cache-policy requires chat and conflicts with --prefix-control unique");
+    }
+    let order_policy = cache_workload::resolve_order_policy(
+        args.prompt_order,
+        if args.shuffle_prompts {
+            OrderPolicy::SeededShuffle
+        } else {
+            OrderPolicy::Preserve
+        },
+        args.prompt_sequence.is_some(),
+    )?;
+    if args.sessions.is_some()
+        && matches!(
+            order_policy,
+            OrderPolicy::SeededShuffle | OrderPolicy::Prescribed
+        )
+    {
+        bail!("session turn order cannot be shuffled or replaced by a flat prompt sequence");
+    }
     let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
     if args.prompts.is_some() && args.max_tokens.is_none() {
         bail!("--max-tokens is required when --prompts is set (bounds OSL for comparable sweeps)");
@@ -646,10 +680,23 @@ fn make_inputs(
         let mut prompts =
             metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts(prompts_path)
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
-        if args.shuffle_prompts {
-            let mut rng = StdRng::seed_from_u64(args.seed);
-            prompts.shuffle(&mut rng);
-        }
+        let prescribed = args
+            .prompt_sequence
+            .as_ref()
+            .map(|path| {
+                let entries = metrum_ai_bench::prompt_sequence::load_prescribed_entries(path)
+                    .map_err(anyhow::Error::msg)?;
+                metrum_ai_bench::prompt_sequence::resolve_prescribed_order(&entries, &prompts)
+                    .map_err(anyhow::Error::msg)
+            })
+            .transpose()?;
+        let order = cache_workload::ordered_indices(
+            prompts.len(),
+            order_policy,
+            args.order_seed.unwrap_or(args.seed),
+            prescribed.as_deref(),
+        )?;
+        metrum_ai_bench::prompt_sequence::apply_prescribed_sequence(&mut prompts, &order);
         let mut inputs = Vec::with_capacity(prompts.len());
         for (index, prompt) in prompts.iter().enumerate() {
             let session_key = format!("prompt-{index}");
@@ -1039,6 +1086,7 @@ fn spawn_one_request(
     seq: Arc<AtomicU64>,
     client: &reqwest::Client,
     semaphore: Arc<Semaphore>,
+    issuance_gate: Option<Arc<cache_workload::IssuanceGate>>,
     inflight_tracker: Arc<metrum_ai_bench::concurrency::InFlightTracker>,
     schedule_epoch: Instant,
     schedule_epoch_unix_ns: u128,
@@ -1059,13 +1107,25 @@ fn spawn_one_request(
     let first_token_fallback = args.ttft_fallback.is_some();
     let strict_reasoning = args.strict_reasoning_truncation || args.ci_safety;
     let sequence = seq.fetch_add(1, Ordering::Relaxed);
+    let cache_policy = args.cache_policy;
+    let fingerprint_enabled = args.cache_policy != CachePolicy::LegacyUnspecified
+        || args.prompt_order != OrderPolicy::LegacyUnspecified
+        || args.order_seed.is_some()
+        || args.prompt_sequence.is_some();
+    let mut issuance_ticket = issuance_gate.as_ref().map(|gate| gate.ticket());
     tokio::spawn(async move {
+        if let Some(ticket) = issuance_ticket.as_mut() {
+            ticket.wait_turn().await;
+        }
         let permit = metrum_ai_bench::concurrency::acquire_with_engagement(
             Arc::clone(&semaphore),
             &inflight_tracker,
         )
         .await
         .expect("semaphore closed");
+        if let Some(ticket) = issuance_ticket.take() {
+            ticket.advance();
+        }
         let mut request_slot = Some(metrum_ai_bench::concurrency::InFlightSlot::new(
             &inflight_tracker,
             permit,
@@ -1096,6 +1156,21 @@ fn spawn_one_request(
             .map(|form| client.post(&url).bearer_auth(&api_key).multipart(form))
             .map_err(|err| anyhow::anyhow!("{err}"))
         });
+        let prepared = fingerprint_enabled
+            .then(|| {
+                cache_workload::prepare_chat_body(
+                    (*input.body).clone(),
+                    cache_policy,
+                    &run_id,
+                    sequence,
+                )
+            })
+            .transpose();
+        let body_sha256 = prepared
+            .as_ref()
+            .ok()
+            .and_then(|body| body.as_ref())
+            .map(|body| body.sha256.clone());
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -1113,9 +1188,17 @@ fn spawn_one_request(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(t_sent_ns);
         let connect_slot = metrum_ai_bench::connect_timing::ConnectSlot::new();
-        let request = upload_request
-            .or(prebuilt_json)
-            .unwrap_or_else(|| Ok(client.post(&url).bearer_auth(&api_key).json(&*input.body)));
+        let request = match prepared {
+            Err(error) => Err(error),
+            Ok(Some(body)) => Ok(client
+                .post(&url)
+                .bearer_auth(&api_key)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.bytes)),
+            Ok(None) => upload_request
+                .or(prebuilt_json)
+                .unwrap_or_else(|| Ok(client.post(&url).bearer_auth(&api_key).json(&*input.body))),
+        };
         let result = match request {
             Ok(request) => metrum_ai_bench::connect_timing::with_connect_slot(
                 Arc::clone(&connect_slot),
@@ -1327,6 +1410,10 @@ fn spawn_one_request(
             usage_missing,
             usage_prompt_tokens_present: usage_presence.map(|p| p.0),
             usage_completion_tokens_present: usage_presence.map(|p| p.1),
+            cache_workload_version: body_sha256
+                .as_ref()
+                .map(|_| "cache-workload.v1".to_string()),
+            body_sha256,
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -1524,6 +1611,11 @@ async fn run_stage(
         SweepBy::Rate => args.max_in_flight as usize,
     }
     .max(1);
+    let ordered = args.cache_policy != CachePolicy::LegacyUnspecified
+        || args.prompt_order != OrderPolicy::LegacyUnspecified
+        || args.order_seed.is_some()
+        || args.prompt_sequence.is_some();
+    let issuance_gate = ordered.then(|| Arc::new(cache_workload::IssuanceGate::default()));
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let inflight_tracker = Arc::new(metrum_ai_bench::concurrency::InFlightTracker::new(
         concurrency as u32,
@@ -1553,6 +1645,7 @@ async fn run_stage(
                 Arc::clone(&seq),
                 client,
                 Arc::clone(&semaphore),
+                issuance_gate.clone(),
                 Arc::clone(&inflight_tracker),
                 warmup_epoch,
                 warmup_unix_ns,
@@ -1612,6 +1705,7 @@ async fn run_stage(
             Arc::clone(&seq),
             client,
             Arc::clone(&semaphore),
+            issuance_gate.clone(),
             Arc::clone(&inflight_tracker),
             measure_epoch,
             measure_unix_ns,
@@ -1671,6 +1765,20 @@ fn aggregate_server(samples: &[ServerMetrics]) -> ServerMetrics {
     }
 }
 
+fn body_order_evidence(records: &[BenchRecord]) -> Result<Value> {
+    let mut ordered: Vec<_> = records
+        .iter()
+        .filter_map(|row| row.body_sha256.as_ref().map(|hash| (row.seq, hash.clone())))
+        .collect();
+    ordered.sort_by_key(|(seq, _)| *seq);
+    cache_workload::fingerprint_evidence(
+        &ordered
+            .into_iter()
+            .map(|(_, hash)| hash)
+            .collect::<Vec<_>>(),
+    )
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -1678,6 +1786,22 @@ async fn main() -> Result<()> {
         println!("metrum-ai-bench-cli-strategic version {VERSION}");
         return Ok(());
     }
+    let fingerprint_enabled = args.cache_policy != CachePolicy::LegacyUnspecified
+        || args.prompt_order != OrderPolicy::LegacyUnspecified
+        || args.order_seed.is_some()
+        || args.prompt_sequence.is_some();
+    if fingerprint_enabled && !matches!(args.kind, EndpointKind::Chat) {
+        bail!("explicit cache policy/order evidence currently requires chat");
+    }
+    let effective_order_policy = cache_workload::resolve_order_policy(
+        args.prompt_order,
+        if args.shuffle_prompts {
+            OrderPolicy::SeededShuffle
+        } else {
+            OrderPolicy::Preserve
+        },
+        args.prompt_sequence.is_some(),
+    )?;
     let url = args
         .url
         .clone()
@@ -1735,6 +1859,36 @@ async fn main() -> Result<()> {
             make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?
         }
     };
+    if fingerprint_enabled {
+        for input in &inputs {
+            cache_workload::prepare_chat_body(
+                (*input.body).clone(),
+                args.cache_policy,
+                "preflight",
+                0,
+            )?;
+        }
+    }
+    if let Some(path) = &args.prompt_sequence_log {
+        let prompts: Vec<String> = inputs
+            .iter()
+            .map(|input| {
+                input.body["messages"]
+                    .as_array()
+                    .and_then(|messages| messages.last())
+                    .and_then(|message| message["content"].as_str())
+                    .map(str::to_owned)
+                    .context("prompt sequence logging requires string messages")
+            })
+            .collect::<Result<_>>()?;
+        metrum_ai_bench::prompt_sequence::write_sequence_log(
+            path,
+            &prompts,
+            args.requests_per_stage,
+            args.max_in_flight.into(),
+            None,
+        )?;
+    }
     let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
     let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
     let stop = metrum_ai_bench::runner::StopFlag::new();
@@ -1881,6 +2035,17 @@ async fn main() -> Result<()> {
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
+    if fingerprint_enabled {
+        redacted_config["cache_workload"] = json!({
+            "schema_version": "cache-workload.v1", "policy": args.cache_policy,
+            "order": effective_order_policy, "order_seed": args.order_seed.unwrap_or(args.seed),
+            "arrival": "deterministic_stage_rate_or_closed_loop",
+            "nonce_placement": args.cache_policy.nonce_placement(),
+            "nonce_scope": args.cache_policy.nonce_scope(),
+            "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
+            "prompt_sequence_log_scope": "measured_per_stage"
+        });
+    }
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -1928,6 +2093,10 @@ async fn main() -> Result<()> {
             &stop,
         )
         .await?;
+        if fingerprint_enabled {
+            redacted_config["cache_workload"]["body_evidence"] = body_order_evidence(&records)?;
+            redacted_config["cache_workload"]["evidence_scope"] = json!("stage_including_warmup");
+        }
         if stop.is_stopped() {
             partial = true;
         }
@@ -2069,6 +2238,10 @@ async fn main() -> Result<()> {
         Some(session) => session.finish(partial).await?.dropped_telemetry_rows,
         None => 0,
     };
+    if fingerprint_enabled {
+        redacted_config["cache_workload"]["body_evidence"] = body_order_evidence(&all_records)?;
+        redacted_config["cache_workload"]["evidence_scope"] = json!("run_including_warmup");
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({

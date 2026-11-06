@@ -3,6 +3,7 @@
 
 pub mod args_common;
 pub mod asr;
+pub mod cache_workload;
 pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;

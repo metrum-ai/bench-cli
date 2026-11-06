@@ -3,6 +3,16 @@
 
 # JSONL output schema
 
+## Opt-in cache workload extension (`cache-workload.v1`)
+
+LLM request `modality_labels.cache_workload_version` and `body_sha256` bind
+post-transformation HTTP body bytes without adding raw prompt content. Strategic
+CSV appends optional `cache_workload_version` / `body_sha256` columns (old inputs
+default to absent). Existing core record schema versions remain unchanged; the
+extension is separately versioned. Summary metadata records effective policy,
+order/seeds, nonce scope/placement, digest-list checksums and serialization timing.
+See [CACHE_WORKLOADS.md](CACHE_WORKLOADS.md) for exact digest and coverage semantics.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)

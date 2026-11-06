@@ -116,6 +116,12 @@ pub struct BenchRecord {
     pub usage_prompt_tokens_present: Option<bool>,
     #[serde(default)]
     pub usage_completion_tokens_present: Option<bool>,
+    /// Opt-in post-transformation wire-body evidence extension version.
+    #[serde(default)]
+    pub cache_workload_version: Option<String>,
+    /// SHA-256 of exact serialized request-body bytes, never prompt text.
+    #[serde(default)]
+    pub body_sha256: Option<String>,
 }
 
 fn unknown_usage_is_missing() -> bool {
@@ -1513,6 +1519,8 @@ struct CsvBenchRecord {
     usage_missing: bool,
     usage_prompt_tokens_present: Option<bool>,
     usage_completion_tokens_present: Option<bool>,
+    cache_workload_version: Option<String>,
+    body_sha256: Option<String>,
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
