@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Local pinned chat rendering
+
+The optional tokenizer-feature `RenderedChat` artifact separates exact final
+HTTP `body_sha256` from `rendered_text_sha256`, and retains actual `token_ids`
+and the full rendering identity. See [CHAT_RENDERING.md](CHAT_RENDERING.md).
+It does not change existing runner output. Any body mutation after rendering
+invalidates its use as issuance or warmup-isolation evidence.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses integer
