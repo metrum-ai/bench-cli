@@ -68,6 +68,7 @@ PATH_AREAS = {
     'src/telemetry/session.rs': {'TELEM', 'SCHEMA', 'GPU', 'INTEG'},
     'src/telemetry/writer.rs': {'TELEM', 'SCHEMA', 'GPU', 'INTEG'},
     'src/time_weighted.rs': {'MATH', 'TELEM', 'GPU'},
+    'src/token_overlap.rs': {'*'},
     'src/tokenizer.rs': {'CLI', 'MATH', 'GPU', 'COMP', 'PERF'},
     'src/trace_inputs.rs': {'*'},
     'src/vlm.rs': {'LIVE', 'REASON', 'GPU', 'MATH', 'SCHEMA'},
