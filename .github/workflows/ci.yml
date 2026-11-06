@@ -13,9 +13,10 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
-# Metrum AI: cancel superseded PR runs, never active non-PR evidence runs.
+# Metrum AI: group PRs for supersession; isolate every non-PR run by run_id.
+# Shared non-PR groups replace pending evidence even when cancellation is false.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -26,6 +27,21 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  workflow-lint:
+    name: actionlint (PR workflows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.10"
+          cache: false
+      - name: Validate PR workflows with actionlint
+        run: >-
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          .github/workflows/ci.yml .github/workflows/codeql.yml
+          .github/workflows/dummy-server.yml .github/workflows/perf-validation.yml
+
   certification-validator:
     name: certification validator offline tests
     runs-on: ubuntu-latest
@@ -380,9 +396,9 @@ jobs:
     runs-on: bench-cli-arc
     timeout-minutes: 45
     concurrency:
-      # The runner serializes different refs in its queue. Only superseded PR
-      # runs on the same ref are cancelled; main is never cancelled.
-      group: bench-cli-self-hosted-${{ github.ref }}
+      # Metrum AI: retain the runner queue without replacing pending non-PR jobs.
+      # Use a job namespace distinct from the enclosing workflow group.
+      group: ${{ github.workflow }}-self-hosted-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
