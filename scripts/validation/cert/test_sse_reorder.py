@@ -47,6 +47,19 @@ class ReorderTests(unittest.TestCase):
         multichoice = b'data: {"choices":[{"index":0,"delta":{"reasoning":"r"}},{"index":1,"delta":{}}]}\n\n'
         with self.assertRaises(ValueError): sse_reorder.transform([multichoice, self.answer, self.done], 'answer-first')
 
+    def test_output_detection_includes_tool_arguments_and_legacy_text(self):
+        metadata = frame({'tool_calls': [{'function': {'name': 'f', 'arguments': ''}}]})
+        tool = frame({'tool_calls': [{'function': {'arguments': '{"city":"x"}'}}]})
+        legacy = b'data: {"id":"source","choices":[{"index":0,"delta":{},"text":"answer","finish_reason":null}]}\n\n'
+        self.assertFalse(sse_reorder.has_selected_output([self.role, self.reason1, metadata, self.done]))
+        for answer in (tool, legacy):
+            self.assertTrue(sse_reorder.has_selected_output([self.role, self.reason1, answer, self.done]))
+            for mode in ('answer-first', 'same-event'):
+                self.assertEqual(len(sse_reorder.transform([self.role, self.reason1, answer, self.done], mode)),
+                                 4 if mode == 'answer-first' else 3)
+        with self.assertRaises(ValueError):
+            sse_reorder.transform([self.role, self.reason1, metadata, tool, self.done], 'answer-first')
+
     def test_unpreserved_source_metadata_rejected(self):
         reason = json.loads(self.reason1[6:-2]); reason['choices'][0]['logprobs'] = {'unexpected': 1}
         unsafe = b'data: ' + json.dumps(reason).encode() + b'\n\n'
