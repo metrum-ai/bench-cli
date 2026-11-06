@@ -473,6 +473,9 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [held-out warmup boundary](docs/STRATEGIC_BENCHMARKING.md#held-out-warmup-integration-boundary-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
+[public dataset contract](docs/PUBLIC_DATASETS.md),
+[canonical runtime inputs](docs/CANONICAL_INPUTS.md),
+[canonical workload consumption](docs/CANONICAL_WORKLOADS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).

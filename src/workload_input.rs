@@ -56,10 +56,8 @@ pub struct PreparedCanonicalInput {
 
 pub fn prepare_canonical_record(record: CanonicalRecord) -> anyhow::Result<PreparedCanonicalInput> {
     use crate::canonical_input::CanonicalBody;
-    anyhow::ensure!(
-        !record.record_id.is_empty() && !record.source_row_id.is_empty(),
-        "canonical identity is required"
-    );
+    // Delegate structural/causal checks to the authoritative ingestion types.
+    record.validate()?;
     let lineage = CanonicalLineage::from(&record);
     let messages = match record.body {
         CanonicalBody::Prompt(prompt) => vec![serde_json::json!({"role":"user","content":prompt})],

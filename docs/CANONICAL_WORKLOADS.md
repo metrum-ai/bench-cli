@@ -5,9 +5,11 @@
 
 `--canonical-jsonl` selects a separate, bounded canonical input path. It never
 falls back to legacy prompt parsing. Legacy `Vec<String>` loader signatures and
-defaults remain unchanged. While the canonical loader implementation is not
-integrated, the option fails before HTTP traffic, including pre-warmup reset
-hooks; it does not claim to accept or validate a canonical dataset.
+defaults remain unchanged. The authoritative `canonical_input` loader checks the
+bounded local file before HTTP traffic, including pre-warmup reset hooks. Invalid
+canonical input never becomes a legacy prompt file. Structural validation and
+provenance references do not establish legal clearance or independently verify
+the referenced source artifact.
 
 ## Final record interface
 
@@ -37,10 +39,11 @@ for an operator's output-token limit. Shared-prefix, temperature and other
 explicit body controls still apply; final-body/token evidence must bind their
 post-transformation output rather than the source body alone.
 
-Closed-loop scheduling keys a session by its exact source envelope plus
-`session_id`, preventing identical session strings from different sources being
-combined. Original source IDs remain unchanged in exports. Every closed-loop
-target must have a session ID. Source turn numbering is preserved separately from
+Closed-loop scheduling honors `session_id` globally within the input, matching
+the loader's `(session_id, turn_index)` uniqueness rule. A change of source
+envelope must not create a second overlapping cursor for the same session.
+Original source IDs remain unchanged in exports. Every closed-loop target must
+have a session ID. Source turn numbering is preserved separately from
 legacy `turn`, which remains the original one-based message position.
 
 Source arrival offsets are retained unchanged as metadata. The current stage
@@ -64,9 +67,11 @@ normal privacy review; a digest or identifier is not publication clearance.
 ## Validation boundary
 
 Offline tests cover overflow rejection, body-free lineage, target preparation,
-typed tool payload preservation, source-scoped session concurrency, and CSV
-identity round trips. The unavailable-loader mock asserts both zero HTTP traffic
+typed tool payload preservation, global session identity across source envelopes, and CSV
+identity round trips. The invalid-schema mock asserts both zero HTTP traffic of any method
 and no reset-hook execution, even if the file is valid in the legacy format.
+A real-file CLI mock checks one retained target rather than repeated history
+expansion, exact wire messages, unchanged lineage and explicit output controls.
 These tests do not establish source rights, live engine support, physical cache
 participation, or token-prefix isolation. Held-out closed-loop warmup still fails
 closed until dynamic final-body bindings are integrated; an override cannot

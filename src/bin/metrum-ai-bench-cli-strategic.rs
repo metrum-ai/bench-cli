@@ -481,7 +481,6 @@ struct Input {
     json: Option<bytes::Bytes>,
     session_id: Option<String>,
     turn: Option<usize>,
-    scheduler_session_key: Option<String>,
     canonical_lineage_json: Option<Arc<String>>,
     /// `--kind asr`: the audio upload sent as multipart instead of `body`.
     upload: Option<Arc<AudioUpload>>,
@@ -653,7 +652,7 @@ fn validate_chat_controls(args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn add_canonical_config(config: &mut Value, inputs: &[Input]) -> Result<()> {
+fn add_canonical_config(config: &mut Value, inputs: &[Input], args: &Args) -> Result<()> {
     let mut sources = std::collections::BTreeMap::new();
     for input in inputs {
         if let Some(lineage) = &input.canonical_lineage_json {
@@ -666,6 +665,8 @@ fn add_canonical_config(config: &mut Value, inputs: &[Input]) -> Result<()> {
         config["datasets"] = json!(sources.into_values().collect::<Vec<_>>());
         config["canonical_input"] = json!({"schema_version":"canonical-lineage.v1",
             "ordering":"source_order", "history":"recorded_targets_no_prefix_expansion",
+            "session_mode":args.session_mode, "session_scope":"session_id_global_within_input",
+            "selected_terminal_roles":args.session_request_roles,
             "arrival_offsets":"metadata_only_not_trace_replay",
             "expected_output_tokens":"source_metadata_only_explicit_max_tokens_controls_body",
             "request_lineage":"canonical_lineage_json"});
@@ -713,20 +714,13 @@ fn canonical_inputs(
             bail!("closed-loop canonical targets require session_id");
         }
         has_arrivals |= prepared.lineage.arrival_offset_ms.is_some();
-        let scheduler_session_key = prepared
-            .lineage
-            .session_id
-            .as_ref()
-            .map(|session_id| {
-                serde_json::to_vec(&(&prepared.lineage.source, session_id))
-                    .map(|bytes| metrum_ai_bench::warmup_isolation::body_digest(&bytes))
-            })
-            .transpose()?;
         let messages = controlled_messages(
             &prepared.messages,
             args.shared_prefix.as_deref(),
             args.prefix_control,
-            scheduler_session_key
+            prepared
+                .lineage
+                .session_id
                 .as_deref()
                 .unwrap_or(&prepared.lineage.record_id),
         );
@@ -749,7 +743,6 @@ fn canonical_inputs(
             // `turn` remains the legacy one-based message position. Canonical
             // turn_index is preserved without reinterpretation inside lineage.
             turn: None,
-            scheduler_session_key,
             canonical_lineage_json: Some(Arc::new(serde_json::to_string(&prepared.lineage)?)),
             ..Input::default()
         });
@@ -1821,9 +1814,8 @@ where
     let mut ids = std::collections::HashMap::new();
     for input in inputs {
         let id = input
-            .scheduler_session_key
+            .session_id
             .as_ref()
-            .or(input.session_id.as_ref())
             .context("closed-loop input lacks session ID")?;
         let next = groups.len();
         let index = *ids.entry(id.clone()).or_insert(next);
@@ -2242,7 +2234,7 @@ async fn main() -> Result<()> {
         "telemetry": args.telemetry,
         "metrics_url": args.metrics_url,
     });
-    add_canonical_config(&mut run_config, &inputs)?;
+    add_canonical_config(&mut run_config, &inputs, &args)?;
     if let Some(temperature) = args.temperature {
         run_config["temperature"] = json!(decimal_f32(temperature));
     }
@@ -2378,7 +2370,7 @@ async fn main() -> Result<()> {
             "evidence": "trusted_operator_acknowledgement"
         });
     }
-    add_canonical_config(&mut redacted_config, &inputs)?;
+    add_canonical_config(&mut redacted_config, &inputs, &args)?;
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -2659,17 +2651,25 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn canonical_targets_preserve_tool_wire_lineage_and_dataset_scoped_sessions() {
+    async fn canonical_targets_preserve_tool_wire_lineage_and_global_session_identity() {
         use axum::{extract::State, routing::post, Json, Router};
         use metrum_ai_bench::canonical_input::CanonicalRecord;
         use metrum_ai_bench::workload_input::WorkloadInput;
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-        let barrier = Arc::new(tokio::sync::Barrier::new(2));
-        let app = Router::new().route("/chat/completions", post(|State((seen, barrier)): State<(Arc<std::sync::Mutex<Vec<Value>>>, Arc<tokio::sync::Barrier>)>, Json(body): Json<Value>| async move {
+        use std::sync::atomic::AtomicUsize;
+        type MockState = (
+            Arc<std::sync::Mutex<Vec<Value>>>,
+            Arc<(AtomicUsize, AtomicUsize)>,
+        );
+        let occupancy = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let app = Router::new().route("/chat/completions", post(|State((seen, occupancy)): State<MockState>, Json(body): Json<Value>| async move {
             seen.lock().unwrap().push(body);
-            barrier.wait().await;
+            let active = occupancy.0.fetch_add(1, Ordering::SeqCst) + 1;
+            occupancy.1.fetch_max(active, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            occupancy.0.fetch_sub(1, Ordering::SeqCst);
             Json(json!({"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":4,"completion_tokens":1}}))
-        })).with_state((seen.clone(), barrier));
+        })).with_state((seen.clone(), occupancy.clone()));
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
             .unwrap();
@@ -2710,15 +2710,37 @@ mod tests {
         let inputs =
             canonical_inputs(&args, "mock", WorkloadInput::Canonical(records), None, None).unwrap();
         assert_eq!(inputs.len(), 2);
-        assert_ne!(
-            inputs[0].scheduler_session_key,
-            inputs[1].scheduler_session_key
+        assert_eq!(inputs[0].session_id, inputs[1].session_id);
+        let logical = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let outcomes = run_session_requests(
+            &inputs,
+            2,
+            2,
+            &metrum_ai_bench::runner::StopFlag::new(),
+            |_| {
+                let logical = logical.clone();
+                let active = logical.0.fetch_add(1, Ordering::SeqCst) + 1;
+                logical.1.fetch_max(active, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    tokio::task::yield_now().await;
+                    logical.0.fetch_sub(1, Ordering::SeqCst);
+                    (BenchRecord::default(), ModalitySample::default())
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(
+            logical.1.load(Ordering::SeqCst),
+            1,
+            "source envelopes must not split a canonical session cursor"
         );
         assert_eq!(inputs[1].body["messages"], tool_messages);
         assert_eq!(inputs[1].body["max_tokens"], 8);
         assert!(inputs.iter().all(|input| input.turn.is_none()));
         let mut config = json!({});
-        add_canonical_config(&mut config, &inputs).unwrap();
+        add_canonical_config(&mut config, &inputs, &args).unwrap();
         assert_eq!(config["datasets"].as_array().unwrap().len(), 2);
         assert_eq!(
             config["canonical_input"]["arrival_offsets"],
@@ -2743,11 +2765,16 @@ mod tests {
             ),
         )
         .await
-        .expect("dataset-scoped sessions should issue concurrently")
+        .expect("one cursor must advance the global session across source envelopes")
         .unwrap();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.success));
-        assert_eq!(seen.lock().unwrap().len(), 2);
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2);
+            assert_eq!(seen[1]["messages"], tool_messages);
+            assert_eq!(occupancy.1.load(Ordering::SeqCst), 1);
+        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("requests.csv");
         export_csv(&path, &rows).unwrap();

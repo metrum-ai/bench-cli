@@ -39,6 +39,8 @@ pub struct OverlapReport {
     pub max_shared_prefix_tokens: usize,
     pub max_shared_full_blocks: usize,
     pub pairs_over_threshold: Vec<(String, String, usize)>,
+    pub pairs_over_threshold_total: Option<u64>,
+    pub pairs_over_threshold_truncated: bool,
     pub tokenizer_revision: String,
     pub chat_template_sha256: String,
     pub verdict: Verdict,
@@ -78,6 +80,8 @@ pub fn validate_prefix_disjoint(
         max_shared_prefix_tokens: 0,
         max_shared_full_blocks: 0,
         pairs_over_threshold: Vec::new(),
+        pairs_over_threshold_total: None,
+        pairs_over_threshold_truncated: false,
         tokenizer_revision: "unknown".into(),
         chat_template_sha256: "unknown".into(),
         verdict: Verdict::Unknown,
@@ -105,6 +109,11 @@ mod tests {
         let b = body("b", b"second");
         let report = validate_prefix_disjoint(&[a.clone(), b.clone()], &[], 16);
         assert_eq!(report.verdict, Verdict::Unknown);
+        assert_eq!(report.pairs_over_threshold_total, None);
+        assert!(!report.pairs_over_threshold_truncated);
+        let value = serde_json::to_value(&report).unwrap();
+        assert!(value["pairs_over_threshold_total"].is_null());
+        assert_eq!(value["pairs_over_threshold_truncated"], false);
         assert_eq!(report.max_shared_full_blocks, 0); // Unknown maxima are not measurements.
         let reordered = validate_prefix_disjoint(&[b.clone(), a.clone()], &[], 16);
         assert_eq!(
