@@ -23,6 +23,22 @@ is not a pass. A failure is retained and repeated unchanged; fixing code
 creates a new candidate and requires rerunning the required cases. N/A needs a
 specific technical justification and independent approval before the case.
 
+### Measured and validation-only builds
+
+Certify the shipped feature profile: for v1.8.1 every measured case uses a
+release-equivalent build with `--features otlp` only. Do not enable `tokenizer`
+in the shipped artifact or substitute a feature-enabled binary for measurement.
+Record the measured binary's SHA-256, features and frozen source commit.
+
+Tokenizer input validation uses a separate **validation-only build** with
+`--features otlp,tokenizer` from that same frozen commit. Record its distinct
+SHA-256, features and validation-only role in preflight evidence. Keep the two
+builds in separate output directories so neither can overwrite the other.
+The validation-only binary may run preflight/input checks, never measured cases;
+its successful probe is not a measured case result. If a case requires a
+capability absent from the shipped profile, retain that conflict explicitly:
+do not silently drop assertions, substitute builds or claim a pass.
+
 Compare metrics across versions only after matching token populations, timing
 origins, window, inputs, and usage coverage. A v1.8.0 first-any headline is not
 equivalent to v1.7.2 visible-answer TTFT. Preserve raw per-request evidence and

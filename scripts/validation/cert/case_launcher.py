@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+import build_roles
 from execution_evidence import digest, require_python, phase
 
 
@@ -26,6 +27,7 @@ def preflight(manifest):
     if not re.fullmatch(r"[a-f0-9]{40}", manifest.get("candidate_sha", "")):
         raise ValueError("candidate_sha must be a full commit")
     binary = pinned(manifest["candidate"], True)
+    _, validation_binary = build_roles.check_manifest(manifest)
     subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
     sut_path = pinned(manifest["sut"])
     sut = json.loads(sut_path.read_text())
@@ -58,13 +60,17 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
-    if "BC-GPU-010" in cases:
-        from tokenizer_probe import probe
-        probe(binary, tokenizer["path"])
+    from tokenizer_probe import probe
+    probe(validation_binary, tokenizer['path'])
+    if 'BC-GPU-010' in cases:
+        raise ValueError('BC-GPU-010 measured fallback is unsupported by otlp; explicit gate disposition required')
     return list(cases)
 
 
 def run_case(manifest_path, manifest, case):
+    build_roles.check_manifest(manifest)
+    if case == 'BC-GPU-010':
+        raise ValueError('BC-GPU-010 measured fallback requires explicit gate disposition')
     import signal
     import result_writer
     entry = manifest["cases"][case]

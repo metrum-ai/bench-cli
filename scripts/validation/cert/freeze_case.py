@@ -8,6 +8,7 @@ import json
 import subprocess
 from pathlib import Path
 import case_launcher
+import build_roles
 import manifest_tool
 from execution_evidence import digest, require_python
 
@@ -42,6 +43,12 @@ def freeze(args):
         raise ValueError("lane manifest and selection candidate mismatch")
     if digest(args.candidate) != lane_manifest["candidate_binary_sha256"] or digest(args.baseline) != lane_manifest["baseline_binary_sha256"]:
         raise ValueError("lane manifest binary hash mismatch")
+    measured, validation = build_roles.load_receipt(args.build_receipt, selection['candidate_sha'])
+    matching = [item for item in measured if item['sha256'] == digest(args.candidate)
+                and Path(item['path']).resolve() == args.candidate.resolve()]
+    if len(matching) != 1:
+        raise ValueError('candidate must be a measured artifact from the build receipt')
+    build_roles.check_measured_config(lane_manifest, measured, validation)
     lane = row["Parallel group"]
     if lane != "CLEANUP":
         _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0")
@@ -50,6 +57,8 @@ def freeze(args):
         check_case_tokenizer(args.case, config, args.tokenizer)
     root = Path(__file__).parent
     if args.command_json:
+        if args.case not in ('BC-COMP-001', 'BC-OPS-001', 'BC-INTEG-001'):
+            raise ValueError('custom commands are restricted to barrier/cleanup/signoff cases')
         command = json.loads(args.command_json.read_text())
     else:
         if args.case in ("BC-COMP-001", "BC-OPS-001", "BC-INTEG-001"):
@@ -60,7 +69,10 @@ def freeze(args):
                    "--baseline", str(args.baseline.resolve()), "--manifest", str(args.lane_manifest.resolve()),
                    "--out", str(args.run_out.resolve())]
     inputs = {Path(path).resolve() for path in args.input}
-    inputs.update({args.selection.resolve(), args.catalog.resolve(), args.lane_manifest.resolve(), args.baseline.resolve()})
+    inputs.update({args.selection.resolve(), args.catalog.resolve(), args.lane_manifest.resolve(), args.baseline.resolve(),
+                   args.build_receipt.resolve(), Path(validation['path']).resolve()})
+    inputs.update(Path(item['path']).resolve() for item in measured)
+    inputs.update(args.build_receipt.resolve().parent / (role + '.log') for role in ('measured', 'validation-only'))
     def collect_pins(value):
         if isinstance(value, dict):
             if "path" in value and "sha256" in value:
@@ -79,7 +91,10 @@ def freeze(args):
     if args.command_json:
         inputs.add(args.command_json.resolve())
     manifest = {"$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
-                "candidate_sha": selection["candidate_sha"], "candidate": pin(args.candidate), "sut": pin(args.sut),
+                "candidate_sha": selection["candidate_sha"], "candidate": matching[0],
+                "tokenizer_validation": validation, "measured_binaries": measured,
+                "build_receipt": pin(args.build_receipt), "lane_manifest": pin(args.lane_manifest),
+                "sut": pin(args.sut),
                 "tokenizer": {**pin(args.tokenizer), "revision": args.tokenizer_revision}, "all_smi": pin(args.all_smi),
                 "inputs": [pin(path) for path in sorted(inputs)],
                 "cases": {args.case: {"launcher": pin(command[0]), "command": command, "out": str(args.run_out.resolve())}}}
@@ -92,7 +107,7 @@ def freeze(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("selection", "catalog", "lane-manifest", "candidate", "baseline", "sut", "tokenizer", "all-smi", "out", "run-out"):
+    for name in ("selection", "catalog", "lane-manifest", "candidate", "baseline", "sut", "tokenizer", "all-smi", "build-receipt", "out", "run-out"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--case", required=True)
     parser.add_argument("--tokenizer-revision", required=True)

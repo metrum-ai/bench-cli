@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import case_launcher
+from build_role_test_fixture import bind
 from execution_evidence import digest
 
 
@@ -26,7 +27,8 @@ class CaseLauncherTests(unittest.TestCase):
                         "all_smi": pin(binary), "tokenizer": {**pin(binary), "revision": "b" * 40},
                         "cases": {"BC-GPU-001": {"launcher": pin(binary), "out": str(root / "attempt"),
                                                     "command": [str(binary), "--out", str(root / "attempt")]}}}
-            with patch.object(case_launcher.subprocess, "run") as run:
+            bind(manifest, root)
+            with patch.object(case_launcher.subprocess, "run") as run, patch('tokenizer_probe.probe'):
                 self.assertEqual(case_launcher.preflight(manifest), ["BC-GPU-001"])
                 run.assert_called_once()
             guarded = copy.deepcopy(manifest)
@@ -34,7 +36,10 @@ class CaseLauncherTests(unittest.TestCase):
             with patch.object(case_launcher.subprocess, "run"), patch("tokenizer_probe.probe", side_effect=ValueError("missing tokenizer capability")) as probe:
                 with self.assertRaisesRegex(ValueError, "missing tokenizer capability"):
                     case_launcher.preflight(guarded)
-                probe.assert_called_once_with(binary.resolve(), str(binary))
+                probe.assert_called_once_with(Path(manifest['tokenizer_validation']['path']).resolve(), str(binary))
+            with patch.object(case_launcher.subprocess, 'run'), patch('tokenizer_probe.probe'):
+                with self.assertRaisesRegex(ValueError, 'disposition'):
+                    case_launcher.preflight(guarded)
             for field in ("host_os", "memory_gb"):
                 bad = {"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}
                 bad.pop(field)
@@ -70,6 +75,7 @@ class CaseLauncherTests(unittest.TestCase):
             manifest = {"candidate_sha": "a" * 40, "candidate": pin(), "sut": pin(), "all_smi": pin(),
                         "tokenizer": pin(), "cases": {"BC-GPU-001": {"out": str(out), "launcher": pin(),
                         "command": [str(launcher), "--out", str(out)]}}}
+            bind(manifest, root)
             frozen = root / "frozen.json"
             frozen.write_text(json.dumps(manifest))
             with self.assertRaises(subprocess.CalledProcessError):

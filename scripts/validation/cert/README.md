@@ -54,14 +54,24 @@ Never substitute runner start/end for actual first/last request times.
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
 and content pin, all-smi executable pin, every input pin and each launcher pin.
-BC-GPU-010 also probes actual tokenizer fallback against a one-request loopback
-CPU fixture with no server usage. Its runner tokenizer must match the probed
-bytes. Missing `tokenizer` build support or unusable tokenizer data blocks
-preflight before GPU work. The synthetic probe inherits no API/exporter
-credentials and never becomes a GPU record or actual request-phase measurement;
-its temporary fixture server and files are cleaned up on success or failure.
-Preflight is offline and allocates no hardware or model-serving process.
-Its manifest contains `candidate_sha`; `candidate`, `sut`, `all_smi`, `tokenizer` pin objects
+Tokenizer validation probes the separately pinned **validation-only build**
+against a one-request loopback CPU fixture with no server usage, never the
+measured candidate. Both builds must be release builds of the same frozen
+commit: measured features are `otlp` only, validation-only features are
+`otlp,tokenizer`. The probe inherits no API/exporter credentials and never
+becomes GPU case evidence or a request-phase measurement. Temporary files and
+the fixture server are cleaned up on success or failure. Preflight allocates
+no hardware or model-serving process.
+
+The manifest binds `candidate_sha`, role-tagged `candidate` and
+`tokenizer_validation` artifacts, the execution-time `build_receipt`, and the
+frozen `lane_manifest`. Build and log hashes are rechecked before launch.
+Secondary CLI pins must belong to the measured artifact registry; a validation
+binary (including renamed copies) cannot appear in measured argv/config.
+BC-GPU-010 is currently blocked: its measured positive-fallback assertion is
+incompatible with the shipped feature profile and requires explicit gate
+disposition. A successful validation-only probe cannot make that case PASS.
+Other fields include `sut`, `all_smi`, `tokenizer` pins
 (`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
 and `cases`, mapping selected IDs to a pinned `launcher`, a fresh `out`
 directory and literal `command` argv containing that exact `--out` value.
@@ -83,9 +93,17 @@ performance gate configurations are unchanged.
 
 ## Freeze and launch individual selected cases
 
-`freeze_case.py` creates an exclusive (never overwritten) single-case manifest
-from a selector output, catalog, validated lane manifest, candidate/baseline
-binaries, SUT, tokenizer pin and all-smi pin. It verifies the existing lane
+First run `freeze_builds.py --repo CLEAN_CHECKOUT --candidate-sha SHA --out NEW_DIR
+--rust-target RUST_TARGET --zig-target RELEASE_ZIG_TARGET` with the matching
+release-workflow targets. It runs the locked release `cargo zigbuild` commands
+in separate output directories and emits `builds.json` only after both builds
+succeed. Partial logs remain on failure. It records actual executable hashes,
+features, source commit, command argv and build-log hashes, not measured results.
+
+`freeze_case.py --build-receipt NEW_DIR/builds.json` creates an exclusive
+(never overwritten) single-case manifest from that receipt, selector output,
+catalog, validated lane manifest, candidate/baseline binaries, SUT, tokenizer
+pin and all-smi pin. It verifies the existing lane
 contract offline, freezes every nested lane input pin and all transitive harness
 source files, then runs the per-case offline preflight. Additional data files
 can be declared with repeated `--input` arguments. Use `--help` for required
@@ -152,7 +170,9 @@ missing source populations fail. G3 uses the hidden certification-only
 `--cert-e2e-median-slo` option to calculate an exploratory answered-cohort e2e
 median for BC-GPU-009. It requires at least two distinct answered latencies and
 zero scheduling delay, and is not a prospective service SLO. G4 requires a pinned tokenizer.json and a
-candidate built with tokenizer support for 010; 011 also pins the VLM binary,
+separate validation-only tokenizer tool. Case 010 remains blocked until the
+shipped-profile measured fallback gate has an explicit disposition; no assertion
+has been relaxed. Case 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct
 `second_port` and `second_proxy_port`, and `--gpu-memory-utilization 0.45` in

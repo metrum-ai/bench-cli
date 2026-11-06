@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import freeze_case
 import selected_set
+from build_role_test_fixture import bind
 from execution_evidence import digest
 
 
@@ -29,7 +30,12 @@ class FreezeCaseTests(unittest.TestCase):
                                              "selected": {"BC-GPU-001": ["core"]}}))
             lane = root / "lane.json"
             lane.write_text(json.dumps({"candidate_sha": "a" * 40, "candidate_binary_sha256": digest(binary), "baseline_binary_sha256": digest(binary)}))
-            args = SimpleNamespace(selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,
+            fixture = bind({'candidate_sha': 'a' * 40,
+                            'candidate': {'path': str(binary), 'sha256': digest(binary)}}, root)
+            probe = patch('tokenizer_probe.probe')
+            probe.start()
+            self.addCleanup(probe.stop)
+            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,
                 candidate=binary, baseline=binary, sut=sut, tokenizer=binary, tokenizer_revision="b" * 40,
                 all_smi=binary, input=[], command_json=None, out=root / "frozen.json", run_out=root / "run")
             with patch.object(freeze_case.manifest_tool, "load_manifest", return_value=({}, {"revision": "b" * 40})) as validation:
@@ -43,6 +49,12 @@ class FreezeCaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "tokenizer revision"):
                     freeze_case.freeze(args)
                 args.tokenizer_revision = "b" * 40
+                custom = root / 'command.json'
+                custom.write_text(json.dumps([str(binary)]))
+                args.command_json = custom
+                with self.assertRaisesRegex(ValueError, 'restricted'):
+                    freeze_case.freeze(args)
+                args.command_json = None
             index = root / "index.json"
             entries = [{"path": str(args.out), "sha256": digest(args.out)}]
             data = {"candidate_sha": "a" * 40, "selection_sha256": digest(selection), "catalog_sha256": digest(catalog), "manifests": entries}
