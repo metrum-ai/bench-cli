@@ -34,6 +34,7 @@ fn exact_pinned_profiles_preserve_units_types_labels_and_missing_not_zero() {
     for profile in [
         ProfileId::VllmApc,
         ProfileId::VllmExternal,
+        ProfileId::VllmOffload,
         ProfileId::Sglang,
         ProfileId::Lmcache,
         ProfileId::DynamoKvbm,
@@ -131,6 +132,51 @@ fn duplicate_series_are_unknown_while_distinct_label_sets_are_not_summed() {
     let result = probe(p, Some(p.source_revision()), &distinct).unwrap();
     assert_eq!(result.observations.len(), 4);
     assert!(result.observations.iter().all(|v| v.value == Some(10.0)));
+}
+
+#[test]
+fn flat_offload_time_is_continuous_but_bytes_are_integer_and_legacy_totals_are_not_aliases() {
+    let p = ProfileId::VllmOffload;
+    let page = fixture(p).replace(
+        "vllm:kv_offload_load_time_total{worker=\"worker-a\"} 10",
+        "vllm:kv_offload_load_time_total{worker=\"worker-a\"} 0.125",
+    );
+    let page = format!("{page}# TYPE vllm:kv_offload_total_bytes_total counter\nvllm:kv_offload_total_bytes_total{{transfer_type=\"CPU_to_GPU\"}} 999\n");
+    let result = probe(p, Some(p.source_revision()), &page).unwrap();
+    assert_eq!(result.unmatched_samples, 1);
+    let time = result
+        .observations
+        .iter()
+        .find(|row| row.spec.metric == "vllm:kv_offload_load_time_total")
+        .unwrap();
+    assert_eq!(time.value, Some(0.125));
+    assert_eq!(time.spec.unit, Unit::Seconds);
+    let bad = page.replace(
+        "vllm:kv_offload_load_bytes_total{worker=\"worker-a\"} 10",
+        "vllm:kv_offload_load_bytes_total{worker=\"worker-a\"} 0.125",
+    );
+    assert_eq!(
+        probe(p, Some(p.source_revision()), &bad)
+            .unwrap()
+            .observations[0]
+            .unknown,
+        Some(Unknown::InvalidValue)
+    );
+    let specs = ProfileId::Lmcache.metrics();
+    assert!(specs.iter().any(|s| s.role == Role::Residency
+        && s.kind == MetricType::Gauge
+        && s.unit == Unit::Bytes));
+    assert!(specs
+        .iter()
+        .any(|s| s.role == Role::Eviction && s.unit == Unit::Keys));
+    assert_eq!(
+        specs
+            .iter()
+            .find(|s| s.metric == "lmcache:local_cpu_evict_failed_count_total")
+            .unwrap()
+            .unit,
+        Unit::EvictionCandidates
+    );
 }
 
 #[test]

@@ -19,6 +19,7 @@ const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
 pub enum ProfileId {
     VllmApc,
     VllmExternal,
+    VllmOffload,
     Sglang,
     Lmcache,
     DynamoKvbm,
@@ -30,6 +31,10 @@ pub enum Unit {
     Bytes,
     Blocks,
     Ratio,
+    Seconds,
+    Events,
+    Keys,
+    EvictionCandidates,
 }
 impl Unit {
     fn declaration(self) -> &'static str {
@@ -39,6 +44,10 @@ impl Unit {
             Self::Bytes => "bytes",
             Self::Blocks => "blocks",
             Self::Ratio => "ratio",
+            Self::Seconds => "seconds",
+            Self::Events => "events",
+            Self::Keys => "keys",
+            Self::EvictionCandidates => "eviction_candidates",
         }
     }
 }
@@ -53,6 +62,10 @@ pub enum Role {
     Utilization,
     ReportedHitRate,
     Matched,
+    Residency,
+    Eviction,
+    Failure,
+    TransferTime,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct MetricSpec {
@@ -71,11 +84,20 @@ const fn c(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
         required: true,
     }
 }
+impl MetricSpec {
+    const fn optional(mut self) -> Self {
+        self.required = false;
+        self
+    }
+}
 const fn g(metric: &'static str, role: Role) -> MetricSpec {
+    gauge(metric, Unit::Ratio, role)
+}
+const fn gauge(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
     MetricSpec {
         metric,
         kind: MetricType::Gauge,
-        unit: Unit::Ratio,
+        unit,
         role,
         required: false,
     }
@@ -97,6 +119,34 @@ const VLLM_EXTERNAL: &[MetricSpec] = &[
         Unit::Tokens,
         Role::Hit,
     ),
+];
+// Flat transfer metrics only. Deprecated transfer_type-labelled aggregates are
+// intentionally not aliases and must not be added to these directional totals.
+const VLLM_OFFLOAD: &[MetricSpec] = &[
+    c("vllm:kv_offload_load_bytes_total", Unit::Bytes, Role::Read),
+    c(
+        "vllm:kv_offload_store_bytes_total",
+        Unit::Bytes,
+        Role::Write,
+    ),
+    c(
+        "vllm:kv_offload_load_time_total",
+        Unit::Seconds,
+        Role::TransferTime,
+    )
+    .optional(),
+    c(
+        "vllm:kv_offload_store_time_total",
+        Unit::Seconds,
+        Role::TransferTime,
+    )
+    .optional(),
+    c(
+        "vllm:kv_offload_allocation_failure_total",
+        Unit::Events,
+        Role::Failure,
+    )
+    .optional(),
 ];
 const SGLANG: &[MetricSpec] = &[
     c("sglang:cached_tokens_total", Unit::Tokens, Role::Hit),
@@ -129,6 +179,29 @@ const LMCACHE: &[MetricSpec] = &[
         Unit::Requests,
         Role::Read,
     ),
+    gauge("lmcache:local_cache_usage", Unit::Bytes, Role::Residency),
+    gauge("lmcache:remote_cache_usage", Unit::Bytes, Role::Residency),
+    gauge("lmcache:local_storage_usage", Unit::Bytes, Role::Residency),
+    c(
+        "lmcache:local_cpu_evict_count_total",
+        Unit::Events,
+        Role::Eviction,
+    )
+    .optional(),
+    c(
+        "lmcache:local_cpu_evict_keys_count_total",
+        Unit::Keys,
+        Role::Eviction,
+    )
+    .optional(),
+    c(
+        "lmcache:local_cpu_evict_failed_count_total",
+        // local_cpu_backend passes num_candidates, which may be up to 64 per
+        // failed selection. This is neither failed calls nor evicted keys.
+        Unit::EvictionCandidates,
+        Role::Failure,
+    )
+    .optional(),
 ];
 const KVBM: &[MetricSpec] = &[
     c("kvbm_offload_blocks_d2h", Unit::Blocks, Role::Transfer),
@@ -137,12 +210,16 @@ const KVBM: &[MetricSpec] = &[
     g("kvbm_host_cache_hit_rate", Role::ReportedHitRate),
     g("kvbm_disk_cache_hit_rate", Role::ReportedHitRate),
     g("kvbm_object_cache_hit_rate", Role::ReportedHitRate),
+    c("kvbm_object_read_failures", Unit::Blocks, Role::Failure).optional(),
+    c("kvbm_object_write_failures", Unit::Blocks, Role::Failure).optional(),
 ];
 
 impl ProfileId {
     pub fn source_revision(self) -> &'static str {
         match self {
-            Self::VllmApc | Self::VllmExternal => "aa4022dc8176db8f769f93445d845f8755f9b4ca",
+            Self::VllmApc | Self::VllmExternal | Self::VllmOffload => {
+                "aa4022dc8176db8f769f93445d845f8755f9b4ca"
+            }
             Self::Sglang => "188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a",
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
@@ -152,6 +229,7 @@ impl ProfileId {
         match self {
             Self::VllmApc => VLLM_APC,
             Self::VllmExternal => VLLM_EXTERNAL,
+            Self::VllmOffload => VLLM_OFFLOAD,
             Self::Sglang => SGLANG,
             Self::Lmcache => LMCACHE,
             Self::DynamoKvbm => KVBM,
@@ -211,12 +289,14 @@ pub fn probe(
     }
     static APC: OnceLock<RegexSet> = OnceLock::new();
     static EXTERNAL: OnceLock<RegexSet> = OnceLock::new();
+    static OFFLOAD: OnceLock<RegexSet> = OnceLock::new();
     static SGLANG_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static LMCACHE_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static KVBM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     let matcher = match profile {
         ProfileId::VllmApc => &APC,
         ProfileId::VllmExternal => &EXTERNAL,
+        ProfileId::VllmOffload => &OFFLOAD,
         ProfileId::Sglang => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
@@ -358,7 +438,9 @@ pub fn probe(
         } else if !sample.value.is_finite()
             || sample.value < 0.0
             || (spec.unit == Unit::Ratio && sample.value > 1.0)
-            || (spec.kind == MetricType::Counter && sample.value.fract() != 0.0)
+            || (spec.unit != Unit::Seconds
+                && spec.unit != Unit::Ratio
+                && sample.value.fract() != 0.0)
         {
             Some(Unknown::InvalidValue)
         } else if spec.kind == MetricType::Counter && sample.value >= MAX_EXACT_INTEGER {
