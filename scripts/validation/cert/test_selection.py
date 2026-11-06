@@ -108,6 +108,18 @@ class SelectionTests(unittest.TestCase):
 
 
 class PublicCatalogTests(unittest.TestCase):
+    def test_warmup_path_preserves_conservative_all_area_selection(self):
+        path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
+        catalog = validator.load_catalog(path)
+        sha = 'a' * 40
+        history = [{'release': 'prior', 'ran': sorted(catalog)}]
+        unknown = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3,
+                                        ['src/future_unmapped_input.rs'], history)
+        mapped = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3,
+                                       ['src/token_overlap.rs'], history)
+        self.assertEqual({'*'}, select.PATH_AREAS['src/token_overlap.rs'])
+        self.assertEqual(unknown['selected'], mapped['selected'])
+
     def test_required_core_and_change_trigger_cadence(self):
         path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
         rows = validator.load_catalog(path)
