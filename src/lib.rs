@@ -33,6 +33,7 @@ pub mod sut;
 pub mod sweep_modality;
 pub mod telemetry;
 pub mod time_weighted;
+pub mod token_overlap;
 pub mod tokenizer;
 pub mod usage;
 pub mod vlm;

@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Offline warmup overlap artifact
+
+The standalone `kv-token-overlap.v1` report is documented in
+[WARMUP_ISOLATION.md](WARMUP_ISOLATION.md). It contains sorted warmup/measured
+wire-body digest-list fingerprints, maximum shared tokens/full blocks, offending
+request pairs, tokenizer/template identity and Pass/Fail/Unknown verdict. It is
+not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)
