@@ -39,6 +39,7 @@ pub mod tokenizer;
 pub mod usage;
 pub mod vlm;
 pub mod warmup_isolation;
+pub mod workload_input;
 
 /// True when the process was invoked with the `--version-only` flag
 /// (#307).

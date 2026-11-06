@@ -116,6 +116,9 @@ pub struct BenchRecord {
     pub usage_prompt_tokens_present: Option<bool>,
     #[serde(default)]
     pub usage_completion_tokens_present: Option<bool>,
+    /// JSON-encoded canonical-lineage.v1; never includes prompt/messages.
+    #[serde(default)]
+    pub canonical_lineage_json: Option<String>,
 }
 
 fn unknown_usage_is_missing() -> bool {
@@ -1513,6 +1516,7 @@ struct CsvBenchRecord {
     usage_missing: bool,
     usage_prompt_tokens_present: Option<bool>,
     usage_completion_tokens_present: Option<bool>,
+    canonical_lineage_json: Option<String>,
 }
 
 struct CsvRow<'a>(&'a BenchRecord);

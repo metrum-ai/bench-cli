@@ -81,7 +81,8 @@ impl ImageDetail {
 #[command(
     author,
     version,
-    about = "Sweep and benchmark OpenAI-compatible inference endpoints"
+    about = "Sweep and benchmark OpenAI-compatible inference endpoints",
+    group(clap::ArgGroup::new("session_input").args(["sessions", "canonical_jsonl"]).multiple(false))
 )]
 struct Args {
     #[arg(long, help = "Print version information and exit")]
@@ -155,6 +156,8 @@ struct Args {
         help = "JSONL prompt file (objects with \"prompt\"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests"
     )]
     prompts: Option<String>,
+    #[arg(long, conflicts_with_all = ["prompts", "sessions"], help = "Canonical JSONL; fails closed until the canonical loader is integrated")]
+    canonical_jsonl: Option<PathBuf>,
     #[arg(
         long,
         help = "Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps"
@@ -325,13 +328,13 @@ struct Args {
     sessions: Option<PathBuf>,
     #[arg(
         long,
-        requires = "sessions",
+        requires = "session_input",
         value_delimiter = ',',
         value_parser = ["user", "tool", "system", "assistant", "developer", "function"],
         help = "Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior"
     )]
     session_request_roles: Vec<String>,
-    #[arg(long, requires = "sessions", value_parser = ["legacy", "closed-loop"], default_value = "legacy",
+    #[arg(long, requires = "session_input", value_parser = ["legacy", "closed-loop"], default_value = "legacy",
         help = "Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only")]
     session_mode: String,
     #[arg(long, value_enum, default_value = "shared")]
@@ -478,6 +481,8 @@ struct Input {
     json: Option<bytes::Bytes>,
     session_id: Option<String>,
     turn: Option<usize>,
+    scheduler_session_key: Option<String>,
+    canonical_lineage_json: Option<Arc<String>>,
     /// `--kind asr`: the audio upload sent as multipart instead of `body`.
     upload: Option<Arc<AudioUpload>>,
     /// `--kind vlm`: image count and payload bytes in `json`.
@@ -648,6 +653,116 @@ fn validate_chat_controls(args: &Args) -> Result<()> {
     Ok(())
 }
 
+fn add_canonical_config(config: &mut Value, inputs: &[Input]) -> Result<()> {
+    let mut sources = std::collections::BTreeMap::new();
+    for input in inputs {
+        if let Some(lineage) = &input.canonical_lineage_json {
+            let lineage: Value = serde_json::from_str(lineage)?;
+            let source = lineage["source"].clone();
+            sources.insert(serde_json::to_string(&source)?, source);
+        }
+    }
+    if !sources.is_empty() {
+        config["datasets"] = json!(sources.into_values().collect::<Vec<_>>());
+        config["canonical_input"] = json!({"schema_version":"canonical-lineage.v1",
+            "ordering":"source_order", "history":"recorded_targets_no_prefix_expansion",
+            "arrival_offsets":"metadata_only_not_trace_replay",
+            "expected_output_tokens":"source_metadata_only_explicit_max_tokens_controls_body",
+            "request_lineage":"canonical_lineage_json"});
+    }
+    Ok(())
+}
+
+fn canonical_inputs(
+    args: &Args,
+    model: &str,
+    workload: metrum_ai_bench::workload_input::WorkloadInput,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+) -> Result<Vec<Input>> {
+    use metrum_ai_bench::workload_input::{prepare_canonical_record, WorkloadInput};
+    let records = match workload {
+        WorkloadInput::Canonical(records) => records,
+        WorkloadInput::Legacy(_) => bail!("canonical conversion cannot consume legacy strings"),
+    };
+    if args.max_tokens.is_none() {
+        bail!("--canonical-jsonl requires explicit --max-tokens; expected_output_tokens is retained as source metadata, not silently used as a cap");
+    }
+    if args.shuffle_prompts {
+        bail!("canonical source order cannot use --shuffle-prompts");
+    }
+    let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
+    let mut inputs = Vec::with_capacity(records.len());
+    let mut has_arrivals = false;
+    for record in records {
+        let prepared = prepare_canonical_record(record)?;
+        let role = prepared
+            .messages
+            .last()
+            .and_then(|message| message["role"].as_str())
+            .context("canonical target has no terminal role")?;
+        if !args.session_request_roles.is_empty()
+            && !args
+                .session_request_roles
+                .iter()
+                .any(|selected| selected == role)
+        {
+            continue;
+        }
+        if args.session_mode == "closed-loop" && prepared.lineage.session_id.is_none() {
+            bail!("closed-loop canonical targets require session_id");
+        }
+        has_arrivals |= prepared.lineage.arrival_offset_ms.is_some();
+        let scheduler_session_key = prepared
+            .lineage
+            .session_id
+            .as_ref()
+            .map(|session_id| {
+                serde_json::to_vec(&(&prepared.lineage.source, session_id))
+                    .map(|bytes| metrum_ai_bench::warmup_isolation::body_digest(&bytes))
+            })
+            .transpose()?;
+        let messages = controlled_messages(
+            &prepared.messages,
+            args.shared_prefix.as_deref(),
+            args.prefix_control,
+            scheduler_session_key
+                .as_deref()
+                .unwrap_or(&prepared.lineage.record_id),
+        );
+        let mut body = json!({"model":model,"messages":messages,"stream":args.streaming});
+        if args.streaming {
+            body["stream_options"] = json!({"include_usage":true});
+        }
+        apply_chat_controls(
+            &mut body,
+            args.max_tokens,
+            args.ignore_eos,
+            args.min_tokens,
+            args.temperature,
+            extra_body.as_ref(),
+        )?;
+        add_structured(&mut body, schema, tools);
+        inputs.push(Input {
+            body: Arc::new(body),
+            session_id: prepared.lineage.session_id.clone(),
+            // `turn` remains the legacy one-based message position. Canonical
+            // turn_index is preserved without reinterpretation inside lineage.
+            turn: None,
+            scheduler_session_key,
+            canonical_lineage_json: Some(Arc::new(serde_json::to_string(&prepared.lineage)?)),
+            ..Input::default()
+        });
+    }
+    if inputs.is_empty() {
+        bail!("canonical request-boundary selection produced no requests");
+    }
+    if has_arrivals {
+        eprintln!("warning: canonical arrival offsets are retained as source metadata; stage scheduling is not source-trace arrival replay");
+    }
+    Ok(inputs)
+}
+
 fn make_inputs(
     args: &Args,
     model: &str,
@@ -655,6 +770,19 @@ fn make_inputs(
     tools: Option<&Value>,
 ) -> Result<Vec<Input>> {
     validate_chat_controls(args)?;
+    if let Some(path) = &args.canonical_jsonl {
+        let input = metrum_ai_bench::workload_input::WorkloadInput::Canonical(
+            metrum_ai_bench::canonical_input::load_canonical_jsonl(
+                path,
+                metrum_ai_bench::canonical_input::IngestionLimits {
+                    max_file_bytes: 64 * 1024 * 1024,
+                    max_total_bytes: 64 * 1024 * 1024,
+                    max_rows: 100_000,
+                },
+            )?,
+        );
+        return canonical_inputs(args, model, input, schema, tools);
+    }
     let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
     if args.session_mode == "closed-loop" && !matches!(args.sweep_by, SweepBy::Concurrency) {
         bail!("--session-mode closed-loop requires --sweep-by concurrency");
@@ -809,6 +937,9 @@ fn imagegen_request(body: &Value) -> Result<ImagegenRequest> {
 /// Reject flags that do not apply to `--kind` before any input is loaded.
 fn validate_kind_flags(args: &Args) -> Result<()> {
     let kind = args.kind;
+    if args.canonical_jsonl.is_some() && kind != EndpointKind::Chat {
+        bail!("--canonical-jsonl currently requires chat");
+    }
     if args.ttft_fallback.is_some() && (!args.streaming || !kind.chat_like()) {
         bail!("--ttft-fallback requires streaming chat or vlm");
     }
@@ -1413,6 +1544,7 @@ fn spawn_one_request(
             usage_missing,
             usage_prompt_tokens_present: usage_presence.map(|p| p.0),
             usage_completion_tokens_present: usage_presence.map(|p| p.1),
+            canonical_lineage_json: input.canonical_lineage_json.as_deref().cloned(),
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -1625,6 +1757,7 @@ fn heldout_warmup_inputs(
         bail!("held-out warmup requests must be at least the stage concurrency");
     }
     let mut warmup_args = args.clone();
+    warmup_args.canonical_jsonl = None;
     warmup_args.sessions = args.warmup_sessions.clone();
     warmup_args.prompts = args
         .warmup_prompts
@@ -1688,8 +1821,9 @@ where
     let mut ids = std::collections::HashMap::new();
     for input in inputs {
         let id = input
-            .session_id
+            .scheduler_session_key
             .as_ref()
+            .or(input.session_id.as_ref())
             .context("closed-loop input lacks session ID")?;
         let next = groups.len();
         let index = *ids.entry(id.clone()).or_insert(next);
@@ -2108,6 +2242,7 @@ async fn main() -> Result<()> {
         "telemetry": args.telemetry,
         "metrics_url": args.metrics_url,
     });
+    add_canonical_config(&mut run_config, &inputs)?;
     if let Some(temperature) = args.temperature {
         run_config["temperature"] = json!(decimal_f32(temperature));
     }
@@ -2243,6 +2378,7 @@ async fn main() -> Result<()> {
             "evidence": "trusted_operator_acknowledgement"
         });
     }
+    add_canonical_config(&mut redacted_config, &inputs)?;
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -2521,6 +2657,128 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn canonical_targets_preserve_tool_wire_lineage_and_dataset_scoped_sessions() {
+        use axum::{extract::State, routing::post, Json, Router};
+        use metrum_ai_bench::canonical_input::CanonicalRecord;
+        use metrum_ai_bench::workload_input::WorkloadInput;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let app = Router::new().route("/chat/completions", post(|State((seen, barrier)): State<(Arc<std::sync::Mutex<Vec<Value>>>, Arc<tokio::sync::Barrier>)>, Json(body): Json<Value>| async move {
+            seen.lock().unwrap().push(body);
+            barrier.wait().await;
+            Json(json!({"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":4,"completion_tokens":1}}))
+        })).with_state((seen.clone(), barrier));
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let args = Args::try_parse_from([
+            "strategic",
+            "--url",
+            &url,
+            "--model",
+            "mock",
+            "--api-key",
+            "dummy",
+            "--canonical-jsonl",
+            "not-loaded.jsonl",
+            "--session-mode",
+            "closed-loop",
+            "--session-request-roles",
+            "user,tool",
+            "--max-tokens",
+            "8",
+            "--requests-per-stage",
+            "2",
+        ])
+        .unwrap();
+        let tool_messages = json!([
+            {"role":"user","content":"root"},
+            {"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"never_execute","arguments":"{}"}}]},
+            {"role":"tool","content":"inert result","tool_call_id":"call-1"}
+        ]);
+        let records: Vec<CanonicalRecord> = (0..2).map(|index| serde_json::from_value(json!({
+            "record_id":format!("record-{index}"), "source_row_id":format!("row-{index}"),
+            "session_id":"same-id-in-two-sources", "turn_index":index, "group_id":format!("group-{index}"),
+            "trace_id":format!("trace-{index}"), "arrival_offset_ms":100+index, "expected_output_tokens":3,
+            "body": if index == 0 { json!({"Prompt":"plain"}) } else { json!({"Chat":tool_messages.clone()}) },
+            "source":{"source_id":format!("source-{index}"),"files":[]}
+        })).unwrap()).collect();
+        let inputs =
+            canonical_inputs(&args, "mock", WorkloadInput::Canonical(records), None, None).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_ne!(
+            inputs[0].scheduler_session_key,
+            inputs[1].scheduler_session_key
+        );
+        assert_eq!(inputs[1].body["messages"], tool_messages);
+        assert_eq!(inputs[1].body["max_tokens"], 8);
+        assert!(inputs.iter().all(|input| input.turn.is_none()));
+        let mut config = json!({});
+        add_canonical_config(&mut config, &inputs).unwrap();
+        assert_eq!(config["datasets"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            config["canonical_input"]["arrival_offsets"],
+            "metadata_only_not_trace_replay"
+        );
+        let (rows, _, _, _, _) = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_stage(
+                &args,
+                &url,
+                2.0,
+                0,
+                &inputs,
+                None,
+                None,
+                Arc::new(AtomicU64::new(0)),
+                &reqwest::Client::new(),
+                Arc::new(metrum_ai_bench::telemetry::RunEpoch::new()),
+                Arc::new("fixture".into()),
+                None,
+                &metrum_ai_bench::runner::StopFlag::new(),
+            ),
+        )
+        .await
+        .expect("dataset-scoped sessions should issue concurrently")
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.success));
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("requests.csv");
+        export_csv(&path, &rows).unwrap();
+        let decoded: Vec<BenchRecord> = csv::Reader::from_path(path)
+            .unwrap()
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        let mut ids = std::collections::BTreeSet::new();
+        for row in decoded {
+            let lineage: Value =
+                serde_json::from_str(row.canonical_lineage_json.as_ref().unwrap()).unwrap();
+            let index = match lineage["record_id"].as_str() {
+                Some("record-0") => 0,
+                Some("record-1") => 1,
+                other => panic!("unexpected record ID: {other:?}"),
+            };
+            assert!(ids.insert(lineage["record_id"].as_str().unwrap().to_owned()));
+            assert_eq!(lineage["source_row_id"], format!("row-{index}"));
+            assert_eq!(lineage["turn_index"], index);
+            assert_eq!(lineage["group_id"], format!("group-{index}"));
+            assert_eq!(lineage["trace_id"], format!("trace-{index}"));
+            assert_eq!(lineage["arrival_offset_ms"], 100 + index);
+            assert_eq!(lineage["expected_output_tokens"], 3);
+            assert_eq!(lineage["source"]["source_id"], format!("source-{index}"));
+            assert!(lineage.get("body").is_none());
+            assert!(row.turn.is_none());
+        }
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
 
     #[test]
     fn heldout_closed_loop_cannot_override_unbound_dynamic_issuance() {
