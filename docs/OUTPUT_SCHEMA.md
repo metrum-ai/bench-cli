@@ -403,7 +403,7 @@ present, with the same `null` rules. Differences from the summary:
   monotonic CSV `send_offset_s` (wall-clock `sent_unix_ns` for older CSVs
   without it), so
   client queue delay is excluded. The window runs from the first measured
-  send of the stage to the latest successful `sent + service_latency_s`,
+  send of the stage to the latest terminal `sent + service_latency_s` of any outcome,
   the same stage window behind `throughput` and the stage token rates
   (#224).
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
@@ -417,9 +417,11 @@ trailing optional columns, in this order: `first_reasoning_s` (seconds),
 (#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
 `receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
 (count), then `send_offset_s` (seconds, #224): the monotonic send time from
-the run start, the same origin as the NDJSON `t_sent_ns`. The trailing
-`ttft_first_any_s` cell is the first real reasoning or visible delta, not HTTP
-headers. The `first_reasoning_s` cell is empty when the request streamed no
+the run start, the same origin as the NDJSON `t_sent_ns`. Next,
+`ttft_first_any_s` is the first real reasoning or visible delta, not HTTP
+headers; it is followed by `ttft_visible_answer_s`, `outcome`,
+`answer_completed`, `usage_missing`, `usage_prompt_tokens_present`, and
+`usage_completion_tokens_present`. The `first_reasoning_s` cell is empty when the request streamed no
 reasoning delta; the `reasoning_tokens` cell is empty when the server did not
 report reasoning. A trace cell is empty when the value is absent;
 `receive_s`, `bytes_received`, and `chunks_received` are empty for failed
@@ -434,7 +436,7 @@ stretch the window.
 ### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
 
 Strategic `--kind vlm`, `--kind asr`, and `--kind imagegen` (additive, #197)
-add these fields. The schema stays `metrum-ai-bench-cli.strategic.v1`, the
+add these fields. The current schema is `metrum-ai-bench-cli.strategic.v3`, the
 request CSV columns are unchanged for every kind (per-request modality values
 are not in the CSV), and chat, embeddings, and rerank output is unchanged.
 Modality binary output uses `summary.v5` and `request.v5`.
@@ -458,8 +460,9 @@ Modality binary output uses `summary.v5` and `request.v5`.
 Existing fields for modality kinds: `osl_tokens` and
 `completion_tokens_total` come from server usage for vlm and asr (asr only
 when the server reports usage) and are `n=0` / `null` for imagegen, which
-generates no tokens. `ttft_s` has samples only for streaming chat and vlm;
-asr and imagegen stages report `ttft_s` with `n=0`.
+generates no tokens. Real token TTFT requires streaming chat or vlm; unary chat
+and vlm can explicitly use labelled HTTP first-byte approximation. ASR and
+imagegen stages report `ttft_s` with `n=0`.
 
 The strategic stdout `config` gains:
 
@@ -485,7 +488,7 @@ settings; chat, embeddings, and rerank `run` rows are unchanged.
 
 ### Strategic stdout `knee` and `knee_detection`
 
-The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v1`) carries the
+The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v3`) carries the
 knee result in two fields (`knee_detection` is additive, #190):
 
 - `knee` (object or null) - the `SweepPoint` at `knee_detection.index`: the
