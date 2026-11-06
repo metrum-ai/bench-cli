@@ -190,9 +190,10 @@ Other summary fields:
   `ttft_s` is present. Older records may use `"first_token_fallback"`. The
   deprecated `--ttft-fallback first-token` is a redundant alias, while
   `--infer-ttft-from-first-byte` uses HTTP response-header timing.
-  `--allow-missing-ttft` relaxes only the missing-TTFT audit. Under every
-  option a completed no-answer stream remains an error, and `--ci-safety`
-  remains strict.
+  `--allow-missing-ttft` relaxes only the missing-TTFT audit. A reasoning-only
+  length finish is `reasoning_truncated` and non-failing by default; strict
+  mode and `--ci-safety` make it an error. Other completed no-answer streams
+  remain errors.
 - `price_per_hour` / `price_provenance` - declared `$/hour` from
   `--price-per-hour` (`"cli"`) or `sut.cost.price_per_hour` (`"sut"`); both
   `null` when absent. CLI overrides SUT.
