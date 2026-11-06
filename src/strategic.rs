@@ -1282,7 +1282,6 @@ pub fn parse_server_metrics(text: &str) -> ServerMetrics {
             &[
                 "vllm:gpu_cache_usage_perc",
                 "vllm:kv_cache_usage_perc",
-                "sglang:cache_hit_rate",
                 "trtllm_kv_cache_utilization",
             ],
         )
@@ -2571,6 +2570,15 @@ mod tests {
         );
         assert_eq!(metrics.kv_cache_usage, Some(0.75));
         assert_eq!(metrics.requests_waiting, Some(3.0));
+    }
+
+    #[test]
+    fn cache_hit_rate_is_not_kv_occupancy() {
+        let hit_only = parse_server_metrics("sglang:cache_hit_rate 0.95\n");
+        assert_eq!(hit_only.kv_cache_usage, None);
+        let mixed =
+            parse_server_metrics("vllm:kv_cache_usage_perc 0.20\nsglang:cache_hit_rate 0.95\n");
+        assert_eq!(mixed.kv_cache_usage, Some(0.20));
     }
 
     #[test]
