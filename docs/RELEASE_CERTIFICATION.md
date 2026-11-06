@@ -78,6 +78,28 @@ prove the supplied changes or history are complete or authenticate evidence.
 Independent review must verify those inputs, randomness policy, approvals and
 raw evidence. Never change a frozen selection to hide a failure.
 
+### Opt-in carry-over of prior candidate evidence
+
+Metrum AI's validator keeps strict candidate matching by default. An explicitly
+reviewed `--carry-over-manifest PATH` permits a prior candidate record only when
+it is an ancestor of the target and the manifest binds the unmodified record
+bytes, case ID, attempt, evidence root, proof files and per-case reviewer
+applicability disposition. The manifest is a JSON object with
+`target_candidate_sha` and a nonempty `entries` array. Each entry has `ID`,
+`attempt`, `source_sha`, `record_sha256`, `evidence_root`, `proofs` (a nonempty
+array of `{path, sha256}`), and `disposition` (`applicable: true`, nonempty
+`reviewer` and `reason`, and UTC `utc`). Paths are relative to the results
+parent and must resolve inside it. Retain original records without changing
+their candidate SHA or contents; preserve all historical records and evidence.
+
+CI-001, CI-006, CI-007, PACK-001, PACK-002, REL-001 and REL-002 require target
+candidate records and are never accepted as carried records. Current history
+rules remain strict: attempts must be consecutive PASS/FAIL/N-A case records;
+a lane interruption without a case record cannot be silently invented or
+renumbered. This validator checks hash and ancestry, not reviewer identity,
+proof semantics, evidence authenticity, or execution. Independent review and
+actual sign-off remain mandatory.
+
 ## Regular test cadence
 
 The catalog's `Cadence` field lists per-PR, per-release, nightly, weekly,
