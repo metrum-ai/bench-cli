@@ -150,10 +150,10 @@ pub fn generate(
         );
         let mut suffix_heads = spec.token_pool.clone();
         suffix_heads.shuffle(&mut rng);
-        for repeat in 0..count {
+        for (repeat, suffix_head) in suffix_heads.iter().cycle().take(count).enumerate() {
             let mut planned = prefix.clone();
             if spec.suffix_tokens > 0 {
-                planned.push(suffix_heads[repeat]);
+                planned.push(*suffix_head);
                 for _ in 1..spec.suffix_tokens {
                     planned.push(spec.token_pool[rng.random_range(0..spec.token_pool.len())]);
                 }
