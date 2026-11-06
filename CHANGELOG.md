@@ -1,6 +1,17 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
+
 # Changelog
 
 ## Unreleased
+
+- Bound warmup/measured prefix validation using a compressed token trie and a
+  default 1,000-pair evidence cap with an explicit-cap helper. Preserve exact
+  maxima, duplicate multiplicity, default thresholds and Unknown handling.
+  Extend unreleased `kv-token-overlap.v1` in place with
+  `pairs_over_threshold_total: Option<u64>` (null on Unknown) and
+  `pairs_over_threshold_truncated: bool`; existing function signatures remain
+  unchanged. Stored pairs now use deterministic measured/token-lexicographic
+  order. Pair-list length alone must not determine pass/fail.
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and
   clarify reasoning-only truncation semantics in the output schema.

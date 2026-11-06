@@ -10,6 +10,9 @@ The standalone `kv-token-overlap.v1` report is documented in
 wire-body digest-list fingerprints, maximum shared tokens/full blocks, offending
 request pairs, tokenizer/template identity and Pass/Fail/Unknown verdict. It is
 not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
+The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
+and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
+totals remain exact independently of that cap; an empty list can still mean Fail.
 
 ## Canonical runtime input JSONL
 
