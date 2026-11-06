@@ -47,6 +47,7 @@ datasets:
     generation: >-
       metrum-ai-bench-cli-prompts --config full --profile code-medium
       --count 512 --count-slack 0 --seed 42
+    canonical_sha256: e5480af17428c48e614a0840f30eda53acbea7f9efe869c5173cde5d5818edfd
     study_sha256: eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b
 
 points:
