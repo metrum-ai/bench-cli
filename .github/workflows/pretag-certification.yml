@@ -3,24 +3,55 @@
 name: Pre-tag certification dry run
 
 on:
-  pull_request:
   workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact candidate commit (40 hexadecimal characters)
+        required: true
+        type: string
+      version:
+        description: Candidate version (SemVer without a v prefix)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
-  CERT_CANDIDATE: bfdb520426484a6e580203f0f220815ebd67a03d
-  CERT_VERSION: '1.8.0'
+  CERT_CANDIDATE: ${{ inputs.candidate_sha }}
+  CERT_VERSION: ${{ inputs.version }}
 
 jobs:
+  validate-inputs:
+    name: Validate explicit candidate inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail closed on invalid candidate or version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          sha = os.environ.get('CERT_CANDIDATE', '')
+          version = os.environ.get('CERT_VERSION', '')
+          numeric = r'(?:0|[1-9][0-9]*)'
+          identifier = rf'(?:{numeric}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          semver = rf'{numeric}\.{numeric}\.{numeric}(?:-{identifier}(?:\.{identifier})*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('candidate_sha must be exactly 40 lowercase hexadecimal characters')
+          if not re.fullmatch(semver, version):
+              raise SystemExit('version must be valid SemVer without a v prefix')
+          PY
+
   verify:
+    needs: validate-inputs
     name: Verify candidate package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Verify candidate and package
@@ -33,6 +64,7 @@ jobs:
           cargo publish --dry-run --locked --features otlp
 
   codeql:
+    needs: validate-inputs
     name: BC-CI-006 CodeQL candidate
     runs-on: ubuntu-latest
     permissions:
@@ -41,7 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -54,12 +86,13 @@ jobs:
           category: /pretag-candidate/language:rust
 
   dummy-checks:
+    needs: validate-inputs
     name: BC-CI-006 dummy server checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -94,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -136,7 +169,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - name: Assert candidate and non-root-owned checkout in root container
         shell: bash
@@ -209,7 +242,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: bfdb520426484a6e580203f0f220815ebd67a03d
+          ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
