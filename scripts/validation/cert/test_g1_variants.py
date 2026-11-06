@@ -10,14 +10,16 @@ import sse_reorder
 from test_sse_reorder import frame
 
 
-def captured(source, forwarded, mode=None):
+def captured(source, forwarded, mode=None, ineligible=False):
     events = [{'request': 1, 'kind': 'send', 'monotonic_ns': 1},
               {'request': 1, 'kind': 'headers', 'monotonic_ns': 2, 'status': 200}]
     for i, value in enumerate(source):
         events.append({'request': 1, 'kind': 'chunk', 'monotonic_ns': 10+i,
                        'bytes_b64': base64.b64encode(value).decode()})
     if mode:
-        events.append({'request': 1, 'kind': 'transformation', 'monotonic_ns': 99, 'mode': mode})
+        events.append({'request': 1, 'kind': 'ineligible' if ineligible else 'transformation',
+                       'monotonic_ns': 99, 'mode': mode,
+                       **({'reason': 'no_selected_output'} if ineligible else {})})
     for i, value in enumerate(forwarded):
         events.append({'request': 1, 'kind': 'forwarded_chunk', 'monotonic_ns': 100+i,
                        'bytes_b64': base64.b64encode(value).decode()})
@@ -44,6 +46,18 @@ class VariantTests(unittest.TestCase):
             checks.verify_source_and_collect(captured(self.source, forwarded, 'answer-first'), 'answer-first')
         with self.assertRaises(ValueError):
             checks.verify_source_and_collect(captured(self.source, self.source[:-1]), None)
+
+    def test_reasoning_only_length_is_unanswered_and_provenance_checked(self):
+        terminal = b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\n'
+        source = [self.source[0], self.source[1], terminal, self.source[-1]]
+        self.assertEqual(checks.verify_source_and_collect(captured(source, source), None)['reasoning_truncated'], 1)
+        for mode in ('answer-first', 'same-event', 'unselected-first'):
+            trace = captured(source, source, mode, ineligible=True)
+            self.assertEqual(checks.verify_source_and_collect(trace, mode)['reasoning_truncated'], 1)
+            with self.assertRaises(ValueError): checks.verify_source_and_collect(captured(source, source, mode), mode)
+            with self.assertRaises(ValueError): checks.verify_source_and_collect(captured(source, source[:-1], mode, True), mode)
+        bad = source[:2] + [terminal.replace(b'length', b'stop'), source[-1]]
+        with self.assertRaises(ValueError): checks.verify_source_and_collect(captured(bad, bad), None)
 
     def test_tool_metadata_is_not_output(self):
         source = [self.source[0], frame({'tool_calls': [{'function': {'name': 'f', 'arguments': ''}}]}),

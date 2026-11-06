@@ -257,7 +257,7 @@ fn verify_file(path: &Path, file: &SourceFile) -> Result<()> {
 /// Explicit body type; answers and patches are not part of the request payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CanonicalBody {
+pub enum IngestionBody {
     Prompt {
         text: String,
     },
@@ -322,7 +322,7 @@ pub struct Message {
 /// Stable lineage for one canonical target; a source row can yield many targets.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct CanonicalRecord {
+pub struct IngestionRecord {
     pub record_id: String,
     pub session_id: Option<String>,
     pub trace_id: Option<String>,
@@ -331,10 +331,10 @@ pub struct CanonicalRecord {
     pub group_id: Option<String>,
     pub turn_index: Option<u64>,
     pub output_budget: Option<u64>,
-    pub body: CanonicalBody,
+    pub body: IngestionBody,
 }
 
-impl CanonicalRecord {
+impl IngestionRecord {
     /// Check source linkage and structural invariants without executing payloads.
     pub fn validate(&self, origin: &DatasetOrigin) -> Result<()> {
         ensure!(
@@ -349,8 +349,8 @@ impl CanonicalRecord {
             "record file digest is not in origin"
         );
         match &self.body {
-            CanonicalBody::Prompt { text } => ensure!(!text.trim().is_empty(), "empty prompt"),
-            CanonicalBody::DocumentQuestion {
+            IngestionBody::Prompt { text } => ensure!(!text.trim().is_empty(), "empty prompt"),
+            IngestionBody::DocumentQuestion {
                 document_id,
                 document,
                 question,
@@ -362,7 +362,7 @@ impl CanonicalRecord {
                     "empty document/question"
                 );
             }
-            CanonicalBody::Session {
+            IngestionBody::Session {
                 session_id,
                 messages,
                 ..
@@ -408,7 +408,7 @@ impl CanonicalRecord {
                 }
                 ensure!(pending.is_empty(), "unresolved tool calls");
             }
-            CanonicalBody::StructuralTrace {
+            IngestionBody::StructuralTrace {
                 input_tokens,
                 block_size,
                 prefix_hashes,
@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn canonical_linkage_tools_and_partial_blocks() {
         let (origin, _, _) = fixture();
-        let mut record = CanonicalRecord {
+        let mut record = IngestionRecord {
             record_id: "target-1".into(),
             session_id: None,
             trace_id: None,
@@ -818,7 +818,7 @@ mod tests {
             group_id: None,
             turn_index: None,
             output_budget: Some(8),
-            body: CanonicalBody::Prompt {
+            body: IngestionBody::Prompt {
                 text: "hello".into(),
             },
         };
@@ -826,15 +826,15 @@ mod tests {
         record.source_file_sha256 = "f".repeat(64);
         assert!(record.validate(&origin).is_err());
         record.source_file_sha256 = origin.files[0].sha256.clone();
-        record.body = CanonicalBody::Prompt { text: " ".into() };
+        record.body = IngestionBody::Prompt { text: " ".into() };
         assert!(record.validate(&origin).is_err());
-        record.body = CanonicalBody::DocumentQuestion {
+        record.body = IngestionBody::DocumentQuestion {
             document_id: "doc".into(),
             document: "context".into(),
             question: "question".into(),
         };
         assert!(record.validate(&origin).is_ok());
-        record.body = CanonicalBody::StructuralTrace {
+        record.body = IngestionBody::StructuralTrace {
             timestamp: 1,
             time_unit: TimeUnit::Milliseconds,
             input_tokens: 513,
@@ -844,11 +844,11 @@ mod tests {
             post_template: true,
         };
         assert!(record.validate(&origin).is_ok());
-        if let CanonicalBody::StructuralTrace { prefix_hashes, .. } = &mut record.body {
+        if let IngestionBody::StructuralTrace { prefix_hashes, .. } = &mut record.body {
             *prefix_hashes = Some(vec!["a".into()]);
         }
         assert!(record.validate(&origin).is_err());
-        if let CanonicalBody::StructuralTrace { prefix_hashes, .. } = &mut record.body {
+        if let IngestionBody::StructuralTrace { prefix_hashes, .. } = &mut record.body {
             *prefix_hashes = None;
         }
         assert!(record.validate(&origin).is_ok());
@@ -864,17 +864,17 @@ mod tests {
             tool_call_ids: vec![],
             tool_result_id: Some("call-1".into()),
         };
-        record.body = CanonicalBody::Session {
+        record.body = IngestionBody::Session {
             session_id: "s1".into(),
             history_mode: HistoryMode::Recorded,
             messages: vec![call.clone(), result.clone()],
         };
         assert!(record.validate(&origin).is_ok());
-        if let CanonicalBody::Session { messages, .. } = &mut record.body {
+        if let IngestionBody::Session { messages, .. } = &mut record.body {
             *messages = vec![result.clone(), call.clone()];
         }
         assert!(record.validate(&origin).is_err());
-        if let CanonicalBody::Session { messages, .. } = &mut record.body {
+        if let IngestionBody::Session { messages, .. } = &mut record.body {
             *messages = vec![call];
         }
         assert!(record.validate(&origin).is_err());

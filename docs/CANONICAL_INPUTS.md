@@ -6,24 +6,45 @@
 `canonical_input::load_canonical_jsonl(path, IngestionLimits)` returns
 `Result<Vec<canonical_input::CanonicalRecord>>` from a **local** bounded file.
 This is the runtime interface for session/order consumers. Legacy loaders that
-return `Vec<String>` are unchanged. Rich source-adapter records in `public_dataset`
-remain ingestion-stage records; convert them explicitly to this runtime contract
-rather than serializing source metadata into user text.
+return `Vec<String>` are unchanged. Rich `public_dataset::IngestionRecord` values
+remain source-stage records; the checked conversion and its required envelope
+context are documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md). Never
+serialize source metadata into user text.
 
 ## Exact runtime fields
 
-- `record_id: String`
-- `session_id: Option<String>`
-- `turn_index: Option<u32>` (zero-based source turn index)
-- `group_id: Option<String>`
-- `trace_id: Option<String>`
-- `arrival_offset_ms: Option<u64>` (relative milliseconds, not an inferred time unit)
-- `messages: Vec<canonical_input::Message>`
-- `expected_output_tokens: Option<u32>` (positive target, not observed output)
-- `source: DatasetEnvelopeRef`
+```rust
+pub struct CanonicalRecord {
+    pub record_id: String,
+    pub source_row_id: String,
+    pub session_id: Option<String>,
+    pub turn_index: Option<u32>,
+    pub group_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub arrival_offset_ms: Option<u64>,
+    pub body: CanonicalBody,
+    pub expected_output_tokens: Option<u32>,
+    pub source: DatasetEnvelopeRef,
+}
 
-Represent a single prompt as one `user` message. Every target preserves opaque
-non-sensitive record/session/group/trace IDs; scheduling must carry them unchanged.
+pub enum CanonicalBody {
+    Prompt(String),
+    Chat(Vec<Message>),
+}
+```
+
+Prompt-only inputs remain `CanonicalBody::Prompt`; chat inputs remain
+`CanonicalBody::Chat`. Serde uses externally tagged bodies: `{"Prompt":"text"}`
+or `{"Chat":[{"role":"user","content":"text"}]}`. There is no top-level
+`messages` or `output_budget` field. `source_row_id` is required, nonempty source
+lineage; multiple derived targets may refer to the same source row. Preserve it
+separately from `record_id`, without inserting metadata into request text.
+`turn_index` is a zero-based u32 source turn index; overflow fails at load.
+`expected_output_tokens` is a positive u32 target, not observed output.
+`arrival_offset_ms` is relative u64 milliseconds (None/null when unknown), not an
+inferred time unit. Both it and `source: DatasetEnvelopeRef` are required struct
+fields; `source` cannot be null or omitted in JSON. Every target preserves
+record/source-row/session/group/trace IDs; scheduling must carry them unchanged.
 The loader preserves source order and rejects duplicate record IDs or duplicate
 (session_id, turn_index) pairs. A turn index requires a session ID. It does not
 schedule, shuffle, infer arrival times or execute consecutive turns. Runtime owns
@@ -45,7 +66,7 @@ the ingestion/provenance policy. Structural validity is not rights clearance.
 
 ## Typed inert history
 
-Messages use roles `system`, `user`, `assistant`, `tool`; `content` is a string or
+For `CanonicalBody::Chat`, messages use roles `system`, `user`, `assistant`, `tool`; `content` is a string or
 null. Multimodal message arrays are unsupported by this text-only contract.
 Optional `tool_calls` contain `id`, `type: "function"` and
 `function{name,arguments}`; arguments remain a JSON object encoded as a string.
