@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Cached-token evidence extension (`cached-token-evidence.v1`)
+
+Chat request `cache_evidence` is an optional, separately versioned object retaining
+reported counters, source/units, null/missing state and contradiction flags. Core
+schema IDs remain readable; an absent extension is Unknown. Strategic CSV encodes
+the object as a JSON cell and defaults old missing columns to absent. See
+[CACHED_TOKENS.md](CACHED_TOKENS.md) for exact inference and timing-population rules.
+
 ## Opt-in cache workload extension (`cache-workload.v1`)
 
 LLM request `modality_labels.cache_workload_version` and `body_sha256` bind

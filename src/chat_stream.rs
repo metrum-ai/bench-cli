@@ -66,6 +66,7 @@ pub struct ChatStreamResult {
     pub completion_tokens_present: bool,
     /// Server-reported reasoning tokens from the usage chunk; `None` when absent.
     pub reasoning_tokens: Option<u64>,
+    pub cached_tokens: crate::cached_tokens::CachedTokenEvidence,
     pub completion_text: String,
     /// Bounded SSE event timeline (#313): index, timestamp and categories
     /// per event — never prompt text, content or secrets. `Some` only when
@@ -95,6 +96,7 @@ pub struct PartialUsage {
     pub completion_tokens: u64,
     pub total_tokens: u64,
     pub reasoning_tokens: Option<u64>,
+    pub cached_tokens: Box<crate::cached_tokens::CachedTokenEvidence>,
     pub usage_complete: bool,
     pub prompt_tokens_present: bool,
     pub completion_tokens_present: bool,
@@ -143,6 +145,7 @@ struct Consumer {
     prompt_tokens_present: bool,
     completion_tokens_present: bool,
     reasoning_tokens: Option<u64>,
+    cached_tokens: crate::cached_tokens::CachedTokenEvidence,
     done: bool,
     saw_finish: bool,
     finish_reason: Option<String>,
@@ -156,6 +159,7 @@ impl Consumer {
             completion_tokens: self.completion_tokens,
             total_tokens: self.total_tokens,
             reasoning_tokens: self.reasoning_tokens,
+            cached_tokens: Box::new(self.cached_tokens.clone()),
             usage_complete: self.prompt_tokens_present && self.completion_tokens_present,
             prompt_tokens_present: self.prompt_tokens_present,
             completion_tokens_present: self.completion_tokens_present,
@@ -213,6 +217,7 @@ impl Consumer {
                         });
                     }
                     if let Some(usage) = parsed.get("usage") {
+                        self.cached_tokens.observe_usage(usage);
                         let (prompt_present, completion_present) = usage_presence(usage);
                         self.prompt_tokens_present |= prompt_present;
                         self.completion_tokens_present |= completion_present;
@@ -291,6 +296,7 @@ impl Consumer {
             prompt_tokens_present: self.prompt_tokens_present,
             completion_tokens_present: self.completion_tokens_present,
             reasoning_tokens: self.reasoning_tokens,
+            cached_tokens: self.cached_tokens,
             completion_text: self.completion_text,
             trace: self.trace,
         })
