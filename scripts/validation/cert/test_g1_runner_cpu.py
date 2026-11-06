@@ -23,6 +23,12 @@ class Fixture(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         thinking = request.get('chat_template_kwargs', {}).get('enable_thinking')
         multi = request.get('n') == 2
+        # Match vLLM: greedy sampling cannot return multiple choices.
+        if multi and request.get('temperature') == 0:
+            body = b'{"error":{"message":"n must be 1 when using greedy sampling","code":400}}'
+            self.send_response(400); self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+            return
         tool = bool(request.get('tools'))
         def event(index, delta, finish=None):
             return {'choices': [{'index': index, 'delta': delta, 'finish_reason': finish}]}
