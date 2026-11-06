@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Strategic session request-boundary selection (v1.9.0 development)
+
+Session summaries record `config.session_request_roles` as the selected role array,
+or `legacy_all_prefixes` when omitted, and `config.session_history_mode=recorded`.
+Per-request `turn` stays the original one-based message position, not a filtered
+ordinal. These optional config fields do not change existing record versions.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
 ## Offline warmup overlap artifact
 
 The standalone `kv-token-overlap.v1` report is documented in

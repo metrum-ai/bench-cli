@@ -1,8 +1,13 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
 
-## Unreleased
+## Unreleased (v1.9.0)
+
+- Add opt-in strategic `--session-request-roles` for recorded-history request
+  boundaries, preserving original message indices and legacy defaults. Record
+  boundary/history policy in summary config (#413, first implementation slice).
 
 - Bound warmup/measured prefix validation using a compressed token trie and a
   default 1,000-pair evidence cap with an explicit-cap helper. Preserve exact
@@ -12,6 +17,8 @@
   `pairs_over_threshold_truncated: bool`; existing function signatures remain
   unchanged. Stored pairs now use deterministic measured/token-lexicographic
   order. Pair-list length alone must not determine pass/fail.
+
+## Unreleased
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and
   clarify reasoning-only truncation semantics in the output schema.
