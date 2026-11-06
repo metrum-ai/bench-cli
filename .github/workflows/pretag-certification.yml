@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  CERT_CANDIDATE: 774764245cde8f0f50bd91778852abb634596ca7
+  CERT_CANDIDATE: ebead47feb598b508dcf9eef800ecc99522a0ee4
   CERT_VERSION: '1.8.0'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Verify candidate and package
@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
@@ -136,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - name: Assert candidate and non-root-owned checkout in root container
         shell: bash
@@ -209,7 +209,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 774764245cde8f0f50bd91778852abb634596ca7
+          ref: ebead47feb598b508dcf9eef800ecc99522a0ee4
           persist-credentials: false
       - name: Assert candidate checkout
         run: test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
