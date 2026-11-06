@@ -103,7 +103,8 @@ def load_manifest(path, lane, candidate, baseline, gpu):
             raise ValueError("27B lanes require exactly W1 and W2")
         if (prompt_sets["W1"]["sha256"] not in ("4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7",
                                                  "44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340")
-                or prompt_sets["W2"]["sha256"] != "eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b"):
+                or prompt_sets["W2"]["sha256"] not in ("e5480af17428c48e614a0840f30eda53acbea7f9efe869c5173cde5d5818edfd",
+                                                        "eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b")):
             raise ValueError("27B prompt sets must match the frozen spec")
         paths = [Path(prompt_sets[w]["path"]).resolve() for w in ("W1", "W2")]
         if paths[0].name != "W1.jsonl" or paths[1].name != "W2.jsonl" or paths[0].parent != paths[1].parent:
