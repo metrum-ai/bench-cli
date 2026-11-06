@@ -1,0 +1,26 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Fixture wrapper only; source excerpt CC-BY-SA-4.0.",
+  "source": {
+    "source_id": "bigai-nlco/LooGLE",
+    "resolved_revision": "4b50b4cb9333b48b3f7ddfd307c1d13369be5d1e",
+    "config": "longdep_qa",
+    "split": "test",
+    "files": [{"path": "data/longdep_qa.jsonl", "sha256": "6c047bc6e904e5fd632e44a2f2624d75e85fe0f871c6b74bcfffa918bf2f3624", "bytes": 134979019}]
+  },
+  "attribution": "LooGLE: Can Long-Context Language Models Understand Long Contexts? Jiaqi Li, Mengmeng Wang, Zilong Zheng and Muhan Zhang (2023), arXiv:2311.04939. Source document title: José Luis Picardo.",
+  "source_url": "https://huggingface.co/datasets/bigai-nlco/LooGLE/blob/4b50b4cb9333b48b3f7ddfd307c1d13369be5d1e/data/longdep_qa.jsonl",
+  "license": "CC-BY-SA-4.0",
+  "conversion": {
+    "version": "first-row-excerpt.v1",
+    "source_row_ordinal": 0,
+    "source_line_sha256": "a13c61333b0c4c6c7ed4710c8f2a134f0b21ea9c2de13a5d2897ab23dc2fe4c8",
+    "changes": "First 160 Unicode characters of context only; retained public question and IDs; omitted answers, evidence and task. This is not a full-document benchmark input or a corpus sample distribution."
+  },
+  "row": {
+    "id": "612d5b66-6470-48bf-8d55-8a320f59f43b",
+    "doc_id": "93a3d3c4-7659-4a8a-96fc-caaa8ba34c73",
+    "context": " Early life. Picardo was born in Jerez de la Frontera, in the Province of Cádiz in Andalucía, Spain on 18 June 1919. His father was Alvaro Picardo de Celis and ",
+    "question": "How many people were in Picardo's family when he was twelve?\n1. seven\n2. six\n3. five\n4. four",
+    "title": "José Luis Picardo"
+  }
+}

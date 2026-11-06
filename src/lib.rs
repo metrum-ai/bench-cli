@@ -1,14 +1,18 @@
 // Copyright (c) 2026 Metrum AI, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod archive_inputs;
 pub mod args_common;
 pub mod asr;
 pub mod canonical_input;
+#[cfg(feature = "tokenizer")]
+pub mod chat_rendering;
 pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;
 pub mod connect_timing;
 pub mod count_points;
+pub mod dataset_formats;
 pub mod endpoints;
 pub mod endpoints_export;
 pub mod environment;
@@ -19,11 +23,15 @@ pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
 pub mod measurement;
+pub mod prefix_families;
+pub mod prefix_validation;
 pub mod preflight;
 pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
+pub mod public_adapters;
 pub mod public_dataset;
+pub mod public_profile;
 pub mod record;
 pub mod request;
 pub mod runner;
