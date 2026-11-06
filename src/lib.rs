@@ -22,6 +22,7 @@ pub mod preflight;
 pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
+pub mod public_dataset;
 pub mod record;
 pub mod request;
 pub mod runner;

@@ -1239,7 +1239,7 @@ pub fn resolve_revision(repo: &str, revision: &str, allow_moving: bool) -> Resul
         .ok_or_else(|| anyhow!("Hugging Face revision lookup for `{trimmed}` returned no sha"))
 }
 
-fn hf_headers() -> reqwest::header::HeaderMap {
+pub(crate) fn hf_headers() -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,
