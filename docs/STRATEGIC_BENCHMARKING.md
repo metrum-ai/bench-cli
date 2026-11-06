@@ -70,9 +70,12 @@ policy. Source names, prompts and raw tokens are not exported.
 
 A different file or ID is **not** proof of token-prefix isolation. The preflight
 calls the agreed offline `validate_prefix_disjoint` interface with final request
-body digests. Until the dataset validator and a pinned full-chat token renderer
-are integrated, the local stub deliberately returns `Unknown`, never `Pass`.
-Thus this development boundary fails before any warmup or measured traffic unless
+body digests, delegating to the authoritative producer-owned validator without
+copying its algorithm. A pinned full-chat token renderer is still unavailable;
+CLI bodies therefore have no validated token IDs and yield `Unknown`, never
+`Pass`. The separately versioned consumer projection retains validator version
+and unknown pair population counts rather than deriving totals from diagnostic
+samples. Thus this development boundary fails before warmup or measured traffic unless
 `--allow-unverified-warmup` is explicitly supplied. That override remains an
 `Unknown` result, records both sorted body-digest-list hashes, and cannot justify
 an isolation/cold-cache claim. It is for plumbing tests and explicitly exploratory

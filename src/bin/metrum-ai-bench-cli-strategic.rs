@@ -1769,7 +1769,7 @@ fn heldout_warmup_inputs(
                 let bytes = serde_json::to_vec(&*input.body)?;
                 Ok(RenderedBody {
                     request_id: format!("{phase:?}-{index}"),
-                    phase: phase.clone(),
+                    phase,
                     body_sha256: body_digest(&bytes),
                     tokenizer_revision: "unknown".into(),
                     chat_template_sha256: "unknown".into(),

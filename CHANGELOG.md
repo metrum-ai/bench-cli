@@ -6,9 +6,12 @@
 ## Unreleased (v1.9.0)
 
 - Add held-out strategic warmup pools and a fail-closed rendered-token overlap
-  integration boundary. Until the pinned renderer/dataset validator is integrated,
-  isolation is Unknown and blocks traffic unless explicitly overridden; retain
-  both final-body digest-list hashes and the override without claiming a Pass (#413).
+  boundary delegating to the authoritative offline validator. Until pinned final-chat
+  rendering is available, isolation remains Unknown and blocks traffic unless
+  explicitly overridden. Version the consumer projection `kv-warmup-overlap.v1`,
+  retain its validator version and both final-body digest-list hashes; an override
+  never establishes a Pass. Population counts remain unknown pending producer
+  support rather than inferred from diagnostic samples (#413).
 
 - Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
   recorded-history sessions, with sequential turns and no overlapping duplicate
