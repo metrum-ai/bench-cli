@@ -467,7 +467,8 @@ is never touched).
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
 [CLI reference](docs/CLI.md),
-[strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
+[strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
+[prompt library](docs/PROMPT_LIBRARY.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).

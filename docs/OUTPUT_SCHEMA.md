@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Opt-in KV study interchange (v1.9.0 development)
+
+The separate `kv-study-report.v1` manifest/report contract is specified in
+[KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+It preserves unknown evidence and phase/reset provenance and references the
+separately versioned dataset validation manifest by digest. This initial contract
+is not emitted by runners yet and does not change existing JSONL schema versions.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)

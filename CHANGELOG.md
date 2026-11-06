@@ -1,4 +1,14 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Changelog
+
+## Unreleased (v1.9.0)
+
+- Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
+  validation references, effective workload digests, explicit unknowns and
+  phase/reset evidence. Add schema and offline mock contract tests. This does
+  not yet add runner emission or live engine/cache validation (#421).
 
 ## Unreleased
 

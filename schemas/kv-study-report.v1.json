@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/metrum-ai/bench-cli/blob/integration/v1.9.0/schemas/kv-study-report.v1.json",
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
+  "title": "KV study manifest/report v1 (engineering, non-certifying)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "study_id", "reuse_kind", "runtime", "workload", "datasets", "phases", "limitations"],
+  "properties": {
+    "schema_version": {"const": "kv-study-report.v1"},
+    "study_id": {"type": "string", "minLength": 1},
+    "reuse_kind": {"enum": ["exact_prefix", "approximate_chunk", "compression"]},
+    "runtime": {"$ref": "#/$defs/runtime"},
+    "workload": {"$ref": "#/$defs/workload"},
+    "datasets": {"type": "array", "items": {"$ref": "#/$defs/dataset"}},
+    "phases": {"type": "array", "items": {"$ref": "#/$defs/phase"}},
+    "limitations": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "nullable_string": {"type": ["string", "null"], "minLength": 1},
+    "runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_revision", "tokenizer_revision", "chat_template_sha256", "engine", "engine_version", "connector", "connector_version", "flags_sha256", "block_size_tokens", "kv_dtype", "kv_layout", "tensor_parallelism", "routing", "tiers"],
+      "properties": {
+        "model_revision": {"$ref": "#/$defs/nullable_string"},
+        "tokenizer_revision": {"$ref": "#/$defs/nullable_string"},
+        "chat_template_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "engine": {"$ref": "#/$defs/nullable_string"},
+        "engine_version": {"$ref": "#/$defs/nullable_string"},
+        "connector": {"$ref": "#/$defs/nullable_string"},
+        "connector_version": {"$ref": "#/$defs/nullable_string"},
+        "flags_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "block_size_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "kv_dtype": {"$ref": "#/$defs/nullable_string"},
+        "kv_layout": {"$ref": "#/$defs/nullable_string"},
+        "tensor_parallelism": {"type": ["integer", "null"], "minimum": 1},
+        "routing": {"$ref": "#/$defs/nullable_string"},
+        "tiers": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "capacity_bytes", "evidence"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "capacity_bytes": {"type": ["integer", "null"], "minimum": 0},
+            "evidence": {"enum": ["observed", "declared", "unknown"]}
+          }
+        }}
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "resolved_revision", "config", "split", "files", "adapter_id", "adapter_version", "license_spdx", "validation_manifest"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "resolved_revision": {"$ref": "#/$defs/nullable_string"},
+        "config": {"$ref": "#/$defs/nullable_string"},
+        "split": {"$ref": "#/$defs/nullable_string"},
+        "files": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "sha256", "bytes"],
+          "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/digest"}, "bytes": {"type": "integer", "minimum": 0}}
+        }},
+        "adapter_id": {"$ref": "#/$defs/nullable_string"},
+        "adapter_version": {"$ref": "#/$defs/nullable_string"},
+        "license_spdx": {"$ref": "#/$defs/nullable_string"},
+        "validation_manifest": {
+          "description": "Reference to the versioned cross-source rights/token validation artifact owned by ingestion, not a duplicate rights schema.",
+          "type": ["object", "null"], "additionalProperties": false,
+          "required": ["schema_version", "sha256"],
+          "properties": {"schema_version": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/digest"}}
+        }
+      }
+    },
+    "workload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cache_policy", "order", "effective_order_sha256", "body_fingerprints_sha256", "history_mode", "arrival_mode", "concurrency", "input_distribution", "output_distribution", "warmup_isolation"],
+      "properties": {
+        "cache_policy": {"enum": ["reuse", "bust_request", "isolate_run", "legacy_unspecified"]},
+        "order": {"enum": ["preserve", "seeded_shuffle", "prescribed", "legacy_unspecified"]},
+        "effective_order_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "body_fingerprints_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "history_mode": {"enum": ["recorded", "live_generated", "not_applicable", "unknown"]},
+        "arrival_mode": {"enum": ["open_loop", "closed_loop", "unknown"]},
+        "concurrency": {"type": ["integer", "null"], "minimum": 1},
+        "input_distribution": {"$ref": "#/$defs/nullable_string"},
+        "output_distribution": {"$ref": "#/$defs/nullable_string"},
+        "warmup_isolation": {"enum": ["token_prefix_disjoint", "reset_after_warmup", "unverified", "none"]}
+      }
+    },
+    "reset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "acknowledged", "ready", "settled", "status", "reason"],
+      "properties": {
+        "scope": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "acknowledged": {"type": "boolean"},
+        "ready": {"type": "boolean"},
+        "settled": {"type": "boolean"},
+        "status": {"enum": ["verified", "failed", "unverified", "not_requested"]},
+        "reason": {"$ref": "#/$defs/nullable_string"}
+      },
+      "allOf": [{"if": {"properties": {"status": {"const": "verified"}}}, "then": {"properties": {
+        "scope": {"minItems": 1}, "acknowledged": {"const": true}, "ready": {"const": true}, "settled": {"const": true}
+      }}}]
+    },
+    "phase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "cache_state", "reset", "requests", "errors", "cached_token_known", "cached_token_unknown"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["warmup", "cold_populate", "resident_warm", "pressure", "rehit"]},
+        "cache_state": {"enum": ["verified_cold", "observed_resident", "observed_external", "unknown"]},
+        "reset": {"$ref": "#/$defs/reset"},
+        "requests": {"type": "integer", "minimum": 0},
+        "errors": {"type": "integer", "minimum": 0},
+        "cached_token_known": {"type": "integer", "minimum": 0},
+        "cached_token_unknown": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [{"if": {"properties": {"cache_state": {"const": "verified_cold"}}}, "then": {"properties": {
+        "reset": {"properties": {"status": {"const": "verified"}}}
+      }}}]
+    }
+  }
+}
