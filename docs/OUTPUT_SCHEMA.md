@@ -115,6 +115,13 @@ including no-answer outcomes), `fallback_ttft_s` (failed-request fallback
 samples) and `observed_reasoning_tokens` / `observed_visible_completion_tokens`
 distributions and totals (server-reported usage including completed no-answer
 streams). `first_reasoning_s` and `ttft_first_any_s` include these streams;
+The public library `RequestRecord::success` constructor initializes headline
+`ttft_s` and `ttft_first_any_s` from the earliest supplied visible or reasoning
+clock, retaining the visible clock independently in `ttft_visible_answer_s`.
+An explicit `with_resolved_ttft` override retains its supplied provenance.
+`with_chat_outcome` records reasoning truncation as unanswered; it is an error
+only when strict mode is requested.
+
 v5 normally uses first-any headline TTFT (or labelled first-byte approximation) and all-attempt usage with completeness gating. See
 [METRICS.md](METRICS.md#thinking-models-ttft-vs-first-reasoning).
 
