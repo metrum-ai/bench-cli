@@ -56,6 +56,24 @@ Track measurement and packaging gaps via GitHub issues labeled `measurement`, `o
 - Add a CHANGELOG.md entry under the unreleased section.
 - Sign off commits (`git commit -s`) so DCO is satisfied.
 
+## Workflow concurrency
+
+PR-triggered workflows group runs by workflow and PR number, canceling superseded
+PR runs. Non-PR runs use a unique run-ID group and never request in-progress
+cancellation. Unique groups matter because a shared concurrency group can replace
+an older **pending** run even when `cancel-in-progress` is false; main pushes,
+tags, schedules, releases and manual evidence must not lose queued runs this way.
+The self-hosted job uses the same dispatch policy in a separate job namespace,
+so its nested group cannot replace non-PR jobs or lock its enclosing workflow.
+CI checks all PR-triggered workflows with pinned actionlint v1.7.12, including
+shellcheck. To run the same check locally:
+
+```sh
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
+  .github/workflows/ci.yml .github/workflows/codeql.yml \
+  .github/workflows/dummy-server.yml .github/workflows/perf-validation.yml
+```
+
 ## Reporting bugs
 
 Open a GitHub issue with: the exact command line, the tool version
