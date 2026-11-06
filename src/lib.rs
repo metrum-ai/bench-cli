@@ -19,6 +19,7 @@ pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
 pub mod measurement;
+pub mod prefix_validation;
 pub mod preflight;
 pub mod prompt_inputs;
 pub mod prompt_library;
