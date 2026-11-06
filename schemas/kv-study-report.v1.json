@@ -67,7 +67,7 @@
           "description": "Reference to the versioned cross-source rights/token validation artifact owned by ingestion, not a duplicate rights schema.",
           "type": ["object", "null"], "additionalProperties": false,
           "required": ["schema_version", "sha256"],
-          "properties": {"schema_version": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/digest"}}
+          "properties": {"schema_version": {"const": "kv-dataset-manifest.v1"}, "sha256": {"$ref": "#/$defs/digest"}}
         }
       }
     },

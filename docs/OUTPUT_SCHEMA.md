@@ -11,6 +11,24 @@ It preserves unknown evidence and phase/reset provenance and references the
 separately versioned dataset validation manifest by digest. This initial contract
 is not emitted by runners yet and does not change existing JSONL schema versions.
 
+## Canonical runtime input JSONL
+
+[CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input
+contract: record_id/source_row_id/session_id/turn_index(u32)/group_id/trace_id,
+arrival_offset_ms(u64), body: CanonicalBody::Prompt(String) or Chat(Vec<Message>),
+expected_output_tokens(u32), and required source: DatasetEnvelopeRef. Null metadata remains unknown. This adds a new
+loader without changing legacy Vec<String> APIs or runner output schema versions.
+
+## Public input provenance sub-contract
+
+The standalone `public_dataset::ValidationManifest` uses string
+`schema_version: "kv-dataset-manifest.v1"` and is documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md).
+It is not yet embedded into runner output. Corpus counts and validation checks
+carry explicit measured/publisher/unknown status; canonical target counts are
+separate from source rows. Its fingerprint covers source file digests, mappings,
+rights, transformations and tokenizer/template versions. Logical input overlap
+must never be exported as an observed server cache-hit metric.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)

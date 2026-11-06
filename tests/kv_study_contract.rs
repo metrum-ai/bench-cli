@@ -78,6 +78,59 @@ fn version_and_required_provenance_are_strict() {
 }
 
 #[test]
+fn merged_dataset_envelope_round_trips_and_manifest_version_is_pinned() {
+    let study_schema: Value =
+        serde_json::from_str(include_str!("../schemas/kv-study-report.v1.json")).unwrap();
+    let dataset_schema: Value =
+        serde_json::from_str(include_str!("../schemas/kv-dataset-manifest.v1.json")).unwrap();
+    let envelope_schema = json!({"$schema":"https://json-schema.org/draft/2020-12/schema",
+        "$ref":"#/$defs/envelope", "$defs":dataset_schema["$defs"]});
+    let dataset_validator = jsonschema::validator_for(&envelope_schema).unwrap();
+    let study_validator = validator();
+    assert_eq!(
+        study_schema["$defs"]["dataset"]["required"],
+        dataset_schema["$defs"]["envelope"]["required"]
+    );
+    assert!(study_schema["$comment"]
+        .as_str()
+        .unwrap()
+        .contains("Copyright (c)"));
+    let envelope = json!({"source_id":"fixture", "resolved_revision":"a".repeat(40),
+        "config":"fixture", "split":"test", "files":[{"path":"fixture.jsonl","sha256":"a".repeat(64),"bytes":12}],
+        "adapter_id":"fixture", "adapter_version":"1", "license_spdx":"Apache-2.0",
+        "validation_manifest":{"schema_version":"kv-dataset-manifest.v1","sha256":"b".repeat(64)}});
+    assert!(dataset_validator.is_valid(&envelope));
+    let typed: metrum_ai_bench::canonical_input::DatasetEnvelopeRef =
+        serde_json::from_value(envelope.clone()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), envelope);
+    let mut report = manifest();
+    report["datasets"][0] = envelope;
+    assert!(study_validator.is_valid(&report));
+    for field in study_schema["$defs"]["dataset"]["required"]
+        .as_array()
+        .unwrap()
+    {
+        let mut bad = report.clone();
+        bad["datasets"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove(field.as_str().unwrap());
+        assert!(
+            !study_validator.is_valid(&bad),
+            "missing shared envelope field {field}"
+        );
+        assert!(!dataset_validator.is_valid(&bad["datasets"][0]));
+    }
+    report["datasets"][0]["validation_manifest"]["schema_version"] =
+        json!("kv-dataset-manifest.v2");
+    assert!(!study_validator.is_valid(&report));
+    assert!(!dataset_validator.is_valid(&report["datasets"][0]));
+    // Unknown study provenance remains explicit, not a fully validated envelope.
+    assert!(study_validator.is_valid(&manifest()));
+    assert!(!dataset_validator.is_valid(&manifest()["datasets"][0]));
+}
+
+#[test]
 fn warmup_override_retains_both_body_bindings_without_claiming_a_pass() {
     let validator = validator();
     let mut value = manifest();
