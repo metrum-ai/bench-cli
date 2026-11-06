@@ -26,10 +26,12 @@ def run_cell(args, label, prompt, body, reorder):
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     data = evidence / f'{label}-requests.jsonl'
+    # vLLM rejects n>1 with greedy sampling; the seed retains reproducibility.
+    temperature = '0.1' if body.get('n', 1) > 1 else '0'
     command = [str(args.candidate), '--scenario', label, '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions',
                '--api-key', 'dummy', '--num-requests', '4', '--concurrency', '1', '--prompts', str(prompt),
                '--mode', 'chat', '--streaming', '--model', args.model, '--data-log', str(data), '--max-tokens', '4096',
-               '--temperature', '0', '--seed', '42', '--warmup-requests', '0', '--request-timeout', '1200',
+               '--temperature', temperature, '--seed', '42', '--warmup-requests', '0', '--request-timeout', '1200',
                '--extra-body-json', json.dumps(body), '--debug-log', str(evidence / f'{label}-debug.log'),
                '--error-log', str(evidence / f'{label}-error.log')]
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
