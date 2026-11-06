@@ -460,7 +460,7 @@ is never touched).
 | Visible-answer TTFT | First visible output, absent when no answer is observed |
 | First byte | Headers received (`first_byte_s`) |
 | Window rps | Completed requests / first-send to last-terminal-completion window |
-| Goodput | Answered requests meeting `--slo` thresholds / window |
+| Goodput | Successful requests meeting `--slo` thresholds / window, excluding explicitly unanswered rows; unmarked legacy/ASR/imagegen rows are treated as answered for goodput |
 | Output token rate | Reported completion tokens including reasoning / window; null when usage is incomplete |
 | RTFx (ASR) | Audio seconds / client request seconds |
 

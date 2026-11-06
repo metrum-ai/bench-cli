@@ -186,8 +186,9 @@ value, so overload cannot hide behind coordinated omission. Each sweep point
 carries `n`, `errors`, a full `latency_s` DistSummary (including reliability
 flags), redacted stage `config`, and `goodput`.
 
-Use repeatable `--slo e2e=…` so goodput counts only answered, valid successes
-that also meet the end-to-end latency threshold. Without `--slo`,
+Use repeatable `--slo e2e=…` so goodput counts valid successes that meet the
+end-to-end latency threshold, excluding explicitly unanswered rows. Unmarked
+legacy rows and ASR/imagegen successes are treated as answered for goodput. Without `--slo`,
 `goodput_equals_throughput` is true only when the goodput and completed-response
 counts match; unanswered or invalid responses can make them differ.
 With `--streaming`, `ttft=` and `tpot=` use captured stream timings (ITL is

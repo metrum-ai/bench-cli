@@ -20,8 +20,11 @@ this page and that file ever disagree, prefer the repository file and live
 ## Request v5
 
 `metrum-ai-bench-cli.request.v5` records are flushed immediately on completion.
-Earlier schemas remain readable for audit. `ttft_s` now means the first reasoning
-or visible delta; `ttft_visible_answer_s` is separate. `outcome` and
+Earlier schemas remain readable for audit. `ttft_s` normally means the first
+reasoning or visible delta; explicit first-byte inference may supply a labelled
+`first_byte_approx`. Historical v4 normally used first-visible timing, with a
+labelled `first_token_fallback` or `first_byte_approx` when enabled.
+`ttft_visible_answer_s` is separate. `outcome` and
 `answer_completed` distinguish a completed stream from a visible answer.
 Reasoning-only length finishes are `reasoning_truncated`, non-failing by default
 but rejected in strict mode and `--ci-safety`. `ttft_source` identifies a
