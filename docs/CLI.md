@@ -1374,6 +1374,24 @@ Options:
 
           [default: 0]
 
+      --stage-hook <STAGE_HOOK>
+          Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement
+
+      --stage-reset-scope <STAGE_RESET_SCOPE>
+          Exact tier IDs the trusted reset hook must acknowledge
+
+      --stage-hook-timeout-seconds <STAGE_HOOK_TIMEOUT_SECONDS>
+          [default: 60]
+
+      --stage-ready-url <STAGE_READY_URL>
+          Optional readiness probe after scoped reset acknowledgement
+
+      --stage-settle-ms <STAGE_SETTLE_MS>
+          [default: 0]
+
+      --pre-warmup-reset
+          Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset
+
       --seed <SEED>
           RNG seed used when --shuffle-prompts is set
 
@@ -1384,6 +1402,17 @@ Options:
 
       --sessions <SESSIONS>
 
+
+      --session-request-roles <SESSION_REQUEST_ROLES>
+          Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior
+
+          [possible values: user, tool, system, assistant, developer, function]
+
+      --session-mode <SESSION_MODE>
+          Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only
+
+          [default: legacy]
+          [possible values: legacy, closed-loop]
 
       --prefix-control <PREFIX_CONTROL>
           [default: shared]

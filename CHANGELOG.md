@@ -12,6 +12,23 @@
   Add schema and offline mock contract tests. This does
   not yet add runner emission or live engine/cache validation (#421).
 
+- Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
+  recorded-history sessions, with sequential turns and no overlapping duplicate
+  session when cycling a small pool. Rate-sweep combinations fail before traffic;
+  request budgets can end at partial sessions (#413, scheduling slice).
+
+- Add opt-in trusted strategic stage reset hooks after warmup drain and before
+  measurement, with exact tier acknowledgement, readiness, total deadlines and
+  optional settle delay/pre-warmup reset. Record non-sensitive acknowledgements
+  and lifecycle timestamps; failures abort measured issuance (#413). Unix hooks
+  run via `/bin/sh -c` in an isolated process group, terminated on cancellation;
+  failures include bounded, escaped stderr diagnostics. Reject settle delays at
+  least as long as the total deadline. Hook stderr must not contain secrets.
+
+- Add opt-in strategic `--session-request-roles` for recorded-history request
+  boundaries, preserving original message indices and legacy defaults. Record
+  boundary/history policy in summary config (#413, first implementation slice).
+
 ## Unreleased
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and

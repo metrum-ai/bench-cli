@@ -11,6 +11,28 @@ It preserves unknown evidence and phase/reset provenance and references the
 separately versioned dataset validation manifest by digest. This initial contract
 is not emitted by runners yet and does not change existing JSONL schema versions.
 
+## Strategic trusted reset metadata (v1.9.0 development)
+
+When opted in, `config.stage_hook` records command SHA-256 (not raw command),
+intended tier scope, deadline, readiness-probe presence, settle delay and optional
+pre-warmup reset. `config.stage_resets[]` records stage index/load and reset
+position (`before_warmup` or `after_warmup`), plus scope, acknowledgement,
+readiness, settling and UTC Unix-nanosecond lifecycle timestamps. These are trusted
+operator acknowledgements, not independent evidence of physical cache state.
+Failed resets abort before measured issuance; they are never relabelled cold.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
+## Strategic session request-boundary selection (v1.9.0 development)
+
+Session summaries record `config.session_request_roles` as the selected role array,
+or `legacy_all_prefixes` when omitted, and `config.session_history_mode=recorded`.
+`config.session_mode` is `legacy` or `closed-loop`; the latter limits active
+sessions on concurrency sweeps and records `session_budget_semantics` because
+the issued-request budget may end with a partial session.
+Per-request `turn` stays the original one-based message position, not a filtered
+ordinal. These optional config fields do not change existing record versions.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
 ## Offline warmup overlap artifact
 
 The standalone `kv-token-overlap.v1` report is documented in
