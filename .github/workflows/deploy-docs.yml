@@ -86,18 +86,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A tag counts as a real release only if it does not carry a
-          # prerelease marker. Mirrors release.yml's own prerelease test
-          # (contains '-rc.' / '-alpha.' / '-beta.') so docs promotion never
-          # disagrees with what the GitHub Release / crates.io gates decide.
+          # Mirror release.yml: any semantic-version prerelease must not
+          # promote the production latest archive.
           is_prerelease() {
-            case "$1" in
-              *-rc.*|*-alpha.*|*-beta.*) return 0 ;;
-              *) return 1 ;;
-            esac
+            [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]
           }
 
-          # Newest tag that is a real release (excludes -rc./-alpha./-beta.).
+          # Newest tag that is a real release (excludes prereleases).
           # Used as the DOCS_LATEST_VERSION fallback whenever the current
           # push is not itself promoting a new latest.
           latest_release_tag() {
