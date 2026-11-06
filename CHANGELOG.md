@@ -1,4 +1,13 @@
+<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Changelog
+
+## Unreleased (v1.9.0)
+
+- Add opt-in strategic `--session-request-roles` for recorded-history request
+  boundaries, preserving original message indices and legacy defaults. Record
+  boundary/history policy in summary config (#413, first implementation slice).
 
 ## Unreleased
 

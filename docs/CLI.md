@@ -1390,6 +1390,11 @@ Options:
       --sessions <SESSIONS>
 
 
+      --session-request-roles <SESSION_REQUEST_ROLES>
+          Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior
+
+          [possible values: user, tool, system, assistant, developer, function]
+
       --prefix-control <PREFIX_CONTROL>
           [default: shared]
           [possible values: shared, unique, none]
