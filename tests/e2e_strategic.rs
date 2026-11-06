@@ -368,6 +368,62 @@ fn strategic_failed_requests_export_and_preserve_summary_on_csv_error() {
 }
 
 #[test]
+fn strategic_session_request_roles_keep_only_selected_boundaries() {
+    let server = common::spawn_mock(&["--latency-ms", "1"]);
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let sessions = directory.path().join("sessions.jsonl");
+    fs::write(&sessions, r#"{"session_id":"fixture","messages":[{"role":"system","content":"context"},{"role":"user","content":"question"},{"role":"assistant","content":"recorded answer"},{"role":"tool","content":"result"},{"role":"assistant","content":"continuation"}]}"#).unwrap();
+    let csv = directory.path().join("records.csv");
+    let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
+        .args([
+            "--url",
+            &format!("http://{}/v1/chat/completions", server.address),
+            "--model",
+            "mock",
+            "--sweep",
+            "1",
+            "--requests-per-stage",
+            "2",
+            "--max-tokens",
+            "4",
+            "--session-request-roles",
+            "user,tool",
+        ])
+        .arg("--sessions")
+        .arg(&sessions)
+        .arg("--csv")
+        .arg(&csv)
+        .arg("--html")
+        .arg(directory.path().join("report.html"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<metrum_ai_bench::strategic::BenchRecord> = csv::Reader::from_path(csv)
+        .unwrap()
+        .deserialize()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .all(|row| row.success && row.session_id.as_deref() == Some("fixture")));
+    assert_eq!(
+        rows.iter().map(|row| row.turn.unwrap()).collect::<Vec<_>>(),
+        vec![2, 4]
+    );
+    let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        summary["config"]["session_request_roles"],
+        serde_json::json!(["user", "tool"])
+    );
+    assert_eq!(summary["config"]["session_history_mode"], "recorded");
+}
+
+#[test]
 fn strategic_sessions_measure_ttft_only_when_streaming() {
     let Some(dummy) = common::spawn_dummy(&["-latency", "20ms", "-chunk-interval", "2ms"]) else {
         common::skip("go dummy-model-server not available");
