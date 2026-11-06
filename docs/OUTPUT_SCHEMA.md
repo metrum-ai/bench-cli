@@ -11,9 +11,17 @@ arrival_offset_ms(u64), typed inert messages, expected_output_tokens(u32), and t
 agreed dataset source envelope. Null metadata remains unknown. This adds a new
 loader without changing legacy Vec<String> APIs or runner output schema versions.
 
+## Local pinned chat rendering
+
+The optional tokenizer-feature `RenderedChat` artifact separates exact final
+HTTP `body_sha256` from `rendered_text_sha256`, and retains actual `token_ids`
+and the full rendering identity. See [CHAT_RENDERING.md](CHAT_RENDERING.md).
+It does not change existing runner output. Any body mutation after rendering
+invalidates its use as issuance or warmup-isolation evidence.
+
 ## Public input provenance sub-contract
 
-The standalone `public_dataset::ValidationManifest` uses integer
+The standalone `public_dataset::ValidationManifest` uses string
 `schema_version: "kv-dataset-manifest.v1"` and is documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md).
 It is not yet embedded into runner output. Corpus counts and validation checks
 carry explicit measured/publisher/unknown status; canonical target counts are

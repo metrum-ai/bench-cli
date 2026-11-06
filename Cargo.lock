@@ -1479,6 +1479,7 @@ dependencies = [
  "image",
  "jsonschema",
  "log",
+ "minijinja",
  "parquet",
  "pin-project-lite",
  "rand 0.10.3",
@@ -1517,6 +1518,15 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "minijinja"
+version = "3.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f5a04892e86ddb4fc254e9160835370b63a0d44042d3ab4725bc2dbcbab136"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

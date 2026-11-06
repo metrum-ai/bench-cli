@@ -38,7 +38,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-tokenizer = ["dep:tokenizers"]
+tokenizer = ["dep:tokenizers", "dep:minijinja"]
 otlp = []
 
 # Primary binary names (preferred).
@@ -102,6 +102,7 @@ tower-service = "0.3.3"
 pin-project-lite = "0.2"
 regex = { version = "1.13.1", features = ["std"] }
 bytes = "1.12.1"
+minijinja = { version = "3.0.5", default-features = false, features = ["builtins", "json", "fuel", "serde"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }

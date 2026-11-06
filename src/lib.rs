@@ -4,6 +4,8 @@
 pub mod args_common;
 pub mod asr;
 pub mod canonical_input;
+#[cfg(feature = "tokenizer")]
+pub mod chat_rendering;
 pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;
