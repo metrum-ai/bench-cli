@@ -13,6 +13,11 @@ on:
       - "scripts/validation/perf/**"
       - ".github/workflows/perf-validation.yml"
 
+# Metrum AI: cancel superseded PR runs, never active non-PR evidence runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

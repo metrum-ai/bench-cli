@@ -13,6 +13,11 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
+# Metrum AI: cancel superseded PR runs, never active non-PR evidence runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -68,7 +73,7 @@ jobs:
             bench-dummy-test -port=8000
           for container in bench-runner-health bench-dummy-health; do
             healthy=false
-            for attempt in {1..30}; do
+            for _attempt in {1..30}; do
               if [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" == healthy ]]; then
                 healthy=true; break
               fi
