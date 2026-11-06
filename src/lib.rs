@@ -35,6 +35,7 @@ pub mod public_profile;
 pub mod record;
 pub mod request;
 pub mod runner;
+pub mod session_inputs;
 pub mod sse;
 pub mod stage_lifecycle;
 pub mod stats;

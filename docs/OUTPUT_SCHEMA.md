@@ -79,6 +79,15 @@ provenance are documented in
 separate units. The adapter does not change runner JSONL or certify token lengths,
 window feasibility, rights beyond caller policy, or observed cache reuse.
 
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses string
