@@ -323,6 +323,7 @@ fn strategic_points_report_http_phase_trace() {
 
 fn strategic_pool_control(pooled: bool) {
     let fixture = pool_fixture::PoolFixture::start(pooled, 3, MAX_TOKENS as usize);
+    let expected_body_bytes = fixture.body_bytes as u64;
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = dir.path().join("prompts.jsonl");
     std::fs::write(&prompts, "{\"prompt\":\"alpha\"}\n").expect("prompts");
@@ -386,7 +387,10 @@ fn strategic_pool_control(pooled: bool) {
     let connections = fixture.finish();
     if pooled {
         // Concurrency 1 on one drained pooled connection: only the first connects.
-        assert!(reused >= 2, "reused {reused}");
+        assert!(
+            reused >= 2,
+            "reused {reused}; accepted sockets {connections}"
+        );
         assert_eq!(connections, 1);
     } else {
         // Connection: close disables persistence without changing client tracing.
@@ -401,6 +405,10 @@ fn strategic_pool_control(pooled: bool) {
         assert!(chunks >= MAX_TOKENS, "chunks {chunks}");
         let received: u64 = col(row, "bytes_received").parse().expect("bytes");
         assert!(received > 0);
+        assert_eq!(
+            received, expected_body_bytes,
+            "entire body must be consumed"
+        );
         let sent: u64 = col(row, "bytes_sent").parse().expect("bytes_sent");
         assert!(sent > 0);
         let receive: f64 = col(row, "receive_s").parse().expect("receive_s");

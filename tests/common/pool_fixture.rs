@@ -6,10 +6,11 @@ use std::net::{TcpListener, TcpStream};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-/// Fixed-length responses make the DONE bytes and HTTP body EOF coincide.
-/// Unlike chunked responses there is no trailing chunk terminator left to drain.
+/// Fixed-length bulk responses exercise body reads independently of TCP write
+/// boundaries. DONE is at HTTP body EOF, without a delayed transfer terminator.
 pub struct PoolFixture {
     pub url: String,
+    pub body_bytes: usize,
     worker: Option<JoinHandle<usize>>,
 }
 
@@ -20,6 +21,7 @@ impl PoolFixture {
             "http://{}/v1/chat/completions",
             listener.local_addr().unwrap()
         );
+        let (wire, body_bytes) = response(pooled, tokens);
         let worker = thread::spawn(move || {
             listener.set_nonblocking(true).unwrap();
             let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -36,7 +38,7 @@ impl PoolFixture {
                     Err(e) => panic!("accept: {e}"),
                 };
                 connections += 1;
-                // Do not let Nagle coalesce paced SSE writes behind delayed ACKs.
+                // Avoid delaying the complete response behind a prior TCP ACK.
                 stream.set_nodelay(true).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -45,21 +47,10 @@ impl PoolFixture {
                     if !read_request(&mut stream) {
                         break;
                     }
-                    let mut chunks = Vec::new();
-                    for _ in 0..tokens {
-                        chunks.push(
-                            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n"
-                                .to_owned(),
-                        );
-                    }
-                    chunks.push(format!("data: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":{tokens},\"total_tokens\":{}}}}}\n\ndata: [DONE]\n\n", tokens + 1));
-                    let size: usize = chunks.iter().map(String::len).sum();
-                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {size}\r\nConnection: {}\r\n\r\n", if pooled { "keep-alive" } else { "close" }).unwrap();
-                    for chunk in chunks {
-                        stream.write_all(chunk.as_bytes()).unwrap();
-                        stream.flush().unwrap();
-                        thread::sleep(Duration::from_millis(10));
-                    }
+                    // No per-event sleeps or assumed packet boundaries. Queue
+                    // the complete, fixed-length response including DONE.
+                    stream.write_all(&wire).unwrap();
+                    stream.flush().unwrap();
                     served += 1;
                     if !pooled || served == requests {
                         break;
@@ -70,12 +61,54 @@ impl PoolFixture {
         });
         Self {
             url,
+            body_bytes,
             worker: Some(worker),
         }
     }
 
     pub fn finish(mut self) -> usize {
         self.worker.take().unwrap().join().expect("fixture worker")
+    }
+}
+
+// A bulk body is intentional: chunks_received counts HTTP body reads, not SSE
+// events or server writes. Eight MiB exceeds the locked HTTP/1 reader's adaptive
+// buffer by a wide margin, even if the receiving task is descheduled.
+const BULK_COMMENT_BYTES: usize = 8 * 1024 * 1024;
+
+fn response(pooled: bool, tokens: usize) -> (Vec<u8>, usize) {
+    let mut body = vec![b'p'; BULK_COMMENT_BYTES];
+    body[0] = b':'; // Valid SSE comment, ignored rather than fabricated output.
+    body.extend_from_slice(b"\n\n");
+    let token = b"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n";
+    for _ in 0..tokens {
+        body.extend_from_slice(token);
+    }
+    write!(body, "data: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":{tokens},\"total_tokens\":{}}}}}\n\ndata: [DONE]\n\n", tokens + 1).unwrap();
+    let size = body.len();
+    let mut wire = Vec::new();
+    write!(wire, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {size}\r\nConnection: {}\r\n\r\n", if pooled { "keep-alive" } else { "close" }).unwrap();
+    wire.extend_from_slice(&body);
+    (wire, size)
+}
+
+#[test]
+fn response_has_complete_fixed_length_and_ignored_bulk_comment() {
+    use metrum_ai_bench::sse::{SseEvent, SseParser};
+    for pooled in [true, false] {
+        let (wire, size) = response(pooled, 8);
+        let header_end = wire.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        let header = std::str::from_utf8(&wire[..header_end]).unwrap();
+        assert!(header.contains(&format!("Content-Length: {size}\r\n")));
+        assert!(!header.contains("Transfer-Encoding:"));
+        let body = &wire[header_end..];
+        assert_eq!(body.len(), size);
+        assert!(size > BULK_COMMENT_BYTES);
+        assert!(body.ends_with(b"data: [DONE]\n\n"));
+        let events = SseParser::new().feed(body);
+        assert_eq!(events.len(), 10); // Eight tokens, finish/usage, DONE.
+        assert!(matches!(events.last(), Some(SseEvent::Done)));
+        assert_eq!(events.iter().filter(|event| matches!(event, SseEvent::Json(value) if value["choices"][0]["delta"]["content"] == "x")).count(), 8);
     }
 }
 
