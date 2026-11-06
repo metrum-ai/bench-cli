@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/metrum-ai/bench-cli/blob/integration/v1.9.0/schemas/kv-study-report.v1.json",
-  "$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved.",
   "title": "KV study manifest/report v1 (engineering, non-certifying)",
   "type": "object",
   "additionalProperties": false,
