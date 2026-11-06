@@ -4,6 +4,7 @@
 pub mod archive_inputs;
 pub mod args_common;
 pub mod asr;
+pub mod cache_metrics;
 pub mod cache_workload;
 pub mod canonical_input;
 #[cfg(feature = "tokenizer")]

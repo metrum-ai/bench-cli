@@ -73,6 +73,7 @@ PATH_AREAS = {
     'src/stage_lifecycle.rs': {'*'},
     'src/warmup_isolation.rs': {'*'},
     'src/workload_input.rs': {'*'},
+    'src/cache_metrics.rs': {'*'},
     'src/strategic.rs': {'MODE', 'MATH', 'GPU', 'PERF', 'COMP', 'SCHEMA', 'INTEG'},
     'src/sut.rs': {'HW', 'SCHEMA', 'LIVE', 'GPU', 'INTEG'},
     'src/sweep_modality.rs': {'MODE', 'LIVE', 'GPU', 'MATH'},
