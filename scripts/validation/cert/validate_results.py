@@ -5,14 +5,20 @@
 import argparse
 import csv
 import datetime as dt
+import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 REQUIRED_TIERS = {"PR", "RC", "RC-GPU"}
 ID = re.compile(r"BC-[A-Z]+-[0-9]{3}\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+MUST_RERUN = {"BC-CI-001", "BC-CI-006", "BC-CI-007", "BC-PACK-001",
+              "BC-PACK-002", "BC-REL-001", "BC-REL-002"}
+REPO = Path(__file__).resolve().parents[3]
 
 
 def unique_object(pairs):
@@ -116,7 +122,92 @@ def load_selection(path, catalog, rows, candidate):
     return selection
 
 
-def validate(catalog, results, candidate, as_of, cadence=None, history=None, selection=None, include_post=False):
+class CarryOver:
+    """Authorize only hash-bound, reviewed source records from actual ancestors."""
+
+    def __init__(self, manifest, root, candidate, as_of):
+        self.root = root.resolve()
+        self.candidate = candidate
+        self.as_of = as_of
+        self.entries = {}
+        self.used = set()
+        with manifest.open(encoding="utf-8") as stream:
+            data = json.load(stream, object_pairs_hook=unique_object,
+                             parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
+        if not isinstance(data, dict) or data.get("target_candidate_sha") != candidate:
+            raise ValueError("carry-over target SHA mismatch")
+        entries = data.get("entries")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("carry-over entries must be a nonempty list")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("invalid carry-over entry")
+            case, attempt = entry.get("ID"), entry.get("attempt")
+            if (not isinstance(case, str) or not ID.fullmatch(case) or not isinstance(attempt, int)
+                    or isinstance(attempt, bool) or attempt < 1):
+                raise ValueError("invalid carry-over case or attempt")
+            key = (case, attempt)
+            if key in self.entries:
+                raise ValueError("duplicate carry-over case/attempt")
+            self.entries[key] = entry
+
+    def within(self, value, directory=False):
+        if not isinstance(value, str) or not value or Path(value).is_absolute():
+            raise ValueError("invalid carry-over path")
+        path = (self.root / value).resolve()
+        if not path.is_relative_to(self.root) or not (path.is_dir() if directory else path.is_file()):
+            raise ValueError("missing or outside carry-over path")
+        return path
+
+    def authorize(self, record, record_path):
+        case, attempt = record.get("ID"), record.get("attempt")
+        if case in MUST_RERUN:
+            raise ValueError("case requires a target-candidate rerun")
+        entry = self.entries.get((case, attempt))
+        if entry is None:
+            raise ValueError("missing carry-over case/attempt")
+        source = entry.get("source_sha")
+        if not isinstance(source, str) or not SHA.fullmatch(source) or source == self.candidate or source != record.get("candidate_sha"):
+            raise ValueError("carry-over source SHA mismatch")
+        record_hash = entry.get("record_sha256")
+        raw = record_path.read_bytes()
+        if (not isinstance(record_hash, str) or not SHA256.fullmatch(record_hash)
+                or hashlib.sha256(raw).hexdigest() != record_hash
+                or json.loads(raw, object_pairs_hook=unique_object) != record):
+            raise ValueError("carry-over original record hash mismatch")
+        if subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor", source, self.candidate],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
+            raise ValueError("carry-over source is not an ancestor")
+        disposition = entry.get("disposition")
+        if not isinstance(disposition, dict) or disposition.get("applicable") is not True:
+            raise ValueError("carry-over applicability not approved")
+        for field in ("reviewer", "reason"):
+            if not isinstance(disposition.get(field), str) or not disposition[field].strip():
+                raise ValueError(f"missing carry-over {field}")
+        if timestamp(disposition.get("utc")) > self.as_of:
+            raise ValueError("carry-over review is in the future")
+        proofs = entry.get("proofs")
+        if not isinstance(proofs, list) or not proofs:
+            raise ValueError("carry-over proofs must be nonempty")
+        for proof in proofs:
+            if not isinstance(proof, dict):
+                raise ValueError("invalid carry-over proof")
+            digest = proof.get("sha256")
+            if not isinstance(digest, str) or not SHA256.fullmatch(digest):
+                raise ValueError("invalid carry-over proof hash")
+            if hashlib.sha256(self.within(proof.get("path")).read_bytes()).hexdigest() != digest:
+                raise ValueError("carry-over proof hash mismatch")
+        evidence_root = self.within(entry.get("evidence_root"), directory=True)
+        self.used.add((case, attempt))
+        return evidence_root
+
+    def unused_errors(self):
+        return [f"unused carry-over entry {case} attempt {attempt}"
+                for case, attempt in sorted(self.entries.keys() - self.used)]
+
+
+def validate(catalog, results, candidate, as_of, cadence=None, history=None, selection=None, include_post=False,
+             carry_over_manifest=None):
     rows = load_catalog(catalog)
     universe = {case for case, row in rows.items()
                 if (cadence in row.get("Cadence", "").split(";") if cadence
@@ -125,7 +216,10 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
     if not expected:
         raise ValueError("no required cases in catalog")
     records = {}
+    record_paths = {}
     errors = []
+    carry = (CarryOver(carry_over_manifest, results.parent, candidate, as_of)
+             if carry_over_manifest is not None else None)
     for path in sorted(results.glob("*.json")):
         try:
             with path.open(encoding="utf-8") as stream:
@@ -136,6 +230,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
             if case in records:
                 raise ValueError("duplicate ID")
             records[case] = record
+            record_paths[case] = path
         except (ValueError, OSError, AttributeError) as exc:
             errors.append(f"{path.name}: {exc}")
     histories = {case: [] for case in expected}
@@ -150,10 +245,13 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                                              parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
                     case = previous.get("ID")
                     attempt = previous.get("attempt")
-                    if (case not in expected or previous.get("candidate_sha") != candidate or
-                        not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1 or
+                    if (case not in expected or not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1 or
                         previous.get("result") not in ("PASS", "FAIL", "N-A")):
                         raise ValueError("invalid history ID, SHA, result or attempt")
+                    if previous.get("candidate_sha") != candidate:
+                        if carry is None:
+                            raise ValueError("invalid history ID, SHA, result or attempt")
+                        carry.authorize(previous, path)
                     histories[case].append(previous)
                 except (ValueError, OSError, AttributeError) as exc:
                     errors.append(f"history {path.name}: {exc}")
@@ -168,14 +266,19 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
         try:
             if record is None:
                 raise ValueError("missing result")
-            result = check_record(record, candidate, results.parent, as_of)
+            source = record.get("candidate_sha")
+            if source != candidate and carry is not None:
+                evidence_root = carry.authorize(record, record_paths[case])
+                result = check_record(record, source, evidence_root, as_of)
+            else:
+                result = check_record(record, candidate, results.parent, as_of)
             attempt = record.get("attempt", 1)
             old_attempts = [entry["attempt"] for entry in histories[case]]
             if sorted(old_attempts) != list(range(1, attempt)):
                 raise ValueError("missing, duplicate or unexpected historical attempts")
             if result == "N-A" and any(entry["result"] == "FAIL" for entry in histories[case]):
                 raise ValueError("a failed case cannot be reclassified N-A")
-            note = ""
+            note = (f"carried from {source} to {candidate}" if source != candidate else "")
         except (ValueError, TypeError, KeyError) as exc:
             result = "FAIL"
             note = str(exc)
@@ -183,6 +286,8 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
         table.append({"ID": case, "Test case": rows[case]["Test case"], "Tier": rows[case]["Tier"],
                       "Result": result, "Notes": note, "Catalog": rows[case],
                       "Record": record or {}, "History": sorted(histories[case], key=lambda x: x["attempt"])})
+    if carry is not None:
+        errors.extend(carry.unused_errors())
     return table, errors
 
 
@@ -284,6 +389,7 @@ def main():
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--release", required=True)
     parser.add_argument("--history", type=Path)
+    parser.add_argument("--carry-over-manifest", type=Path, help="reviewed opt-in carry-over manifest")
     parser.add_argument("--selection", type=Path, help="frozen selection.json (required for release)")
     parser.add_argument("--stage", choices=["pre-tag", "full"], default="pre-tag")
     parser.add_argument("--markdown", type=Path, default=Path("CERTIFICATION-REPORT.md"))
@@ -300,6 +406,8 @@ def main():
         parser.error("release mode requires --selection; periodic mode does not use it")
     if args.cadence and args.stage != "pre-tag":
         parser.error("--stage applies only to release mode")
+    if args.cadence and args.carry_over_manifest:
+        parser.error("carry-over is only supported in release mode")
     if args.cadence and not all((args.run_id, args.run_date_utc, args.branch, args.compared_against)):
         parser.error("periodic mode requires run ID, UTC date, branch and comparison release")
     try:
@@ -308,7 +416,7 @@ def main():
         selection = load_selection(args.selection, args.catalog, load_catalog(args.catalog), args.candidate_sha) if args.selection else None
         table, errors = validate(args.catalog, args.results, args.candidate_sha,
                                  dt.datetime.now(dt.timezone.utc), args.cadence, args.history,
-                                 selection, args.stage == "full")
+                                 selection, args.stage == "full", args.carry_over_manifest)
         export_csv(args.csv or Path("periodic.csv" if args.cadence else "results.csv"), table, args)
         export_report(args.markdown, table, errors, args)
         for error in errors:
