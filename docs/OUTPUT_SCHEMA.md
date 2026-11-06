@@ -11,6 +11,14 @@ It preserves unknown evidence and phase/reset provenance and references the
 separately versioned dataset validation manifest by digest. This initial contract
 is not emitted by runners yet and does not change existing JSONL schema versions.
 
+## Offline warmup overlap artifact
+
+The standalone `kv-token-overlap.v1` report is documented in
+[WARMUP_ISOLATION.md](WARMUP_ISOLATION.md). It contains sorted warmup/measured
+wire-body digest-list fingerprints, maximum shared tokens/full blocks, offending
+request pairs, tokenizer/template identity and Pass/Fail/Unknown verdict. It is
+not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
+
 ## Canonical runtime input JSONL
 
 [CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input

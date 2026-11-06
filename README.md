@@ -469,6 +469,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
 [prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
