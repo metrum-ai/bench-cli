@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+import case_dispatch
+import os
 import g6_checks
 import g6_counter_runner
 import l1_runner
@@ -105,6 +107,10 @@ def main():
     outcomes = {}
 
     def record(case_id, callback, thresholds):
+        target = os.environ.get("CERT_CASE_ID")
+        prerequisites = {"BC-REASON-001", "BC-REASON-002", "BC-REASON-003"} if target == "BC-HW-001" else set()
+        if not case_dispatch.selected(case_id) and case_id not in prerequisites:
+            return
         files = list(common_files)
         try:
             observed = callback(files)
@@ -118,7 +124,8 @@ def main():
                        "owner": args.owner, "evidence_link": args.evidence_link, "gpu_class": gpu_line[0].strip(),
                        "driver": gpu_line[1].strip() if len(gpu_line) > 1 else "", "versions": versions,
                        "observed_values": observed, "thresholds": thresholds, "evidence_paths": files}
-        result_writer.write_record(args.out, record_data)
+        if case_dispatch.selected(case_id):
+            result_writer.write_record(args.out, record_data)
         outcomes[case_id] = passed
 
     def run(label, binary, count, cap, thinking, flags, files):
@@ -165,7 +172,7 @@ def main():
         return {"gpu_class": gpu_line[0].strip(), "reasoning_cases_passed": 3}
 
     record("BC-HW-001", hardware, {"gpu_class": "L40S", "reasoning_cases_passed": 3})
-    return 0 if all(outcomes.values()) else 1
+    return 0 if outcomes and all(outcomes.values()) else 1
 
 
 if __name__ == "__main__":

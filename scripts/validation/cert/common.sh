@@ -8,6 +8,15 @@ CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cert_parse() {
   python3 -c 'import sys; sys.version_info >= (3, 12) or sys.exit("certification harness requires Python 3.12 or newer")'
   CERT_LANE=$1; shift
+  if [[ -n "${CERT_CASE_ID:-}" ]]; then
+    local found=0 case_id
+    for case_id in "${CERT_CASES[@]:-}"; do
+      [[ "$case_id" != "$CERT_CASE_ID" ]] || found=1
+    done
+    [[ "$CERT_LANE" != W || "$CERT_CASE_ID" != BC-INTEG-001 ]] || found=1
+    ((found == 1)) || { echo 'selected case does not belong to this lane' >&2; return 2; }
+    CERT_CASES=("$CERT_CASE_ID")
+  fi
   CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT='' CERT_AUX_OWNER=''
   CERT_PERF_FINALIZE=0
   [[ "$CERT_LANE" != P1 && "$CERT_LANE" != P2 ]] || CERT_PERF_FINALIZE=1
@@ -114,6 +123,12 @@ cert_server_logs() {
 }
 
 cert_run() {
+  if [[ -n "${CERT_CASE_ID:-}" ]]; then
+    local selected_rc=0
+    python3 "$CERT_DIR/case_dispatch.py" "$CERT_CASE_ID" "$@" || selected_rc=$?
+    [[ "$selected_rc" != 10 ]] || return 0
+    ((selected_rc == 0)) || return "$selected_rc"
+  fi
   "$@" &
   CERT_RUNNER_PID=$!
   local rc=0
