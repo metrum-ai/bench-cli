@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 PHASES = ("rent", "ssh-ready", "inputs-ready", "server-ready", "first-request", "last-request", "record-validated")
@@ -25,7 +26,7 @@ def digest(path):
 def phase(root, case, name, timestamp=None):
     if name not in PHASES:
         raise ValueError("unknown certification phase")
-    if not __import__("re").fullmatch(r"BC-[A-Z]+-[0-9]{3}", case):
+    if not re.fullmatch(r"BC-[A-Z]+-[0-9]{3}", case):
         raise ValueError("invalid case ID")
     event = {"case": case, "phase": name, "utc": timestamp or dt.datetime.now(dt.timezone.utc).isoformat()}
     path = Path(root) / "phases.jsonl"
@@ -50,10 +51,26 @@ def enrich(root, record):
     for name in ("CERT_MANIFEST", "CERT_CANDIDATE", "CERT_BASELINE"):
         if os.environ.get(name):
             inputs[name] = digest(os.environ[name])
+    if os.environ.get("CERT_INPUT_MANIFEST"):
+        manifest_path = Path(os.environ["CERT_INPUT_MANIFEST"])
+        inputs["execution_manifest"] = digest(manifest_path)
+        manifest = json.loads(manifest_path.read_text())
+        if manifest["candidate_sha"] != record["candidate_sha"]:
+            raise ValueError("execution manifest candidate mismatch")
+        if os.environ.get("CERT_CASE_ID") != record["ID"]:
+            raise ValueError("runner wrote a case outside the selected launcher")
+        pins = {name: manifest[name] for name in ("candidate", "sut", "all_smi", "tokenizer")}
+        pins.update({f"input-{i}": pin for i, pin in enumerate(manifest.get("inputs", []))})
+        pins["launcher"] = manifest["cases"][record["ID"]]["launcher"]
+        for name, pin in pins.items():
+            actual = digest(pin["path"])
+            if actual != pin["sha256"]:
+                raise ValueError("input changed during case execution")
+            inputs[name] = actual
     # Eligibility is only a proposal; reviewed ancestor/diff proof is still required.
     record = {**record, "input_hashes": inputs, "output_hashes": output,
               "carry_over_eligibility": {"eligible": False, "reason": "requires reviewed measurement-code diff and ancestry proof"}}
-    record.setdefault("infra_history", [{"type": "completed" if record["result"] == "PASS" else "failed_or_interrupted",
+    record.setdefault("infra_history", [{"type": "completed" if record["result"] == "PASS" else "case_failed",
                                          "reason": record.get("reason"), "start_utc": record.get("start_utc"),
                                          "end_utc": record.get("end_utc")}])
     return record
@@ -64,8 +81,12 @@ def report_rows(root):
     rows = []
     for path in sorted((Path(root) / "results").glob("BC-*.json")):
         record = json.loads(path.read_text())
-        if not __import__("re").fullmatch(r"[a-f0-9]{40}", record.get("candidate_sha", "")) or record.get("result") not in ("PASS", "FAIL"):
+        if not re.fullmatch(r"[a-f0-9]{40}", record.get("candidate_sha", "")) or record.get("result") not in ("PASS", "FAIL"):
             raise ValueError("invalid result record")
+        if record.get("ID") != path.stem or not re.fullmatch(r"BC-[A-Z]+-[0-9]{3}", path.stem):
+            raise ValueError("record identity mismatch")
+        if set(record.get("output_hashes", {})) != set(record.get("evidence_paths", [])):
+            raise ValueError("record lacks complete output hashes")
         if record["result"] == "PASS":
             from validate_results import check_record
             check_record(record, record["candidate_sha"], Path(root), dt.datetime.now(dt.timezone.utc))

@@ -28,13 +28,25 @@ class ExecutionEvidenceTests(unittest.TestCase):
             self.assertEqual(saved["output_hashes"]["capture.txt"], evidence.digest(root / "capture.txt"))
             self.assertIsNone(saved["observed_values"]["request_count"])
             self.assertFalse(saved["carry_over_eligibility"]["eligible"])
-            self.assertEqual(saved["infra_history"][0]["type"], "failed_or_interrupted")
+            self.assertEqual(saved["infra_history"][0]["type"], "case_failed")
             self.assertEqual(evidence.report_rows(root), [saved])
             with self.assertRaises(FileExistsError):
                 result_writer.write_record(root, record)
             (root / "capture.txt").write_text("modified")
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 evidence.report_rows(root)
+
+    def test_interruption_keeps_unknown_counts(self):
+        import failure_writer
+        with tempfile.TemporaryDirectory() as temporary:
+            argv = ["failure_writer", "--out", temporary, "--id", "BC-GPU-001", "--sha", "a" * 40,
+                    "--start", "2026-01-01T00:00:00Z", "--reason", "runner interrupted", "--type", "infra_interrupted"]
+            with patch("sys.argv", argv), patch.dict("os.environ", {}, clear=True):
+                failure_writer.main()
+            record = json.loads((Path(temporary) / "results/BC-GPU-001.json").read_text())
+            self.assertEqual(record["infra_history"][0]["type"], "infra_interrupted")
+            self.assertIsNone(record["observed_values"]["request_count"])
+            self.assertIsNone(record["observed_values"]["error_count"])
 
     def test_phase_append(self):
         with tempfile.TemporaryDirectory() as temporary:

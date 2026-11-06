@@ -15,12 +15,14 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--reason", required=True)
+    parser.add_argument("--type", choices=("infra_failed", "infra_interrupted"), default="infra_failed")
     args = parser.parse_args()
     result_writer.write_record(args.out, {"ID": args.id, "candidate_sha": args.sha, "result": "FAIL",
                                          "reason": args.reason, "attempt": 1, "start_utc": args.start,
                                          "end_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                                          "observed_values": {"request_count": None, "error_count": None}, "thresholds": {}, "evidence_paths": [],
-                                         "gpu_class": None, "driver": None, "versions": {}})
+                                         "gpu_class": None, "driver": None, "versions": {},
+                                         "infra_history": [{"type": args.type, "reason": args.reason}]})
 
 
 if __name__ == "__main__":

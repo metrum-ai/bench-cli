@@ -88,7 +88,7 @@
       "items": {
         "type": "object",
         "required": ["type"],
-        "properties": {"type": {"enum": ["completed", "failed_or_interrupted"]}}
+        "properties": {"type": {"enum": ["completed", "case_failed", "infra_interrupted", "infra_failed"]}}
       }
     },
     "carry_over_eligibility": {

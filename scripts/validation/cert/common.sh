@@ -111,7 +111,7 @@ cert_run() {
 }
 
 cert_on_exit() {
-  local rc=$1
+  local rc=$1 original_rc=$1
   trap - EXIT INT TERM
   set +e
   if [[ -n "${CERT_RUNNER_PID:-}" ]]; then
@@ -178,12 +178,13 @@ cert_on_exit() {
     ((rc == 0)) || finalize_args+=(--fail)
     python3 "$CERT_DIR/finalize_perf.py" "${finalize_args[@]}" "${CERT_CASES[@]}" || rc=1
   fi
-  local case_id
+  local case_id failure_type=infra_failed
+  [[ "$original_rc" != 130 && "$original_rc" != 143 ]] || failure_type=infra_interrupted
   for case_id in "${CERT_CASES[@]:-}"; do
     [[ -n "$case_id" ]] || continue
     if [[ ! -e "$CERT_OUT/results/${case_id}.json" ]]; then
       python3 "$CERT_DIR/failure_writer.py" --out "$CERT_OUT" --id "$case_id" --sha "$CERT_SHA" \
-        --start "$CERT_START_UTC" --reason 'lane exited before this case completed' || true
+        --start "$CERT_START_UTC" --type "$failure_type" --reason 'lane exited before this case completed' || true
       rc=1
     fi
   done

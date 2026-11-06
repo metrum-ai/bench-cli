@@ -77,7 +77,9 @@ def main():
             raise ValueError("manifest changed after preflight")
         # Recheck every pin between cases, not only on the initial launch.
         preflight(manifest)
-        subprocess.run(manifest["cases"][case]["command"], check=True)
+        environment = {**os.environ, "CERT_INPUT_MANIFEST": str(args.manifest.resolve()),
+                       "CERT_CASE_ID": case, "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
+        subprocess.run(manifest["cases"][case]["command"], check=True, env=environment)
 
 
 if __name__ == "__main__":
