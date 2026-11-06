@@ -72,6 +72,39 @@ the repository documentation audit and CLI/schema/export-surface tests. It is a
 pre-freeze gate, not a substitute for final pre-tag certification. Existing
 performance gate configurations are unchanged.
 
+## Freeze and launch individual selected cases
+
+`freeze_case.py` creates an exclusive (never overwritten) single-case manifest
+from a selector output, catalog, validated lane manifest, candidate/baseline
+binaries, SUT, tokenizer pin and all-smi pin. It verifies the existing lane
+contract offline, freezes every nested lane input pin and all transitive harness
+source files, then runs the per-case offline preflight. Additional data files
+can be declared with repeated `--input` arguments. Use `--help` for required
+paths; missing input files fail before any execution.
+
+The generated command uses `case_entry.sh`, which selects exactly one named
+case in its existing lane. Shared shell dispatch suppresses sibling runners;
+R, G3 and P1 support selected-only records. BC-HW-001 still executes all three
+required reasoning prerequisites on its named class and cannot pass just because
+an unrelated reasoning case did. Their prerequisite observations remain evidence,
+not extra case PASS records. No performance gate thresholds are changed.
+
+`selected_set.py --selection SELECTION --catalog CATALOG --index INDEX --preflight`
+is the complete-set preflight entry. Omit `--preflight` only for an authorized
+execution. The index contains `candidate_sha`, `selection_sha256`,
+`catalog_sha256`, and ordered `manifests` entries (`path`, `sha256`). Every case
+manifest must have exactly one case; the set must exactly equal the selected
+RC-GPU IDs, without missing/duplicate/extra IDs. All manifests are verified
+before any launch and rechecked at each execution boundary. The order in the
+index is the execution order, so dependencies must precede their barriers.
+
+BC-COMP-001, BC-OPS-001 and externally signed BC-INTEG-001 require an explicit
+pinned command via `freeze_case.py --command-json`: they are respectively a
+post-measurement barrier, external resource cleanup and externally reviewed
+integration evidence, not independent model-load commands. Their required source
+results/sign-off must exist before freezing those case inputs. Do not invent
+future hashes, bypass sign-off, or interpret collection-only output as PASS.
+
 ## GPU development runners
 
 L1, R and G6 have been exercised on a real NVIDIA GPU. Selected cases in D,
