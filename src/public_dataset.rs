@@ -17,7 +17,7 @@ pub const SCHEMA_VERSION: &str = "kv-dataset-manifest.v1";
 
 /// Digest of exact bytes (not normalized text).
 pub fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::prompt_library::hex_digest(Sha256::digest(bytes).as_slice())
 }
 
 fn hex(value: &str, len: usize) -> bool {
@@ -239,7 +239,8 @@ fn copy_verified(reader: impl Read, writer: &mut impl Write, file: &SourceFile) 
     }
     ensure!(count == file.bytes, "truncated source file");
     ensure!(
-        format!("{:x}", hash.finalize()).eq_ignore_ascii_case(&file.sha256),
+        crate::prompt_library::hex_digest(hash.finalize().as_slice())
+            .eq_ignore_ascii_case(&file.sha256),
         "source checksum mismatch"
     );
     Ok(())

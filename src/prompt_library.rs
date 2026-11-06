@@ -902,7 +902,7 @@ pub fn write_jsonl(path: &Path, mix: &SelectedMix) -> Result<()> {
     Ok(())
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(crate) fn hex_digest(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         use std::fmt::Write as _;
