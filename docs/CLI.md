@@ -1374,6 +1374,24 @@ Options:
 
           [default: 0]
 
+      --stage-hook <STAGE_HOOK>
+          Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement
+
+      --stage-reset-scope <STAGE_RESET_SCOPE>
+          Exact tier IDs the trusted reset hook must acknowledge
+
+      --stage-hook-timeout-seconds <STAGE_HOOK_TIMEOUT_SECONDS>
+          [default: 60]
+
+      --stage-ready-url <STAGE_READY_URL>
+          Optional readiness probe after scoped reset acknowledgement
+
+      --stage-settle-ms <STAGE_SETTLE_MS>
+          [default: 0]
+
+      --pre-warmup-reset
+          Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset
+
       --seed <SEED>
           RNG seed used when --shuffle-prompts is set
 

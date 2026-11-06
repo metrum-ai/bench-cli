@@ -470,6 +470,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [strategic telemetry](docs/TELEMETRY.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
 [sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
+[trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),

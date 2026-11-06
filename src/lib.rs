@@ -26,6 +26,7 @@ pub mod record;
 pub mod request;
 pub mod runner;
 pub mod sse;
+pub mod stage_lifecycle;
 pub mod stats;
 pub mod strategic;
 pub mod summary;

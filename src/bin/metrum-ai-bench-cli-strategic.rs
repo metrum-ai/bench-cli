@@ -16,6 +16,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use serde_json::{json, Value};
+use sha2::Digest;
 #[cfg(feature = "otlp")]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -259,6 +260,35 @@ struct Args {
         help = "Per-stage warmup requests excluded from measured aggregates (cold-start control)"
     )]
     warmup_requests: u64,
+    #[arg(
+        long,
+        help = "Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement"
+    )]
+    stage_hook: Option<String>,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        value_delimiter = ',',
+        help = "Exact tier IDs the trusted reset hook must acknowledge"
+    )]
+    stage_reset_scope: Vec<String>,
+    #[arg(long, requires = "stage_hook", default_value_t = 60)]
+    stage_hook_timeout_seconds: u64,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        help = "Optional readiness probe after scoped reset acknowledgement"
+    )]
+    stage_ready_url: Option<String>,
+    #[arg(long, requires = "stage_hook", default_value_t = 0)]
+    stage_settle_ms: u64,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        default_value_t = false,
+        help = "Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset"
+    )]
+    pre_warmup_reset: bool,
     #[arg(
         long,
         default_value_t = 0,
@@ -1589,11 +1619,24 @@ where
     Ok(outcomes)
 }
 
+fn reset_hook(args: &Args) -> Option<metrum_ai_bench::stage_lifecycle::ResetHook> {
+    args.stage_hook
+        .as_ref()
+        .map(|command| metrum_ai_bench::stage_lifecycle::ResetHook {
+            command: command.clone(),
+            scope: args.stage_reset_scope.clone(),
+            timeout: Duration::from_secs(args.stage_hook_timeout_seconds),
+            ready_url: args.stage_ready_url.clone(),
+            settle_delay: Duration::from_millis(args.stage_settle_ms),
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_stage(
     args: &Args,
     url: &str,
     stage: f64,
+    stage_index: usize,
     inputs: &[Input],
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
@@ -1607,6 +1650,7 @@ async fn run_stage(
     Vec<ModalitySample>,
     f64,
     metrum_ai_bench::concurrency::ObservedConcurrency,
+    Vec<Value>,
 )> {
     let concurrency = match args.sweep_by {
         SweepBy::Concurrency => stage.ceil() as usize,
@@ -1621,6 +1665,13 @@ async fn run_stage(
     let capacity = args.warmup_requests.saturating_add(args.requests_per_stage) as usize;
     let mut records = Vec::with_capacity(capacity);
     let mut samples = Vec::with_capacity(capacity);
+
+    let mut resets = Vec::new();
+    if args.pre_warmup_reset && !stop.is_stopped() {
+        let hook = reset_hook(args).context("pre-warmup reset requires stage hook")?;
+        let acknowledgement = hook.execute(stage_index, stage, client).await?;
+        resets.push(json!({"position": "before_warmup", "acknowledgement": acknowledgement}));
+    }
 
     // Phase 1: fully complete warmup before measurement begins.
     if args.warmup_requests > 0 && !stop.is_stopped() {
@@ -1703,6 +1754,13 @@ async fn run_stage(
                 ))
                 .await?;
         }
+    }
+
+    // Machine/connection warmup is fully drained. Reset intended tiers now,
+    // not before warmup, so measured cold prefixes cannot inherit warmup state.
+    if let Some(hook) = reset_hook(args).filter(|_| !stop.is_stopped()) {
+        let acknowledgement = hook.execute(stage_index, stage, client).await?;
+        resets.push(json!({"position": "after_warmup", "acknowledgement": acknowledgement}));
     }
 
     // Phase 2: reset measurement epoch; measured prompts restart at index 0.
@@ -1806,6 +1864,7 @@ async fn run_stage(
         samples,
         measured_seconds,
         inflight_tracker.snapshot(),
+        resets,
     ))
 }
 
@@ -1831,6 +1890,9 @@ async fn main() -> Result<()> {
     if args.version_only {
         println!("metrum-ai-bench-cli-strategic version {VERSION}");
         return Ok(());
+    }
+    if let Some(hook) = reset_hook(&args) {
+        hook.validate()?;
     }
     let url = args
         .url
@@ -2046,6 +2108,17 @@ async fn main() -> Result<()> {
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
+    if let Some(command) = &args.stage_hook {
+        redacted_config["stage_hook"] = json!({
+            "command_sha256": sha2::Sha256::digest(command.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+            "scope": args.stage_reset_scope, "timeout_seconds": args.stage_hook_timeout_seconds,
+            "readiness_probe": args.stage_ready_url.is_some(),
+            "settle_delay_ms": args.stage_settle_ms,
+            "pre_warmup_reset": args.pre_warmup_reset,
+            "timing": "after_warmup_drain_before_measurement",
+            "evidence": "trusted_operator_acknowledgement"
+        });
+    }
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -2074,15 +2147,17 @@ async fn main() -> Result<()> {
     let mut any_osl_validation = None;
     let mut ttft_error = None;
     let mut partial = false;
-    for stage in stages {
+    let mut stage_resets = Vec::new();
+    for (stage_index, stage) in stages.into_iter().enumerate() {
         if stop.is_stopped() {
             partial = true;
             break;
         }
-        let (records, samples, seconds, observed) = run_stage(
+        let (records, samples, seconds, observed, reset) = run_stage(
             &args,
             &url,
             stage,
+            stage_index + 1,
             &inputs,
             validator.as_ref(),
             sequence.clone(),
@@ -2093,6 +2168,11 @@ async fn main() -> Result<()> {
             &stop,
         )
         .await?;
+        if !reset.is_empty() {
+            stage_resets
+                .push(json!({"stage_index": stage_index + 1, "load": stage, "resets": reset}));
+            redacted_config["stage_resets"] = json!(stage_resets);
+        }
         if stop.is_stopped() {
             partial = true;
         }
