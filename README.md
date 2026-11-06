@@ -468,6 +468,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
 [canonical runtime inputs](docs/CANONICAL_INPUTS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
