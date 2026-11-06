@@ -30,6 +30,7 @@ exclude = [
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",
     "test-data/endpoints-4servers.yaml",
+    "test-data/public-datasets/**",
 ]
 
 [lib]

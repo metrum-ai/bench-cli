@@ -21,3 +21,19 @@ Test fixtures with attribution requirements:
   CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Metrum AI
   converted the FLAC originals to 16 kHz mono 16-bit PCM WAV with
   `cargo xtask fixtures asr`; the audio content is unchanged.
+
+- test-data/public-datasets/loogle-excerpt.v1.json is a modified excerpt from
+  bigai-nlco/LooGLE, configuration longdep_qa, split test, revision
+  4b50b4cb9333b48b3f7ddfd307c1d13369be5d1e, data/longdep_qa.jsonl.
+  Dataset authors: Jiaqi Li, Mengmeng Wang, Zilong Zheng and Muhan Zhang,
+  "LooGLE: Can Long-Context Language Models Understand Long Contexts?"
+  (2023), https://arxiv.org/abs/2311.04939. Source document title:
+  "José Luis Picardo". Pinned source:
+  https://huggingface.co/datasets/bigai-nlco/LooGLE/blob/4b50b4cb9333b48b3f7ddfd307c1d13369be5d1e/data/longdep_qa.jsonl
+  License: CC-BY-SA-4.0, https://creativecommons.org/licenses/by-sa/4.0/.
+  Metrum AI retained the first 160 Unicode context characters, a public question
+  and identifiers; omitted answers, evidence and task metadata; and added a
+  provenance wrapper. The source excerpt and its adaptations remain under
+  CC-BY-SA-4.0, not the repository's Apache-2.0 code license. This fixture is
+  for source-checkout tests only; test-data/public-datasets is excluded from
+  the published Cargo crate. Source content remains subject to its own rights.
