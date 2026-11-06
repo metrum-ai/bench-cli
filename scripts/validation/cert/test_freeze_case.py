@@ -30,13 +30,17 @@ class FreezeCaseTests(unittest.TestCase):
             args = SimpleNamespace(selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,
                 candidate=binary, baseline=binary, sut=sut, tokenizer=binary, tokenizer_revision="b" * 40,
                 all_smi=binary, input=[], command_json=None, out=root / "frozen.json", run_out=root / "run")
-            with patch.object(freeze_case.manifest_tool, "load_manifest") as validation:
+            with patch.object(freeze_case.manifest_tool, "load_manifest", return_value=({}, {"revision": "b" * 40})) as validation:
                 frozen = freeze_case.freeze(args)
                 validation.assert_called_once()
                 self.assertIn("--out", frozen["cases"][args.case]["command"])
                 self.assertGreater(len(frozen["inputs"]), 10)
                 with self.assertRaises(FileExistsError):
                     freeze_case.freeze(args)
+                args.tokenizer_revision = "c" * 40
+                with self.assertRaisesRegex(ValueError, "tokenizer revision"):
+                    freeze_case.freeze(args)
+                args.tokenizer_revision = "b" * 40
             index = root / "index.json"
             entries = [{"path": str(args.out), "sha256": digest(args.out)}]
             data = {"candidate_sha": "a" * 40, "selection_sha256": digest(selection), "catalog_sha256": digest(catalog), "manifests": entries}

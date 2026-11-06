@@ -36,7 +36,9 @@ def freeze(args):
         raise ValueError("lane manifest binary hash mismatch")
     lane = row["Parallel group"]
     if lane != "CLEANUP":
-        manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0")
+        _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0")
+        if args.tokenizer_revision != config["revision"]:
+            raise ValueError("tokenizer revision must match the frozen model revision")
     root = Path(__file__).parent
     if args.command_json:
         command = json.loads(args.command_json.read_text())
