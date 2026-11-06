@@ -38,8 +38,10 @@ canonical payload JSONL is separate and must not be published by default.
 
 ## Public document adapter output
 
-The standalone document adapter emits canonical `DocumentQuestion` records from
-the dataset contract; mapping and pinned fixture provenance are documented in
+The standalone document adapter emits `IngestionRecord` with
+`IngestionBody::DocumentQuestion`; the command's checked conversion yields the
+final runtime `CanonicalRecord` with `CanonicalBody::Chat`. Mapping and fixture
+provenance are documented in
 [PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
 separate units. The adapter does not change runner JSONL or certify token lengths,
 window feasibility, rights beyond caller policy, or observed cache reuse.

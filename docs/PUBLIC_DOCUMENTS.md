@@ -5,9 +5,12 @@
 
 `public_adapters::documents` is the initial declarative document adapter on the
 [dataset contract](PUBLIC_DATASETS.md). It maps one question per row or an array
-of questions per document. It is a library API, not yet CLI ingestion or runner
-integration. The optional source catalog remains deferred until rights and
-rendered-token gates are complete.
+of questions per document into IngestionRecord/IngestionBody::DocumentQuestion.
+The [dataset command](PUBLIC_DATASET_CLI.md) exports them through the checked
+[ingestion-to-runtime conversion](PUBLIC_DATASETS.md) as the final CanonicalRecord
+with source_row_id and body: CanonicalBody::Chat. Runtime consumption remains a
+separate interface. The optional catalog stays deferred until rights and rendered
+token gates are complete.
 
 ## Pinned first fixture
 

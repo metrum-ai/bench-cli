@@ -13,7 +13,7 @@ use serde_json::json;
 use serde_json::Value;
 
 use crate::archive_inputs::{read_zip_members, ArchiveMember};
-use crate::canonical_input::{CanonicalRecord, DatasetEnvelopeRef, Message, Role};
+use crate::canonical_input::{CanonicalRecord, DatasetEnvelopeRef};
 use crate::dataset_formats::{read_rows, DatasetFormat};
 use crate::prefix_validation::{self, OverlapValidation, RenderingIdentity, SelectionConstraints};
 use crate::public_adapters::{documents, render_document, AdapterLimits, DocumentMapping};
@@ -342,34 +342,7 @@ pub fn build(
     let source: DatasetEnvelopeRef = manifest.envelope()?.into();
     let records = adapted
         .into_iter()
-        .map(|record| {
-            let input = CanonicalRecord {
-                record_id: record.record_id.clone(),
-                session_id: record.session_id.clone(),
-                turn_index: record
-                    .turn_index
-                    .map(u32::try_from)
-                    .transpose()
-                    .context("runtime turn index overflow")?,
-                group_id: record.group_id.clone(),
-                trace_id: record.trace_id.clone(),
-                arrival_offset_ms: None,
-                messages: vec![Message {
-                    role: Role::User,
-                    content: Some(render_document(&record)?),
-                    tool_calls: vec![],
-                    tool_call_id: None,
-                }],
-                expected_output_tokens: record
-                    .output_budget
-                    .map(u32::try_from)
-                    .transpose()
-                    .context("runtime output target overflow")?,
-                source: source.clone(),
-            };
-            input.validate()?;
-            Ok(input)
-        })
+        .map(|record| record.into_canonical(source.clone()))
         .collect::<Result<Vec<_>>>()?;
     let human_summary = manifest.summary();
     Ok((
@@ -438,11 +411,11 @@ mod tests {
         let (records, report) = build(&job, &cache, true).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].group_id, records[1].group_id);
-        assert!(!records[0].messages[0]
-            .content
-            .as_ref()
-            .unwrap()
-            .contains("GOLD"));
+        assert_eq!(records[0].source_row_id, "1");
+        let crate::canonical_input::CanonicalBody::Chat(messages) = &records[0].body else {
+            panic!("expected Chat")
+        };
+        assert!(!messages[0].content.as_ref().unwrap().contains("GOLD"));
         assert_eq!(
             report.manifest.checks["rendered_overlap"],
             Evidence::Unknown

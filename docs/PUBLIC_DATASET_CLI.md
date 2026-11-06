@@ -13,7 +13,8 @@ run tool calls. Canonical runtime consumption is a separate runner interface.
 `local_files` map. Without it, reviewed pinned Hub files may download, under the
 job's byte budgets. No mirror fallback, script execution, agreement acceptance
 or credential persistence occurs. HF_TOKEN is only used by existing Hub headers.
-Both outputs must be new files; existing files are never overwritten. A failed
+Both outputs must be new files in existing parent directories; existing files are
+never overwritten. A failed
 write must be treated as failure even if one output was already installed.
 
 ## Job schema
@@ -92,7 +93,9 @@ preparation, but cannot be advertised as a validated KV-reuse/bust profile.
 ## Outputs, fingerprints and limitations
 
 `canonical.jsonl` contains [runtime records](CANONICAL_INPUTS.md) with opaque
-record/group IDs, messages, positive output targets and the exact dataset envelope.
+record/group IDs, preserved source_row_id, body: CanonicalBody::Chat, positive
+expected_output_tokens and the exact dataset envelope. The checked conversion is
+shared with the canonical runtime contract; it does not silently narrow integers.
 It contains raw source payload: keep it local unless the reviewed policy permits
 redistribution and privacy review. Do not feed it to a legacy Vec<String> loader
 and expect lineage to survive. Runtime must use the canonical loader/input enum.

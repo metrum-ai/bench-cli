@@ -7,7 +7,7 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::public_dataset::{sha256, CanonicalBody, CanonicalRecord, DatasetOrigin, RightsPolicy};
+use crate::public_dataset::{sha256, DatasetOrigin, IngestionBody, IngestionRecord, RightsPolicy};
 
 /// Explicit mapping; source layout is not inferred from dataset name.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub fn documents(
     rights: &RightsPolicy,
     mapping: &DocumentMapping,
     limits: AdapterLimits,
-) -> Result<Vec<CanonicalRecord>> {
+) -> Result<Vec<IngestionRecord>> {
     origin.validate()?;
     rights.authorize()?;
     ensure!(
@@ -136,7 +136,7 @@ pub fn documents(
                 ids.insert(record_id.clone()),
                 "duplicate source target identity"
             );
-            let record = CanonicalRecord {
+            let record = IngestionRecord {
                 record_id,
                 session_id: None,
                 trace_id: None,
@@ -145,7 +145,7 @@ pub fn documents(
                 source_file_sha256: source_file_sha256.into(),
                 group_id: Some(group_id.clone()),
                 output_budget: Some(mapping.output_budget),
-                body: CanonicalBody::DocumentQuestion {
+                body: IngestionBody::DocumentQuestion {
                     document_id: doc_id.into(),
                     document: document.into(),
                     question: question.into(),
@@ -160,8 +160,8 @@ pub fn documents(
 
 /// Deterministic document-first text. Chat framing is applied by the caller and
 /// must then pass the pinned rendered-token validator. No clipping occurs here.
-pub fn render_document(record: &CanonicalRecord) -> Result<String> {
-    let CanonicalBody::DocumentQuestion {
+pub fn render_document(record: &IngestionRecord) -> Result<String> {
+    let IngestionBody::DocumentQuestion {
         document, question, ..
     } = &record.body
     else {
