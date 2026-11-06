@@ -3,6 +3,15 @@
 
 # JSONL output schema
 
+## Held-out warmup provenance (v1.9.0 development)
+
+Optional `config.warmup` retains source SHA-256, pool/request counts, block size,
+`overlap_report`, `override_unverified` and `rendered_tokens_available`. The report
+binds sorted warmup/measured body-digest lists to exact post-transformation JSON
+request bytes. The temporary validator/renderer boundary returns Unknown and
+fails before traffic unless explicitly overridden. Override never changes verdict
+to Pass; Unknown maxima are not measurements. No raw prompts/tokens are exported.
+
 ## Strategic trusted reset metadata (v1.9.0 development)
 
 When opted in, `config.stage_hook` records command SHA-256 (not raw command),

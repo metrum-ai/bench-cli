@@ -1374,6 +1374,38 @@ Options:
 
           [default: 0]
 
+      --warmup-sessions <WARMUP_SESSIONS>
+          Held-out recorded-history warmup sessions; isolation must be validated or explicitly overridden
+
+      --warmup-prompts <WARMUP_PROMPTS>
+          Held-out warmup prompt JSONL; isolation must be validated or explicitly overridden
+
+      --allow-unverified-warmup
+          Explicitly permit Fail/Unknown warmup token-prefix isolation; records override and both digest-list hashes, never a cold/isolation claim
+
+      --warmup-block-size-tokens <WARMUP_BLOCK_SIZE_TOKENS>
+          Token block size for warmup overlap validation (must match the serving engine)
+
+          [default: 16]
+
+      --stage-hook <STAGE_HOOK>
+          Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement
+
+      --stage-reset-scope <STAGE_RESET_SCOPE>
+          Exact tier IDs the trusted reset hook must acknowledge
+
+      --stage-hook-timeout-seconds <STAGE_HOOK_TIMEOUT_SECONDS>
+          [default: 60]
+
+      --stage-ready-url <STAGE_READY_URL>
+          Optional readiness probe after scoped reset acknowledgement
+
+      --stage-settle-ms <STAGE_SETTLE_MS>
+          [default: 0]
+
+      --pre-warmup-reset
+          Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset
+
       --seed <SEED>
           RNG seed used when --shuffle-prompts is set
 
@@ -1389,12 +1421,6 @@ Options:
           Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior
 
           [possible values: user, tool, system, assistant, developer, function]
-
-      --session-mode <SESSION_MODE>
-          Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only
-
-          [default: legacy]
-          [possible values: legacy, closed-loop]
 
       --prefix-control <PREFIX_CONTROL>
           [default: shared]

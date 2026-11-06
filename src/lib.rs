@@ -37,6 +37,7 @@ pub mod time_weighted;
 pub mod tokenizer;
 pub mod usage;
 pub mod vlm;
+pub mod warmup_isolation;
 
 /// True when the process was invoked with the `--version-only` flag
 /// (#307).

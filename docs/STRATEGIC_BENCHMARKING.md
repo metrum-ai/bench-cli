@@ -43,6 +43,38 @@ reset after machine warmup; a new file/session ID is not sufficient. These lifec
 and scheduling enhancements are separate steps under #413. Generic prompt-library
 throughput profiles do not establish controlled KV reuse or offload evidence.
 
+## Held-out warmup integration boundary (v1.9.0 development)
+
+`--warmup-sessions FILE` or `--warmup-prompts FILE` isolates the warmup input
+pool from the measured pool. These options are chat-only, mutually exclusive,
+and require a positive warmup request count at least as large as the configured
+stage concurrency. Measured input indexing still restarts at zero after warmup.
+Summary `config.warmup` retains source SHA-256, pool/request counts and overlap
+policy. Source names, prompts and raw tokens are not exported.
+
+A different file or ID is **not** proof of token-prefix isolation. The preflight
+calls the agreed offline `validate_prefix_disjoint` interface with final request
+body digests. Until the dataset validator and a pinned full-chat token renderer
+are integrated, the local stub deliberately returns `Unknown`, never `Pass`.
+Thus this development boundary fails before any warmup or measured traffic unless
+`--allow-unverified-warmup` is explicitly supplied. That override remains an
+`Unknown` result, records both sorted body-digest-list hashes, and cannot justify
+an isolation/cold-cache claim. It is for plumbing tests and explicitly exploratory
+runs, not a substitute for completing rendered-token validation. Unknown maxima
+in a stub report are not overlap measurements.
+
+`--warmup-block-size-tokens` must match the actual serving cache. The default
+passing policy permits zero shared full blocks; tokenizer/template mismatches
+must remain Unknown. Body digests cover exact serialized JSON bytes after current
+body transformations. Any later mutation policy must regenerate token rendering
+and validation bindings before traffic. Default legacy warmup is unchanged when
+no held-out pool is supplied and makes no isolation claim.
+
+For cold studies, the required protocol remains held-out prefix-disjoint warmup,
+drain, acknowledged tier reset/readiness/settling, then measurement. Do not call
+an unvalidated warmup file prefix-disjoint. The stub is temporary and must be
+replaced by the dataset implementation rather than a competing overlap algorithm.
+
 ## Trusted stage reset lifecycle (v1.9.0 development)
 
 `--stage-hook CMD --stage-reset-scope resident,external` is an explicit opt-in

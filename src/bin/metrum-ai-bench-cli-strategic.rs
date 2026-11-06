@@ -77,7 +77,7 @@ impl ImageDetail {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     author,
     version,
@@ -260,6 +260,30 @@ struct Args {
         help = "Per-stage warmup requests excluded from measured aggregates (cold-start control)"
     )]
     warmup_requests: u64,
+    #[arg(
+        long,
+        conflicts_with = "warmup_prompts",
+        help = "Held-out recorded-history warmup sessions; isolation must be validated or explicitly overridden"
+    )]
+    warmup_sessions: Option<PathBuf>,
+    #[arg(
+        long,
+        conflicts_with = "warmup_sessions",
+        help = "Held-out warmup prompt JSONL; isolation must be validated or explicitly overridden"
+    )]
+    warmup_prompts: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Explicitly permit Fail/Unknown warmup token-prefix isolation; records override and both digest-list hashes, never a cold/isolation claim"
+    )]
+    allow_unverified_warmup: bool,
+    #[arg(
+        long,
+        default_value_t = 16,
+        help = "Token block size for warmup overlap validation (must match the serving engine)"
+    )]
+    warmup_block_size_tokens: usize,
     #[arg(
         long,
         help = "Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement"
@@ -1556,6 +1580,89 @@ impl ModalityOptions {
     }
 }
 
+fn heldout_warmup_inputs(
+    args: &Args,
+    model: &str,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+    measured: &[Input],
+) -> Result<Option<(Vec<Input>, Value)>> {
+    use metrum_ai_bench::warmup_isolation::{
+        body_digest, validate_prefix_disjoint, Phase, RenderedBody, Verdict,
+    };
+    let path = match args
+        .warmup_sessions
+        .as_ref()
+        .or(args.warmup_prompts.as_ref())
+    {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+    if !matches!(args.kind, EndpointKind::Chat)
+        || args.warmup_requests == 0
+        || args.warmup_block_size_tokens == 0
+    {
+        bail!("held-out warmup requires chat, positive --warmup-requests and positive --warmup-block-size-tokens");
+    }
+    let concurrency = match args.sweep_by {
+        SweepBy::Concurrency => parse_sweep(&args.sweep)?
+            .into_iter()
+            .map(|s| s.ceil() as u64)
+            .max()
+            .unwrap_or(1),
+        SweepBy::Rate => u64::from(args.max_in_flight),
+    };
+    if args.warmup_requests < concurrency {
+        bail!("held-out warmup requests must be at least the stage concurrency");
+    }
+    let mut warmup_args = args.clone();
+    warmup_args.sessions = args.warmup_sessions.clone();
+    warmup_args.prompts = args
+        .warmup_prompts
+        .as_ref()
+        .map(|path| {
+            path.to_str()
+                .map(str::to_owned)
+                .context("warmup prompt path must be UTF-8")
+        })
+        .transpose()?;
+    let warmup = make_inputs(&warmup_args, model, schema, tools)?;
+    let render = |pool: &[Input], count: u64, phase: Phase| -> Result<Vec<RenderedBody>> {
+        (0..count)
+            .map(|index| {
+                let input = &pool[index as usize % pool.len()];
+                let bytes = serde_json::to_vec(&*input.body)?;
+                Ok(RenderedBody {
+                    request_id: format!("{phase:?}-{index}"),
+                    phase: phase.clone(),
+                    body_sha256: body_digest(&bytes),
+                    tokenizer_revision: "unknown".into(),
+                    chat_template_sha256: "unknown".into(),
+                    token_ids: Vec::new(),
+                })
+            })
+            .collect()
+    };
+    let warmup_bodies = render(&warmup, args.warmup_requests, Phase::Warmup)?;
+    let measured_bodies = render(measured, args.requests_per_stage, Phase::Measured)?;
+    let report = validate_prefix_disjoint(
+        &warmup_bodies,
+        &measured_bodies,
+        args.warmup_block_size_tokens,
+    );
+    if report.verdict != Verdict::Pass && !args.allow_unverified_warmup {
+        bail!("held-out warmup token-prefix isolation is {:?}; fail closed (pinned rendered-token validation unavailable); --allow-unverified-warmup is an explicit non-certifying override", report.verdict);
+    }
+    let source_bytes = std::fs::read(path).context("read held-out warmup source")?;
+    let metadata = json!({
+        "source_sha256": body_digest(&source_bytes), "pool_requests": warmup.len(),
+        "requests_per_stage": args.warmup_requests, "block_size_tokens": args.warmup_block_size_tokens,
+        "overlap_report": report, "override_unverified": args.allow_unverified_warmup,
+        "rendered_tokens_available": false
+    });
+    Ok(Some((warmup, metadata)))
+}
+
 fn reset_hook(args: &Args) -> Option<metrum_ai_bench::stage_lifecycle::ResetHook> {
     args.stage_hook
         .as_ref()
@@ -1575,6 +1682,7 @@ async fn run_stage(
     stage: f64,
     stage_index: usize,
     inputs: &[Input],
+    warmup_inputs: Option<&[Input]>,
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
     client: &reqwest::Client,
@@ -1610,6 +1718,7 @@ async fn run_stage(
         resets.push(json!({"position": "before_warmup", "acknowledgement": acknowledgement}));
     }
 
+    let warmup_pool = warmup_inputs.unwrap_or(inputs);
     // Phase 1: fully complete warmup before measurement begins.
     if args.warmup_requests > 0 && !stop.is_stopped() {
         let warmup_epoch = Instant::now();
@@ -1620,7 +1729,7 @@ async fn run_stage(
             if stop.is_stopped() {
                 break;
             }
-            let input = inputs[index as usize % inputs.len()].clone();
+            let input = warmup_pool[index as usize % warmup_pool.len()].clone();
             warmup_handles.push(spawn_one_request(
                 args,
                 url,
@@ -1823,6 +1932,8 @@ async fn main() -> Result<()> {
             make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?
         }
     };
+    let heldout_warmup =
+        heldout_warmup_inputs(&args, &model, schema.as_ref(), tools.as_ref(), &inputs)?;
     let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
     let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
     let stop = metrum_ai_bench::runner::StopFlag::new();
@@ -1977,6 +2088,9 @@ async fn main() -> Result<()> {
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
+    if let Some((_, metadata)) = &heldout_warmup {
+        redacted_config["warmup"] = metadata.clone();
+    }
     if let Some(command) = &args.stage_hook {
         redacted_config["stage_hook"] = json!({
             "command_sha256": sha2::Sha256::digest(command.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
@@ -2028,6 +2142,7 @@ async fn main() -> Result<()> {
             stage,
             stage_index + 1,
             &inputs,
+            heldout_warmup.as_ref().map(|(pool, _)| pool.as_slice()),
             validator.as_ref(),
             sequence.clone(),
             &client,
@@ -2361,6 +2476,55 @@ mod tests {
                 .chain(["--session-request-roles", "invalid"])
         )
         .is_err());
+    }
+
+    #[test]
+    fn heldout_warmup_validates_budgets_and_preserves_legacy_without_a_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("warmup.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"session_id":"heldout","messages":[{"role":"user","content":"synthetic"}]}"#,
+        )
+        .unwrap();
+        let mut args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--sweep",
+            "1",
+        ])
+        .unwrap();
+        let measured = make_inputs(&args, "mock", None, None).unwrap();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap()
+            .is_none());
+        args.warmup_sessions = Some(path);
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("positive"));
+        args.warmup_requests = 1;
+        args.sweep = "2".into();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("at least"));
+        args.sweep = "1".into();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown"));
+        args.allow_unverified_warmup = true;
+        let (warmup, metadata) = heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap()
+            .unwrap();
+        assert_eq!(warmup.len(), 1);
+        assert_eq!(metadata["override_unverified"], true);
+        args.warmup_block_size_tokens = 0;
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured).is_err());
     }
 
     #[test]

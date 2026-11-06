@@ -5,6 +5,11 @@
 
 ## Unreleased (v1.9.0)
 
+- Add held-out strategic warmup pools and a fail-closed rendered-token overlap
+  integration boundary. Until the pinned renderer/dataset validator is integrated,
+  isolation is Unknown and blocks traffic unless explicitly overridden; retain
+  both final-body digest-list hashes and the override without claiming a Pass (#413).
+
 - Add opt-in trusted strategic stage reset hooks after warmup drain and before
   measurement, with exact tier acknowledgement, readiness, total deadlines and
   optional settle delay/pre-warmup reset. Record non-sensitive acknowledgements
