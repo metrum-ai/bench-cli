@@ -29,6 +29,8 @@ PATH_AREAS = {
     'src/bin/metrum-ai-bench-cli-strategic.rs': {'*'},
     'src/bin/metrum-ai-bench-cli-vlm.rs': {'*'},
     'src/bin/metrum-ai-bench-cli.rs': {'*'},
+    'src/canonical_input.rs': {'*'},
+    'src/public_dataset.rs': {'*'},
     'src/chat_stream.rs': {'*'}, 'src/measurement.rs': {'*'},
     'src/usage.rs': {'*'}, 'src/stats.rs': {'*'}, 'src/summary.rs': {'*'}, 'src/sse.rs': {'*'},
     'src/args_common.rs': {'CLI', 'MODE', 'LIVE', 'GPU', 'INTEG'},
