@@ -178,10 +178,7 @@ pub fn materialize(
             verify_file(&dest, file)?;
         } else {
             ensure!(!offline, "offline cache miss for {}", file.path);
-            let url = format!(
-                "https://huggingface.co/datasets/{}/resolve/{}/{}",
-                origin.source_id, origin.resolved_revision, file.path
-            );
+            let url = hub_file_url(origin, file)?;
             let client = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()?;
@@ -203,6 +200,22 @@ pub fn materialize(
         paths.push(dest);
     }
     Ok(paths)
+}
+
+fn hub_file_url(origin: &DatasetOrigin, file: &SourceFile) -> Result<reqwest::Url> {
+    origin.validate()?;
+    ensure!(safe_segments(&file.path), "invalid source path");
+    ensure!(hex(&file.sha256, 64), "invalid file digest");
+    let mut url = reqwest::Url::parse("https://huggingface.co/")?;
+    // URL's segment API percent-encodes each component, rather than treating
+    // source metadata as URL syntax. Validation remains deliberately stricter.
+    url.path_segments_mut()
+        .map_err(|_| anyhow::anyhow!("invalid Hub base URL"))?
+        .extend(["datasets"])
+        .extend(origin.source_id.split('/'))
+        .extend(["resolve", &origin.resolved_revision])
+        .extend(file.path.split('/'));
+    Ok(url)
 }
 
 fn copy_verified(reader: impl Read, writer: &mut impl Write, file: &SourceFile) -> Result<()> {
@@ -645,6 +658,55 @@ mod tests {
         limits.max_total_bytes = 2;
         assert!(materialize(&origin, &rights, dir.path(), true, limits).is_err());
     }
+    #[test]
+    fn url_components_and_digest_are_validated_before_cache_or_network() {
+        let (mut origin, rights, limits) = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("must-not-be-created");
+        for path in [
+            "",
+            "/absolute",
+            "back\\slash",
+            "..",
+            ".",
+            "a/../b",
+            "a/./b",
+            "a?query",
+            "a#fragment",
+            "a//b",
+            "a%2fb",
+        ] {
+            origin.files[0].path = path.into();
+            assert!(origin.validate().is_err(), "accepted path {path:?}");
+            assert!(hub_file_url(&origin, &origin.files[0]).is_err());
+            // Offline by construction, even if a future validation regression occurs.
+            assert!(materialize(&origin, &rights, &cache, true, limits).is_err());
+            assert!(!cache.exists());
+        }
+        origin.files[0].path = "data/test.jsonl".into();
+        for digest in [
+            "".into(),
+            "a".repeat(63),
+            "a".repeat(65),
+            "g".repeat(64),
+            "../outside".into(),
+        ] {
+            origin.files[0].sha256 = digest;
+            assert!(materialize(&origin, &rights, &cache, true, limits).is_err());
+            assert!(!cache.exists());
+        }
+        origin.files[0].sha256 = sha256(b"{}\n");
+        let url = hub_file_url(&origin, &origin.files[0]).unwrap();
+        assert_eq!(
+            url.as_str(),
+            format!(
+                "https://huggingface.co/datasets/example/fixture/resolve/{}/data/test.jsonl",
+                "a".repeat(40)
+            )
+        );
+        assert!(url.query().is_none() && url.fragment().is_none());
+    }
+
     #[test]
     fn streaming_size_checksum_and_truncation() {
         let (origin, _, _) = fixture();
