@@ -344,13 +344,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Same prerelease test as github-release below: an rc never
-          # promotes /latest/, it only gets its own versioned path.
+          # Same prerelease test as github-release below: prereleases never
+          # promote /latest/, only their own versioned paths.
           is_prerelease() {
-            case "$1" in
-              *-rc.*|*-alpha.*|*-beta.*) return 0 ;;
-              *) return 1 ;;
-            esac
+            [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]
           }
           all_tags="$(git tag --list 'v*' --sort=-v:refname | tr '\n' ' ')"
           npm ci
@@ -439,12 +436,23 @@ jobs:
             -f tag_name="${RELEASE_TAG}" --jq .body > release-notes.md
           printf '\n' >> release-notes.md
           cargo xtask release-notes-data-points >> release-notes.md
+      - name: Classify release tag
+        id: release-kind
+        shell: bash
+        run: |
+          is_prerelease() {
+            [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]
+          }
+          if is_prerelease "${RELEASE_TAG}"; then
+            echo 'prerelease=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           body_path: release-notes.md
-          # Infer prerelease from the tag so -rc.N never becomes GitHub Latest.
-          prerelease: ${{ contains(env.RELEASE_TAG, '-rc.') || contains(env.RELEASE_TAG, '-alpha.') || contains(env.RELEASE_TAG, '-beta.') }}
+          prerelease: ${{ steps.release-kind.outputs.prerelease == 'true' }}
           generate_release_notes: false
           files: |
             *.tar.gz

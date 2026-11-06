@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Metrum AI: keep all prerelease tags out of latest release promotion and
+  clarify reasoning-only truncation semantics in the output schema.
+
 - Metrum AI: develop GPU certification runners and independent evidence
   checks; unsupported cases remain fail-closed. Prospectively revise the
   reference comparison to use frozen ShareGPT prompts with a matched 1024-token
