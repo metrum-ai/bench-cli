@@ -36,6 +36,7 @@ pub mod sweep_modality;
 pub mod telemetry;
 pub mod time_weighted;
 pub mod tokenizer;
+pub mod trace_inputs;
 pub mod usage;
 pub mod vlm;
 

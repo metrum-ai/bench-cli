@@ -69,6 +69,7 @@ PATH_AREAS = {
     'src/telemetry/writer.rs': {'TELEM', 'SCHEMA', 'GPU', 'INTEG'},
     'src/time_weighted.rs': {'MATH', 'TELEM', 'GPU'},
     'src/tokenizer.rs': {'CLI', 'MATH', 'GPU', 'COMP', 'PERF'},
+    'src/trace_inputs.rs': {'*'},
     'src/vlm.rs': {'LIVE', 'REASON', 'GPU', 'MATH', 'SCHEMA'},
     'dummy-model-server/**': {'CI'},
     'README.md': {'REL', 'PACK', 'POST', 'CI'},
