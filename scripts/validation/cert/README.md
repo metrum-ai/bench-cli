@@ -248,7 +248,11 @@ this offline JSON format does not cryptographically establish identity. Raw
 traces, wrapper output and sign-off evidence remain private.
 
 For release evidence, generate and freeze the selection described in
-[the release policy](../../../docs/RELEASE_CERTIFICATION.md). The validator
+[the release policy](../../../docs/RELEASE_CERTIFICATION.md). `CONTRIBUTING.md`
+uses the same documentation areas as `README.md`; combined measurement changes
+still add their own areas. Unknown paths remain listed as unmapped and select
+all extended areas conservatively, rather than silently excluding cases.
+The validator
 requires all selected PR, RC and RC-GPU rows and produces `results.csv` and
 `CERTIFICATION-REPORT.md`, with unselected rows explicitly NOT-SELECTED:
 
