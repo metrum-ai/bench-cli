@@ -3,6 +3,7 @@
 
 pub mod args_common;
 pub mod asr;
+pub mod canonical_input;
 pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;
@@ -22,6 +23,7 @@ pub mod preflight;
 pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
+pub mod public_dataset;
 pub mod record;
 pub mod request;
 pub mod runner;

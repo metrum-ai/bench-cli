@@ -142,6 +142,19 @@ class PublicCatalogTests(unittest.TestCase):
         unmapped = [path for path in paths if path.endswith('.rs') and path not in select.PATH_AREAS]
         self.assertEqual([], unmapped, f'map newly tracked source paths explicitly: {unmapped}')
 
+    def test_new_input_paths_preserve_conservative_all_area_selection(self):
+        path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
+        catalog = validator.load_catalog(path)
+        sha = 'a' * 40
+        history = [{'release': 'prior', 'ran': sorted(catalog)}]
+        unknown = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3,
+                                        ['src/future_unmapped_input.rs'], history)
+        for source in ('src/canonical_input.rs', 'src/public_dataset.rs'):
+            self.assertEqual({'*'}, select.PATH_AREAS[source])
+            mapped = select.make_selection(catalog, select.catalog_hash(path), sha, .3, 3,
+                                           [source], history)
+            self.assertEqual(unknown['selected'], mapped['selected'])
+
     def test_docs_plus_changelog_is_sampled_not_full(self):
         path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
         catalog = validator.load_catalog(path)
