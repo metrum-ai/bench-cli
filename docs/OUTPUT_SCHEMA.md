@@ -13,7 +13,7 @@ loader without changing legacy Vec<String> APIs or runner output schema versions
 
 ## Public input provenance sub-contract
 
-The standalone `public_dataset::ValidationManifest` uses integer
+The standalone `public_dataset::ValidationManifest` uses string
 `schema_version: "kv-dataset-manifest.v1"` and is documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md).
 It is not yet embedded into runner output. Corpus counts and validation checks
 carry explicit measured/publisher/unknown status; canonical target counts are
