@@ -43,6 +43,49 @@ reset after machine warmup; a new file/session ID is not sufficient. These lifec
 and scheduling enhancements are separate steps under #413. Generic prompt-library
 throughput profiles do not establish controlled KV reuse or offload evidence.
 
+## Trusted stage reset lifecycle (v1.9.0 development)
+
+`--stage-hook CMD --stage-reset-scope resident,external` is an explicit opt-in
+**trusted operator shell command**, never a dataset-provided command. It runs
+once per cold stage after machine warmup requests have drained, before any
+measured issuance. It never runs between measured requests. Intended ordering:
+held-out token-prefix-disjoint machine warmup → drain → reset → scoped
+acknowledgement → readiness → optional asynchronous transfer settling → measure.
+Kernels/connections stay warm without leaving measured prefixes resident.
+
+The hook must exit zero and write one bounded JSON object (at most 64 KiB):
+
+```json
+{"success":true,"scope":["resident","external"],"ready":true,"settled":true}
+```
+
+All intended tiers must be acknowledged exactly; missing/malformed fields,
+`success=false`, unsettled transfers, nonzero exit or timeout abort before measured
+requests. The total `--stage-hook-timeout-seconds` deadline (default 60) includes
+execution, readiness and `--stage-settle-ms` (default 0). An optional
+`--stage-ready-url` must return successful HTTP with JSON `ready=true` and no
+false/malformed `success`; HTTP 200 alone is insufficient. Without that probe,
+the hook itself must acknowledge `ready=true`.
+
+`--pre-warmup-reset` additionally runs the hook before warmup; off by default.
+It does not replace the post-warmup reset. Both acknowledgements retain scope and
+UTC Unix-nanosecond start/ack/readiness/settling timestamps. Operators must still
+validate the actual engine/tier reset mechanism; a trusted command's declaration
+is not independent physical cache evidence or a live support claim.
+
+The command receives `BENCH_STAGE_INDEX` (one-based), `BENCH_STAGE_LOAD`, and
+`BENCH_RESET_SCOPE`. Run only trusted scripts; use environment-based credentials,
+never command-line tokens. Commands/output are excluded from summary/errors;
+config retains a command digest and non-sensitive lifecycle metadata. Hooks must
+not daemonize; use `exec` for a long-running subprocess so timeout cancellation
+can terminate it. Ensure asynchronous transfers have drained before acknowledging
+settled state. A settle delay is not proof of completed transfers on its own.
+
+Default behavior is unchanged when no hook is supplied. These hooks do not yet
+provide held-out warmup input or prove prefix-disjointness; do not claim that the
+legacy warmup pool is isolated. Cold studies must configure safe warmup and
+validate every intended tier, not merely restart the benchmark client.
+
 ## Sweep and server correlation
 
 ```bash

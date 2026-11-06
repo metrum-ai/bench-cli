@@ -5,6 +5,11 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in trusted strategic stage reset hooks after warmup drain and before
+  measurement, with exact tier acknowledgement, readiness, total deadlines and
+  optional settle delay/pre-warmup reset. Record non-sensitive acknowledgements
+  and lifecycle timestamps; failures abort measured issuance (#413).
+
 - Add opt-in strategic `--session-request-roles` for recorded-history request
   boundaries, preserving original message indices and legacy defaults. Record
   boundary/history policy in summary config (#413, first implementation slice).
