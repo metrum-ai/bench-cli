@@ -469,6 +469,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
+[sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
 [trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
 [held-out warmup boundary](docs/STRATEGIC_BENCHMARKING.md#held-out-warmup-integration-boundary-v190-development),
 [prompt library](docs/PROMPT_LIBRARY.md),

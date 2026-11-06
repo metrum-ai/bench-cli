@@ -27,6 +27,9 @@ See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
 
 Session summaries record `config.session_request_roles` as the selected role array,
 or `legacy_all_prefixes` when omitted, and `config.session_history_mode=recorded`.
+`config.session_mode` is `legacy` or `closed-loop`; the latter limits active
+sessions on concurrency sweeps and records `session_budget_semantics` because
+the issued-request budget may end with a partial session.
 Per-request `turn` stays the original one-based message position, not a filtered
 ordinal. These optional config fields do not change existing record versions.
 See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).

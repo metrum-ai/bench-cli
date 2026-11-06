@@ -35,8 +35,24 @@ selected pool fail before traffic. The summary config records
 `session_request_roles` (or `legacy_all_prefixes`) and `session_history_mode=recorded`.
 The stage request count still controls issuance and cycles the selected pool.
 
-Boundary selection alone does **not** enforce sequential sessions or cold caches.
-Current scheduling remains flattened request scheduling. Recorded assistant history
+### Sequential recorded-history sessions
+
+`--session-mode closed-loop --session-request-roles user,tool` makes stage
+concurrency count active sessions. Each session sends its selected request points
+in order and waits for completion before sending the next. When it finishes,
+another pending session starts. Pool cycling never activates a second instance
+of an already active session, so concurrency can be below the target when the
+pool is small. `--requests-per-stage` remains a request budget and may stop at
+a partial session. Warmup also respects turn sequencing, but still uses the
+same input pool until held-out warmup is supplied in a later lifecycle step.
+
+This mode requires a concurrency sweep; rate sweeps are rejected rather than
+mislabelled independent arrivals. Default `--session-mode legacy` retains flat
+request scheduling. Config records mode and budget semantics. This is recorded
+history replay, not live-generated-history conversation: outputs do not replace
+recorded assistant messages. Boundary selection alone does **not** enforce
+sequential sessions; select closed-loop explicitly. Neither mode proves cold caches.
+Recorded assistant history
 can differ from generated answers; do not infer reuse of generated KV. Held-out
 warmup needs token-prefix isolation, and cold measurement needs acknowledged tier
 reset after machine warmup; a new file/session ID is not sufficient. These lifecycle
