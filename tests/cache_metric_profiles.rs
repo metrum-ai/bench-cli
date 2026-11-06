@@ -1,0 +1,238 @@
+// Copyright (c) 2026 Metrum AI, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Synthetic source-derived probes, NOT captured live exporter certification.
+use metrum_ai_bench::cache_metrics::{probe, ProbeError, ProfileId, Role, Unit, Unknown};
+use metrum_ai_bench::telemetry::MetricType;
+
+fn fixture(profile: ProfileId) -> String {
+    profile
+        .metrics()
+        .iter()
+        .map(|s| {
+            let kind = if s.kind == MetricType::Counter {
+                "counter"
+            } else {
+                "gauge"
+            };
+            let value = if s.unit == Unit::Ratio { "0.5" } else { "10" };
+            let tier = if s.metric == "sglang:cached_tokens_total" {
+                ",cache_source=\"device\""
+            } else {
+                ""
+            };
+            format!(
+                "# TYPE {} {kind}\n{}{{worker=\"worker-a\"{tier}}} {value}\n",
+                s.metric, s.metric
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn exact_pinned_profiles_preserve_units_types_labels_and_missing_not_zero() {
+    for profile in [
+        ProfileId::VllmApc,
+        ProfileId::VllmExternal,
+        ProfileId::Sglang,
+        ProfileId::Lmcache,
+        ProfileId::DynamoKvbm,
+    ] {
+        let page = fixture(profile);
+        let result = probe(profile, Some(profile.source_revision()), &page).unwrap();
+        assert!(result.missing_required_metrics.is_empty());
+        assert_eq!(result.observations.len(), profile.metrics().len());
+        for row in result.observations {
+            assert!(row.value.is_some());
+            assert_eq!(row.labels["worker"], "worker-a");
+            if row.spec.role == Role::ReportedHitRate {
+                assert_eq!(row.spec.kind, MetricType::Gauge);
+            }
+        }
+        let absent = probe(profile, Some(profile.source_revision()), "").unwrap();
+        assert!(absent.observations.is_empty());
+        assert!(!absent.missing_required_metrics.is_empty());
+        let unknown = probe(profile, None, &page).unwrap();
+        assert!(unknown
+            .observations
+            .iter()
+            .all(|v| v.value.is_none()
+                && v.unknown == Some(Unknown::RevisionNotDeclaredOrUnsupported)));
+    }
+    assert!(ProfileId::Lmcache
+        .metrics()
+        .iter()
+        .any(|v| v.role == Role::Stored
+            && v.unit == Unit::Tokens
+            && v.kind == MetricType::Counter));
+    assert!(ProfileId::DynamoKvbm
+        .metrics()
+        .iter()
+        .any(|v| v.unit == Unit::Blocks));
+}
+
+#[test]
+fn observed_type_not_counter_suffix_and_required_families_gate_values() {
+    let p = ProfileId::VllmExternal;
+    let page = fixture(p);
+    let untyped: String = page
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert!(probe(p, Some(p.source_revision()), &untyped)
+        .unwrap()
+        .observations
+        .iter()
+        .all(|v| v.unknown == Some(Unknown::TypeNotDeclaredOrConflicting)));
+    let incomplete = format!(
+        "# TYPE {} counter\n{} 0\n",
+        p.metrics()[0].metric,
+        p.metrics()[0].metric
+    );
+    let result = probe(p, Some(p.source_revision()), &incomplete).unwrap();
+    assert_eq!(
+        result.observations[0].unknown,
+        Some(Unknown::MissingRequired)
+    );
+    let zero = page.replace(" 10\n", " 0\n");
+    assert!(probe(p, Some(p.source_revision()), &zero)
+        .unwrap()
+        .observations
+        .iter()
+        .all(|v| v.value == Some(0.0)));
+    let conflict = format!("{page}# TYPE {} gauge\n", p.metrics()[0].metric);
+    assert_eq!(
+        probe(p, Some(p.source_revision()), &conflict)
+            .unwrap()
+            .observations[0]
+            .unknown,
+        Some(Unknown::TypeNotDeclaredOrConflicting)
+    );
+}
+
+#[test]
+fn duplicate_series_are_unknown_while_distinct_label_sets_are_not_summed() {
+    let p = ProfileId::VllmExternal;
+    let page = fixture(p);
+    let duplicate = format!("{page}{page}");
+    assert!(probe(p, Some(p.source_revision()), &duplicate)
+        .unwrap()
+        .observations
+        .iter()
+        .all(|v| v.unknown == Some(Unknown::DuplicateIdentity)));
+    let extra: String = page
+        .replace("worker-a", "worker-b")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let distinct = format!("{page}{extra}");
+    let result = probe(p, Some(p.source_revision()), &distinct).unwrap();
+    assert_eq!(result.observations.len(), 4);
+    assert!(result.observations.iter().all(|v| v.value == Some(10.0)));
+}
+
+#[test]
+fn explicit_incompatible_units_cannot_override_source_semantics() {
+    let p = ProfileId::VllmExternal;
+    let page = format!("# UNIT {} bytes\n{}", p.metrics()[0].metric, fixture(p));
+    let result = probe(p, Some(p.source_revision()), &page).unwrap();
+    assert_eq!(
+        result.observations[0].unknown,
+        Some(Unknown::UnitNotCompatible)
+    );
+    assert!(result.observations[0].value.is_none());
+    assert_eq!(result.observations[1].value, Some(10.0));
+}
+
+#[test]
+fn unrelated_series_do_not_exhaust_the_selected_profile_budget() {
+    let p = ProfileId::VllmExternal;
+    let unrelated: String = (0..1024)
+        .map(|i| format!("other_metric{{index=\"{i}\"}} 1\n"))
+        .collect();
+    let result = probe(
+        p,
+        Some(p.source_revision()),
+        &format!("{}{unrelated}", fixture(p)),
+    )
+    .unwrap();
+    assert_eq!(result.observations.len(), 2);
+    assert_eq!(result.unmatched_samples, 1024);
+    assert!(result.observations.iter().all(|v| v.value == Some(10.0)));
+    let too_many: String = (0..257)
+        .map(|i| format!("{}{{worker=\"{i}\"}} 1\n", p.metrics()[0].metric))
+        .collect();
+    assert_eq!(
+        probe(p, Some(p.source_revision()), &too_many).unwrap_err(),
+        ProbeError::TooManySeries
+    );
+}
+
+#[test]
+fn late_types_and_unknown_storage_sources_are_not_validated() {
+    let p = ProfileId::VllmExternal;
+    let page = fixture(p);
+    let samples: String = page
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let declarations: String = page
+        .lines()
+        .filter(|l| l.starts_with('#'))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let result = probe(
+        p,
+        Some(p.source_revision()),
+        &format!("{samples}{declarations}"),
+    )
+    .unwrap();
+    assert_eq!(result.observations.len(), 2);
+    assert!(result
+        .observations
+        .iter()
+        .all(|v| v.unknown == Some(Unknown::TypeNotDeclaredOrConflicting)));
+    let p = ProfileId::Sglang;
+    let page = fixture(p).replace(
+        "cache_source=\"device\"",
+        "cache_source=\"unvalidated-tier\"",
+    );
+    let result = probe(p, Some(p.source_revision()), &page).unwrap();
+    assert_eq!(result.observations[0].unknown, Some(Unknown::InvalidLabels));
+}
+
+#[test]
+fn invalid_nonfinite_fractional_and_imprecise_counters_remain_unknown() {
+    let p = ProfileId::VllmExternal;
+    for value in ["NaN", "+Inf", "-1", "0.5", "9007199254740992"] {
+        let page = fixture(p).replace(" 10\n", &format!(" {value}\n"));
+        assert!(probe(p, Some(p.source_revision()), &page)
+            .unwrap()
+            .observations
+            .iter()
+            .all(|v| v.value.is_none()));
+    }
+    let p = ProfileId::VllmApc;
+    let result = probe(
+        p,
+        Some(p.source_revision()),
+        &fixture(p).replace(" 0.5\n", " 50\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result.observations.last().unwrap().unknown,
+        Some(Unknown::InvalidValue)
+    );
+    assert_eq!(
+        probe(
+            p,
+            Some(p.source_revision()),
+            &"x".repeat(4 * 1024 * 1024 + 1)
+        )
+        .unwrap_err(),
+        ProbeError::PageTooLarge
+    );
+}
