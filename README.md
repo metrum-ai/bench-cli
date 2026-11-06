@@ -469,6 +469,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
 [public dataset contract](docs/PUBLIC_DATASETS.md),
+[rendered-token validation](docs/PREFIX_VALIDATION.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
