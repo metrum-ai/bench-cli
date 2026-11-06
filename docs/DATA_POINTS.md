@@ -71,7 +71,7 @@ harness counts agree on what a quantity is.
   Counts describe a successful request; a failed one carries the always set
   plus the request-side `http` fields.
 - **Optional:** in the maximal record but absent or `null` in the minimal
-  one. Each optional field fires when any condition in its row holds.
+  one. A row uses `or` for alternatives and `and` for required conjunctions.
 
 ## Conditions
 
@@ -80,6 +80,7 @@ harness counts agree on what a quantity is.
 | `http` | Set by the bundled binaries' HTTP request path (llm, vlm, asr, imagegen, strategic). Response body fields (`receive_s`, `bytes_received`, `chunks_received`) are on successes only. |
 | `usage` | The server reports complete `usage` token counts for the relevant population. |
 | `streaming` | `--streaming` chat or vlm. `itl_s` needs two or more content chunks, `decode_tok_s` a positive decode time and output tokens. |
+| `visible-answer` | A visible answer or tool output delta was observed; absent for reasoning-only truncation. |
 | `ttft-approx` | This condition refers only to `--infer-ttft-from-first-byte`, which approximates missing TTFT from HTTP response headers, not a token. `--ttft-fallback first-token` is a deprecated redundant alias; `--allow-missing-ttft` relaxes the audit. Reasoning-only truncation is unanswered and `--ci-safety` rejects it. |
 | `reasoning-stream` | The server streams `reasoning_content` deltas. |
 | `reasoning-usage` | The server reports `usage.completion_tokens_details.reasoning_tokens` (or an accepted variant). |
@@ -93,15 +94,19 @@ harness counts agree on what a quantity is.
 | `validation` | Strategic response validation (`--json-schema` or `--tools`). |
 | `measured-success` | The stage has at least one measured request or success. |
 | `positive-window` | The measured terminal window is finite and strictly positive. |
+| `positive-completion-rate` | The completion-token rate is finite and strictly positive. |
+| `output-generating` | The strategic stage kind generates output tokens. |
 | `vlm-sweep` | `metrum-ai-bench-cli-strategic --kind vlm`. |
 | `asr-sweep` | `metrum-ai-bench-cli-strategic --kind asr`. `wer` and `cer` are `n = 0` without `--ground-truth`; `audio_duration_s` and `rtfx_client` are `n = 0` without a sample `duration`. |
 | `imagegen-sweep` | `metrum-ai-bench-cli-strategic --kind imagegen`. `image_digests` counts decoded `b64_json` images (0 for `url` responses). |
+
+Reasoning-usage for non-reasoning rates must be complete and consistent for every measured row. Cost also requires a finite nonnegative price and a finite strictly positive completion-token rate. Totals do not require a positive window.
 
 ## Plain llm run
 
 A closed-loop `metrum-ai-bench-cli-llm --mode chat --streaming` run against a
 server that reports usage, with no reasoning, SLO, price, ISL/OSL targets,
-tokenizer, or `--ndjson`, meets `http`, `usage`, `streaming`, `positive-window`. It fires **56**
+tokenizer, or `--ndjson`, meets `http`, `usage`, `streaming`, `visible-answer`, `positive-window`. It fires **56**
 summary quantities and **23** per-request fields (schema fields
 plus the llm `modality_metrics` keys).
 `tests/data_points.rs` runs exactly that against dummy-model-server and
@@ -123,13 +128,13 @@ than the schema `values` here, which counts every numeric slot.
 | `bytes_received` | distribution | 10 | always |
 | `bytes_sent` | distribution | 10 | always |
 | `chunks_received` | distribution | 10 | always |
-| `completion_tokens_per_second` | scalar | 1 | `usage` |
+| `completion_tokens_per_second` | scalar | 1 | `usage` and `positive-window` |
 | `completion_tokens_total` | scalar | 1 | `usage` |
 | `connect_s` | distribution | 10 | always |
 | `connection_reuse_rate` | scalar | 1 | `http` |
 | `connections_reused` | scalar | 1 | `http` |
 | `coordinated_omission_latency_s` | distribution | 10 | always |
-| `cost_per_million_output_tokens` | scalar | 1 | `price` |
+| `cost_per_million_output_tokens` | scalar | 1 | `price` and `positive-completion-rate` |
 | `decode_s` | distribution | 10 | always |
 | `decode_tok_s` | distribution | 10 | always |
 | `dns_s` | distribution | 10 | always |
@@ -144,13 +149,13 @@ than the schema `values` here, which counts every numeric slot.
 | `first_byte_s` | distribution | 10 | always |
 | `first_reasoning_s` | distribution | 10 | always |
 | `goodput` | block | 7 | always |
-| `input_tokens_per_second` | scalar | 1 | `usage` |
+| `input_tokens_per_second` | scalar | 1 | `usage` and `positive-window` |
 | `isl_osl` | block | 11 | `isl-osl-targets` |
 | `isl_tokens` | distribution | 10 | always |
 | `itl_s` | distribution | 10 | always |
 | `latency_s` | distribution | 10 | always |
 | `legacy_success_completion_tokens_per_second` | scalar | 1 | `usage` or `tokenizer` |
-| `non_reasoning_completion_tokens_per_second` | scalar | 1 | `reasoning-usage` |
+| `non_reasoning_completion_tokens_per_second` | scalar | 1 | `usage` and `positive-window` and `reasoning-usage` |
 | `observed_concurrency` | block | 7 | `http` |
 | `observed_reasoning_tokens` | distribution | 10 | always |
 | `observed_reasoning_tokens_total` | scalar | 1 | `reasoning-usage` |
@@ -171,7 +176,7 @@ than the schema `values` here, which counts every numeric slot.
 | `throughput_bins_rps` | distribution | 10 | always |
 | `time_to_second_token_s` | distribution | 10 | always |
 | `tokens_in_flight` | block | 5 | always |
-| `total_tokens_per_second` | scalar | 1 | `usage` |
+| `total_tokens_per_second` | scalar | 1 | `usage` and `positive-window` |
 | `tpot_s` | distribution | 10 | always |
 | `ttft_approx_count` | scalar | 1 | `ttft-approx` |
 | `ttft_coverage` | block | 10 | always |
@@ -212,12 +217,12 @@ than the schema `values` here, which counts every numeric slot.
 | `bytes_received` | distribution | 10 | always |
 | `bytes_sent` | distribution | 10 | always |
 | `chunks_received` | distribution | 10 | always |
-| `completion_tokens_per_second` | scalar | 1 | `usage` |
-| `completion_tokens_total` | scalar | 1 | `usage` |
+| `completion_tokens_per_second` | scalar | 1 | `usage` and `positive-window` and `output-generating` |
+| `completion_tokens_total` | scalar | 1 | `usage` and `output-generating` |
 | `connect_s` | distribution | 10 | always |
 | `connection_reuse_rate` | scalar | 1 | `http` |
 | `connections_reused` | scalar | 1 | `http` |
-| `cost_per_million_output_tokens` | scalar | 1 | `price` |
+| `cost_per_million_output_tokens` | scalar | 1 | `price` and `positive-completion-rate` |
 | `decode_s` | distribution | 10 | always |
 | `decode_tok_s` | distribution | 10 | always |
 | `dns_s` | distribution | 10 | always |
@@ -233,7 +238,7 @@ than the schema `values` here, which counts every numeric slot.
 | `first_reasoning_s` | distribution | 10 | always |
 | `goodput` | scalar | 1 | `positive-window` |
 | `image_digests` | block | 2 | `imagegen-sweep` |
-| `input_tokens_per_second` | scalar | 1 | `usage` |
+| `input_tokens_per_second` | scalar | 1 | `usage` and `positive-window` |
 | `isl_osl` | block | 11 | `isl-osl-targets` |
 | `isl_tokens` | distribution | 10 | always |
 | `latency_s` | distribution | 10 | always |
@@ -248,7 +253,7 @@ than the schema `values` here, which counts every numeric slot.
 | `modality_metrics.rtfx_client` | distribution | 10 | `asr-sweep` |
 | `modality_metrics.wer` | distribution | 10 | `asr-sweep` |
 | `n` | scalar | 1 | always |
-| `non_reasoning_completion_tokens_per_second` | scalar | 1 | `reasoning-usage` |
+| `non_reasoning_completion_tokens_per_second` | scalar | 1 | `usage` and `positive-window` and `reasoning-usage` and `output-generating` |
 | `observed_concurrency` | block | 7 | `http` |
 | `observed_reasoning_tokens` | distribution | 10 | always |
 | `observed_reasoning_tokens_total` | scalar | 1 | `reasoning-usage` |
@@ -269,7 +274,7 @@ than the schema `values` here, which counts every numeric slot.
 | `throughput` | scalar | 1 | `positive-window` |
 | `time_to_second_token_s` | distribution | 10 | always |
 | `tokens_in_flight` | block | 5 | always |
-| `total_tokens_per_second` | scalar | 1 | `usage` |
+| `total_tokens_per_second` | scalar | 1 | `usage` and `positive-window` and `output-generating` |
 | `ttft_approx_count` | scalar | 1 | `ttft-approx` |
 | `ttft_coverage` | block | 10 | always |
 | `ttft_first_any_s` | distribution | 10 | always |
@@ -311,7 +316,7 @@ than the schema `values` here, which counts every numeric slot.
 | `total_tokens` | always |
 | `ttft_first_any_s` | `streaming` |
 | `ttft_s` | `streaming` or `ttft-approx` |
-| `ttft_visible_answer_s` | `streaming` |
+| `ttft_visible_answer_s` | `streaming` and `visible-answer` |
 | `visible_completion_tokens` | `reasoning-usage` |
 
 ## `telemetry.v3` `request` row fields (`--ndjson`)
@@ -332,4 +337,4 @@ than the schema `values` here, which counts every numeric slot.
 | `t_sent_ns` | always |
 | `ttft_first_any_s` | `streaming` |
 | `ttft_s` | `streaming` or `ttft-approx` |
-| `ttft_visible_answer_s` | `streaming` |
+| `ttft_visible_answer_s` | `streaming` and `visible-answer` |

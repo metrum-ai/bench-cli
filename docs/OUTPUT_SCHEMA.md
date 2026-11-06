@@ -12,14 +12,16 @@ that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)
 
 `metrum-ai-bench-cli.request.v5` records are flushed immediately on completion;
 audit readers also accept earlier supported versions including v4. In v5,
-`ttft_s` is first-any reasoning or visible output, while
-`ttft_visible_answer_s` is the first visible output and `ttft_first_any_s`
-retains the first-any alias. `outcome` and `answer_completed` separate
-transport completion from an answer. A reasoning-only length finish is
-`reasoning_truncated`, non-failing by default but an error under strict mode.
-`ttft_source` distinguishes streamed timing from the explicit HTTP
-`first_byte_approx`. Historical v4 `ttft_s` means first-visible output; do not
-mix versions without mapping their semantics and cohorts.
+`ttft_s` normally records the first reasoning or visible output delta; opt-in
+`--infer-ttft-from-first-byte` may instead use HTTP headers, labelled
+`first_byte_approx`. `ttft_visible_answer_s` is the first visible output and
+`ttft_first_any_s` records the first real reasoning or visible delta. `outcome`
+and `answer_completed` separate transport completion from an answer. A
+reasoning-only length finish is `reasoning_truncated`, non-failing by default
+but an error under strict mode. Historical v4 `ttft_s` normally means first
+visible output, but can use a labelled `first_token_fallback` or explicit
+`first_byte_approx` when enabled.
+Do not mix versions without mapping their semantics and cohorts.
 
 Records contain:
 
@@ -89,7 +91,8 @@ on `request.v5` (no parallel `imagegen.request.v1` lines).
 
 `first_byte_s` is the monotonic elapsed time from send start until response
 headers are received (after a successful `.send()`). It is distinct from
-`ttft_s` (first reasoning or visible output), which includes connect/TLS/queue.
+real-delta `ttft_s`, which includes connect/TLS/queue, unless explicit
+first-byte inference supplies the labelled approximation.
 
 `connect_s` is the HTTP connector duration for establishing a new TCP/TLS
 session (DNS + TCP + TLS). `0.0` means a pooled connection was reused. TCP and
@@ -112,7 +115,7 @@ including no-answer outcomes), `fallback_ttft_s` (failed-request fallback
 samples) and `observed_reasoning_tokens` / `observed_visible_completion_tokens`
 distributions and totals (server-reported usage including completed no-answer
 streams). `first_reasoning_s` and `ttft_first_any_s` include these streams;
-v5 uses first-any headline TTFT and all-attempt usage with completeness gating. See
+v5 normally uses first-any headline TTFT (or labelled first-byte approximation) and all-attempt usage with completeness gating. See
 [METRICS.md](METRICS.md#thinking-models-ttft-vs-first-reasoning).
 
 Other summary fields:
@@ -190,9 +193,10 @@ Other summary fields:
   `ttft_s` is present. Older records may use `"first_token_fallback"`. The
   deprecated `--ttft-fallback first-token` is a redundant alias, while
   `--infer-ttft-from-first-byte` uses HTTP response-header timing.
-  `--allow-missing-ttft` relaxes only the missing-TTFT audit. Under every
-  option a completed no-answer stream remains an error, and `--ci-safety`
-  remains strict.
+  `--allow-missing-ttft` relaxes only the missing-TTFT audit. A reasoning-only
+  length finish is `reasoning_truncated` and non-failing by default; strict
+  mode and `--ci-safety` make it an error. Other completed no-answer streams
+  remain errors.
 - `price_per_hour` / `price_provenance` - declared `$/hour` from
   `--price-per-hour` (`"cli"`) or `sut.cost.price_per_hour` (`"sut"`); both
   `null` when absent. CLI overrides SUT.
@@ -402,7 +406,7 @@ present, with the same `null` rules. Differences from the summary:
   monotonic CSV `send_offset_s` (wall-clock `sent_unix_ns` for older CSVs
   without it), so
   client queue delay is excluded. The window runs from the first measured
-  send of the stage to the latest successful `sent + service_latency_s`,
+  send of the stage to the latest terminal `sent + service_latency_s` of any outcome,
   the same stage window behind `throughput` and the stage token rates
   (#224).
 - Tokens are `input_tokens` / `output_tokens` from server usage only; rows
@@ -416,9 +420,11 @@ trailing optional columns, in this order: `first_reasoning_s` (seconds),
 (#194) `connection_reused` (bool), `dns_s` (seconds), `bytes_sent` (bytes),
 `receive_s` (seconds), `bytes_received` (bytes), and `chunks_received`
 (count), then `send_offset_s` (seconds, #224): the monotonic send time from
-the run start, the same origin as the NDJSON `t_sent_ns`. The trailing
-`ttft_first_any_s` cell is the first real reasoning or visible delta, not HTTP
-headers. The `first_reasoning_s` cell is empty when the request streamed no
+the run start, the same origin as the NDJSON `t_sent_ns`. Next,
+`ttft_first_any_s` is the first real reasoning or visible delta, not HTTP
+headers; it is followed by `ttft_visible_answer_s`, `outcome`,
+`answer_completed`, `usage_missing`, `usage_prompt_tokens_present`, and
+`usage_completion_tokens_present`. The `first_reasoning_s` cell is empty when the request streamed no
 reasoning delta; the `reasoning_tokens` cell is empty when the server did not
 report reasoning. A trace cell is empty when the value is absent;
 `receive_s`, `bytes_received`, and `chunks_received` are empty for failed
@@ -433,7 +439,7 @@ stretch the window.
 ### Strategic modality sweeps (`--kind vlm|asr|imagegen`)
 
 Strategic `--kind vlm`, `--kind asr`, and `--kind imagegen` (additive, #197)
-add these fields. The schema stays `metrum-ai-bench-cli.strategic.v1`, the
+add these fields. The current schema is `metrum-ai-bench-cli.strategic.v3`, the
 request CSV columns are unchanged for every kind (per-request modality values
 are not in the CSV), and chat, embeddings, and rerank output is unchanged.
 Modality binary output uses `summary.v5` and `request.v5`.
@@ -457,8 +463,9 @@ Modality binary output uses `summary.v5` and `request.v5`.
 Existing fields for modality kinds: `osl_tokens` and
 `completion_tokens_total` come from server usage for vlm and asr (asr only
 when the server reports usage) and are `n=0` / `null` for imagegen, which
-generates no tokens. `ttft_s` has samples only for streaming chat and vlm;
-asr and imagegen stages report `ttft_s` with `n=0`.
+generates no tokens. Real token TTFT requires streaming chat or vlm; unary chat
+and vlm can explicitly use labelled HTTP first-byte approximation. ASR and
+imagegen stages report `ttft_s` with `n=0`.
 
 The strategic stdout `config` gains:
 
@@ -484,7 +491,7 @@ settings; chat, embeddings, and rerank `run` rows are unchanged.
 
 ### Strategic stdout `knee` and `knee_detection`
 
-The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v1`) carries the
+The strategic stdout JSON (`metrum-ai-bench-cli.strategic.v3`) carries the
 knee result in two fields (`knee_detection` is additive, #190):
 
 - `knee` (object or null) - the `SweepPoint` at `knee_detection.index`: the

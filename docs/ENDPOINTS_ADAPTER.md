@@ -64,12 +64,15 @@ fixed-rate run labeled Offline is a proxy, not the same arrival process.
 
 ## Definition flags
 
-Native bench definitions are preserved, never silently transformed:
+The adapter uses native values, with the following definition caveat:
 
-- **TTFT** is first **visible content token** (not first byte) — flagged
-  per metric in `result_summary.json` (`bench_definition`) and `point.yaml`.
+- **TTFT** reads `ttft_s` from successful input rows. Interpret it by input
+  schema and source: v5 streaming is first reasoning or visible delta; explicit
+  HTTP first-byte approximations are labelled separately, and historical v4
+  streaming is first visible output. The emitted definitions disclose mixed or
+  unknown provenance rather than inferring a single meaning.
 - **TPOT** is a per-request `(latency − ttft) / (completion_tokens − 1)`
-  percentile — flagged the same way; it is not a steady-state aggregate.
+  percentile, not a steady-state aggregate; `result_summary.json` flags it.
 - **Token rates** are emitted only when every successful row reports server
   usage (`usage_missing` rows drop the rate instead of undercounting it).
 

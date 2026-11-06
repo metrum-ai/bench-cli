@@ -247,7 +247,7 @@ struct Args {
 
     #[arg(
         long,
-        help = "Optional path to write summary.v4 JSON (same schema as the data-log summary line)"
+        help = "Optional path to write summary.v5 JSON (same schema as the data-log summary line)"
     )]
     summary_json: Option<String>,
 
@@ -297,7 +297,7 @@ struct Args {
     #[arg(
         long,
         value_name = "PATH",
-        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v4 as sut"
+        help = "Operator-declared SUT block (JSON/YAML) embedded in summary.v5 as sut"
     )]
     sut: Option<std::path::PathBuf>,
 
