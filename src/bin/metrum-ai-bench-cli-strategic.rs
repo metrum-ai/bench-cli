@@ -2264,7 +2264,18 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no string role"));
-        assert!(Args::try_parse_from(["bench", "--session-request-roles", "user"]).is_err());
+        assert!(Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--session-request-roles",
+            "user"
+        ])
+        .unwrap_err()
+        .to_string()
+        .contains("--sessions"));
         assert!(Args::try_parse_from(
             base.into_iter()
                 .chain(["--session-request-roles", "invalid"])
