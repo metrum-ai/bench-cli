@@ -438,6 +438,51 @@ mod tests {
             .unwrap(),
             records
         );
+        #[cfg(feature = "tokenizer")]
+        {
+            // Committed synthetic tokenizer/template bytes, never downloaded.
+            let tokenizer = br#"{"version":"1.0","truncation":null,"padding":null,"added_tokens":[],"normalizer":null,"pre_tokenizer":{"type":"WhitespaceSplit"},"post_processor":null,"decoder":null,"model":{"type":"WordLevel","vocab":{"[UNK]":0,"shared":1,"Question:":2,"one":3,"two":4},"unk_token":"[UNK]"}}"#;
+            let template = b"{% for message in messages %}{{ message.content }}{% endfor %}";
+            let tok = dir.path().join("tokenizer.json");
+            let tpl = dir.path().join("chat.jinja");
+            std::fs::write(&tok, tokenizer).unwrap();
+            std::fs::write(&tpl, template).unwrap();
+            let mut rendered_job = job.clone();
+            rendered_job.constraints.content_unique = true;
+            rendered_job.rendering = Some(ProfileRendering {
+                identity: RenderingIdentity {
+                    tokenizer_id: "fixture/wordlevel".into(),
+                    tokenizer_revision: "a".repeat(40),
+                    tokenizer_sha256: sha256(tokenizer),
+                    chat_template_sha256: sha256(template),
+                    add_special_tokens: false,
+                    add_generation_prompt: true,
+                    hint_nonce_included: false,
+                    renderer_version: "minijinja-chat.v1".into(),
+                },
+                tokenizer_path: tok,
+                template_path: tpl,
+                special_tokens: json!({}),
+                max_artifact_bytes: 8192,
+                max_rendered_bytes: 1024,
+                max_tokens: 64,
+                template_fuel: 10000,
+            });
+            let (rendered_records, measured) = build(&rendered_job, &cache, true).unwrap();
+            assert_eq!(rendered_records.len(), 2);
+            let overlap = measured.overlap.unwrap();
+            assert_eq!(overlap.sample_size, 2);
+            assert_eq!(overlap.lengths.min, Some(3));
+            assert_eq!(overlap.lengths.max, Some(3));
+            assert_eq!(overlap.within_group_lcp.min, Some(2));
+            assert_eq!(overlap.block_aligned_reuse_ceiling.max, Some(0));
+            assert!(matches!(
+                measured.manifest.checks["rendered_overlap"],
+                Evidence::Measured(_)
+            ));
+            rendered_job.constraints.max_pair_lcp = Some(0);
+            assert!(build(&rendered_job, &cache, true).is_err());
+        }
         let mut denied = job.clone();
         denied.rights.license = None;
         assert!(build(&denied, &cache, true).is_err());
