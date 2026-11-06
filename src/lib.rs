@@ -3,7 +3,10 @@
 
 pub mod args_common;
 pub mod asr;
+pub mod cache_cohorts;
+pub mod cache_report;
 pub mod cache_workload;
+pub mod cached_tokens;
 pub mod chat_stream;
 pub mod compare;
 pub mod concurrency;

@@ -122,6 +122,8 @@ pub struct BenchRecord {
     /// SHA-256 of exact serialized request-body bytes, never prompt text.
     #[serde(default)]
     pub body_sha256: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_cache_evidence")]
+    pub cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
 }
 
 fn unknown_usage_is_missing() -> bool {
@@ -1521,6 +1523,34 @@ struct CsvBenchRecord {
     usage_completion_tokens_present: Option<bool>,
     cache_workload_version: Option<String>,
     body_sha256: Option<String>,
+    #[serde(serialize_with = "serialize_cache_evidence")]
+    cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
+}
+
+fn deserialize_cache_evidence<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<crate::cached_tokens::CachedTokenEvidence>, D::Error> {
+    match Option::<Value>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(Value::String(text)) if text.is_empty() => Ok(None),
+        Some(Value::String(text)) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Some(value) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
+fn serialize_cache_evidence<S: Serializer>(
+    evidence: &Option<crate::cached_tokens::CachedTokenEvidence>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match evidence {
+        Some(evidence) => serializer
+            .serialize_str(&serde_json::to_string(evidence).map_err(serde::ser::Error::custom)?),
+        None => serializer.serialize_none(),
+    }
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
@@ -2873,13 +2903,27 @@ mod tests {
         export_csv(&path, &[record]).unwrap();
         let mut reader = csv::Reader::from_path(path).unwrap();
         let header = reader.headers().unwrap().clone();
-        assert_eq!(header.get(header.len() - 3), Some("usage_missing"));
+        let usage_marker = header
+            .iter()
+            .position(|name| name == "usage_missing")
+            .unwrap();
+        assert_eq!(header.get(usage_marker - 1), Some("answer_completed"));
+        assert_eq!(
+            header.get(usage_marker + 1),
+            Some("usage_prompt_tokens_present")
+        );
+        assert_eq!(
+            header.get(usage_marker + 2),
+            Some("usage_completion_tokens_present")
+        );
         let row = reader.records().next().unwrap().unwrap();
+        // Reconstruct the historical prefix, excluding the usage marker and all
+        // later extensions rather than assuming those markers are still last.
         let mut writer = csv::Writer::from_writer(Vec::new());
         writer
-            .write_record(header.iter().take(header.len() - 3))
+            .write_record(header.iter().take(usage_marker))
             .unwrap();
-        writer.write_record(row.iter().take(row.len() - 3)).unwrap();
+        writer.write_record(row.iter().take(usage_marker)).unwrap();
         let csv = writer.into_inner().unwrap();
         let legacy: BenchRecord = csv::Reader::from_reader(csv.as_slice())
             .deserialize()
@@ -2887,6 +2931,9 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(legacy.usage_missing);
+        assert!(legacy.cache_workload_version.is_none());
+        assert!(legacy.body_sha256.is_none());
+        assert!(legacy.cache_evidence.is_none());
         let point = summarize_stage(
             1.0,
             &[legacy],
@@ -3182,7 +3229,7 @@ mod tests {
             .lines()
             .next()
             .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present"));
+            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,cache_workload_version,body_sha256,cache_evidence"));
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()

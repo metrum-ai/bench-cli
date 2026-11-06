@@ -1216,6 +1216,8 @@ fn spawn_one_request(
         let mut stream_completed = false;
         let mut usage_missing = true;
         let mut usage_presence = kind.chat_like().then_some((false, false));
+        let mut cache_evidence = matches!(kind, EndpointKind::Chat)
+            .then(metrum_ai_bench::cached_tokens::CachedTokenEvidence::default);
         let mut itl_s = Vec::new();
         let body_slot = Arc::clone(&connect_slot);
         let result: Result<Reply> = metrum_ai_bench::connect_timing::with_connect_slot(body_slot, async {
@@ -1231,6 +1233,7 @@ fn spawn_one_request(
                     false,
                 )
                 .await?;
+                if cache_evidence.is_some() { cache_evidence = Some(stream.cached_tokens.clone()); }
                 stream_completed = true;
                 stream_output_error = stream.output_error();
                 usage_missing = !stream.usage_complete;
@@ -1315,6 +1318,13 @@ fn spawn_one_request(
         let (success, valid, input_tokens, output_tokens, reasoning_tokens, error) = match result {
             Ok(value) => {
                 if !streaming {
+                    if cache_evidence.is_some() {
+                        cache_evidence = Some(
+                            metrum_ai_bench::cached_tokens::CachedTokenEvidence::from_usage(
+                                value.get("usage").unwrap_or(&Value::Null),
+                            ),
+                        );
+                    }
                     if kind.chat_like() {
                         usage_presence = Some(
                             value
@@ -1343,6 +1353,9 @@ fn spawn_one_request(
                     .downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
                     .map(|failure| &failure.usage);
                 if let Some(usage) = usage {
+                    if cache_evidence.is_some() {
+                        cache_evidence = Some(usage.cached_tokens.as_ref().clone());
+                    }
                     usage_missing = !usage.usage_complete;
                     usage_presence =
                         Some((usage.prompt_tokens_present, usage.completion_tokens_present));
@@ -1414,6 +1427,7 @@ fn spawn_one_request(
                 .as_ref()
                 .map(|_| "cache-workload.v1".to_string()),
             body_sha256,
+            cache_evidence,
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -2242,6 +2256,13 @@ async fn main() -> Result<()> {
         redacted_config["cache_workload"]["body_evidence"] = body_order_evidence(&all_records)?;
         redacted_config["cache_workload"]["evidence_scope"] = json!("run_including_warmup");
     }
+    let cache_cohorts = matches!(args.kind, EndpointKind::Chat).then(|| json!({
+        "schema_version":"cached-token-cohort-report.v1",
+        "all_stages": metrum_ai_bench::cache_report::strategic_cohorts(&all_records),
+        "stages": points.iter().map(|point| json!({"load":point.load,
+            "cohorts":metrum_ai_bench::cache_report::strategic_cohorts(all_records.iter().filter(|record| record.stage == point.load))
+        })).collect::<Vec<_>>()
+    }));
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -2250,6 +2271,7 @@ async fn main() -> Result<()> {
             "environment": environment,
             "config": redacted_config,
             "points": points,
+            "cache_cohorts": cache_cohorts,
             "knee": knee.index.map(|index| &points[index]),
             "knee_detection": knee,
             "server_metrics": server,
