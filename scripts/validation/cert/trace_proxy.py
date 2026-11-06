@@ -248,9 +248,13 @@ def make_handler(upstream_port, recorder, fault=None, fault_request=None, reques
                         if frame is None:
                             raise ValueError('incomplete source stream')
                         frames.append(frame)
-                    output = sse_reorder.transform(frames, reorder)
-                    recorder.event(request_id, 'transformation', mode=reorder, original_frames=len(frames), forwarded_frames=len(output))
-                    transformed += 1
+                    if not sse_reorder.has_selected_output(frames):
+                        output = frames
+                        recorder.event(request_id, 'ineligible', mode=reorder, reason='no_selected_output')
+                    else:
+                        output = sse_reorder.transform(frames, reorder)
+                        recorder.event(request_id, 'transformation', mode=reorder, original_frames=len(frames), forwarded_frames=len(output))
+                        transformed += 1
                     for frame in output:
                         forward(frame)
                 elif buffer:
