@@ -50,9 +50,16 @@ and content pin, all-smi executable pin, every input pin and each launcher pin.
 It is offline and does not allocate hardware or start a server. Its manifest
 contains `candidate_sha`; `candidate`, `sut`, `all_smi`, `tokenizer` pin objects
 (`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
-and `cases`, mapping selected IDs to a pinned `launcher` and literal `command`
-argv. Each launcher must execute only its named case and retain its own attempt
-record. Launch one case with `--case ID`, or omit `--case` for the whole selected
+and `cases`, mapping selected IDs to a pinned `launcher`, a fresh `out`
+directory and literal `command` argv containing that exact `--out` value.
+Each launcher must execute only its named case and retain its own attempt
+record. The launcher rejects reused attempt directories. On failure or an
+interrupt it stops its owned process group and preserves a typed FAIL with null
+unknown counts if the case did not publish a record. Existing records are never
+overwritten: a separate failure sentinel prevents an earlier PASS from masking
+a launcher/cleanup failure. A sibling `OUT-lifecycle` directory retains append-only
+input-ready and record-validated observations. External provisioning events and
+actual request events still need instrumentation at their respective sources. Launch one case with `--case ID`, or omit `--case` for the whole selected
 set. Pins are rechecked before each launch; no shell evaluation is performed.
 
 Before candidate freeze, run `bash scripts/validation/cert/before_freeze.sh SHA`
