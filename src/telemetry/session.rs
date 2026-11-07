@@ -18,8 +18,8 @@ use super::row::{
     TELEMETRY_SCHEMA_VERSION,
 };
 use super::scraper::{
-    boundary_scrape_error, boundary_scrape_once, build_telemetry_client, probe_sources,
-    spawn_scrapers,
+    boundary_scrape_error, boundary_scrape_observed, boundary_scrape_once, build_telemetry_client,
+    probe_sources, spawn_scrapers, BoundaryScrape,
 };
 use super::writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats};
 use crate::record::{Phase, RequestRecord};
@@ -176,6 +176,13 @@ pub struct BoundaryOutcome {
     pub matched_series: u64,
     /// Sources whose boundary scrape failed (`name: error`).
     pub failed_sources: Vec<String>,
+}
+
+/// Private native capture is intentionally not Debug/Serialize. Legacy rows
+/// and coverage are separate from native semantic availability.
+pub struct NativeBoundaryOutcome {
+    pub telemetry: BoundaryOutcome,
+    pub native: Option<super::NativeBoundaryCapture>,
 }
 
 /// Additive `summary.v3.telemetry` block: where the NDJSON went and how
@@ -414,28 +421,77 @@ impl TelemetrySession {
     /// verdict after the partial summary is written; otherwise the failure
     /// is recorded and the run proceeds.
     pub async fn boundary_sample(&mut self) -> BoundaryOutcome {
+        self.boundary_sample_observed(BOUNDARY_PRE_MEASURED, None)
+            .await
+            .telemetry
+    }
+
+    /// Opt-in strict acquisition on ONE explicitly named source, reusing its
+    /// boundary GET for private native parsing and normal priority rows. Does
+    /// not schedule requests, assert process epochs, or establish sample age.
+    pub async fn boundary_sample_with_native(
+        &mut self,
+        source: &str,
+        options: &super::NativeBoundaryConfig,
+        tag: &str,
+    ) -> NativeBoundaryOutcome {
+        self.boundary_sample_observed(tag, Some((source, options)))
+            .await
+    }
+
+    async fn boundary_sample_observed(
+        &mut self,
+        boundary: &str,
+        native: Option<(&str, &super::NativeBoundaryConfig)>,
+    ) -> NativeBoundaryOutcome {
         let Some((client, cfg, sources)) = self.boundary_plan.as_ref() else {
             // No telemetry sources configured: no-op success.
-            return BoundaryOutcome {
-                ok: true,
-                ..BoundaryOutcome::default()
+            return NativeBoundaryOutcome {
+                telemetry: BoundaryOutcome {
+                    ok: true,
+                    ..BoundaryOutcome::default()
+                },
+                native: None,
             };
         };
+        let mut capture = None;
         let mut outcome = BoundaryOutcome::default();
         let mut failed: Vec<String> = Vec::new();
         for src in sources {
-            match boundary_scrape_once(
-                client,
-                cfg,
-                src,
-                &self.epoch,
-                &self.run_id,
-                &self.writer,
-                BOUNDARY_PRE_MEASURED,
-                &self.sample_history,
-            )
-            .await
-            {
+            let selected = native
+                .filter(|(name, _)| *name == src.name)
+                .map(|(_, options)| options);
+            let result = if let Some(options) = selected {
+                let observed = boundary_scrape_observed(
+                    BoundaryScrape {
+                        client,
+                        cfg,
+                        src,
+                        epoch: &self.epoch,
+                        run_id: &self.run_id,
+                        writer: &self.writer,
+                        boundary,
+                        sample_history: &self.sample_history,
+                    },
+                    Some(options),
+                )
+                .await;
+                capture = observed.native;
+                observed.result
+            } else {
+                boundary_scrape_once(
+                    client,
+                    cfg,
+                    src,
+                    &self.epoch,
+                    &self.run_id,
+                    &self.writer,
+                    boundary,
+                    &self.sample_history,
+                )
+                .await
+            };
+            match result {
                 Ok(matched) => {
                     outcome.matched_series += matched;
                 }
@@ -445,7 +501,7 @@ impl TelemetrySession {
                         &self.epoch,
                         &self.run_id,
                         &self.writer,
-                        BOUNDARY_PRE_MEASURED,
+                        boundary,
                         &err,
                     )
                     .await;
@@ -475,7 +531,10 @@ impl TelemetrySession {
             );
         }
         outcome.failed_sources = failed;
-        outcome
+        NativeBoundaryOutcome {
+            telemetry: outcome,
+            native: capture,
+        }
     }
 
     /// A boundary sample that exceeded its budget (#312): mark the missing
@@ -1144,6 +1203,85 @@ mod boundary_tests {
             boundary_t < 500_000_000,
             "boundary near epoch: {boundary_t}"
         );
+    }
+
+    #[tokio::test]
+    async fn native_boundary_reuses_one_get_before_filters_and_unit_transforms() {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = count.clone();
+        let app=axum::Router::new().route("/metrics",axum::routing::get(move |headers:axum::http::HeaderMap| {
+            let seen=seen.clone(); async move {
+                assert!(!headers.contains_key("authorization"));
+                if headers.get("x-metrum-telemetry-boundary").and_then(|v|v.to_str().ok())==Some("cache-warm-before") {seen.fetch_add(1,Ordering::SeqCst);}
+                "# TYPE vllm:prefix_cache_queries_total counter\nvllm:prefix_cache_queries_total{worker=\"PRIVATE_WORKER\"} 10\n# TYPE vllm:prefix_cache_hits_total counter\nvllm:prefix_cache_hits_total{worker=\"PRIVATE_WORKER\"} 0\n"
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut cfg =
+            TelemetryConfig::from_metrics_url(&format!("http://{address}/metrics"), 60_000);
+        cfg.sources[0].include = vec!["^vllm:prefix_cache_queries_total$".into()];
+        cfg.sources[0].units.insert(
+            "vllm:prefix_cache_queries_total".into(),
+            super::super::UnitScale {
+                scale: 0.5,
+                unit: "CUSTOM_UNIT".into(),
+            },
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            ..TelemetryArgs::default()
+        };
+        let mut session = args
+            .start_session(Some(&cfg), stamp(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let p = crate::cache_metrics::ProfileId::VllmApc;
+        let options = super::super::NativeBoundaryConfig {
+            profile: p,
+            source_revision: Some(p.source_revision().into()),
+        };
+        let outcome = session
+            .boundary_sample_with_native("engine", &options, "cache-warm-before")
+            .await;
+        assert!(outcome.telemetry.ok);
+        assert_eq!(outcome.telemetry.matched_series, 1);
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "native parser must not issue another GET"
+        );
+        let capture = outcome.native.unwrap();
+        assert!(capture.failure.is_none());
+        assert!(capture.fetch_end_ns >= capture.fetch_start_ns);
+        let probe = capture.probe.unwrap();
+        assert_eq!(probe.observations.len(), 2);
+        let query = probe
+            .observations
+            .iter()
+            .find(|o| o.spec.metric == "vllm:prefix_cache_queries_total")
+            .unwrap();
+        assert_eq!(query.value, Some(10.0));
+        assert_eq!(
+            query.labels.get("worker").map(String::as_str),
+            Some("PRIVATE_WORKER")
+        );
+        let _ = session.join_scrapers().await;
+        session.finish(false).await.unwrap();
+        let rows = read_rows(&path);
+        let tagged: Vec<_> = rows
+            .iter()
+            .filter(|r| r["boundary"] == "cache-warm-before")
+            .collect();
+        assert_eq!(tagged.len(), 1);
+        assert_eq!(tagged[0]["value"], 5.0);
+        assert_eq!(tagged[0]["unit"], "CUSTOM_UNIT");
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 
     /// A cancelled baseline must not consume the plan needed by later edges.
