@@ -45,6 +45,8 @@ PATH_AREAS = {
     'src/public_adapters.rs': {'*'},
     'src/public_dataset.rs': {'*'},
     'src/public_profile.rs': {'*'},
+    'src/public_catalog.rs': {'*'},
+    'src/validation_consolidation.rs': {'*'},
     'src/chat_stream.rs': {'*'}, 'src/measurement.rs': {'*'},
     'src/usage.rs': {'*'}, 'src/stats.rs': {'*'}, 'src/summary.rs': {'*'}, 'src/sse.rs': {'*'},
     'src/args_common.rs': {'CLI', 'MODE', 'LIVE', 'GPU', 'INTEG'},

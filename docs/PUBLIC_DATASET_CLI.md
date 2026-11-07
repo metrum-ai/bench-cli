@@ -13,9 +13,29 @@ run tool calls. Canonical runtime consumption is a separate runner interface.
 `local_files` map. Without it, reviewed pinned Hub files may download, under the
 job's byte budgets. No mirror fallback, script execution, agreement acceptance
 or credential persistence occurs. HF_TOKEN is only used by existing Hub headers.
-Both outputs must be new files in existing parent directories; existing files are
-never overwritten. A failed
+All requested outputs must be new files in existing parent directories; existing
+files are never overwritten. Parent-directory aliases are checked before writing,
+so a payload path cannot also be selected as a metadata path. A failed
 write must be treated as failure even if one output was already installed.
+
+## Scoped consolidation and optional catalog
+
+Add `--consolidation-report consolidation.json` for the standalone metadata-only
+[provenance/rights report](VALIDATION_CONSOLIDATION.md). It binds the exact existing
+manifest and #422 rendered artifact; missing component reviews, corpus evidence,
+final-issued-body and physical evidence stay Unknown. Its human summary is printed
+and stored in JSON. All logical job settings, including requested output budget and
+rendering context, bind through the existing manifest transformation list; changing
+local filesystem locations alone does not alter identity.
+
+`prompts catalog` lists [optional pinned candidates](PUBLIC_CATALOG.md) without
+network access, source verification or rights grants. For the initial reviewed
+profile, `--catalog-key loogle-longdep-qa` additionally requires `--rights-review`
+and `--consolidation-report`. Review JSON is bounded and binds exact source and
+selected IDs; stale/incomplete/unknown policies cannot satisfy the profile gate.
+Pinned rendering is mandatory in catalog mode. Review-only/code-extraction entries
+fail rather than guess context or execute source scripts. Catalog metadata/card
+licenses are not legal clearance or serving-window guarantees.
 
 ## Job schema
 

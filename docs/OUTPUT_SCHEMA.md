@@ -76,6 +76,19 @@ The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
 and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
 totals remain exact independently of that cap; an empty list can still mean Fail.
 
+## Source-stage consolidation and optional catalog
+
+[VALIDATION_CONSOLIDATION.md](VALIDATION_CONSOLIDATION.md) documents the standalone
+[source-validation-consolidation.v1 schema](../schemas/source-validation-consolidation.v1.json),
+with exact manifest/rights/selection bindings, measured/publisher/unknown count
+claims, partial/unavailable metadata, scoped contradictions and declared component
+reviews. Unknown privacy/semantic/history/issued-body/physical evidence is not Pass.
+[PUBLIC_CATALOG.md](PUBLIC_CATALOG.md) documents optional pinned discovery and the
+[optional-public-catalog.v1 schema](../schemas/optional-public-catalog.v1.json);
+card hints never grant rights. CLI canonical payload, profile and consolidation
+outputs remain separate. Existing canonical, manifest and runner/report fields are
+unchanged; logical job declarations are bound through existing transformations.
+
 ## Logical pressure and structural source artifacts
 
 [PRESSURE_INPUTS.md](PRESSURE_INPUTS.md) describes `logical-pressure-plan.v1`,

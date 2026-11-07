@@ -88,6 +88,35 @@ pub struct PublicProfileReport {
     pub human_summary: String,
 }
 
+/// Bind all logical parsing/mapping/selection/rendering settings, without local
+/// filesystem paths. Relocation is not a semantic change; output budgets, unused
+/// rendering context and validation limits still invalidate cached validation.
+pub fn logical_job_sha256(job: &PublicDatasetJob) -> Result<String> {
+    let rendering = job.rendering.as_ref().map(|r| {
+        (
+            &r.identity,
+            &r.special_tokens,
+            r.max_artifact_bytes,
+            r.max_rendered_bytes,
+            r.max_tokens,
+            r.template_fuel,
+        )
+    });
+    Ok(sha256(&serde_json::to_vec(&(
+        "public-logical-job.v1",
+        &job.schema_version,
+        &job.origin,
+        &job.rights,
+        &job.mapping,
+        &job.formats,
+        &job.limits,
+        job.count,
+        &job.constraints,
+        job.block_size_tokens,
+        rendering,
+    ))?))
+}
+
 /// Parse a local job under a fixed configuration-byte budget, without fetching URLs.
 pub fn load_job(path: &Path) -> Result<PublicDatasetJob> {
     use std::io::Read;
@@ -163,6 +192,7 @@ pub fn build(
     let mut transforms = vec![
         "document-first-question-last.v1".into(),
         "selection:first-fit.v1".into(),
+        format!("public-logical-job.v1:sha256={}", logical_job_sha256(job)?),
     ];
     for (file, path) in job.origin.files.iter().zip(&paths) {
         let remaining = IngestionLimits {
@@ -355,6 +385,28 @@ pub fn build(
     ))
 }
 
+/// Reject aliases/existing entries before creating payload or metadata outputs.
+pub fn check_new_outputs(paths: &[&Path]) -> Result<()> {
+    let mut normalized = BTreeSet::new();
+    for path in paths {
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().context("output needs a file name")?;
+        ensure!(
+            normalized.insert(parent.canonicalize()?.join(name)),
+            "payload and metadata outputs must be distinct, including path aliases"
+        );
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+            Ok(_) => anyhow::bail!("output already exists; refusing overwrite"),
+        }
+    }
+    Ok(())
+}
+
 /// Write local payload inputs and metadata-only report only after successful build.
 /// Output files are separate; callers must not publish payload by default.
 pub fn write_profile(
@@ -364,7 +416,7 @@ pub fn write_profile(
     metadata: &Path,
 ) -> Result<()> {
     use std::io::Write;
-    ensure!(output != metadata, "input and metadata outputs must differ");
+    check_new_outputs(&[output, metadata])?;
     let mut data = tempfile::NamedTempFile::new_in(
         output
             .parent()
@@ -393,6 +445,20 @@ pub fn write_profile(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn output_preflight_rejects_parent_aliases_and_existing_files_before_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let output = dir.path().join("data.json");
+        let alias = nested.join("..").join("data.json");
+        assert!(check_new_outputs(&[&output, &alias]).is_err());
+        assert!(!output.exists());
+        std::fs::write(&output, b"existing").unwrap();
+        assert!(check_new_outputs(&[&output]).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"existing");
+    }
+
     #[test]
     fn offline_job_exports_runtime_inputs_and_unknown_token_status() {
         let dir = tempfile::tempdir().unwrap();
@@ -423,6 +489,26 @@ mod tests {
         assert_eq!(report.manifest.corpus_rows, Evidence::Unknown);
         assert!(!cache.exists());
         assert_eq!(report.manifest.selected_source_rows, 2);
+        let mut relocated = job.clone();
+        relocated.local_files.insert(
+            "source.jsonl".into(),
+            PathBuf::from("a-different-private-path"),
+        );
+        assert_eq!(
+            logical_job_sha256(&job).unwrap(),
+            logical_job_sha256(&relocated).unwrap()
+        );
+        let mut changed_limits = job.clone();
+        changed_limits.limits.max_pairs += 1;
+        assert_ne!(
+            logical_job_sha256(&job).unwrap(),
+            logical_job_sha256(&changed_limits).unwrap()
+        );
+        let mut changed_budget = job.clone();
+        changed_budget.mapping.output_budget = 16;
+        let (changed_records, changed_report) = build(&changed_budget, &cache, true).unwrap();
+        assert_eq!(changed_records[0].expected_output_tokens, Some(16));
+        assert_ne!(report.manifest.fingerprint().unwrap(),changed_report.manifest.fingerprint().unwrap(),"requested output-budget changes must invalidate cached validation even if prompt text is unchanged");
         let output = dir.path().join("canonical.jsonl");
         let metadata = dir.path().join("validation.json");
         write_profile(&records, &report, &output, &metadata).unwrap();
@@ -480,6 +566,29 @@ mod tests {
                 measured.manifest.checks["rendered_overlap"],
                 Evidence::Measured(_)
             ));
+            let mut changed_context = rendered_job.clone();
+            changed_context.rendering.as_mut().unwrap().special_tokens =
+                json!({"bos_token":"unused"});
+            let (_, context_report) = build(&changed_context, &cache, true).unwrap();
+            assert_eq!(
+                serde_json::to_value(&context_report.overlap).unwrap(),
+                serde_json::to_value(Some(overlap)).unwrap()
+            );
+            assert_ne!(
+                measured.manifest.fingerprint().unwrap(),
+                context_report.manifest.fingerprint().unwrap(),
+                "unused rendering context must still invalidate validation provenance"
+            );
+            let mut relocated_artifacts = rendered_job.clone();
+            relocated_artifacts
+                .rendering
+                .as_mut()
+                .unwrap()
+                .tokenizer_path = PathBuf::from("another-private-tokenizer-path");
+            assert_eq!(
+                logical_job_sha256(&rendered_job).unwrap(),
+                logical_job_sha256(&relocated_artifacts).unwrap()
+            );
             rendered_job.constraints.max_pair_lcp = Some(0);
             assert!(build(&rendered_job, &cache, true).is_err());
         }

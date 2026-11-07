@@ -1,0 +1,34 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Metadata-only scoped source validation consolidation, not independent clearance",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "validation_scope", "manifest_sha256", "origin_sha256", "rights_policy_sha256", "selected_ids_sha256", "body_order_sha256", "component_review_sha256", "selected_source_rows", "targets", "corpus_rows", "counts", "count_discrepancies", "rendered_sample_size", "checks", "human_summary", "report_sha256"],
+  "properties": {
+    "schema_version": {"const": "source-validation-consolidation.v1"},
+    "validation_scope": {"const": "artifact_binding_not_source_reverification"},
+    "manifest_sha256": {"$ref": "#/$defs/digest"}, "origin_sha256": {"$ref": "#/$defs/digest"},
+    "rights_policy_sha256": {"$ref": "#/$defs/digest"}, "selected_ids_sha256": {"$ref": "#/$defs/digest"},
+    "body_order_sha256": {"$ref": "#/$defs/digest"}, "component_review_sha256": {"$ref": "#/$defs/digest"},
+    "selected_source_rows": {"$ref": "#/$defs/uint"}, "targets": {"$ref": "#/$defs/uint"},
+    "corpus_rows": {"$ref": "#/$defs/count_evidence"},
+    "counts": {"type": "array", "maxItems": 1000, "items": {"type": "object", "additionalProperties": false, "required": ["scope_sha256", "unit", "count", "completeness", "claim"], "properties": {"scope_sha256": {"$ref": "#/$defs/digest"}, "unit": {"enum": ["source_rows", "documents", "derived_targets"]}, "count": {"$ref": "#/$defs/count_evidence"}, "completeness": {"enum": ["complete", "partial", "unavailable"]}, "claim": {"enum": ["scope_total", "observed_subset"]}}}},
+    "count_discrepancies": {"type": "array", "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 999}}},
+    "rendered_sample_size": {"type": ["integer", "null"], "minimum": 1},
+    "checks": {"type": "object", "additionalProperties": false,
+      "required": ["declared_access_policy", "declared_component_coverage", "rendered_sample", "count_consistency", "independent_privacy_clearance", "final_issued_body", "physical_cache_observations", "semantic_answer_patch_leakage", "role_tool_request_boundaries", "output_budget_distributions", "document_order_truncation", "trace_units_hash_semantics", "desired_achieved_order", "live_recorded_history"],
+      "properties": {
+        "declared_access_policy": {"$ref": "#/$defs/check_evidence"}, "declared_component_coverage": {"$ref": "#/$defs/check_evidence"}, "rendered_sample": {"$ref": "#/$defs/check_evidence"}, "count_consistency": {"$ref": "#/$defs/check_evidence"},
+        "independent_privacy_clearance": {"$ref": "#/$defs/unknown"}, "final_issued_body": {"$ref": "#/$defs/unknown"}, "physical_cache_observations": {"$ref": "#/$defs/unknown"}, "semantic_answer_patch_leakage": {"$ref": "#/$defs/unknown"}, "role_tool_request_boundaries": {"$ref": "#/$defs/unknown"}, "output_budget_distributions": {"$ref": "#/$defs/unknown"}, "document_order_truncation": {"$ref": "#/$defs/unknown"}, "trace_units_hash_semantics": {"$ref": "#/$defs/unknown"}, "desired_achieved_order": {"$ref": "#/$defs/unknown"}, "live_recorded_history": {"$ref": "#/$defs/unknown"}
+      }
+    },
+    "human_summary": {"type": "string", "minLength": 1}, "report_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "uint": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+    "digest": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "unknown": {"type": "object", "additionalProperties": false, "required": ["status"], "properties": {"status": {"const": "unknown"}}},
+    "count_evidence": {"oneOf": [{"$ref": "#/$defs/unknown"}, {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"enum": ["measured", "publisher"]}, "value": {"$ref": "#/$defs/uint"}}}]},
+    "check_evidence": {"oneOf": [{"$ref": "#/$defs/unknown"}, {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"enum": ["measured", "publisher"]}, "value": {"enum": ["pass", "fail"]}}}]}
+  }
+}
