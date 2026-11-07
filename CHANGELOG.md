@@ -64,7 +64,10 @@
 - Add execution-time records and hashes, typed infrastructure history, isolated
   selected-case launchers, offline preflight, Python 3.12 checks and pre-freeze
   release/docs audits. Bind shipped-profile binaries to verified pretag artifacts;
-  retain failed attempts and separate validation-only builds (#435).
+  retain failed attempts and separate validation-only builds (#435). Bind the
+  GPU-010 fallback tokenizer feature-variant cell to its own build proof and
+  stage generated inputs with independent re-derivation and runtime hash binding
+  (#460).
 - Prepare non-publishing pretag packaging and reviewed carry-over validation
   (#402, #412). Certification results and release publication remain separate gates.
 
