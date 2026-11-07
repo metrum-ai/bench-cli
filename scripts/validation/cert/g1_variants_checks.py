@@ -19,6 +19,12 @@ def frames(data):
     return output
 
 
+def selected_finishes(source):
+    return [choice.get('finish_reason') for frame in source
+            for choice in ((sse_reorder.decode(frame) or {}).get('choices') or [])
+            if choice.get('index', 0) == 0 and choice.get('finish_reason') is not None]
+
+
 def verify_source_and_collect(trace, mode):
     groups = {}
     for line in trace.splitlines():
@@ -28,7 +34,8 @@ def verify_source_and_collect(trace, mode):
     if not groups:
         raise ValueError('no source requests')
     populations = {'role': 0, 'reasoning': 0, 'any_reasoning': 0, 'visible': 0, 'tool': 0, 'unselected_before_selected': 0,
-                   'answer_before_reasoning': 0, 'same_event': 0}
+                   'answer_before_reasoning': 0, 'same_event': 0,
+                   'reasoning_truncated': 0, 'transformed': 0, 'complete_answer': 0}
     for events in groups.values():
         for required in ('send', 'headers', 'complete'):
             if sum(event['kind'] == required for event in events) != 1:
@@ -42,14 +49,21 @@ def verify_source_and_collect(trace, mode):
         source = frames(original)
         actual = frames(forwarded)
         transformations = [event for event in events if event['kind'] == 'transformation']
+        ineligible = [event for event in events if event['kind'] == 'ineligible']
+        has_output = sse_reorder.has_selected_output(source)
         if mode is None:
-            if original != forwarded or transformations:
+            if original != forwarded or transformations or ineligible:
                 raise ValueError('untransformed stream does not match real source')
+        elif not has_output:
+            if (transformations or len(ineligible) != 1 or ineligible[0].get('mode') != mode
+                    or ineligible[0].get('reason') != 'no_selected_output' or original != forwarded):
+                raise ValueError('ineligible stream was not forwarded unchanged')
         else:
-            if len(transformations) != 1 or transformations[0].get('mode') != mode:
+            if ineligible or len(transformations) != 1 or transformations[0].get('mode') != mode:
                 raise ValueError('missing or ambiguous transform marker')
             if actual != sse_reorder.transform(source, mode):
                 raise ValueError('forwarded stream differs from deterministic real-byte transformation')
+            populations['transformed'] += 1
         if not source or sse_reorder.decode(source[-1]) is not None:
             raise ValueError('real source lacks DONE')
         # Independently check each source choice's output text is preserved in order.
@@ -101,16 +115,22 @@ def verify_source_and_collect(trace, mode):
                     if reason and reason_at is None: reason_at = when
                     if (answer or tool) and visible_at is None: visible_at = when
                     tool_seen |= tool
-        if pending or visible_at is None:
-            raise ValueError('missing complete selected answer/tool output')
+        if pending:
+            raise ValueError('unterminated forwarded stream')
+        finishes = selected_finishes(source)
+        if visible_at is None:
+            if reason_at is None or finishes != ['length']:
+                raise ValueError('missing complete selected answer/tool output')
+            populations['reasoning_truncated'] += 1
         first = min(x for x in (reason_at, visible_at) if x is not None)
         populations['role'] += role_at is not None and role_at < first
-        populations['reasoning'] += reason_at is not None and reason_at < visible_at
+        populations['reasoning'] += reason_at is not None and visible_at is not None and reason_at < visible_at
         populations['any_reasoning'] += reason_at is not None
         populations['visible'] += visible_at is not None
+        populations['complete_answer'] += visible_at is not None and finishes in (['stop'], ['tool_calls'], ['function_call'])
         populations['tool'] += tool_seen
         populations['unselected_before_selected'] += unselected_at is not None and unselected_at < first
-        populations['answer_before_reasoning'] += reason_at is not None and visible_at < reason_at
+        populations['answer_before_reasoning'] += reason_at is not None and visible_at is not None and visible_at < reason_at
         populations['same_event'] += reason_at is not None and visible_at == reason_at
     return populations
 
@@ -118,6 +138,31 @@ def verify_source_and_collect(trace, mode):
 def evaluate(data, trace, code, mode, required):
     timing = g1_clock_checks.evaluate(data, trace, code, 'forwarded_chunk', require_reasoning=False)
     populations = verify_source_and_collect(trace, mode)
+    rows = sorted((row for row in (json.loads(line) for line in data.splitlines() if line.strip())
+                   if '.request.' in row.get('schema_version', '') and row.get('phase') == 'measure'),
+                  key=lambda row: row['seq'])
+    streams = g1_clock_checks.stream_clocks(trace, 'forwarded_chunk')
+    for row, stream in zip(rows, streams):
+        if stream['visible'] is None and (row.get('outcome') != 'reasoning_truncated'
+                                          or row.get('answer_completed') is not False
+                                          or row.get('finish_reason') != 'length'):
+            raise ValueError('reasoning-only length stream not classified as unanswered truncation')
+    groups = {}
+    for event in (json.loads(line) for line in trace.splitlines() if line.strip()):
+        groups.setdefault(event['request'], []).append(event)
+    ordered = sorted(groups.values(), key=lambda group: next(e['monotonic_ns'] for e in group if e['kind'] == 'send'))
+    completed = 0
+    for row, stream, events in zip(rows, streams, ordered):
+        original = b''.join(base64.b64decode(e['bytes_b64'], validate=True) for e in events if e['kind'] == 'chunk')
+        finishes = selected_finishes(frames(original))
+        if (stream['visible'] is not None and finishes in (['stop'], ['tool_calls'], ['function_call'])
+                and row.get('outcome') == 'answer' and row.get('answer_completed') is True
+                and row.get('finish_reason') == finishes[0]):
+            completed += 1
+    if not completed or not populations['complete_answer']:
+        raise ValueError('required complete answer/tool population missing')
+    if mode is not None and not populations['transformed']:
+        raise ValueError('required transformed stream population missing')
     if required != 'answer_only' and not populations.get(required):
         raise ValueError('required real/transformed event population missing: ' + required)
     if not populations['role']:

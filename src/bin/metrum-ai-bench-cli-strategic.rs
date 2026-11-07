@@ -17,6 +17,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use serde_json::{json, Value};
+use sha2::Digest;
 #[cfg(feature = "otlp")]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -262,6 +263,35 @@ struct Args {
     warmup_requests: u64,
     #[arg(
         long,
+        help = "Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement"
+    )]
+    stage_hook: Option<String>,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        value_delimiter = ',',
+        help = "Exact tier IDs the trusted reset hook must acknowledge"
+    )]
+    stage_reset_scope: Vec<String>,
+    #[arg(long, requires = "stage_hook", default_value_t = 60)]
+    stage_hook_timeout_seconds: u64,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        help = "Optional readiness probe after scoped reset acknowledgement"
+    )]
+    stage_ready_url: Option<String>,
+    #[arg(long, requires = "stage_hook", default_value_t = 0)]
+    stage_settle_ms: u64,
+    #[arg(
+        long,
+        requires = "stage_hook",
+        default_value_t = false,
+        help = "Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset"
+    )]
+    pre_warmup_reset: bool,
+    #[arg(
+        long,
         default_value_t = 0,
         help = "RNG seed used when --shuffle-prompts is set"
     )]
@@ -280,6 +310,17 @@ struct Args {
     prompt_sequence_log: Option<PathBuf>,
     #[arg(long)]
     sessions: Option<PathBuf>,
+    #[arg(
+        long,
+        requires = "sessions",
+        value_delimiter = ',',
+        value_parser = ["user", "tool", "system", "assistant", "developer", "function"],
+        help = "Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior"
+    )]
+    session_request_roles: Vec<String>,
+    #[arg(long, requires = "sessions", value_parser = ["legacy", "closed-loop"], default_value = "legacy",
+        help = "Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only")]
+    session_mode: String,
     #[arg(long, value_enum, default_value = "shared")]
     prefix_control: PrefixControl,
     #[arg(long)]
@@ -625,6 +666,9 @@ fn make_inputs(
         bail!("session turn order cannot be shuffled or replaced by a flat prompt sequence");
     }
     let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
+    if args.session_mode == "closed-loop" && !matches!(args.sweep_by, SweepBy::Concurrency) {
+        bail!("--session-mode closed-loop requires --sweep-by concurrency");
+    }
     if args.prompts.is_some() && args.max_tokens.is_none() {
         bail!("--max-tokens is required when --prompts is set (bounds OSL for comparable sweeps)");
     }
@@ -644,6 +688,21 @@ fn make_inputs(
         let mut inputs = Vec::new();
         for session in load_sessions(path)? {
             for turn in 1..=session.messages.len() {
+                if !args.session_request_roles.is_empty() {
+                    let role = session.messages[turn - 1]["role"].as_str().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "session {} message {turn} has no string role",
+                            session.session_id
+                        )
+                    })?;
+                    if !args
+                        .session_request_roles
+                        .iter()
+                        .any(|selected| selected == role)
+                    {
+                        continue;
+                    }
+                }
                 let messages = controlled_messages(
                     &session.messages[..turn],
                     args.shared_prefix.as_deref(),
@@ -670,6 +729,9 @@ fn make_inputs(
                     ..Input::default()
                 });
             }
+        }
+        if inputs.is_empty() {
+            bail!("session request-boundary selection produced no requests");
         }
         return Ok(inputs);
     }
@@ -1601,11 +1663,81 @@ impl ModalityOptions {
     }
 }
 
+// Each group has exactly one active cursor. Completed groups rejoin the pending
+// queue, so cycling a small pool never overlaps two instances of a session.
+async fn run_session_requests<F>(
+    inputs: &[Input],
+    budget: u64,
+    concurrency: usize,
+    stop: &metrum_ai_bench::runner::StopFlag,
+    mut spawn: F,
+) -> Result<Vec<(BenchRecord, ModalitySample)>>
+where
+    F: FnMut(Input) -> tokio::task::JoinHandle<(BenchRecord, ModalitySample)>,
+{
+    let mut groups: Vec<Vec<Input>> = Vec::new();
+    let mut ids = std::collections::HashMap::new();
+    for input in inputs {
+        let id = input
+            .session_id
+            .as_ref()
+            .context("closed-loop input lacks session ID")?;
+        let next = groups.len();
+        let index = *ids.entry(id.clone()).or_insert(next);
+        if index == next {
+            groups.push(Vec::new());
+        }
+        groups[index].push(input.clone());
+    }
+    let mut pending: std::collections::VecDeque<usize> = (0..groups.len()).collect();
+    let mut active = tokio::task::JoinSet::new();
+    let mut issued = 0;
+    let mut outcomes = Vec::new();
+    for _ in 0..concurrency.min(groups.len()) {
+        if issued == budget || stop.is_stopped() {
+            break;
+        }
+        let group = pending.pop_front().context("missing pending session")?;
+        let handle = spawn(groups[group][0].clone());
+        active.spawn(async move { (group, 0, handle.await) });
+        issued += 1;
+    }
+    while let Some(result) = active.join_next().await {
+        let (group, turn, outcome) = result.context("session cursor task failed")?;
+        outcomes.push(outcome.context("session request task failed")?);
+        let next = if turn + 1 < groups[group].len() {
+            (group, turn + 1)
+        } else {
+            pending.push_back(group);
+            (pending.pop_front().context("missing next session")?, 0)
+        };
+        if issued < budget && !stop.is_stopped() {
+            let handle = spawn(groups[next.0][next.1].clone());
+            active.spawn(async move { (next.0, next.1, handle.await) });
+            issued += 1;
+        }
+    }
+    Ok(outcomes)
+}
+
+fn reset_hook(args: &Args) -> Option<metrum_ai_bench::stage_lifecycle::ResetHook> {
+    args.stage_hook
+        .as_ref()
+        .map(|command| metrum_ai_bench::stage_lifecycle::ResetHook {
+            command: command.clone(),
+            scope: args.stage_reset_scope.clone(),
+            timeout: Duration::from_secs(args.stage_hook_timeout_seconds),
+            ready_url: args.stage_ready_url.clone(),
+            settle_delay: Duration::from_millis(args.stage_settle_ms),
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_stage(
     args: &Args,
     url: &str,
     stage: f64,
+    stage_index: usize,
     inputs: &[Input],
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
@@ -1619,6 +1751,7 @@ async fn run_stage(
     Vec<ModalitySample>,
     f64,
     metrum_ai_bench::concurrency::ObservedConcurrency,
+    Vec<Value>,
 )> {
     let concurrency = match args.sweep_by {
         SweepBy::Concurrency => stage.ceil() as usize,
@@ -1639,42 +1772,80 @@ async fn run_stage(
     let mut records = Vec::with_capacity(capacity);
     let mut samples = Vec::with_capacity(capacity);
 
+    let mut resets = Vec::new();
+    if args.pre_warmup_reset && !stop.is_stopped() {
+        let hook = reset_hook(args).context("pre-warmup reset requires stage hook")?;
+        let acknowledgement = hook.execute(stage_index, stage, client).await?;
+        resets.push(json!({"position": "before_warmup", "acknowledgement": acknowledgement}));
+    }
+
     // Phase 1: fully complete warmup before measurement begins.
     if args.warmup_requests > 0 && !stop.is_stopped() {
         let warmup_epoch = Instant::now();
         let warmup_unix_ns = now_unix_ns();
         let t_start_ns = run_epoch.elapsed_ns();
-        let mut warmup_handles = Vec::with_capacity(args.warmup_requests as usize);
-        for index in 0..args.warmup_requests {
-            if stop.is_stopped() {
-                break;
+        if args.session_mode == "closed-loop" {
+            for (record, sample) in
+                run_session_requests(inputs, args.warmup_requests, concurrency, stop, |input| {
+                    spawn_one_request(
+                        args,
+                        url,
+                        stage,
+                        input,
+                        validator,
+                        Arc::clone(&seq),
+                        client,
+                        Arc::clone(&semaphore),
+                        issuance_gate.clone(),
+                        Arc::clone(&inflight_tracker),
+                        warmup_epoch,
+                        warmup_unix_ns,
+                        Arc::clone(&run_epoch),
+                        Arc::clone(&run_id),
+                        ndjson.clone(),
+                        None,
+                        true,
+                        Arc::clone(&modality),
+                    )
+                })
+                .await?
+            {
+                records.push(record);
+                samples.push(sample);
             }
-            let input = inputs[index as usize % inputs.len()].clone();
-            warmup_handles.push(spawn_one_request(
-                args,
-                url,
-                stage,
-                input,
-                validator,
-                Arc::clone(&seq),
-                client,
-                Arc::clone(&semaphore),
-                issuance_gate.clone(),
-                Arc::clone(&inflight_tracker),
-                warmup_epoch,
-                warmup_unix_ns,
-                Arc::clone(&run_epoch),
-                Arc::clone(&run_id),
-                ndjson.clone(),
-                None,
-                true,
-                Arc::clone(&modality),
-            ));
-        }
-        for handle in warmup_handles {
-            let (record, sample) = handle.await.context("warmup request task failed")?;
-            records.push(record);
-            samples.push(sample);
+        } else {
+            let mut warmup_handles = Vec::with_capacity(args.warmup_requests as usize);
+            for index in 0..args.warmup_requests {
+                if stop.is_stopped() {
+                    break;
+                }
+                let input = inputs[index as usize % inputs.len()].clone();
+                warmup_handles.push(spawn_one_request(
+                    args,
+                    url,
+                    stage,
+                    input,
+                    validator,
+                    Arc::clone(&seq),
+                    client,
+                    Arc::clone(&semaphore),
+                    issuance_gate.clone(),
+                    Arc::clone(&inflight_tracker),
+                    warmup_epoch,
+                    warmup_unix_ns,
+                    Arc::clone(&run_epoch),
+                    Arc::clone(&run_id),
+                    ndjson.clone(),
+                    None,
+                    true,
+                    Arc::clone(&modality),
+                ));
+            }
+            for handle in warmup_handles {
+                let (record, sample) = handle.await.context("warmup request task failed")?;
+                records.push(record);
+                samples.push(sample);
+            }
         }
         let t_end_ns = run_epoch.elapsed_ns();
         if let Some(writer) = &ndjson {
@@ -1693,48 +1864,91 @@ async fn run_stage(
         }
     }
 
+    // Machine/connection warmup is fully drained. Reset intended tiers now,
+    // not before warmup, so measured cold prefixes cannot inherit warmup state.
+    if let Some(hook) = reset_hook(args).filter(|_| !stop.is_stopped()) {
+        let acknowledgement = hook.execute(stage_index, stage, client).await?;
+        resets.push(json!({"position": "after_warmup", "acknowledgement": acknowledgement}));
+    }
+
     // Phase 2: reset measurement epoch; measured prompts restart at index 0.
     // Observed concurrency covers measured slots only (#226).
     inflight_tracker.reset_counts();
     let measure_epoch = Instant::now();
     let measure_unix_ns = now_unix_ns();
     let t_start_ns = run_epoch.elapsed_ns();
-    let mut measure_handles = Vec::with_capacity(args.requests_per_stage as usize);
-    for index in 0..args.requests_per_stage {
-        if stop.is_stopped() {
-            break;
+    if args.session_mode == "closed-loop" {
+        for (record, sample) in run_session_requests(
+            inputs,
+            args.requests_per_stage,
+            concurrency,
+            stop,
+            |input| {
+                spawn_one_request(
+                    args,
+                    url,
+                    stage,
+                    input,
+                    validator,
+                    Arc::clone(&seq),
+                    client,
+                    Arc::clone(&semaphore),
+                    issuance_gate.clone(),
+                    Arc::clone(&inflight_tracker),
+                    measure_epoch,
+                    measure_unix_ns,
+                    Arc::clone(&run_epoch),
+                    Arc::clone(&run_id),
+                    ndjson.clone(),
+                    None,
+                    false,
+                    Arc::clone(&modality),
+                )
+            },
+        )
+        .await?
+        {
+            records.push(record);
+            samples.push(sample);
         }
-        let scheduled_offset = matches!(args.sweep_by, SweepBy::Rate)
-            .then(|| Duration::from_secs_f64(index as f64 / stage));
-        if let Some(offset) = scheduled_offset {
-            tokio::time::sleep(offset.saturating_sub(measure_epoch.elapsed())).await;
+    } else {
+        let mut measure_handles = Vec::with_capacity(args.requests_per_stage as usize);
+        for index in 0..args.requests_per_stage {
+            if stop.is_stopped() {
+                break;
+            }
+            let scheduled_offset = matches!(args.sweep_by, SweepBy::Rate)
+                .then(|| Duration::from_secs_f64(index as f64 / stage));
+            if let Some(offset) = scheduled_offset {
+                tokio::time::sleep(offset.saturating_sub(measure_epoch.elapsed())).await;
+            }
+            let input = inputs[index as usize % inputs.len()].clone();
+            measure_handles.push(spawn_one_request(
+                args,
+                url,
+                stage,
+                input,
+                validator,
+                Arc::clone(&seq),
+                client,
+                Arc::clone(&semaphore),
+                issuance_gate.clone(),
+                Arc::clone(&inflight_tracker),
+                measure_epoch,
+                measure_unix_ns,
+                Arc::clone(&run_epoch),
+                Arc::clone(&run_id),
+                ndjson.clone(),
+                scheduled_offset,
+                false,
+                Arc::clone(&modality),
+            ));
         }
-        let input = inputs[index as usize % inputs.len()].clone();
-        measure_handles.push(spawn_one_request(
-            args,
-            url,
-            stage,
-            input,
-            validator,
-            Arc::clone(&seq),
-            client,
-            Arc::clone(&semaphore),
-            issuance_gate.clone(),
-            Arc::clone(&inflight_tracker),
-            measure_epoch,
-            measure_unix_ns,
-            Arc::clone(&run_epoch),
-            Arc::clone(&run_id),
-            ndjson.clone(),
-            scheduled_offset,
-            false,
-            Arc::clone(&modality),
-        ));
-    }
-    for handle in measure_handles {
-        let (record, sample) = handle.await.context("request task failed")?;
-        records.push(record);
-        samples.push(sample);
+        for handle in measure_handles {
+            let (record, sample) = handle.await.context("request task failed")?;
+            records.push(record);
+            samples.push(sample);
+        }
     }
     let t_end_ns = run_epoch.elapsed_ns();
     if let Some(writer) = &ndjson {
@@ -1760,6 +1974,7 @@ async fn run_stage(
         samples,
         measured_seconds,
         inflight_tracker.snapshot(),
+        resets,
     ))
 }
 
@@ -1816,6 +2031,9 @@ async fn main() -> Result<()> {
         },
         args.prompt_sequence.is_some(),
     )?;
+    if let Some(hook) = reset_hook(&args) {
+        hook.validate()?;
+    }
     let url = args
         .url
         .clone()
@@ -2046,6 +2264,17 @@ async fn main() -> Result<()> {
     if args.infer_ttft_from_first_byte {
         redacted_config["infer_ttft_from_first_byte"] = json!(true);
     }
+    if args.sessions.is_some() {
+        redacted_config["session_request_roles"] = if args.session_request_roles.is_empty() {
+            json!("legacy_all_prefixes")
+        } else {
+            json!(args.session_request_roles)
+        };
+        redacted_config["session_history_mode"] = json!("recorded");
+        redacted_config["session_mode"] = json!(args.session_mode);
+        redacted_config["session_budget_semantics"] =
+            json!("requests; final session may be partial");
+    }
     if let Some(modality) = modality_config(&args, &inputs) {
         redacted_config["modality"] = modality;
     }
@@ -2058,6 +2287,17 @@ async fn main() -> Result<()> {
             "nonce_scope": args.cache_policy.nonce_scope(),
             "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
             "prompt_sequence_log_scope": "measured_per_stage"
+        });
+    }
+    if let Some(command) = &args.stage_hook {
+        redacted_config["stage_hook"] = json!({
+            "command_sha256": sha2::Sha256::digest(command.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+            "scope": args.stage_reset_scope, "timeout_seconds": args.stage_hook_timeout_seconds,
+            "readiness_probe": args.stage_ready_url.is_some(),
+            "settle_delay_ms": args.stage_settle_ms,
+            "pre_warmup_reset": args.pre_warmup_reset,
+            "timing": "after_warmup_drain_before_measurement",
+            "evidence": "trusted_operator_acknowledgement"
         });
     }
     let redact_hostname = args.redact_hostname || args.require_sut;
@@ -2088,15 +2328,17 @@ async fn main() -> Result<()> {
     let mut any_osl_validation = None;
     let mut ttft_error = None;
     let mut partial = false;
-    for stage in stages {
+    let mut stage_resets = Vec::new();
+    for (stage_index, stage) in stages.into_iter().enumerate() {
         if stop.is_stopped() {
             partial = true;
             break;
         }
-        let (records, samples, seconds, observed) = run_stage(
+        let (records, samples, seconds, observed, reset) = run_stage(
             &args,
             &url,
             stage,
+            stage_index + 1,
             &inputs,
             validator.as_ref(),
             sequence.clone(),
@@ -2110,6 +2352,11 @@ async fn main() -> Result<()> {
         if fingerprint_enabled {
             redacted_config["cache_workload"]["body_evidence"] = body_order_evidence(&records)?;
             redacted_config["cache_workload"]["evidence_scope"] = json!("stage_including_warmup");
+        }
+        if !reset.is_empty() {
+            stage_resets
+                .push(json!({"stage_index": stage_index + 1, "load": stage, "resets": reset}));
+            redacted_config["stage_resets"] = json!(stage_resets);
         }
         if stop.is_stopped() {
             partial = true;
@@ -2367,6 +2614,159 @@ mod tests {
             EndpointKind::Rerank,
             &json!({"usage": {}})
         ));
+    }
+
+    #[test]
+    fn session_boundaries_preserve_history_and_original_message_indices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.jsonl");
+        std::fs::write(
+            &path,
+            json!({"session_id": "fixture", "messages": [
+                {"role": "system", "content": "context"},
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "recorded answer"},
+                {"role": "tool", "content": "result"},
+                {"role": "assistant", "content": "recorded continuation"}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let base = [
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--sessions",
+            path.to_str().unwrap(),
+        ];
+        let legacy = Args::try_parse_from(base).unwrap();
+        assert_eq!(make_inputs(&legacy, "mock", None, None).unwrap().len(), 5);
+        let selected = Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "user,tool"]),
+        )
+        .unwrap();
+        let inputs = make_inputs(&selected, "mock", None, None).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].turn, Some(2));
+        assert_eq!(inputs[1].turn, Some(4));
+        assert_eq!(inputs[1].body["messages"][2]["content"], "recorded answer");
+        assert_eq!(inputs[1].body["messages"][3]["role"], "tool");
+        let empty = Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "developer"]),
+        )
+        .unwrap();
+        assert!(make_inputs(&empty, "mock", None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("no requests"));
+        std::fs::write(
+            &path,
+            r#"{"session_id":"bad","messages":[{"content":"missing role"}]}"#,
+        )
+        .unwrap();
+        assert!(make_inputs(&selected, "mock", None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("no string role"));
+        assert!(Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--session-request-roles",
+            "user"
+        ])
+        .unwrap_err()
+        .to_string()
+        .contains("--sessions"));
+        assert!(Args::try_parse_from(
+            base.into_iter()
+                .chain(["--session-request-roles", "invalid"])
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn session_scheduler_honors_budget_stop_and_task_errors() {
+        let inputs = vec![Input {
+            session_id: Some("fixture".into()),
+            turn: Some(1),
+            ..Input::default()
+        }];
+        let stop = metrum_ai_bench::runner::StopFlag::new();
+        let outcomes = run_session_requests(&inputs, 0, 4, &stop, |_| {
+            panic!("zero budget sends nothing")
+        })
+        .await
+        .unwrap();
+        assert!(outcomes.is_empty());
+        let stop_clone = stop.clone();
+        let outcomes = run_session_requests(&inputs, 10, 4, &stop, move |_| {
+            let stop = stop_clone.clone();
+            tokio::spawn(async move {
+                stop.stop();
+                (BenchRecord::default(), ModalitySample::default())
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!(outcomes.len(), 1);
+        let outcomes = run_session_requests(&inputs, 10, 4, &stop, |_| {
+            panic!("already stopped sends nothing")
+        })
+        .await
+        .unwrap();
+        assert!(outcomes.is_empty());
+        let fresh = metrum_ai_bench::runner::StopFlag::new();
+        let error = run_session_requests(&inputs, 1, 1, &fresh, |_| {
+            tokio::spawn(async { panic!("fixture task failure") })
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("session request task failed"));
+        let error = run_session_requests(&[Input::default()], 1, 1, &fresh, |_| unreachable!())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("lacks session ID"));
+    }
+
+    #[test]
+    fn closed_loop_rejects_rate_sweep_before_loading_inputs() {
+        let args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--sessions",
+            "missing.jsonl",
+            "--session-mode",
+            "closed-loop",
+            "--sweep-by",
+            "rate",
+        ])
+        .unwrap();
+        assert!(make_inputs(&args, "mock", None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("requires --sweep-by concurrency"));
+        assert!(Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--session-mode",
+            "closed-loop"
+        ])
+        .unwrap_err()
+        .to_string()
+        .contains("--sessions"));
     }
 
     #[test]

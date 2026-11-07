@@ -21,6 +21,92 @@ extension is separately versioned. Summary metadata records effective policy,
 order/seeds, nonce scope/placement, digest-list checksums and serialization timing.
 See [CACHE_WORKLOADS.md](CACHE_WORKLOADS.md) for exact digest and coverage semantics.
 
+## Strategic trusted reset metadata (v1.9.0 development)
+
+When opted in, `config.stage_hook` records command SHA-256 (not raw command),
+intended tier scope, deadline, readiness-probe presence, settle delay and optional
+pre-warmup reset. `config.stage_resets[]` records stage index/load and reset
+position (`before_warmup` or `after_warmup`), plus scope, acknowledgement,
+readiness, settling and UTC Unix-nanosecond lifecycle timestamps. These are trusted
+operator acknowledgements, not independent evidence of physical cache state.
+Failed resets abort before measured issuance; they are never relabelled cold.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
+## Strategic session request-boundary selection (v1.9.0 development)
+
+Session summaries record `config.session_request_roles` as the selected role array,
+or `legacy_all_prefixes` when omitted, and `config.session_history_mode=recorded`.
+`config.session_mode` is `legacy` or `closed-loop`; the latter limits active
+sessions on concurrency sweeps and records `session_budget_semantics` because
+the issued-request budget may end with a partial session.
+Per-request `turn` stays the original one-based message position, not a filtered
+ordinal. These optional config fields do not change existing record versions.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
+## Offline warmup overlap artifact
+
+The standalone `kv-token-overlap.v1` report is documented in
+[WARMUP_ISOLATION.md](WARMUP_ISOLATION.md). It contains sorted warmup/measured
+wire-body digest-list fingerprints, maximum shared tokens/full blocks, offending
+request pairs, tokenizer/template identity and Pass/Fail/Unknown verdict. It is
+not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
+The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
+and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
+totals remain exact independently of that cap; an empty list can still mean Fail.
+
+## Canonical runtime input JSONL
+
+[CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input
+contract: record_id/source_row_id/session_id/turn_index(u32)/group_id/trace_id,
+arrival_offset_ms(u64), body: CanonicalBody::Prompt(String) or Chat(Vec<Message>),
+expected_output_tokens(u32), and required source: DatasetEnvelopeRef. Null metadata remains unknown. This adds a new
+loader without changing legacy Vec<String> APIs or runner output schema versions.
+
+## Local pinned chat rendering
+
+The optional tokenizer-feature `RenderedChat` artifact separates exact final
+HTTP `body_sha256` from `rendered_text_sha256`, and retains actual `token_ids`
+and the full rendering identity. See [CHAT_RENDERING.md](CHAT_RENDERING.md).
+It does not change existing runner output. Any body mutation after rendering
+invalidates its use as issuance or warmup-isolation evidence.
+
+## Synthetic prefix-family profile
+
+The standalone `prefix-families.v1` generator artifact is documented in
+[PREFIX_FAMILIES.md](PREFIX_FAMILIES.md). It preserves the requested configuration,
+canonical generated group IDs, effective row order, measured token-overlap report,
+requested/achieved group counts and a deterministic profile fingerprint. It does
+not alter existing runner JSONL and does not assert observed server cache hits.
+
+## Public dataset job/report
+
+The `public-dataset-job.v1` command configuration and metadata-only profile report
+are documented in [PUBLIC_DATASET_CLI.md](PUBLIC_DATASET_CLI.md). Inputs use pinned
+origin/files, reviewed rights, declared JSON/JSONL/Parquet/ZIP formats, mapping and
+explicit budgets. Report output includes the validation manifest, optional measured
+overlap artifact and a human summary. Missing token validation remains Unknown;
+canonical payload JSONL is separate and must not be published by default.
+
+## Public document adapter output
+
+The standalone document adapter emits `IngestionRecord` with
+`IngestionBody::DocumentQuestion`; the command's checked conversion yields the
+final runtime `CanonicalRecord` with `CanonicalBody::Chat`. Mapping and fixture
+provenance are documented in
+[PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
+separate units. The adapter does not change runner JSONL or certify token lengths,
+window feasibility, rights beyond caller policy, or observed cache reuse.
+
+## Public input provenance sub-contract
+
+The standalone `public_dataset::ValidationManifest` uses string
+`schema_version: "kv-dataset-manifest.v1"` and is documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md).
+It is not yet embedded into runner output. Corpus counts and validation checks
+carry explicit measured/publisher/unknown status; canonical target counts are
+separate from source rows. Its fingerprint covers source file digests, mappings,
+rights, transformations and tokenizer/template versions. Logical input overlap
+must never be exported as an observed server cache-hit metric.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)
