@@ -18,6 +18,7 @@ pub struct PhaseBoundaryTag {
 impl PhaseBoundaryTag {
     pub fn header(self) -> String {
         let phase = match self.phase {
+            StudyPhase::Measured => "measured",
             StudyPhase::Cold => "cold",
             StudyPhase::Populate => "populate",
             StudyPhase::Warm => "warm",
@@ -43,6 +44,49 @@ pub struct PhaseBoundaryReply {
     pub tag: PhaseBoundaryTag,
     pub outcome: NativeBoundaryOutcome,
     pub budget_expired: bool,
+}
+/// One consumer command channel; legacy default constructors stay unchanged.
+pub enum BoundaryCommand {
+    Legacy(crate::telemetry::BoundaryRequest),
+    Native(PhaseBoundaryRequest),
+}
+pub async fn dispatch_boundary_command(
+    session: Option<&mut TelemetrySession>,
+    command: BoundaryCommand,
+) {
+    match command {
+        BoundaryCommand::Legacy(req) => {
+            let outcome = match session {
+                Some(session) => match tokio::time::timeout(
+                    Duration::from_millis(req.budget_ms),
+                    session.boundary_sample(),
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_) => session.note_boundary_timeout(req.budget_ms).await,
+                },
+                None => crate::telemetry::BoundaryOutcome {
+                    ok: true,
+                    ..Default::default()
+                },
+            };
+            let _ = req.ack.send(outcome);
+        }
+        BoundaryCommand::Native(req) => match session {
+            Some(session) => session.handle_phase_boundary(req).await,
+            None => {
+                let _ = req.ack.send(PhaseBoundaryReply {
+                    tag: req.tag,
+                    budget_expired: false,
+                    outcome: NativeBoundaryOutcome {
+                        telemetry: crate::telemetry::BoundaryOutcome::default(),
+                        native: None,
+                    },
+                });
+            }
+        },
+    }
 }
 impl TelemetrySession {
     /// Dispatch in the existing record consumer's biased command branch. No
