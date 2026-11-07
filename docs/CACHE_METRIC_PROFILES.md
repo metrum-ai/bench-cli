@@ -20,11 +20,11 @@ synthetic, source-derived exposition, not captured live engine pages.
 | SGLang | `188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a` | Cached-token counter retains device/host/storage/total source labels; hit-rate gauge is not a phase counter. |
 | LMCache | `34f8a409e3631eff51d0b6fff67ca9c68f123377` | Requested/hit/stored tokens differ from remote byte counters and retrieve-request counts. Stored tokens include evicted tokens: not resident occupancy. Separate reported cache/storage byte gauges, eviction-operation events, evicted keys and failed-eviction **candidate counts** retain their units. A failed selection can count up to 64 candidates, not one failed call. |
 | Dynamo KVBM | `fa9852014950ed0aea74e56e1de441fc6de15307` | Directional transfer **blocks**, matched tokens and sliding-window hit-rate gauges are distinct. Object read/write failure counters also count **blocks**, not requests. No block-to-byte conversion. |
+| TRT-LLM collector | `a3febfbfd0324bded62007ffd7d5241a06cbfc00` | Cached prompt tokens, manager/iteration reused or missed blocks, accepted connector loads, reported directional bytes and layout/utilization gauges remain separate. Not Triton backend `nv_trt_llm_*` aliases. |
 
 Dynamo's pinned recipe explicitly requires **Dynamo <=1.6.x**; later releases
 no longer ship KVBM. The legacy source slice is not a claim that current Dynamo
-releases expose these metrics. No release aliases or TRT-LLM mappings have been
-validated yet. Supplying a source revision is an **operator declaration**, not an
+releases expose these metrics. No release aliases have been validated. Supplying a source revision is an **operator declaration**, not an
 independent observation of the executable version or deployed tier.
 
 ## Conservative probe behavior
@@ -56,6 +56,30 @@ independent observation of the executable version or deployed tier.
   same-cohort phase hit rates. A known counter zero is different from a missing
   counter, and neither alone proves physical-cache absence or participation.
 
+## TRT-LLM collector caveats
+
+The source-pinned `trt-llm` slice is not a Triton backend metric alias map. Its
+manager block counters accumulate only positive deltas from ordered per-rank
+snapshots: a decrease changes the exporter baseline without decrementing the
+counter. Monotonic exposition is therefore not independent cache-manager
+continuity or reset evidence. Manager and iteration views overlap; do not sum.
+
+Connector reuse blocks and connector-attributed prompt tokens count accepted
+loads **before asynchronous transfer completion**. Tier attribution preserves
+private `dp_rank`, `cache_level` and `cache_tier` identity: two levels can share
+a device-memory tier name, and already-prefetched disk pages count as host.
+These are reported attribution/acceptance, not proven completed transfers or
+physical-tier participation. The public projection does not expose arbitrary
+tier/model label strings. No query denominator is invented from miss counts.
+
+Host-to-device onboard bytes, device-to-host offload bytes, intra-device copy
+bytes and disk-prefetch blocks retain distinct metrics/units. Max/free/used-block
+gauges and tokens-per-block layout do not establish physical occupancy or permit
+block-to-byte conversion without dtype/layout/parallelism evidence. Cached-token
+counters have process lifetime, not cache-flush lifetime. Missing optional
+families stay unavailable; a missing required cached-token family invalidates
+the selected profile evidence rather than creating zero.
+
 ## Machine-readable capability boundaries
 
 Each capture includes `cache-metric-capabilities.v1`: expected metric names,
@@ -65,7 +89,7 @@ source-reference descriptors, not assertions that a server exported them.
 Operator-declared source compatibility is separately `not_declared`,
 `matches_reference` or `unsupported`; a match does not verify the executable.
 Release aliases remain empty, legacy Dynamo's restriction remains explicit,
-and TRT-LLM remains unmapped. Complete-profile support, physical-tier validation,
+and the TRT-LLM slice records explicit semantic qualifiers. Complete-profile support, physical-tier validation,
 phase-delta validation, complete-distribution validation and quantile
 reconstruction are explicitly false in this prototype.
 
@@ -76,7 +100,7 @@ Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optiona
 a supplied revision must be a full source SHA. Missing/unsupported revisions
 preserve Unknown sample values rather than guessing executable compatibility.
 Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`, `sglang`, `lmcache`
-and legacy `dynamo-kvbm`. These are selections, not backend autodetection.
+legacy `dynamo-kvbm` and `trt-llm`. These are selections, not backend autodetection.
 
 Discovery performs one unauthenticated GET before measurement. It sends no
 workload body or inherited inference API key, refuses URL credentials, disables
@@ -99,6 +123,6 @@ counter deltas, rates, hit ratios or client timing measurements.
 
 Remaining work includes captured-exporter fixtures, validated release aliases
 and broader capability coverage, broader histogram coverage and complete-family distribution validation,
-residency/capacity/eviction/failure coverage and TRT-LLM scope. Full telemetry-phase
+residency/capacity/eviction/failure coverage and broader TRT-LLM/Triton scope. Full telemetry-phase
 integration and phase-scoped deltas/reset/identity handling belong to subsequent
 work; none is inferred from a startup snapshot.
