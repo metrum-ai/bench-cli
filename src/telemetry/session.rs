@@ -414,7 +414,7 @@ impl TelemetrySession {
     /// verdict after the partial summary is written; otherwise the failure
     /// is recorded and the run proceeds.
     pub async fn boundary_sample(&mut self) -> BoundaryOutcome {
-        let Some((client, cfg, sources)) = self.boundary_plan.take() else {
+        let Some((client, cfg, sources)) = self.boundary_plan.as_ref() else {
             // No telemetry sources configured: no-op success.
             return BoundaryOutcome {
                 ok: true,
@@ -423,10 +423,10 @@ impl TelemetrySession {
         };
         let mut outcome = BoundaryOutcome::default();
         let mut failed: Vec<String> = Vec::new();
-        for src in &sources {
+        for src in sources {
             match boundary_scrape_once(
-                &client,
-                &cfg,
+                client,
+                cfg,
                 src,
                 &self.epoch,
                 &self.run_id,
@@ -453,10 +453,9 @@ impl TelemetrySession {
                 }
             }
         }
-        // Put the plan back: a second boundary call (e.g. a future stage
-        // boundary) uses the same plan; the idempotence guard at the call
-        // site makes this a single shot today.
-        self.boundary_plan = Some((client, cfg, sources));
+        // Borrow, never take the plan across an await. Budget cancellation
+        // drops this future; subsequent stage/terminal boundaries must still
+        // scrape, not silently become a no-source success.
         if failed.is_empty() {
             outcome.ok = true;
         } else if self.require_telemetry {
@@ -1145,6 +1144,72 @@ mod boundary_tests {
             boundary_t < 500_000_000,
             "boundary near epoch: {boundary_t}"
         );
+    }
+
+    /// A cancelled baseline must not consume the plan needed by later edges.
+    #[tokio::test]
+    async fn cancelled_boundary_retains_source_plan_for_retry() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let first = Arc::new(AtomicBool::new(true));
+        let seen = entered.clone();
+        let gate = first.clone();
+        let app = axum::Router::new().route(
+            "/metrics",
+            axum::routing::get(move |headers: axum::http::HeaderMap| {
+                let seen = seen.clone();
+                let gate = gate.clone();
+                async move {
+                    if headers.contains_key("x-metrum-telemetry-boundary")
+                        && gate.swap(false, Ordering::SeqCst)
+                    {
+                        seen.notify_one();
+                        std::future::pending::<()>().await;
+                    }
+                    "# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(&dir, boundary_yaml(address, &address.to_string(), 60_000));
+        let args = TelemetryArgs {
+            ndjson: Some(dir.path().join("run.ndjson")),
+            telemetry: Some(path),
+            ..TelemetryArgs::default()
+        };
+        let cfg = args.resolve_config().unwrap();
+        let mut session = args
+            .start_session(cfg.as_ref(), stamp(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut pending = Box::pin(session.boundary_sample());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                _ = entered.notified() => {},
+                result = &mut pending => panic!("fixture should block boundary, got {result:?}"),
+            }
+        })
+        .await
+        .expect("boundary request reached fixture");
+        drop(pending);
+        let timeout = session.note_boundary_timeout(1).await;
+        assert!(!timeout.ok);
+        let retry = session.boundary_sample().await;
+        assert!(
+            retry.ok,
+            "retry must really scrape configured sources: {retry:?}"
+        );
+        assert_eq!(
+            retry.matched_series, 2,
+            "cancelled call must not turn later boundaries into no-source success"
+        );
+        let _ = session.join_scrapers().await;
+        session.finish(false).await.unwrap();
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 
     /// #312: under --require-telemetry a failed boundary scrape trips the

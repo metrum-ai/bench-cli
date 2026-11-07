@@ -136,6 +136,11 @@ fn zero_queries_conflicting_counts_and_unrelated_denominators_stay_unknown() {
     assert_eq!(zero.unknown, Some(RateUnknown::ZeroDenominator));
     assert_eq!(zero.query_delta.as_deref(), Some("0"));
     assert!(zero.ratio.is_none());
+    let known_zero = counter_rate(&a, &snapshot(Edge::After, &[("a", 110, 90)]), &req).unwrap();
+    assert_eq!(known_zero.ratio, Some(0.0));
+    assert_eq!(known_zero.hit_delta.as_deref(), Some("0"));
+    assert_eq!(known_zero.query_delta.as_deref(), Some("10"));
+    assert!(known_zero.unknown.is_none());
     let bad = counter_rate(&a, &snapshot(Edge::After, &[("a", 101, 92)]), &req).unwrap();
     assert_eq!(bad.unknown, Some(RateUnknown::ContradictoryCounters));
     req.query_metric = "vllm:kv_cache_usage_perc";
