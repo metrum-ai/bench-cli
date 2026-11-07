@@ -7,6 +7,7 @@ pub mod asr;
 pub mod cache_metric_capture;
 pub mod cache_metrics;
 pub mod cache_phase;
+pub mod cache_phase_cli;
 pub mod cache_phase_runtime;
 pub mod cache_rate;
 pub mod cache_workload;
