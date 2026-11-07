@@ -52,6 +52,8 @@ struct Args {
     native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
     #[command(flatten)]
     phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
+    #[command(flatten)]
+    study_export: metrum_ai_bench::kv_study_cli::StudyExportArgs,
 
     #[arg(
         long,
@@ -696,6 +698,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
+    let mut study_protected = vec![
+        std::path::PathBuf::from(&args.data_log),
+        std::path::PathBuf::from(&args.debug_log),
+        std::path::PathBuf::from(&args.error_log),
+    ];
+    study_protected.extend(args.telemetry.ndjson.clone());
+    let study_exports = args.study_export.prepare(
+        1,
+        &study_protected,
+        args.cache_policy,
+        effective_order_policy,
+    )?;
     let telemetry_cfg = args.telemetry.resolve_config()?;
     let phase_plan = args.phase_metrics.resolve(
         telemetry_cfg.as_ref(),
@@ -1806,6 +1820,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let truncated = run_summary.ttft_coverage.reasoning_truncated;
     if truncated > 0 {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
+    }
+    if let Some(exports) = study_exports {
+        let runtime = serde_json::json!({"schema_version":"kv-study-runtime-bindings.v1","scope":"actual configuration and public producer evidence; not executable/reset/physical attestation","cache_workload":run_summary.config.as_ref().and_then(|c|c.modality.get("cache_workload")),"effective_max_concurrency":run_summary.config.as_ref().map(|c|c.effective_max_concurrency),"cap_engagement":"unknown","warmup_protocol":"unverified; no generic warmup neutrality inference","body_scope":"observed request attempts; not proof of server receipt or all planned issuance"});
+        exports.requests(&records, phase_analysis.as_slice(), &runtime)?;
     }
     ttft_audit?;
     telemetry_verdict?;

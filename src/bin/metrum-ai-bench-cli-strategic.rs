@@ -92,6 +92,8 @@ struct Args {
     native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
     #[command(flatten)]
     phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
+    #[command(flatten)]
+    study_export: metrum_ai_bench::kv_study_cli::StudyExportArgs,
     #[arg(long, required_unless_present = "version_only")]
     url: Option<String>,
     #[arg(
@@ -2614,6 +2616,19 @@ async fn main() -> Result<()> {
         .transpose()
         .context("serialize sut")?;
     let stages = parse_sweep(&args.sweep)?;
+    let mut study_protected = vec![args.csv.clone(), args.html.clone()];
+    study_protected.extend(args.ndjson.clone());
+    let study_exports = args.study_export.prepare(
+        stages.len(),
+        &study_protected,
+        args.cache_policy,
+        effective_order_policy,
+    )?;
+    let study_stage_loads = if study_exports.is_some() {
+        stages.clone()
+    } else {
+        Vec::new()
+    };
     // Flag checks before any file is read, so a wrong flag says so first.
     validate_kind_flags(&args)?;
     if args.ttft_fallback.is_some() {
@@ -3257,6 +3272,10 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "otlp"))]
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
+    }
+    if let Some(exports) = study_exports {
+        let runtime = serde_json::json!({"schema_version":"kv-study-runtime-bindings.v1","scope":"actual configuration and public producer evidence; not executable/reset/physical attestation","cache_workload":redacted_config.get("cache_workload"),"warmup":redacted_config.get("warmup"),"warmup_stages":redacted_config.get("warmup_stages"),"stage_resets":redacted_config.get("stage_resets"),"reset_hook_scope":redacted_config.get("stage_hook"),"planned_stage_loads":study_stage_loads,"cap_engagement":"unknown","body_scope":"observed request attempts; not proof of server receipt or all planned issuance"});
+        exports.strategic(&all_records, &study_stage_loads, &phase_reports, &runtime)?;
     }
     if phase_failed {
         bail!("required native phase coverage unavailable");

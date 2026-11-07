@@ -3,6 +3,10 @@
 
 # KV study manifest/report contract
 
+For opt-in record-bound JSON/CSV/HTML views, see
+[observed exports and methodology](KV_STUDY_EXPORTS.md). Physical state remains
+Unknown; manifest declarations are not runtime attestation.
+
 `kv-study-report.v1`, specified by [the JSON Schema](../schemas/kv-study-report.v1.json), is an
 **opt-in interchange contract**, not an additional field in existing runner
 summaries. This first contract does not implement session lifecycle, metric

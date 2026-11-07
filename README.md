@@ -468,6 +468,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
 [CLI reference](docs/CLI.md),
 [strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
+[observed study JSON/CSV/HTML exports](docs/KV_STUDY_EXPORTS.md),
 [cache policy/order contracts](docs/CACHE_WORKLOADS.md),
 [measured native metric windows](docs/CACHE_PHASES.md),
 [native cache metric profiles](docs/CACHE_METRIC_PROFILES.md),

@@ -71,6 +71,12 @@ are exported.
 
 The separate `kv-study-report.v1` manifest/report contract is specified in
 [KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+Opt-in record-bound views use the separate `kv-study-export.v1` envelope:
+[scope, flags, table units, repetition and methodology](KV_STUDY_EXPORTS.md),
+[output schema](../schemas/kv-study-export.v1.json). Manifest metadata stays
+unverified; runtime observations are separate and physical state stays Unknown.
+JSON, CSV metadata cells and escaped HTML derive from one typed phase model.
+This does not append fields to existing core CSV/summary schemas.
 It preserves unknown evidence and phase/reset provenance and references the
 separately versioned dataset validation manifest by digest. This initial contract
 is not emitted by runners yet and does not change existing JSONL schema versions.
