@@ -87,6 +87,15 @@ provenance are documented in
 separate units. The adapter does not change runner JSONL or certify token lengths,
 window feasibility, rights beyond caller policy, or observed cache reuse.
 
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
+
 ## Public input provenance sub-contract
 
 The standalone `public_dataset::ValidationManifest` uses string
@@ -209,6 +218,13 @@ including no-answer outcomes), `fallback_ttft_s` (failed-request fallback
 samples) and `observed_reasoning_tokens` / `observed_visible_completion_tokens`
 distributions and totals (server-reported usage including completed no-answer
 streams). `first_reasoning_s` and `ttft_first_any_s` include these streams;
+The public library `RequestRecord::success` constructor initializes headline
+`ttft_s` and `ttft_first_any_s` from the earliest supplied visible or reasoning
+clock, retaining the visible clock independently in `ttft_visible_answer_s`.
+An explicit `with_resolved_ttft` override retains its supplied provenance.
+`with_chat_outcome` records reasoning truncation as unanswered; it is an error
+only when strict mode is requested.
+
 v5 normally uses first-any headline TTFT (or labelled first-byte approximation) and all-attempt usage with completeness gating. See
 [METRICS.md](METRICS.md#thinking-models-ttft-vs-first-reasoning).
 
