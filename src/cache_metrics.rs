@@ -15,7 +15,8 @@ const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SERIES: usize = 256;
 const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfileId {
     VllmApc,
     VllmExternal,
@@ -24,7 +25,8 @@ pub enum ProfileId {
     Lmcache,
     DynamoKvbm,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Unit {
     Tokens,
     Requests,
@@ -53,7 +55,8 @@ impl Unit {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Role {
     Query,
     Hit,
@@ -70,7 +73,8 @@ pub enum Role {
     TransferTime,
     OperationTime,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HistogramPart {
     Bucket,
     Count,
@@ -321,7 +325,8 @@ impl ProfileId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Unknown {
     RevisionNotDeclaredOrUnsupported,
     TypeNotDeclaredOrConflicting,

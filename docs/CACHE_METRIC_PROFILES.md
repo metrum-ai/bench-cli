@@ -4,8 +4,10 @@
 # Native cache metric semantics (development prototype)
 
 This is **not complete profile support or live certification**. The initial
-`cache-metric-profile.v1` Rust probe is not wired to CLI/report exports. Existing
-scraper configuration and defaults remain unchanged. Tests are explicitly
+`cache-metric-profile.v1` Rust probe has opt-in startup discovery plumbing in both
+chat runners, with a separate `cache-metric-capture.v1` public projection. This
+is not phase-delta or physical-cache certification. Existing scraper
+configuration and defaults remain unchanged. Tests are explicitly
 synthetic, source-derived exposition, not captured live engine pages.
 
 ## Initial pinned source slices
@@ -54,9 +56,36 @@ independent observation of the executable version or deployed tier.
   same-cohort phase hit rates. A known counter zero is different from a missing
   counter, and neither alone proves physical-cache absence or participation.
 
-Remaining work includes exporter-derived coverage fixtures, explicit capability
-and release-support metadata, public label policy, broader histogram coverage
-and complete-family distribution validation, residency/capacity/eviction/failure
-coverage, TRT-LLM scope and opt-in
-CLI/telemetry/report integration. Phase-scoped deltas and reset/identity handling
-belong to the subsequent phase-delta feature. None is inferred by this prototype.
+## Opt-in startup discovery (development)
+
+Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optional
+`--cache-metrics-source-revision`. Endpoint and profile must be selected together;
+a supplied revision must be a full source SHA. Missing/unsupported revisions
+preserve Unknown sample values rather than guessing executable compatibility.
+Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`, `sglang`, `lmcache`
+and legacy `dynamo-kvbm`. These are selections, not backend autodetection.
+
+Discovery performs one unauthenticated GET before measurement. It sends no
+workload body or inherited inference API key, refuses URL credentials, disables
+redirects, and bounds the response to 4 MiB with a five-second fetch deadline.
+HTTP, size, UTF-8, deadline and parser failures are coded unavailable evidence;
+they do not become zero counters. No flags means no discovery GET or new metadata.
+Protected exporters need a separately designed explicit authentication path;
+inference credentials are deliberately not forwarded.
+
+The redacted capture appears under `native_cache_metric_discovery` in strategic
+`config` or LLM effective modality configuration. It retains expected family
+type/units, missing-family lists, per-sample unknown reasons, source declarations
+and fetch timestamps. It excludes endpoint URLs, raw invalid values and private
+worker/model labels. Only validated bucket bounds and whitelisted SGLang cache
+sources are projected. Opaque series IDs are scoped to one snapshot; full private
+labels remain in a non-serialized probe for later same-source phase matching.
+There is no replica/tier summation, distribution reconstruction or request/tier
+attribution. Discovery values are cumulative endpoint observations, not phase
+counter deltas, rates, hit ratios or client timing measurements.
+
+Remaining work includes exporter-derived fixtures, complete capability/release
+metadata, broader histogram coverage and complete-family distribution validation,
+residency/capacity/eviction/failure coverage and TRT-LLM scope. Full telemetry-phase
+integration and phase-scoped deltas/reset/identity handling belong to subsequent
+work; none is inferred from a startup snapshot.
