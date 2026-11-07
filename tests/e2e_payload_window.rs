@@ -17,7 +17,10 @@
 //! test profile only. The ASR test is a guard, not a reproduction: ASR's
 //! form was already built from shared bytes with no copy, so it passes
 //! before and after #242 and pins the window to a raw upload of the file.
-//! The timing tests hold one lock so they never share the CPU.
+//! The timing tests share a process-local lock to avoid overlapping each other;
+//! this does not isolate them from other processes. Complete sample vectors are
+//! logged after measurement to help diagnose future failures without changing
+//! request windows, samples, thresholds, or assertions.
 
 mod common;
 
@@ -113,6 +116,7 @@ fn reference_latency(mut post: impl FnMut() -> reqwest::blocking::Response) -> f
             start.elapsed().as_secs_f64()
         })
         .collect();
+    eprintln!("payload-window reference latencies_s={samples:?}");
     median(&mut samples)
 }
 
@@ -126,6 +130,7 @@ fn median(values: &mut [f64]) -> f64 {
 /// the window adds about 0.4 s (strategic) to 0.9 s (vlm) in a debug build.
 fn assert_window_excludes_body(what: &str, mut latencies: Vec<f64>, reference: f64) {
     assert_eq!(latencies.len(), REQUESTS, "{what}: {latencies:?}");
+    eprintln!("{what}: observed request latencies_s={latencies:?}");
     let measured = median(&mut latencies);
     let limit = reference * 1.25 + 0.1;
     eprintln!("{what}: median latency {measured:.3} s, reference {reference:.3} s");
