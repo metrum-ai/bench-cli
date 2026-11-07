@@ -393,7 +393,8 @@ jobs:
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.user.login != 'dependabot[bot]'))
-    runs-on: bench-cli-arc
+    # Metrum AI: AWS ARC runner set (runner group aws-public-elastic); replaces DOKS bench-cli-arc.
+    runs-on: aws-pub-4c
     timeout-minutes: 45
     concurrency:
       # Metrum AI: retain the runner queue without replacing pending non-PR jobs.
