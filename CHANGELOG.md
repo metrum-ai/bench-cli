@@ -36,6 +36,41 @@
   cadence, and export certification evidence tables and reports. GPU lane
   automation remains separate; missing evidence blocks release certification.
 
+## [1.8.1]
+
+### Fixed
+
+- Do not treat cache hit rate as KV memory occupancy (#420, #434).
+- Initialize library request TTFT from the earliest reasoning or visible token,
+  preserving separate visible timing and reasoning-truncation semantics (#430, #437).
+
+### Tests and documentation
+
+- Make connection reuse regression fixtures drain complete fixed-length bodies;
+  retain pooling-disabled controls and parser/byte-count checks (#377, #438).
+- Make post-DONE drain timing deterministic with a virtual test clock, keeping
+  the latency bound; retain payload-window samples for diagnosis (#456).
+- Complete the reasoning-model clocks, missing-output and fallback guide (#387, #429).
+
+### Dependencies and CI
+
+- Update uuid to 1.29.0, Tokio to 1.54.1, jsonschema to 0.60.2, and the
+  tool-install action to 2.88.1 (#380, #381, #382, #383).
+- Cancel superseded PR jobs without cancelling non-PR evidence runs; keep strict
+  workflow linting and register the configured custom runner (#446, #449, #453).
+
+### Certification tooling
+
+- Add execution-time records and hashes, typed infrastructure history, isolated
+  selected-case launchers, offline preflight, Python 3.12 checks and pre-freeze
+  release/docs audits. Bind shipped-profile binaries to verified pretag artifacts;
+  retain failed attempts and separate validation-only builds (#435). Bind the
+  GPU-010 fallback tokenizer feature-variant cell to its own build proof and
+  stage generated inputs with independent re-derivation and runtime hash binding
+  (#460).
+- Prepare non-publishing pretag packaging and reviewed carry-over validation
+  (#402, #412). Certification results and release publication remain separate gates.
+
 ## 1.8.0
 
 ### Breaking measurement and schema changes
