@@ -54,7 +54,8 @@ def main():
         entries = load_set(args.selection, args.catalog, args.index)
         for case, path, manifest, expected in entries:
             if args.preflight:
-                print(f"PREFLIGHT-OK {case}")
+                import generated_inputs
+                print(f"{generated_inputs.preflight_label(manifest)} {case}")
                 continue
             if digest(path) != expected:
                 raise ValueError("case manifest changed after selected-set preflight")

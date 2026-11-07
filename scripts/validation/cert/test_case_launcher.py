@@ -38,7 +38,7 @@ class CaseLauncherTests(unittest.TestCase):
                     case_launcher.preflight(guarded)
                 probe.assert_called_once_with(Path(manifest['tokenizer_validation']['path']).resolve(), str(binary))
             with patch.object(case_launcher.subprocess, 'run'), patch('tokenizer_probe.probe'):
-                with self.assertRaisesRegex(ValueError, 'disposition'):
+                with self.assertRaisesRegex(ValueError, 'frozen feature-variant binding required'):
                     case_launcher.preflight(guarded)
             for field in ("host_os", "memory_gb"):
                 bad = {"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}

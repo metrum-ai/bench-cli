@@ -64,7 +64,10 @@ cert_parse() {
   trap 'exit 143' TERM
   nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=name,driver_version --format=csv,noheader > "$CERT_OUT/evidence/gpu.csv"
   sha256sum "$CERT_CANDIDATE" "$CERT_BASELINE" > "$CERT_OUT/evidence/binary-hashes.txt"
-  cert_phase inputs-ready
+  # L1's internal selector binds its final bytes later, before workload issuance.
+  if [[ "$CERT_LANE" != L1 || -z "${CERT_INPUT_MANIFEST:-}" ]]; then
+    cert_phase inputs-ready
+  fi
 }
 
 cert_manifest() {

@@ -54,6 +54,13 @@ def build(args):
     measured = {name: artifact(path, args.candidate_sha, 'measured', ['otlp'], origin)
                 for name, path in paths.items()}
     result['builds']['measured'] = {'origin': origin, 'binaries': measured}
+    if getattr(args, 'tokenizer_variant', False):
+        variant_origin, variant_paths = pretag_artifact.download(
+            args.candidate_sha, args.version, args.workflow_run_id, out / 'tokenizer-variant', variant=True)
+        variants = {name: artifact(path, args.candidate_sha, 'feature-variant-tokenizer',
+                                  ['otlp', 'tokenizer'], variant_origin)
+                    for name, path in variant_paths.items()}
+        result['builds']['feature-variant-tokenizer'] = {'origin': variant_origin, 'binaries': variants}
     clean_source(repo, args.candidate_sha, args.version)
     command = ['cargo', 'build', '--locked', '--release', '--features', 'otlp,tokenizer',
                '--target-dir', str(out / 'validation-only'), '--bin', 'metrum-ai-bench-cli-llm']
@@ -81,6 +88,8 @@ def main():
     for name in ('candidate-sha', 'version'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--workflow-run-id', type=int, required=True)
+    parser.add_argument('--tokenizer-variant', action='store_true',
+                        help='also import the separately labelled BC-GPU-010 fallback artifact')
     args = parser.parse_args()
     try:
         build(args)
