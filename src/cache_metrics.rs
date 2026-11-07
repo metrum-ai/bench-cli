@@ -35,6 +35,7 @@ pub enum Unit {
     Events,
     Keys,
     EvictionCandidates,
+    Observations,
 }
 impl Unit {
     fn declaration(self) -> &'static str {
@@ -48,6 +49,7 @@ impl Unit {
             Self::Events => "events",
             Self::Keys => "keys",
             Self::EvictionCandidates => "eviction_candidates",
+            Self::Observations => "observations",
         }
     }
 }
@@ -66,6 +68,19 @@ pub enum Role {
     Eviction,
     Failure,
     TransferTime,
+    OperationTime,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistogramPart {
+    Bucket,
+    Count,
+    Sum,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct HistogramSpec {
+    pub family: &'static str,
+    pub unit: Unit,
+    pub part: HistogramPart,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct MetricSpec {
@@ -74,6 +89,9 @@ pub struct MetricSpec {
     pub unit: Unit,
     pub role: Role,
     pub required: bool,
+    /// Parent TYPE/UNIT evidence; count/bucket units are observations, not the
+    /// parent duration/size unit. Scalar kind expresses cumulative semantics.
+    pub histogram: Option<HistogramSpec>,
 }
 const fn c(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
     MetricSpec {
@@ -82,6 +100,7 @@ const fn c(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
         unit,
         role,
         required: true,
+        histogram: None,
     }
 }
 impl MetricSpec {
@@ -100,6 +119,29 @@ const fn gauge(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
         unit,
         role,
         required: false,
+        histogram: None,
+    }
+}
+const fn h(
+    metric: &'static str,
+    family: &'static str,
+    part: HistogramPart,
+    unit: Unit,
+    role: Role,
+) -> MetricSpec {
+    MetricSpec {
+        metric,
+        kind: match part {
+            HistogramPart::Bucket => MetricType::HistogramBucket,
+            _ => MetricType::Counter,
+        },
+        unit: match part {
+            HistogramPart::Sum => unit,
+            _ => Unit::Observations,
+        },
+        role,
+        required: false,
+        histogram: Some(HistogramSpec { family, unit, part }),
     }
 }
 
@@ -123,6 +165,27 @@ const VLLM_EXTERNAL: &[MetricSpec] = &[
 // Flat transfer metrics only. Deprecated transfer_type-labelled aggregates are
 // intentionally not aliases and must not be added to these directional totals.
 const VLLM_OFFLOAD: &[MetricSpec] = &[
+    h(
+        "vllm:kv_offload_lookup_sync_delay_seconds_bucket",
+        "vllm:kv_offload_lookup_sync_delay_seconds",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
+    h(
+        "vllm:kv_offload_lookup_sync_delay_seconds_count",
+        "vllm:kv_offload_lookup_sync_delay_seconds",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
+    h(
+        "vllm:kv_offload_lookup_sync_delay_seconds_sum",
+        "vllm:kv_offload_lookup_sync_delay_seconds",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
     c("vllm:kv_offload_load_bytes_total", Unit::Bytes, Role::Read),
     c(
         "vllm:kv_offload_store_bytes_total",
@@ -153,6 +216,27 @@ const SGLANG: &[MetricSpec] = &[
     g("sglang:cache_hit_rate", Role::ReportedHitRate),
 ];
 const LMCACHE: &[MetricSpec] = &[
+    h(
+        "lmcache:time_to_retrieve_bucket",
+        "lmcache:time_to_retrieve",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
+    h(
+        "lmcache:time_to_retrieve_count",
+        "lmcache:time_to_retrieve",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
+    h(
+        "lmcache:time_to_retrieve_sum",
+        "lmcache:time_to_retrieve",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    ),
     c(
         "lmcache:num_requested_tokens_total",
         Unit::Tokens,
@@ -330,7 +414,9 @@ pub fn probe(
                 continue;
             }
             if seen_samples.contains(parts[0])
-                || seen_samples.contains(format!("{}_total", parts[0]).as_str())
+                || ["_total", "_bucket", "_count", "_sum"]
+                    .iter()
+                    .any(|suffix| seen_samples.contains(format!("{}{suffix}", parts[0]).as_str()))
             {
                 // A declaration arriving after its family is not TYPE evidence
                 // for samples that preceded it.
@@ -388,7 +474,9 @@ pub fn probe(
             unmatched_samples += 1;
             continue;
         };
-        let expected_type = if spec.kind == MetricType::Counter {
+        let expected_type = if spec.histogram.is_some() {
+            "histogram"
+        } else if spec.kind == MetricType::Counter {
             "counter"
         } else {
             "gauge"
@@ -396,20 +484,19 @@ pub fn probe(
         // Prometheus and OpenMetrics counter TYPE family spellings; these are
         // declaration spellings, not aliases for accepted sample names.
         let direct = types.get(spec.metric).copied();
-        let family = (spec.kind == MetricType::Counter)
-            .then(|| spec.metric.strip_suffix("_total"))
-            .flatten()
-            .and_then(|base| types.get(base).copied());
+        let family_name = spec.histogram.map(|h| h.family).or_else(|| {
+            (spec.kind == MetricType::Counter)
+                .then(|| spec.metric.strip_suffix("_total"))
+                .flatten()
+        });
+        let family = family_name.and_then(|base| types.get(base).copied());
         let declaration = match (direct, family) {
             (Some(a), Some(b)) if a != b => Some(None),
             (Some(a), _) => Some(a),
             (_, b) => b,
         };
         let direct_unit = units.get(spec.metric).copied();
-        let family_unit = (spec.kind == MetricType::Counter)
-            .then(|| spec.metric.strip_suffix("_total"))
-            .flatten()
-            .and_then(|base| units.get(base).copied());
+        let family_unit = family_name.and_then(|base| units.get(base).copied());
         let declared_unit = match (direct_unit, family_unit) {
             (Some(a), Some(b)) if a != b => Some(None),
             (Some(a), _) => Some(a),
@@ -421,9 +508,18 @@ pub fn probe(
             Some(Unknown::MissingRequired)
         } else if declaration != Some(Some(expected_type)) {
             Some(Unknown::TypeNotDeclaredOrConflicting)
-        } else if declared_unit.is_some_and(|unit| unit != Some(spec.unit.declaration())) {
+        } else if declared_unit.is_some_and(|unit| {
+            unit != Some(spec.histogram.map_or(spec.unit, |h| h.unit).declaration())
+        }) {
             Some(Unknown::UnitNotCompatible)
-        } else if sample.labels.len() > 16
+        } else if (spec.kind == MetricType::HistogramBucket
+            && !sample.labels.get("le").is_some_and(|le| {
+                le == "+Inf"
+                    || le
+                        .parse::<f64>()
+                        .is_ok_and(|bound| bound.is_finite() && bound >= 0.0)
+            }))
+            || sample.labels.len() > 16
             || sample
                 .labels
                 .iter()
@@ -443,7 +539,9 @@ pub fn probe(
                 && sample.value.fract() != 0.0)
         {
             Some(Unknown::InvalidValue)
-        } else if spec.kind == MetricType::Counter && sample.value >= MAX_EXACT_INTEGER {
+        } else if matches!(spec.kind, MetricType::Counter | MetricType::HistogramBucket)
+            && sample.value >= MAX_EXACT_INTEGER
+        {
             Some(Unknown::CounterPrecision)
         } else {
             None

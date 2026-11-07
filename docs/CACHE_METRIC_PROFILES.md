@@ -42,12 +42,21 @@ independent observation of the executable version or deployed tier.
   counts are not. Residency gauges retain byte units rather than being treated as
   stored-token counts. Neither reported residency nor configuration proves actual
   physical allocation, capacity or tier participation.
+- Initial duration-histogram slices cover vLLM offload synchronous lookup and
+  LMCache retrieve operation time. `_bucket`, `_count`, and `_sum` use the exact
+  parent histogram TYPE and UNIT, never scalar-suffix inference. Buckets/counts
+  count observations; sums carry seconds, including fractional seconds. Bucket
+  `le` is required and must be a finite nonnegative bound or `+Inf`. Late or
+  contradictory parent TYPE is Unknown. These are reported operation times, not
+  client TTFT/prefill latency or automatically transfer time. Partial families
+  never establish a complete distribution; no quantiles are synthesized.
 - Gauge changes are not counter deltas. Reported window hit rates are not
   same-cohort phase hit rates. A known counter zero is different from a missing
   counter, and neither alone proves physical-cache absence or participation.
 
 Remaining work includes exporter-derived coverage fixtures, explicit capability
-and release-support metadata, public label policy, histogram suffix/unit
-semantics, broader residency/capacity/eviction/failure coverage, TRT-LLM scope and opt-in
+and release-support metadata, public label policy, broader histogram coverage
+and complete-family distribution validation, residency/capacity/eviction/failure
+coverage, TRT-LLM scope and opt-in
 CLI/telemetry/report integration. Phase-scoped deltas and reset/identity handling
 belong to the subsequent phase-delta feature. None is inferred by this prototype.

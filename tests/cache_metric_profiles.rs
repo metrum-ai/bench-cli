@@ -10,7 +10,9 @@ fn fixture(profile: ProfileId) -> String {
         .metrics()
         .iter()
         .map(|s| {
-            let kind = if s.kind == MetricType::Counter {
+            let kind = if s.histogram.is_some() {
+                "histogram"
+            } else if s.kind == MetricType::Counter {
                 "counter"
             } else {
                 "gauge"
@@ -21,9 +23,15 @@ fn fixture(profile: ProfileId) -> String {
             } else {
                 ""
             };
+            let le = if s.kind == MetricType::HistogramBucket {
+                ",le=\"1\""
+            } else {
+                ""
+            };
             format!(
-                "# TYPE {} {kind}\n{}{{worker=\"worker-a\"{tier}}} {value}\n",
-                s.metric, s.metric
+                "# TYPE {} {kind}\n{}{{worker=\"worker-a\"{tier}{le}}} {value}\n",
+                s.histogram.map_or(s.metric, |h| h.family),
+                s.metric
             )
         })
         .collect()
@@ -158,7 +166,10 @@ fn flat_offload_time_is_continuous_but_bytes_are_integer_and_legacy_totals_are_n
     assert_eq!(
         probe(p, Some(p.source_revision()), &bad)
             .unwrap()
-            .observations[0]
+            .observations
+            .iter()
+            .find(|row| row.spec.metric == "vllm:kv_offload_load_bytes_total")
+            .unwrap()
             .unknown,
         Some(Unknown::InvalidValue)
     );
@@ -176,6 +187,68 @@ fn flat_offload_time_is_continuous_but_bytes_are_integer_and_legacy_totals_are_n
             .unwrap()
             .unit,
         Unit::EvictionCandidates
+    );
+}
+
+#[test]
+fn histogram_parent_type_and_unit_are_not_inferred_from_scalar_suffixes() {
+    let p = ProfileId::Lmcache;
+    let family = "lmcache:time_to_retrieve";
+    let base = fixture(p).replace(
+        "lmcache:time_to_retrieve_sum{worker=\"worker-a\"} 10",
+        "lmcache:time_to_retrieve_sum{worker=\"worker-a\"} 0.125",
+    );
+    let page = format!("# UNIT {family} seconds\n{base}");
+    let result = probe(p, Some(p.source_revision()), &page).unwrap();
+    let hist: Vec<_> = result
+        .observations
+        .iter()
+        .filter(|r| r.spec.histogram.is_some())
+        .collect();
+    assert_eq!(hist.len(), 3);
+    assert!(hist.iter().all(|r| r.value.is_some()));
+    assert_eq!(
+        hist.iter()
+            .find(|r| r.spec.metric.ends_with("_sum"))
+            .unwrap()
+            .value,
+        Some(0.125)
+    );
+    assert!(hist
+        .iter()
+        .filter(|r| !r.spec.metric.ends_with("_sum"))
+        .all(|r| r.spec.unit == Unit::Observations));
+    for changed in [
+        page.replace(
+            "# UNIT lmcache:time_to_retrieve seconds",
+            "# UNIT lmcache:time_to_retrieve bytes",
+        ),
+        page.replace(
+            "# TYPE lmcache:time_to_retrieve histogram",
+            "# TYPE lmcache:time_to_retrieve counter",
+        ),
+        format!(
+            "{}# TYPE {family} histogram\n",
+            page.replace("# TYPE lmcache:time_to_retrieve histogram\n", "")
+        ),
+    ] {
+        assert!(probe(p, Some(p.source_revision()), &changed)
+            .unwrap()
+            .observations
+            .iter()
+            .filter(|r| r.spec.histogram.is_some())
+            .all(|r| r.value.is_none()));
+    }
+    let invalid = page.replace("le=\"1\"", "le=\"NaN\"");
+    assert_eq!(
+        probe(p, Some(p.source_revision()), &invalid)
+            .unwrap()
+            .observations
+            .iter()
+            .find(|r| r.spec.kind == MetricType::HistogramBucket)
+            .unwrap()
+            .unknown,
+        Some(Unknown::InvalidLabels)
     );
 }
 
