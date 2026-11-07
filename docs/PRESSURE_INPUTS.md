@@ -37,5 +37,33 @@ Tests distinguish resident hit, external hit and miss/recompute; unknown capacit
 remains unknown. These are CPU model outcomes, never observed tier transfers or
 physical cache behavior. A backend's admission/prefix/tier policy may differ.
 
-This is a foundation for broader pressure families/source trace adapters, not full
-trace replay, cyclic/Zipf generation or physical multi-tier validation.
+## Constructed cyclic/integer-Zipf families
+
+`pressure_families::generate` constructs independent full-node group chains and
+reproducible logical access order with explicit seed, node/request/group limits,
+requested pool, achieved group counts and achieved distinct footprint. It does
+not synthesize text or final token IDs, invoke a source script, issue traffic,
+set arrival times or guarantee real pressure/eviction. Rendered overlap remains
+Unknown and physical evidence unavailable.
+
+- Cyclic order rotates through all configured groups; the seed selects initial
+  rotation. First accesses populate; revisits are re-hit candidates.
+- Integer Zipf has exponent exactly one and weights `floor(weight_scale/rank)`;
+  scale must preserve positive support for every group. This is not an arbitrary
+  real-valued exponent or a production distribution fit. SHA-derived bounded
+  rejection sampling avoids modulo bias and floating arithmetic; exact effective
+  order/counts are reported, not assumed to equal requested weights.
+- Requested pool above configured capacity does NOT mean the achieved footprint
+  exceeds capacity. Both relations are reported independently, with explicit
+  below/equal/above/unknown values. Missing capacity remains Unknown.
+- Feed the logical requests to the CPU-only LRU oracle for **model** behavior.
+  Distinct-node totals are not instantaneous residence or contiguous-prefix hits.
+
+Artifact schema: [logical-pressure-family.v1](../schemas/logical-pressure-family.v1.json).
+Numeric count/order/path consistency is checked on construction, beyond JSON
+Schema shape. Deserialization alone is not validation or access authorization.
+The plan fingerprint covers semantic version, config, effective order/counts and
+actual logical request chains. It is not an issued-HTTP-body digest.
+Canonical request generation and final rendered-token checks remain separate.
+
+These are foundations, not full trace replay or physical multi-tier validation.

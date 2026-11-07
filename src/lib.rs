@@ -40,6 +40,7 @@ pub mod modeled_tiers;
 pub mod prefix_families;
 pub mod prefix_validation;
 pub mod preflight;
+pub mod pressure_families;
 pub mod pressure_inputs;
 pub mod prompt_inputs;
 pub mod prompt_library;
@@ -67,8 +68,12 @@ pub mod time_weighted;
 pub mod token_overlap;
 pub mod tokenizer;
 pub mod trace_adapters;
+#[cfg(feature = "tokenizer")]
+pub mod trace_candidates;
 pub mod trace_inputs;
 pub mod trace_presets;
+#[cfg(feature = "tokenizer")]
+pub mod trace_text;
 pub mod usage;
 pub mod validation_consolidation;
 pub mod vlm;
