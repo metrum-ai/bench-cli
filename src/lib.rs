@@ -33,6 +33,7 @@ pub mod http_client;
 pub mod imagegen;
 pub mod isl_osl;
 pub mod jsonl;
+pub mod kv_study_export;
 pub mod load;
 pub mod measurement;
 pub mod modeled_tiers;
