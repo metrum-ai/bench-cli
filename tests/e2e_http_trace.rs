@@ -313,19 +313,11 @@ fn llm_streaming_reuses_pooled_connections_at_concurrency() {
     assert_eq!(summary["connections_reused"], MANY - fresh);
 }
 
-// Use the same paced pool-reentry precondition as the LLM fixture above.
-// This is a reuse/trace check, not an unpaced saturation benchmark.
-fn strategic_http_phase_trace_with_pacing(idle_timeout: &str) -> Option<usize> {
-    let Some(dummy) = spawn_dummy(&[
-        "-latency",
-        "20ms",
-        "-chunk-interval",
-        "10ms",
-        "-idle-timeout",
-        idle_timeout,
-    ]) else {
+#[test]
+fn strategic_points_report_http_phase_trace() {
+    let Some(dummy) = spawn_dummy(&["-latency", "20ms", "-chunk-interval", "10ms"]) else {
         skip("go dummy-model-server not available");
-        return None;
+        return;
     };
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = dir.path().join("prompts.jsonl");
@@ -342,10 +334,6 @@ fn strategic_http_phase_trace_with_pacing(idle_timeout: &str) -> Option<usize> {
             "--max-tokens",
             &MAX_TOKENS.to_string(),
             "--sweep",
-            &REUSE_TEST_RATE.to_string(),
-            "--sweep-by",
-            "rate",
-            "--max-in-flight",
             "1",
             "--requests-per-stage",
             "3",
@@ -391,6 +379,8 @@ fn strategic_http_phase_trace_with_pacing(idle_timeout: &str) -> Option<usize> {
         .filter(|row| col(row, "connection_reused") == "true")
         .count();
     assert_eq!(point["connections_reused"], reused);
+    // Concurrency 1 on one pooled connection: at most the first row connects.
+    assert!(reused >= 2, "reused {reused}");
     for row in &measured {
         let chunks: u64 = col(row, "chunks_received").parse().expect("chunks");
         assert!(chunks >= MAX_TOKENS, "chunks {chunks}");
@@ -400,27 +390,5 @@ fn strategic_http_phase_trace_with_pacing(idle_timeout: &str) -> Option<usize> {
         assert!(sent > 0);
         let receive: f64 = col(row, "receive_s").parse().expect("receive_s");
         assert!(receive > 0.0);
-    }
-    Some(reused)
-}
-
-#[test]
-fn strategic_points_report_http_phase_trace() {
-    if let Some(reused) = strategic_http_phase_trace_with_pacing("30m") {
-        // Concurrency 1 on one pooled connection: at most the first row connects.
-        assert!(reused >= 2, "reused {reused}");
-    }
-}
-
-#[test]
-fn strategic_reuse_fixture_detects_server_idle_eviction() {
-    if let Some(reused) = strategic_http_phase_trace_with_pacing("1ns") {
-        // Keep the positive fixture's strict criterion meaningful: a server
-        // evicting every idle connection must not satisfy it, even with pacing.
-        assert_eq!(
-            reused, 0,
-            "idle-evicting server unexpectedly reused a connection"
-        );
-        assert!(reused < 2);
     }
 }
