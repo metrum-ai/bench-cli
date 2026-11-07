@@ -5,6 +5,13 @@
 
 ## Unreleased (v1.9.0)
 
+- Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
+  validation references, effective workload digests, explicit unknowns and
+  phase/reset evidence and timestamps. Retain warmup isolation overrides with
+  both rendered-body digest-list bindings; unknown verdicts cannot claim a Pass.
+  Add schema and offline mock contract tests. This does
+  not yet add runner emission or live engine/cache validation (#421).
+
 - Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
   recorded-history sessions, with sequential turns and no overlapping duplicate
   session when cycling a small pool. Rate-sweep combinations fail before traffic;

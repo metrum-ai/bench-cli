@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Opt-in KV study interchange (v1.9.0 development)
+
+The separate `kv-study-report.v1` manifest/report contract is specified in
+[KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+It preserves unknown evidence and phase/reset provenance and references the
+separately versioned dataset validation manifest by digest. This initial contract
+is not emitted by runners yet and does not change existing JSONL schema versions.
+
 ## Strategic trusted reset metadata (v1.9.0 development)
 
 When opted in, `config.stage_hook` records command SHA-256 (not raw command),
