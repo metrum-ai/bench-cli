@@ -57,8 +57,12 @@ pub mod time_weighted;
 pub mod token_overlap;
 pub mod tokenizer;
 pub mod trace_adapters;
+#[cfg(feature = "tokenizer")]
+pub mod trace_candidates;
 pub mod trace_inputs;
 pub mod trace_presets;
+#[cfg(feature = "tokenizer")]
+pub mod trace_text;
 pub mod usage;
 pub mod validation_consolidation;
 pub mod vlm;

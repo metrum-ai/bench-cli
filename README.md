@@ -486,6 +486,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [scoped provenance/rights consolidation](docs/VALIDATION_CONSOLIDATION.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
 [structural trace building blocks](docs/TRACE_INPUTS.md),
+[declared constructed trace content](docs/CONSTRUCTED_TRACES.md),
 [logical capacity-aware pressure and cyclic/integer-Zipf families](docs/PRESSURE_INPUTS.md),
 [explicit source-relative time offsets](docs/TRACE_INPUTS.md#explicit-relative-offsets),
 [typed public session normalization](docs/PUBLIC_SESSIONS.md),

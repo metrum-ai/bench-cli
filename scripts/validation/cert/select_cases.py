@@ -92,6 +92,8 @@ PATH_AREAS = {
     'src/tokenizer.rs': {'CLI', 'MATH', 'GPU', 'COMP', 'PERF'},
     'src/trace_inputs.rs': {'*'},
     'src/trace_adapters.rs': {'*'},
+    'src/trace_text.rs': {'*'},
+    'src/trace_candidates.rs': {'*'},
     'src/modeled_tiers.rs': {'*'},
     'src/trace_presets.rs': {'*'},
     'src/vlm.rs': {'LIVE', 'REASON', 'GPU', 'MATH', 'SCHEMA'},
