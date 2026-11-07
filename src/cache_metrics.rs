@@ -24,6 +24,7 @@ pub enum ProfileId {
     Sglang,
     Lmcache,
     DynamoKvbm,
+    TrtLlm,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +39,7 @@ pub enum Unit {
     Keys,
     EvictionCandidates,
     Observations,
+    TokensPerBlock,
 }
 impl Unit {
     fn declaration(self) -> &'static str {
@@ -52,6 +54,7 @@ impl Unit {
             Self::Keys => "keys",
             Self::EvictionCandidates => "eviction_candidates",
             Self::Observations => "observations",
+            Self::TokensPerBlock => "tokens_per_block",
         }
     }
 }
@@ -72,6 +75,13 @@ pub enum Role {
     Failure,
     TransferTime,
     OperationTime,
+    Miss,
+    Reuse,
+    ConnectorAccepted,
+    ReportedCacheAttribution,
+    Allocation,
+    Capacity,
+    Layout,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -302,6 +312,103 @@ const KVBM: &[MetricSpec] = &[
     c("kvbm_object_write_failures", Unit::Blocks, Role::Failure).optional(),
 ];
 
+// TRT-LLM's collector exposes several overlapping views. Keep legacy manager
+// reuse separate from iteration reuse and tier attribution. Connector acceptance
+// precedes async completion; layout gauges do not support block->byte conversion.
+const TRTLLM: &[MetricSpec] = &[
+    c("trtllm_prompt_cached_tokens_total", Unit::Tokens, Role::Hit),
+    c(
+        "trtllm_prompt_cache_hit_tokens_total",
+        Unit::Tokens,
+        Role::ReportedCacheAttribution,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_reused_blocks_total",
+        Unit::Blocks,
+        Role::Reuse,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_missed_blocks_total",
+        Unit::Blocks,
+        Role::Miss,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_iter_reused_blocks_total",
+        Unit::Blocks,
+        Role::Reuse,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_iter_full_reused_blocks_total",
+        Unit::Blocks,
+        Role::Reuse,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_iter_partial_reused_blocks_total",
+        Unit::Blocks,
+        Role::Reuse,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_iter_missed_blocks_total",
+        Unit::Blocks,
+        Role::Miss,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_iter_connector_reused_blocks_total",
+        Unit::Blocks,
+        Role::ConnectorAccepted,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_gen_alloc_blocks_total",
+        Unit::Blocks,
+        Role::Allocation,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_onboard_bytes_total",
+        Unit::Bytes,
+        Role::Read,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_offload_bytes_total",
+        Unit::Bytes,
+        Role::Write,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_disk_prefetch_blocks_total",
+        Unit::Blocks,
+        Role::Transfer,
+    )
+    .optional(),
+    c(
+        "trtllm_kv_cache_intra_device_copy_bytes_total",
+        Unit::Bytes,
+        Role::Transfer,
+    )
+    .optional(),
+    g("trtllm_kv_cache_hit_rate", Role::ReportedHitRate),
+    g("trtllm_kv_cache_iter_reuse_rate", Role::ReportedHitRate),
+    g("trtllm_kv_cache_utilization", Role::Utilization),
+    g("trtllm_kv_cache_host_utilization", Role::Utilization),
+    gauge("trtllm_kv_cache_max_blocks", Unit::Blocks, Role::Capacity),
+    gauge("trtllm_kv_cache_free_blocks", Unit::Blocks, Role::Capacity),
+    gauge("trtllm_kv_cache_used_blocks", Unit::Blocks, Role::Residency),
+    gauge(
+        "trtllm_kv_cache_tokens_per_block",
+        Unit::TokensPerBlock,
+        Role::Layout,
+    ),
+];
+
 impl ProfileId {
     pub fn source_revision(self) -> &'static str {
         match self {
@@ -311,6 +418,7 @@ impl ProfileId {
             Self::Sglang => "188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a",
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
+            Self::TrtLlm => "a3febfbfd0324bded62007ffd7d5241a06cbfc00",
         }
     }
     pub fn metrics(self) -> &'static [MetricSpec] {
@@ -321,6 +429,7 @@ impl ProfileId {
             Self::Sglang => SGLANG,
             Self::Lmcache => LMCACHE,
             Self::DynamoKvbm => KVBM,
+            Self::TrtLlm => TRTLLM,
         }
     }
 }
@@ -382,6 +491,7 @@ pub fn probe(
     static SGLANG_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static LMCACHE_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static KVBM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
+    static TRTLLM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     let matcher = match profile {
         ProfileId::VllmApc => &APC,
         ProfileId::VllmExternal => &EXTERNAL,
@@ -389,6 +499,7 @@ pub fn probe(
         ProfileId::Sglang => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
+        ProfileId::TrtLlm => &TRTLLM_MATCHER,
     };
     // Bound relevant series, not every unrelated histogram on an engine page.
     // Reuse the parser's filter-before-label-parsing behavior.

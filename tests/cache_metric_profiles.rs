@@ -46,6 +46,7 @@ fn exact_pinned_profiles_preserve_units_types_labels_and_missing_not_zero() {
         ProfileId::Sglang,
         ProfileId::Lmcache,
         ProfileId::DynamoKvbm,
+        ProfileId::TrtLlm,
     ] {
         let page = fixture(profile);
         let result = probe(profile, Some(profile.source_revision()), &page).unwrap();

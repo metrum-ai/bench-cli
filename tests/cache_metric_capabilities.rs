@@ -13,6 +13,7 @@ fn exact_declared_source_compatibility_never_claims_executable_or_complete_suppo
         ProfileId::Sglang,
         ProfileId::Lmcache,
         ProfileId::DynamoKvbm,
+        ProfileId::TrtLlm,
     ] {
         let cap = ProfileCapabilities::new(profile, Some(profile.source_revision()));
         assert_eq!(
@@ -26,7 +27,11 @@ fn exact_declared_source_compatibility_never_claims_executable_or_complete_suppo
         assert!(!cap.histogram_distribution_validation);
         assert!(!cap.quantile_reconstruction);
         assert!(cap.release_aliases.is_empty());
-        assert_eq!(cap.unmapped_engines, vec!["trt-llm"]);
+        assert!(cap.unmapped_engines.is_empty());
+        assert_eq!(
+            cap.semantic_qualifiers.is_empty(),
+            profile != ProfileId::TrtLlm
+        );
         assert_eq!(cap.descriptors.len(), profile.metrics().len());
         assert_eq!(
             cap.release_restriction.is_some(),

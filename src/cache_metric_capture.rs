@@ -129,6 +129,7 @@ pub struct ProfileCapabilities {
     pub histogram_distribution_validation: bool,
     pub quantile_reconstruction: bool,
     pub unmapped_engines: Vec<&'static str>,
+    pub semantic_qualifiers: Vec<&'static str>,
     pub descriptors: Vec<MetricCapability>,
 }
 
@@ -166,7 +167,19 @@ impl ProfileCapabilities {
             phase_delta_validation: false,
             histogram_distribution_validation: false,
             quantile_reconstruction: false,
-            unmapped_engines: vec!["trt-llm"],
+            unmapped_engines: Vec::new(),
+            semantic_qualifiers: if profile == ProfileId::TrtLlm {
+                vec![
+                "source-pinned TRT-LLM collector slice; not Triton backend metric aliases",
+                "connector reuse and connector-attributed tokens count accepted loads before async completion",
+                "manager-counter decreases update exporter baseline without decrement; monotonic export is not cache-manager continuity proof",
+                "manager/iteration/total/tier views overlap; never sum them",
+                "prefetched disk pages count as host attribution; attribution is not physical-tier participation",
+                "block and tokens-per-block gauges are not sufficient for byte conversion",
+            ]
+            } else {
+                Vec::new()
+            },
             descriptors: profile
                 .metrics()
                 .iter()
