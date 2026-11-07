@@ -36,6 +36,26 @@ an issuance observation. Actual scheduling drift/cap engagement belong to runtim
 reports. A source timestamp/identifier may itself be private: serialization is
 not automatic permission to publish it.
 
+### Explicit relative offsets
+
+`normalize_trace_offset(value, origin, unit, scale, rounding)` accepts two exact
+source decimal lexemes and an **explicit** common origin/unit/scale. It subtracts
+the rational source values before conversion/scaling/rounding. It never chooses
+the first row, infers an epoch, sorts/reorders rows or schedules an issuance.
+
+For example, `1.0015 − 1.0007` seconds is `0.8 ms`: explicit Floor produces `0`
+with a loss flag; Reject fails. Subtracting separately floored absolute times
+would incorrectly produce `1 ms`. Equal times produce exact zero; time before
+the chosen origin fails rather than clamping or rebasing again. Large origins
+can produce small valid offsets without first converting both epochs to u64 ms.
+The same decimal precision and checked-u128 limits still apply.
+
+`NormalizedTraceOffset` retains source and origin strings, unit/scale, rounding,
+offset milliseconds and precision-loss flag. These are declared offsets, not
+actual arrival/dispatch times. Retain private metadata and pass only explicitly
+selected/validated offsets at the runtime request-point boundary. In particular,
+do not subtract `NormalizedTraceTime.milliseconds` values after flooring.
+
 The JSONL adapter preserves numeric time with serde RawValue; other readers must
 likewise preserve the original numeric lexeme. Parsing
 through f64 and converting back to a string can lose distinctions before this
