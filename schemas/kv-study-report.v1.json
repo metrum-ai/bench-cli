@@ -16,6 +16,13 @@
     "phases": {"type": "array", "items": {"$ref": "#/$defs/phase"}},
     "limitations": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
+  "allOf": [{
+    "if": {"properties": {"workload": {"required": ["policy_effects"], "properties": {"policy_effects": {"contains": {"properties": {"effects": {"properties": {"token_scope": {"const": "full_rendered_body_difference"}}}}}}}}}},
+    "then": {"properties": {"runtime": {"properties": {"tokenizer_revision": {"type": "string"}, "chat_template_sha256": {"$ref": "#/$defs/digest"}}}}}
+  }, {
+    "if": {"properties": {"workload": {"required": ["policy_effects"], "properties": {"policy_effects": {"contains": {"properties": {"effects": {"properties": {"residual_verdict": {"enum": ["Pass", "Fail"]}}}}}}}}}},
+    "then": {"properties": {"runtime": {"properties": {"block_size_tokens": {"type": "integer"}, "tokenizer_revision": {"type": "string"}, "chat_template_sha256": {"$ref": "#/$defs/digest"}}}}}
+  }],
   "$defs": {
     "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "nullable_string": {"type": ["string", "null"], "minLength": 1},
@@ -71,6 +78,28 @@
         }
       }
     },
+    "policy_effects": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "nonce_added_characters", "nonce_added_tokens", "token_scope", "residual_shared_full_blocks", "residual_scope", "residual_verdict"],
+      "properties": {
+        "schema_version": {"const": "cache-policy-effects.v1"},
+        "nonce_added_characters": {"type": "integer", "minimum": 0},
+        "nonce_identity_sequence": {"type": ["integer", "null"], "minimum": 0},
+        "nonce_added_tokens": {"type": ["integer", "null"]},
+        "rendered_body_tokens_before": {"type": ["integer", "null"], "minimum": 0},
+        "rendered_body_tokens_after": {"type": ["integer", "null"], "minimum": 0},
+        "token_scope": {"enum": ["no_policy_nonce", "not_rendered", "full_rendered_body_difference"]},
+        "residual_shared_full_blocks": {"type": ["integer", "null"], "minimum": 0},
+        "residual_scope": {"enum": ["not_validated", "validated_pool_maximum"]},
+        "residual_verdict": {"enum": ["Pass", "Fail", "Unknown", null]}
+      },
+      "allOf": [
+        {"if": {"properties": {"token_scope": {"const": "not_rendered"}}}, "then": {"properties": {"nonce_added_tokens": {"type": "null"}}}},
+        {"if": {"properties": {"token_scope": {"const": "full_rendered_body_difference"}}}, "then": {"properties": {"nonce_added_tokens": {"type": "integer"}, "rendered_body_tokens_before": {"type": "integer"}, "rendered_body_tokens_after": {"type": "integer"}}, "required": ["rendered_body_tokens_before", "rendered_body_tokens_after"]}},
+        {"if": {"properties": {"token_scope": {"const": "no_policy_nonce"}}}, "then": {"properties": {"nonce_added_characters": {"const": 0}, "nonce_added_tokens": {"const": 0}}}},
+        {"if": {"properties": {"residual_verdict": {"enum": ["Unknown", null]}}}, "then": {"properties": {"residual_shared_full_blocks": {"type": "null"}}}, "else": {"properties": {"residual_shared_full_blocks": {"type": "integer"}, "residual_scope": {"const": "validated_pool_maximum"}}}}
+      ]
+    },
     "workload": {
       "type": "object", "additionalProperties": false,
       "required": ["cache_policy", "order", "effective_order_sha256", "body_fingerprints_sha256", "history_mode", "arrival_mode", "concurrency", "input_distribution", "output_distribution", "warmup_isolation"],
@@ -85,6 +114,10 @@
         "input_distribution": {"$ref": "#/$defs/nullable_string"},
         "output_distribution": {"$ref": "#/$defs/nullable_string"},
         "warmup_isolation": {"enum": ["token_prefix_disjoint", "reset_after_warmup", "unverified", "none"]},
+        "policy_effects": {
+          "type": "array", "description": "Per-planned-body policy overhead; retain repeated issuance entries. Not proof every planned body was sent.",
+          "items": {"type": "object", "additionalProperties": false, "required": ["body_sha256", "effects"], "properties": {"body_sha256": {"$ref": "#/$defs/digest"}, "effects": {"$ref": "#/$defs/policy_effects"}}}
+        },
         "warmup_overlap": {
           "type": "object", "additionalProperties": false,
           "required": ["warmup_body_digests_sha256", "measured_body_digests_sha256", "verdict", "override_unverified"],

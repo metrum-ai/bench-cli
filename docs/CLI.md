@@ -316,6 +316,25 @@ Options:
       --prompt-sequence <PROMPT_SEQUENCE>
           Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)
 
+      --cache-policy <CACHE_POLICY>
+          Possible values:
+          - legacy-unspecified: Preserve historical mutation controls; no reuse/isolation assertion
+          - reuse:              Do not add policy mutation; not a guarantee of a physical hit
+          - bust-request:       Distinct nonce at first-message content for every request
+          - isolate-run:        One first-message nonce per invocation, preserving within-run reuse
+
+          [default: legacy-unspecified]
+
+      --prompt-order <PROMPT_ORDER>
+          [default: legacy-unspecified]
+          [possible values: legacy-unspecified, preserve, seeded-shuffle, prescribed]
+
+      --order-seed <ORDER_SEED>
+          Independent effective-order shuffle seed; defaults to --seed
+
+      --arrival-seed <ARRIVAL_SEED>
+          Independent arrival RNG seed; defaults to --seed plus one
+
       --start-jitter-ms <START_JITTER_MS>
           Reproducible closed-loop start-stagger: seeded uniform jitter in [0, MS) ms per slot, to break persistent phase-locking (#313); opt-in, recorded in the run config
 
@@ -1424,6 +1443,28 @@ Options:
 
       --shuffle-prompts
           Shuffle --prompts with --seed before cycling
+
+      --cache-policy <CACHE_POLICY>
+          Possible values:
+          - legacy-unspecified: Preserve historical mutation controls; no reuse/isolation assertion
+          - reuse:              Do not add policy mutation; not a guarantee of a physical hit
+          - bust-request:       Distinct nonce at first-message content for every request
+          - isolate-run:        One first-message nonce per invocation, preserving within-run reuse
+
+          [default: legacy-unspecified]
+
+      --prompt-order <PROMPT_ORDER>
+          [default: legacy-unspecified]
+          [possible values: legacy-unspecified, preserve, seeded-shuffle, prescribed]
+
+      --order-seed <ORDER_SEED>
+
+
+      --prompt-sequence <PROMPT_SEQUENCE>
+
+
+      --prompt-sequence-log <PROMPT_SEQUENCE_LOG>
+
 
       --sessions <SESSIONS>
 

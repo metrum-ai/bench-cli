@@ -5,6 +5,17 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in shared chat cache policy, effective prompt order and post-transform
+  wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
+  Preserve historical defaults, retain request/run nonce scope and digest-list
+  checksums, and extend fingerprint-first prescribed replay to strategic prompts.
+  Fix sequence logging to avoid applying original source indices twice after a
+  short prescription reorders the pool. Use a 16-hex (64-bit) nonce, record its
+  22-character overhead and pinned contextual token differences, and retain
+  actual residual shared blocks (including long template headers). Freeze policy
+  bodies per stage before held-out validation; send those same bytes. No physical
+  hit/offload claim (#414).
+
 - Add held-out strategic warmup pools and a fail-closed rendered-token overlap
   boundary delegating to the authoritative offline validator. Opt-in static
   `--warmup-render-config` consumes the producer-owned pinned local renderer,

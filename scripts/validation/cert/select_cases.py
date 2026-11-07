@@ -30,6 +30,7 @@ PATH_AREAS = {
     'src/bin/metrum-ai-bench-cli-vlm.rs': {'*'},
     'src/bin/metrum-ai-bench-cli.rs': {'*'},
     'src/archive_inputs.rs': {'*'},
+    'src/cache_workload.rs': {'*'},
     'src/canonical_input.rs': {'*'},
     'src/chat_rendering.rs': {'*'},
     'src/runtime_rendering.rs': {'*'},

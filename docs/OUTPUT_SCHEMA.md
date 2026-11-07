@@ -3,6 +3,22 @@
 
 # JSONL output schema
 
+## Opt-in cache workload extension (`cache-workload.v1`)
+
+LLM request `modality_labels.cache_workload_version` and `body_sha256` bind
+post-transformation HTTP body bytes without adding raw prompt content. Strategic
+CSV appends optional `cache_workload_version`, `body_sha256` and
+`cache_policy_effects` columns after the already-landed canonical lineage column
+(old inputs default to absent). LLM labels also include `cache_policy_effects`,
+a JSON-encoded `cache-policy-effects.v1` object. This body-free object records
+22-character policy nonce overhead where applied, a nullable signed contextual
+token delta and pinned before/after counts, planned nonce ordinal for busting,
+and the nullable native pool-wide residual shared-full-block maximum. Without
+pinned rendering/validation those quantities remain unknown, not invented zero. Existing core record schema versions remain unchanged; the
+extension is separately versioned. Summary metadata records effective policy,
+order/seeds, nonce scope/placement, digest-list checksums and serialization timing.
+See [CACHE_WORKLOADS.md](CACHE_WORKLOADS.md) for exact digest and coverage semantics.
+
 ## Held-out warmup provenance (v1.9.0 development)
 
 Optional `config.warmup` retains source SHA-256, pool/request counts, block size,

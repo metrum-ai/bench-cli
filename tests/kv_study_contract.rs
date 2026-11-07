@@ -44,6 +44,48 @@ fn manifest() -> Value {
 }
 
 #[test]
+fn policy_effects_bind_bodies_preserve_unknowns_and_allow_signed_contextual_tokens() {
+    use metrum_ai_bench::cache_workload::{CachePolicy, PolicyEffects};
+    let v = validator();
+    let mut report = manifest();
+    report["workload"]["cache_policy"] = json!("bust_request");
+    let effects = PolicyEffects::unrendered(CachePolicy::BustRequest);
+    report["workload"]["policy_effects"] =
+        json!([{"body_sha256":"b".repeat(64),"effects":effects}]);
+    assert!(v.is_valid(&report));
+    let mut bad = report.clone();
+    bad["workload"]["policy_effects"][0]["effects"]["nonce_added_tokens"] = json!(0);
+    assert!(
+        !v.is_valid(&bad),
+        "unrendered overhead cannot pretend known zero tokens"
+    );
+    let mut bad = report.clone();
+    bad["workload"]["policy_effects"][0]["effects"]["residual_shared_full_blocks"] = json!(0);
+    assert!(
+        !v.is_valid(&bad),
+        "no validator evidence cannot pretend zero residual"
+    );
+    let mut bad = report.clone();
+    bad["workload"]["policy_effects"][0]["body_sha256"] = json!("unbound");
+    assert!(!v.is_valid(&bad));
+    report["workload"]["policy_effects"][0]["effects"]["token_scope"] =
+        json!("full_rendered_body_difference");
+    report["workload"]["policy_effects"][0]["effects"]["nonce_added_tokens"] = json!(-1);
+    assert!(
+        !v.is_valid(&report),
+        "full rendered differences require recorded tokenizer/template identity"
+    );
+    report["workload"]["policy_effects"][0]["effects"]["rendered_body_tokens_before"] = json!(17);
+    report["workload"]["policy_effects"][0]["effects"]["rendered_body_tokens_after"] = json!(16);
+    report["runtime"]["tokenizer_revision"] = json!("a".repeat(40));
+    report["runtime"]["chat_template_sha256"] = json!("b".repeat(64));
+    assert!(
+        v.is_valid(&report),
+        "contextual re-tokenization delta is signed, not standalone nonce length"
+    );
+}
+
+#[test]
 fn version_and_required_provenance_are_strict() {
     let validator = validator();
     let base = manifest();
