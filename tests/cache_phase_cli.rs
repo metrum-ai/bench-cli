@@ -22,6 +22,16 @@ fn fixture() -> (PhaseMetricArgs, NativeMetricArgs, TelemetryConfig) {
     )
 }
 #[test]
+fn boundary_budgets_preserve_defaults_and_reject_overflow() {
+    use metrum_ai_bench::cache_phase_runtime::boundary_budget_ms;
+    assert_eq!(boundary_budget_ms(None).unwrap(), 5000);
+    let (_, _, mut cfg) = fixture();
+    cfg.timeout_ms = 500;
+    assert_eq!(boundary_budget_ms(Some(&cfg)).unwrap(), 2000);
+    cfg.timeout_ms = u64::MAX;
+    assert!(boundary_budget_ms(Some(&cfg)).is_err());
+}
+#[test]
 fn phase_selection_is_disabled_by_default_and_never_infers_source_or_continuity() {
     assert!(PhaseMetricArgs::default()
         .resolve(None, false, &NativeMetricArgs::default())

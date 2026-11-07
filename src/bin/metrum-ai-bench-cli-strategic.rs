@@ -2775,10 +2775,11 @@ async fn main() -> Result<()> {
         args.ndjson.is_some(),
         &args.native_metrics,
     )?;
-    let phase_budget_ms = telemetry_cfg
-        .as_ref()
-        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1000)
-        .unwrap_or(5000);
+    let phase_budget_ms = if phase_plan.is_some() {
+        metrum_ai_bench::cache_phase_runtime::boundary_budget_ms(telemetry_cfg.as_ref())?
+    } else {
+        5000
+    };
 
     // Same optional keys as the stdout config (#197), so NDJSON-only analysis
     // sees the kind settings; chat/embeddings/rerank run rows are unchanged.

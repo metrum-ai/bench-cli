@@ -5,6 +5,13 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in measured native cache counter windows to LLM and strategic runs,
+  reusing synchronous boundary GETs and preserving full private label identity.
+  Await baseline before measured issuance, capture terminal after complete drain
+  and declared settling, retain explicit Unknown/conditional continuity and
+  required-versus-optional coverage. Add compatible weighted-counter arithmetic
+  without inferred replica/tier sums or physical cache attribution (#418).
+
 - Add opt-in shared chat cache policy, effective prompt order and post-transform
   wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
   Preserve historical defaults, retain request/run nonce scope and digest-list

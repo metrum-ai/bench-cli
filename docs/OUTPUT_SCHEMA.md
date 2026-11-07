@@ -3,6 +3,17 @@
 
 # JSONL output schema
 
+## Opt-in native measured-window analysis
+
+`native_cache_phase_analysis` is an independently versioned optional extension:
+LLM summary modality metadata contains one `cache-phase-analysis.v1` report;
+strategic config contains a stage-local array. Per-series `cache-phase-delta.v1`
+retains explicit Unknown/null reasons and qualified continuity; neither raw labels,
+endpoint URLs nor continuity identifiers are projected. Optional missing capture
+never becomes zero. Physical cache state, sample freshness and exclusivity remain
+Unknown, not implied by numeric coverage. Core versions and CSV columns are
+unchanged. See [CACHE_PHASES.md](CACHE_PHASES.md).
+
 ## Opt-in cache workload extension (`cache-workload.v1`)
 
 LLM request `modality_labels.cache_workload_version` and `body_sha256` bind

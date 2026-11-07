@@ -9,6 +9,25 @@ use crate::telemetry::{NativeBoundaryConfig, NativeBoundaryOutcome, TelemetrySes
 use std::time::Duration;
 use tokio::sync::oneshot;
 
+/// Preserve the existing per-source budget formula, rejecting arithmetic
+/// overflow before any boundary request (including receiver slack).
+pub fn boundary_budget_ms(cfg: Option<&crate::telemetry::TelemetryConfig>) -> anyhow::Result<u64> {
+    let Some(cfg) = cfg else { return Ok(5000) };
+    let sources = u64::try_from(cfg.sources.len())?;
+    let budget = cfg
+        .timeout_ms
+        .max(1)
+        .checked_mul(sources)
+        .and_then(|n| n.checked_mul(2))
+        .and_then(|n| n.checked_add(1000))
+        .ok_or_else(|| anyhow::anyhow!("telemetry boundary budget overflow"))?;
+    anyhow::ensure!(
+        budget.checked_add(2000).is_some(),
+        "telemetry boundary receiver budget overflow"
+    );
+    Ok(budget)
+}
+
 #[derive(Clone, Copy)]
 pub struct PhaseBoundaryTag {
     pub stage: u32,

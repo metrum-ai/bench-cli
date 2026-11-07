@@ -1,12 +1,12 @@
 <!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase counter arithmetic (development prototype)
+# Measured native metric windows and arithmetic (development)
 
-The library-only `cache-phase-delta.v1` unit consumes validated native probes.
-It does not start requests, add a polling loop, integrate CLI/report exports or
-claim complete phase validation. Runtime integration must extend the existing
-#312 boundary machinery and #413 drain/reset/readiness/settling lifecycle.
+`cache-phase-delta.v1` consumes validated native probes. Opt-in LLM and strategic
+measured-window integration extends the existing synchronous telemetry boundary
+machinery; it does not add another polling loop or certify physical cache state.
+Final study exports and complete source/phase validation remain separate.
 
 Private context binds the source, run epoch, declared source reference, stage,
 phase and boundary edge to monotonic fetch windows. An after snapshot must
@@ -51,8 +51,52 @@ coverage, not proof of executable version, sample freshness or physical state.
 Shared/unknown traffic yields Unknown. Explicit fixture or operator isolation
 scopes remain labeled; declarations do not independently prove exclusivity.
 
+## Opt-in measured windows
+
+Both runners accept `--cache-phase-source NAME` selecting an exact source from
+`--telemetry YAML`, with `--ndjson PATH` and the existing explicit
+`--cache-metrics-url`, `--cache-metrics-profile` and optional source revision.
+The selected configured URL must match the native endpoint; no source, revision,
+worker or tier is autodetected. Defaults add no phase capture or analysis output.
+
+The LLM native baseline replaces its legacy pre-measured boundary GET after all
+warmup work drains. Its acknowledgement is awaited before measured issuance.
+The terminal capture follows record drain, all request-task joins and optional
+`--cache-phase-settle-ms` (0..10000 ms). Strategic uses separate stage-local
+windows after warmup and reset readiness/settling, with terminal capture after
+all stage tasks and priority writes drain. Per-request TTFT/E2E and record-derived
+throughput windows exclude terminal settling; whole-run elapsed/setup can include
+capture overhead. These windows are named
+`measured`, not cold/warm physical states.
+
+Native evidence and existing priority rows use the **same** boundary GET.
+Native opted-in acquisition rejects redirects, credential-bearing URLs and
+insecure TLS, bounds streaming bytes to the smaller of configured cap and 4 MiB,
+requires strict UTF-8 and uses the smaller configured/source/5-second deadline.
+Explicit telemetry authentication remains explicit; inference authentication is
+not inherited. Legacy acquisition defaults are unchanged. Startup native
+discovery and existing periodic telemetry remain distinct, not phase baselines.
+
+`--cache-phase-epoch ID` is an **operator declaration**, not an observed serving
+process or manager epoch. Without continuity evidence deltas remain Unknown.
+`--cache-phase-required` additionally requires the exact supported source
+reference and a continuity declaration; it fails on missing/invalid native
+counter coverage, stopping measured issuance for failed baselines and returning
+an error for failed terminal capture. This is numeric counter coverage, not
+proof of executable version, sample age, workload exclusivity or physical state.
+Optional coverage preserves null/reason instead of substituting zero. A native
+semantic-limit failure does not fabricate a successful probe merely because
+legacy HTTP/row coverage succeeded.
+
+Versioned `native_cache_phase_analysis` appears in LLM summary modality metadata
+and strategic config (one report per stage). Public analysis excludes raw labels,
+endpoint URLs and continuity identifiers. Physical cache state, sample freshness
+and workload exclusivity stay explicit Unknown; operator-declared deltas remain
+conditional endpoint differences, not benchmark-attributed hit ratios. No worker
+partition is inferred for aggregate hit rates. Core record versions and strategic
+CSV column layout remain unchanged.
+
 Remaining work: captured source freshness/continuity/contamination evidence,
-histogram family/transfer-window checks and existing-boundary runtime wiring.
-These arithmetic APIs are not integrated CLI phase sampling or final exports.
+histogram family/transfer-window checks and final study exports.
 Synthetic fixtures establish arithmetic contracts, not live exporter compatibility,
 cache state, tier participation or performance.

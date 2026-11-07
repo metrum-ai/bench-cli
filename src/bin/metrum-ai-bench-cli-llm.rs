@@ -1063,10 +1063,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     >();
     // Budget: per-source timeout × sources × 2 plus slack; default when no
     // telemetry is configured.
-    let boundary_budget_ms = telemetry_cfg
-        .as_ref()
-        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1_000)
-        .unwrap_or(5_000);
+    let boundary_budget_ms =
+        metrum_ai_bench::cache_phase_runtime::boundary_budget_ms(telemetry_cfg.as_ref())?;
 
     // Record consumer (#310): runs concurrently with issuance so tagged
     // request rows are emitted to the NDJSON stream as requests complete,
