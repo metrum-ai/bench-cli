@@ -36,6 +36,7 @@ PATH_AREAS = {
     'src/prefix_families.rs': {'*'},
     'src/prefix_validation.rs': {'*'},
     'src/pressure_inputs.rs': {'*'},
+    'src/pressure_families.rs': {'*'},
     'src/github_source.rs': {'*'},
     'src/public_adapters.rs': {'*'},
     'src/public_dataset.rs': {'*'},
