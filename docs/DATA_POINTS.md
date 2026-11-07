@@ -22,7 +22,7 @@ and the release workflow publishes it in the release notes.
 
 | Per-request output | Numeric fields | Always | Optional |
 |---|---|---|---|
-| `request.v5` (`--data-log`), schema fields | 27 | 5 | 22 |
+| `request.v5` (`--data-log`), schema fields | 29 | 5 | 24 |
 | `telemetry.v3` `request` row (`--ndjson`) | 15 | 9 | 6 |
 
 - **Telemetry series** are selected by the YAML `include` patterns of each
@@ -84,6 +84,8 @@ harness counts agree on what a quantity is.
 | `ttft-approx` | This condition refers only to `--infer-ttft-from-first-byte`, which approximates missing TTFT from HTTP response headers, not a token. `--ttft-fallback first-token` is a deprecated redundant alias; `--allow-missing-ttft` relaxes the audit. Reasoning-only truncation is unanswered and `--ci-safety` rejects it. |
 | `reasoning-stream` | The server streams `reasoning_content` deltas. |
 | `reasoning-usage` | The server reports `usage.completion_tokens_details.reasoning_tokens` (or an accepted variant). |
+| `server-cached-usage` | Chat server reports a valid integer at usage.prompt_tokens_details.cached_tokens; never substitute zero for missing/null. |
+| `chat-prompt-usage` | Chat usage reports integer prompt_tokens; cached-token evidence retains this denominator even when completion usage is missing. |
 | `tokenizer` | `--tokenizer` is set (client token counts; also fills `usage_missing` rows). |
 | `open-loop` | Open-loop arrivals (`--request-rate`). |
 | `slo` | At least one `--slo` threshold. |
@@ -106,8 +108,8 @@ Reasoning-usage for non-reasoning rates must be complete and consistent for ever
 
 A closed-loop `metrum-ai-bench-cli-llm --mode chat --streaming` run against a
 server that reports usage, with no reasoning, SLO, price, ISL/OSL targets,
-tokenizer, or `--ndjson`, meets `http`, `usage`, `streaming`, `visible-answer`, `positive-window`. It fires **56**
-summary quantities and **23** per-request fields (schema fields
+tokenizer, or `--ndjson`, meets `http`, `usage`, `chat-prompt-usage`, `streaming`, `visible-answer`, `positive-window`. It fires **56**
+summary quantities and **24** per-request fields (schema fields
 plus the llm `modality_metrics` keys).
 `tests/data_points.rs` runs exactly that against dummy-model-server and
 asserts both numbers, and that every fired field is in the schema count.
@@ -293,6 +295,8 @@ than the schema `values` here, which counts every numeric slot.
 |---|---|
 | `bytes_received` | `http` |
 | `bytes_sent` | `http` |
+| `cache_evidence.cached_tokens` | `server-cached-usage` |
+| `cache_evidence.prompt_tokens` | `chat-prompt-usage` |
 | `chunks_received` | `http` |
 | `completion_tokens` | always |
 | `connect_s` | `http` |

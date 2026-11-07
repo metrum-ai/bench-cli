@@ -5,6 +5,12 @@
 
 ## Unreleased (v1.9.0)
 
+- Retain versioned request cached-token evidence for unary/SSE chat, including
+  usage-only final chunks and usage preceding a stream error. Distinguish missing,
+  null and reported zero; keep invalid/contradictory reports Unknown. Add measured
+  cohort aggregation with error/warmup exclusions and separate headline timing
+  provenance/visible-answer timing, without physical-tier attribution (#419).
+
 - Add opt-in shared chat cache policy, effective prompt order and post-transform
   wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
   Preserve historical defaults, retain request/run nonce scope and digest-list

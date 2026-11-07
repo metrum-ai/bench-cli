@@ -485,6 +485,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [optional pinned source catalog](docs/PUBLIC_CATALOG.md),
 [scoped provenance/rights consolidation](docs/VALIDATION_CONSOLIDATION.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
+[cached-token evidence](docs/CACHED_TOKENS.md),
 [structural trace building blocks](docs/TRACE_INPUTS.md),
 [logical capacity-aware pressure](docs/PRESSURE_INPUTS.md),
 [typed public session normalization](docs/PUBLIC_SESSIONS.md),

@@ -128,6 +128,8 @@ pub struct BenchRecord {
     /// JSON-encoded cache-policy-effects.v1, without content or token IDs.
     #[serde(default)]
     pub cache_policy_effects: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_cache_evidence")]
+    pub cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
 }
 
 fn unknown_usage_is_missing() -> bool {
@@ -1528,6 +1530,34 @@ struct CsvBenchRecord {
     cache_workload_version: Option<String>,
     body_sha256: Option<String>,
     cache_policy_effects: Option<String>,
+    #[serde(serialize_with = "serialize_cache_evidence")]
+    cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
+}
+
+fn deserialize_cache_evidence<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<crate::cached_tokens::CachedTokenEvidence>, D::Error> {
+    match Option::<Value>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(Value::String(text)) if text.is_empty() => Ok(None),
+        Some(Value::String(text)) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Some(value) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
+fn serialize_cache_evidence<S: Serializer>(
+    evidence: &Option<crate::cached_tokens::CachedTokenEvidence>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match evidence {
+        Some(evidence) => serializer
+            .serialize_str(&serde_json::to_string(evidence).map_err(serde::ser::Error::custom)?),
+        None => serializer.serialize_none(),
+    }
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
@@ -2916,6 +2946,7 @@ mod tests {
         assert!(legacy.usage_missing);
         assert!(legacy.cache_workload_version.is_none());
         assert!(legacy.body_sha256.is_none());
+        assert!(legacy.cache_evidence.is_none());
         assert!(legacy.cache_policy_effects.is_none());
         assert!(legacy.canonical_lineage_json.is_none());
         let point = summarize_stage(
@@ -3225,7 +3256,7 @@ mod tests {
         let bytes = writer.into_inner().unwrap();
         let text = String::from_utf8(bytes.clone()).expect("utf8");
         assert_eq!(text.lines().next().expect("header"),
-            "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,service_latency_s,first_byte_s,connect_s,ttft_s,prefill_s,decode_s,decode_tok_s,itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup,first_reasoning_s,reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,canonical_lineage_json,cache_workload_version,body_sha256,cache_policy_effects");
+            "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,service_latency_s,first_byte_s,connect_s,ttft_s,prefill_s,decode_s,decode_tok_s,itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup,first_reasoning_s,reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,canonical_lineage_json,cache_workload_version,body_sha256,cache_policy_effects,cache_evidence");
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
