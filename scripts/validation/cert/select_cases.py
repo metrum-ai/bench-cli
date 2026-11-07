@@ -69,6 +69,7 @@ PATH_AREAS = {
     'src/cache_cohorts.rs': {'*'},
     'src/cache_report.rs': {'*'},
     'src/cache_metrics.rs': {'*'},
+    'src/cache_metric_capture.rs': {'*'},
     'src/strategic.rs': {'MODE', 'MATH', 'GPU', 'PERF', 'COMP', 'SCHEMA', 'INTEG'},
     'src/sut.rs': {'HW', 'SCHEMA', 'LIVE', 'GPU', 'INTEG'},
     'src/sweep_modality.rs': {'MODE', 'LIVE', 'GPU', 'MATH'},

@@ -87,6 +87,8 @@ impl ImageDetail {
 struct Args {
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
+    #[command(flatten)]
+    native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
     #[arg(long, required_unless_present = "version_only")]
     url: Option<String>,
     #[arg(
@@ -2015,6 +2017,7 @@ async fn main() -> Result<()> {
         println!("metrum-ai-bench-cli-strategic version {VERSION}");
         return Ok(());
     }
+    args.native_metrics.validate()?;
     let fingerprint_enabled = args.cache_policy != CachePolicy::LegacyUnspecified
         || args.prompt_order != OrderPolicy::LegacyUnspecified
         || args.order_seed.is_some()
@@ -2251,6 +2254,10 @@ async fn main() -> Result<()> {
         "ndjson": args.ndjson,
         // Secrets intentionally omitted (api_key never stamped).
     });
+    // Discovery occurs before stage timing; not phase deltas or cache proof.
+    if let Some(capture) = args.native_metrics.capture_if_enabled().await? {
+        redacted_config["native_cache_metric_discovery"] = serde_json::to_value(capture)?;
+    }
     // Additive keys only when used, so chat/embeddings/rerank configs are unchanged.
     if let Some(temperature) = args.temperature {
         redacted_config["temperature"] = json!(decimal_f32(temperature));
