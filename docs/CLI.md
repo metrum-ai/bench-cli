@@ -1091,6 +1091,11 @@ Options:
 
 ```text
 Usage: metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]
+       metrum-ai-bench-cli-prompts dataset --job <PATH> --output <PATH> --report <PATH> [OPTIONS]
+
+Commands:
+  dataset  Ingest pinned public document files into canonical runtime JSONL
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --version-only

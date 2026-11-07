@@ -4,7 +4,7 @@
 //! Select a reproducible ISL/OSL mix from metrum-ai/prompt-library and write
 //! JSONL for metrum-ai-bench-cli-llm.
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use metrum_ai_bench::prompt_library::{
     default_cache_dir, format_select_failure, load_hub_dataset, load_jsonl, load_parquet_files,
     recommended_max_tokens, resolve_revision, select_mix, selection_failure_report,
@@ -22,9 +22,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
     author,
     version,
     about = "Select ISL/OSL mixes from metrum-ai/prompt-library for metrum-ai-bench-cli-llm",
-    override_usage = "metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]"
+    subcommand_negates_reqs = true,
+    override_usage = "metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]\n       metrum-ai-bench-cli-prompts dataset --job <PATH> --output <PATH> --report <PATH> [OPTIONS]"
 )]
 struct Args {
+    #[command(subcommand)]
+    command: Option<ProfileCommand>,
+
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
 
@@ -182,6 +186,29 @@ struct Args {
     report: Option<PathBuf>,
 }
 
+#[derive(Subcommand, Debug)]
+enum ProfileCommand {
+    /// Ingest pinned public document files into canonical runtime JSONL.
+    Dataset {
+        #[arg(long, help = "Local public-dataset-job.v1 JSON configuration")]
+        job: PathBuf,
+        #[arg(
+            long,
+            help = "New canonical JSONL output; existing files are never overwritten"
+        )]
+        output: PathBuf,
+        #[arg(long, help = "New metadata-only validation report JSON")]
+        report: PathBuf,
+        #[arg(
+            long,
+            help = "Never download; require verified cache or explicit local files"
+        )]
+        offline: bool,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+    },
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     if args.version_only {
@@ -199,6 +226,23 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> anyhow::Result<()> {
+    if let Some(ProfileCommand::Dataset {
+        job,
+        output,
+        report,
+        offline,
+        cache_dir,
+    }) = &args.command
+    {
+        let job = metrum_ai_bench::public_profile::load_job(job)?;
+        let cache = cache_dir
+            .clone()
+            .unwrap_or_else(|| default_cache_dir().with_file_name("public-datasets"));
+        let (records, evidence) = metrum_ai_bench::public_profile::build(&job, &cache, *offline)?;
+        metrum_ai_bench::public_profile::write_profile(&records, &evidence, output, report)?;
+        println!("{}", evidence.human_summary);
+        return Ok(());
+    }
     let count = args
         .count
         .ok_or_else(|| anyhow::anyhow!("--count is required"))? as usize;
@@ -395,4 +439,55 @@ fn run(args: Args) -> anyhow::Result<()> {
     println!("wrote {}", output.display());
     println!("wrote {}", report_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod public_dataset_cli_tests {
+    use super::*;
+
+    #[test]
+    fn dataset_command_has_no_legacy_length_requirements() {
+        let args = Args::try_parse_from([
+            "prompts",
+            "dataset",
+            "--job",
+            "job.json",
+            "--output",
+            "canonical.jsonl",
+            "--report",
+            "validation.json",
+            "--offline",
+        ])
+        .unwrap();
+        assert!(matches!(
+            args.command,
+            Some(ProfileCommand::Dataset { offline: true, .. })
+        ));
+        assert!(Args::try_parse_from([
+            "prompts",
+            "dataset",
+            "--output",
+            "canonical.jsonl",
+            "--report",
+            "validation.json"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn legacy_required_flags_are_unchanged() {
+        assert!(Args::try_parse_from(["prompts"]).is_err());
+        assert!(Args::try_parse_from([
+            "prompts",
+            "--count",
+            "2",
+            "--profile",
+            "chat-short",
+            "--output",
+            "prompts.jsonl",
+            "--report",
+            "report.json"
+        ])
+        .is_ok());
+    }
 }

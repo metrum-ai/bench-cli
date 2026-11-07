@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
@@ -29,6 +29,15 @@
 - Add opt-in strategic `--session-request-roles` for recorded-history request
   boundaries, preserving original message indices and legacy defaults. Record
   boundary/history policy in summary config (#413, first implementation slice).
+
+- Bound warmup/measured prefix validation using a compressed token trie and a
+  default 1,000-pair evidence cap with an explicit-cap helper. Preserve exact
+  maxima, duplicate multiplicity, default thresholds and Unknown handling.
+  Extend unreleased `kv-token-overlap.v1` in place with
+  `pairs_over_threshold_total: Option<u64>` (null on Unknown) and
+  `pairs_over_threshold_truncated: bool`; existing function signatures remain
+  unchanged. Stored pairs now use deterministic measured/token-lexicographic
+  order. Pair-list length alone must not determine pass/fail.
 
 ## Unreleased
 

@@ -246,7 +246,7 @@ fn copy_verified(reader: impl Read, writer: &mut impl Write, file: &SourceFile) 
     Ok(())
 }
 
-fn verify_file(path: &Path, file: &SourceFile) -> Result<()> {
+pub(crate) fn verify_file(path: &Path, file: &SourceFile) -> Result<()> {
     ensure!(
         std::fs::metadata(path)?.len() == file.bytes,
         "cached source size mismatch"

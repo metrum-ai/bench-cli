@@ -37,6 +37,8 @@ impl From<crate::token_overlap::OverlapReport> for OverlapReport {
             max_shared_prefix_tokens,
             max_shared_full_blocks,
             pairs_over_threshold,
+            pairs_over_threshold_total,
+            pairs_over_threshold_truncated,
             tokenizer_revision,
             chat_template_sha256,
             verdict,
@@ -49,8 +51,8 @@ impl From<crate::token_overlap::OverlapReport> for OverlapReport {
             max_shared_prefix_tokens,
             max_shared_full_blocks,
             pairs_over_threshold,
-            pairs_over_threshold_total: None,
-            pairs_over_threshold_truncated: false,
+            pairs_over_threshold_total,
+            pairs_over_threshold_truncated,
             tokenizer_revision,
             chat_template_sha256,
             verdict,
@@ -67,9 +69,8 @@ pub fn body_digest(bytes: &[u8]) -> String {
 }
 
 /// Delegate all token/pin/phase/overlap decisions to the producer-owned module.
-/// The current producer API lacks population/truncation fields: retain an unknown
-/// population total rather than guessing from its diagnostic list. Runtime token
-/// rendering remains unavailable, so the CLI still cannot establish isolation.
+/// Retain the producer population count and truncation flag independently of
+/// its capped diagnostic sample. Unknown is never inferred to be zero.
 pub fn validate_prefix_disjoint(
     warmup: &[RenderedBody],
     measured: &[RenderedBody],
@@ -141,9 +142,12 @@ mod tests {
             let value = serde_json::to_value(&projected).unwrap();
             assert_eq!(
                 value.get("pairs_over_threshold_total"),
-                Some(&serde_json::Value::Null)
+                Some(&serde_json::to_value(native.pairs_over_threshold_total).unwrap())
             );
-            assert_eq!(value["pairs_over_threshold_truncated"], false);
+            assert_eq!(
+                value["pairs_over_threshold_truncated"],
+                native.pairs_over_threshold_truncated
+            );
         }
     }
 
