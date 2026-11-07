@@ -98,7 +98,11 @@ hits or physical tier participation. [TRACE_INPUTS.md](TRACE_INPUTS.md) describe
 prefix/session topology under explicit mapping/coverage. Full source artifacts
 contain private source identifiers; they are not default public evidence.
 Length/time-only inputs and all unrendered structural plans retain rendered-token
-overlap Unknown. These artifacts do not change canonical inputs or runner JSONL.
+overlap Unknown. The separate [logical-pressure-family.v1 schema](../schemas/logical-pressure-family.v1.json)
+records cyclic/integer-Zipf config, achieved order/group counts/footprint and a
+versioned logical-body fingerprint. Requested pool capacity relation is separate
+from achieved footprint; neither establishes instantaneous cache residence.
+These artifacts do not change canonical inputs or runner JSONL.
 
 ## Source trace time metadata
 
@@ -106,7 +110,10 @@ The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
 [TRACE_INPUTS.md](TRACE_INPUTS.md). It retains exact source decimal value/unit,
 positive rational scale, explicit rounding and a precision-loss flag. It does
 not represent an actual arrival or cache measurement, and is not embedded in
-runner JSONL. No runtime record or report schema version changes.
+runner JSONL. `NormalizedTraceOffset` additionally retains the explicit source
+origin and computes rational subtraction BEFORE unit/scaling/rounding; it does
+not infer epochs or arrival times. Deserialization alone does not validate source
+rights or numeric invariants. No runtime record or report schema version changes.
 
 ## Canonical runtime input JSONL
 
