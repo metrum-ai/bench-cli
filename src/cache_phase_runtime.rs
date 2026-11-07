@@ -1,0 +1,143 @@
+// Copyright (c) 2026 Metrum AI, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Typed commands for the EXISTING telemetry consumer. No sampler or implicit
+//! server epochs. Producers must await before acknowledgements prior to issuance
+//! and submit after commands only after joining all in-flight work and settling.
+use crate::cache_phase::{Edge, StudyPhase};
+use crate::telemetry::{NativeBoundaryConfig, NativeBoundaryOutcome, TelemetrySession};
+use std::time::Duration;
+use tokio::sync::oneshot;
+
+/// Preserve the existing per-source budget formula, rejecting arithmetic
+/// overflow before any boundary request (including receiver slack).
+pub fn boundary_budget_ms(cfg: Option<&crate::telemetry::TelemetryConfig>) -> anyhow::Result<u64> {
+    let Some(cfg) = cfg else { return Ok(5000) };
+    let sources = u64::try_from(cfg.sources.len())?;
+    let budget = cfg
+        .timeout_ms
+        .max(1)
+        .checked_mul(sources)
+        .and_then(|n| n.checked_mul(2))
+        .and_then(|n| n.checked_add(1000))
+        .ok_or_else(|| anyhow::anyhow!("telemetry boundary budget overflow"))?;
+    anyhow::ensure!(
+        budget.checked_add(2000).is_some(),
+        "telemetry boundary receiver budget overflow"
+    );
+    Ok(budget)
+}
+
+#[derive(Clone, Copy)]
+pub struct PhaseBoundaryTag {
+    pub stage: u32,
+    pub phase: StudyPhase,
+    pub edge: Edge,
+}
+impl PhaseBoundaryTag {
+    pub fn header(self) -> String {
+        let phase = match self.phase {
+            StudyPhase::Measured => "measured",
+            StudyPhase::Cold => "cold",
+            StudyPhase::Populate => "populate",
+            StudyPhase::Warm => "warm",
+            StudyPhase::Pressure => "pressure",
+            StudyPhase::Rehit => "rehit",
+        };
+        let edge = match self.edge {
+            Edge::Before => "before",
+            Edge::After => "after",
+        };
+        format!("cache-stage-{}-{phase}-{edge}", self.stage)
+    }
+}
+// Contains private source/binding/probe: intentionally no Debug/Serialize.
+pub struct PhaseBoundaryRequest {
+    pub source: String,
+    pub options: NativeBoundaryConfig,
+    pub tag: PhaseBoundaryTag,
+    pub budget_ms: u64,
+    pub ack: oneshot::Sender<PhaseBoundaryReply>,
+}
+pub struct PhaseBoundaryReply {
+    pub tag: PhaseBoundaryTag,
+    pub outcome: NativeBoundaryOutcome,
+    pub budget_expired: bool,
+}
+/// One consumer command channel; legacy default constructors stay unchanged.
+pub enum BoundaryCommand {
+    Legacy(crate::telemetry::BoundaryRequest),
+    Native(PhaseBoundaryRequest),
+}
+pub async fn dispatch_boundary_command(
+    session: Option<&mut TelemetrySession>,
+    command: BoundaryCommand,
+) {
+    match command {
+        BoundaryCommand::Legacy(req) => {
+            let outcome = match session {
+                Some(session) => match tokio::time::timeout(
+                    Duration::from_millis(req.budget_ms),
+                    session.boundary_sample(),
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_) => session.note_boundary_timeout(req.budget_ms).await,
+                },
+                None => crate::telemetry::BoundaryOutcome {
+                    ok: true,
+                    ..Default::default()
+                },
+            };
+            let _ = req.ack.send(outcome);
+        }
+        BoundaryCommand::Native(req) => match session {
+            Some(session) => session.handle_phase_boundary(req).await,
+            None => {
+                let _ = req.ack.send(PhaseBoundaryReply {
+                    tag: req.tag,
+                    budget_expired: false,
+                    outcome: NativeBoundaryOutcome {
+                        telemetry: crate::telemetry::BoundaryOutcome::default(),
+                        native: None,
+                    },
+                });
+            }
+        },
+    }
+}
+impl TelemetrySession {
+    /// Dispatch in the existing record consumer's biased command branch. No
+    /// fire-and-forget acknowledgement: priority writes finish before ack.
+    /// This transports evidence, not a native required-coverage verdict; an HTTP
+    /// success or legacy matches cannot substitute for validating the probe.
+    pub async fn handle_phase_boundary(&mut self, request: PhaseBoundaryRequest) {
+        if request.ack.is_closed() {
+            return;
+        }
+        let tag = request.tag.header();
+        let capture = tokio::time::timeout(
+            Duration::from_millis(request.budget_ms),
+            self.boundary_sample_with_native(&request.source, &request.options, &tag),
+        )
+        .await;
+        let (outcome, budget_expired) = match capture {
+            Ok(outcome) => (outcome, false),
+            Err(_) => (
+                NativeBoundaryOutcome {
+                    telemetry: self
+                        .note_boundary_timeout_tagged(&tag, request.budget_ms)
+                        .await,
+                    native: None,
+                },
+                true,
+            ),
+        };
+        let _ = request.ack.send(PhaseBoundaryReply {
+            tag: request.tag,
+            outcome,
+            budget_expired,
+        });
+    }
+}

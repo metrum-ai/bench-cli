@@ -50,6 +50,8 @@ struct Args {
     version_only: bool,
     #[command(flatten)]
     native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
+    #[command(flatten)]
+    phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
 
     #[arg(
         long,
@@ -695,6 +697,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let telemetry_cfg = args.telemetry.resolve_config()?;
+    let phase_plan = args.phase_metrics.resolve(
+        telemetry_cfg.as_ref(),
+        args.telemetry.ndjson.is_some(),
+        &args.native_metrics,
+    )?;
 
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);
 
@@ -1048,6 +1055,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let start_time = telemetry
         .as_ref()
         .map_or_else(Instant::now, |session| session.run_start());
+    let phase_clock = telemetry.as_ref().map(|session| session.epoch());
     let ramp_up_start = start_time;
     let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
@@ -1055,14 +1063,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // consumer (owner of the telemetry session, #310) for the synchronous
     // pre-measured baseline and awaits the ack before the first measured
     // send.
-    let (boundary_tx, boundary_rx) =
-        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::telemetry::BoundaryRequest>();
+    let (boundary_tx, boundary_rx) = tokio::sync::mpsc::unbounded_channel::<
+        metrum_ai_bench::cache_phase_runtime::BoundaryCommand,
+    >();
     // Budget: per-source timeout × sources × 2 plus slack; default when no
     // telemetry is configured.
-    let boundary_budget_ms = telemetry_cfg
-        .as_ref()
-        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1_000)
-        .unwrap_or(5_000);
+    let boundary_budget_ms =
+        metrum_ai_bench::cache_phase_runtime::boundary_budget_ms(telemetry_cfg.as_ref())?;
 
     // Record consumer (#310): runs concurrently with issuance so tagged
     // request rows are emitted to the NDJSON stream as requests complete,
@@ -1098,24 +1105,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 maybe_req = boundary_rx.recv(), if !boundary_closed => {
                     match maybe_req {
                         Some(req) => {
-                            let outcome = match telemetry.as_mut() {
-                                Some(session) => match tokio::time::timeout(
-                                    Duration::from_millis(req.budget_ms),
-                                    session.boundary_sample(),
-                                )
-                                .await
-                                {
-                                    Ok(outcome) => outcome,
-                                    Err(_elapsed) => {
-                                        session.note_boundary_timeout(req.budget_ms).await
-                                    }
-                                },
-                                None => metrum_ai_bench::telemetry::BoundaryOutcome {
-                                    ok: true,
-                                    ..Default::default()
-                                },
-                            };
-                            let _ = req.ack.send(outcome);
+                            metrum_ai_bench::cache_phase_runtime::dispatch_boundary_command(telemetry.as_mut(),req).await;
                         }
                         None => boundary_closed = true,
                     }
@@ -1214,6 +1204,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut warmup_barrier =
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
             .with_tracker(Arc::clone(&inflight_tracker));
+    let mut phase_before = None;
+    let mut phase_issued_ns = None;
+    let mut phase_required_failed = false;
     let mut measured_boundary_done = false;
     let mut body_fingerprints = Vec::new();
     'request_loop: for slot in slots {
@@ -1260,28 +1253,65 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             // the boundary sample is requested over a channel and the ack is
             // awaited before the first measured send — fire-and-forget would
             // not guarantee baseline-before-send.
-            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-            match boundary_tx.send(metrum_ai_bench::telemetry::BoundaryRequest {
-                budget_ms: boundary_budget_ms,
-                ack: ack_tx,
-            }) {
-                Ok(()) => {
-                    // Generous overall wait (budget + slack); a dead
-                    // consumer fails the ack fast, and the consumer join
-                    // below fails the run.
-                    let wait_ms = boundary_budget_ms + 2_000;
-                    match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
-                        Ok(Ok(_outcome)) => {}
-                        Ok(Err(_)) => {
-                            error!("telemetry boundary ack dropped by the consumer");
-                        }
-                        Err(_) => {
-                            error!("telemetry boundary did not answer within {wait_ms}ms");
+            if let Some(plan) = &phase_plan {
+                let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+                    stage: 0,
+                    phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+                    edge: metrum_ai_bench::cache_phase::Edge::Before,
+                };
+                let (request, reply) = plan.request(tag, boundary_budget_ms);
+                if boundary_tx
+                    .send(metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Native(request))
+                    .is_ok()
+                {
+                    phase_before = tokio::time::timeout(
+                        Duration::from_millis(boundary_budget_ms + 2000),
+                        reply,
+                    )
+                    .await
+                    .ok()
+                    .and_then(Result::ok);
+                }
+                if plan.required
+                    && !phase_before
+                        .as_ref()
+                        .is_some_and(|reply| plan.covered(reply))
+                {
+                    phase_required_failed = true;
+                    stop.stop();
+                    error!(
+                        "required native baseline coverage unavailable; refusing measured issuance"
+                    );
+                }
+                phase_issued_ns = phase_clock.as_ref().map(|clock| clock.elapsed_ns());
+            } else {
+                let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+                match boundary_tx.send(
+                    metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Legacy(
+                        metrum_ai_bench::telemetry::BoundaryRequest {
+                            budget_ms: boundary_budget_ms,
+                            ack: ack_tx,
+                        },
+                    ),
+                ) {
+                    Ok(()) => {
+                        // Generous overall wait (budget + slack); a dead
+                        // consumer fails the ack fast, and the consumer join
+                        // below fails the run.
+                        let wait_ms = boundary_budget_ms + 2_000;
+                        match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
+                            Ok(Ok(_outcome)) => {}
+                            Ok(Err(_)) => {
+                                error!("telemetry boundary ack dropped by the consumer");
+                            }
+                            Err(_) => {
+                                error!("telemetry boundary did not answer within {wait_ms}ms");
+                            }
                         }
                     }
-                }
-                Err(_) => {
-                    error!("telemetry boundary request failed: record consumer is gone");
+                    Err(_) => {
+                        error!("telemetry boundary request failed: record consumer is gone");
+                    }
                 }
             }
             measured_boundary_done = true;
@@ -1565,7 +1595,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Join the record consumer (#310): it returns once every request task
     // has finished sending, with the session, records and counters.
-    let (telemetry, records, completed, mut errors) = match consumer.await {
+    let (mut telemetry, records, completed, mut errors) = match consumer.await {
         Ok(outcome) => outcome,
         Err(e) => {
             error!("Record consumer task failed: {e}");
@@ -1581,6 +1611,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             errors += 1;
         }
     }
+
+    // Terminal native fetch follows BOTH channel drain and every task join.
+    let phase_analysis = if let Some(plan) = &phase_plan {
+        let drained_ns = phase_clock.as_ref().map(|clock| clock.elapsed_ns());
+        if plan.settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(plan.settle_ms)).await;
+        }
+        let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+            stage: 0,
+            phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+            edge: metrum_ai_bench::cache_phase::Edge::After,
+        };
+        let (request, reply) = plan.request(tag, boundary_budget_ms);
+        metrum_ai_bench::cache_phase_runtime::dispatch_boundary_command(
+            telemetry.as_mut(),
+            metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Native(request),
+        )
+        .await;
+        let after = reply.await.ok();
+        if plan.required && !after.as_ref().is_some_and(|reply| plan.covered(reply)) {
+            phase_required_failed = true;
+        }
+        Some(plan.report(&run_id, phase_before, after, phase_issued_ns, drained_ns))
+    } else {
+        None
+    };
 
     info!(
         "Completed {} out of {} requests ({} errors)",
@@ -1647,6 +1703,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if let Some(analysis)=&phase_analysis {map.insert("native_cache_phase_analysis".into(),analysis.clone());}
             if let Some(capture) = &native_metrics {
                 map.insert("native_cache_metric_discovery".into(), serde_json::to_value(capture)?);
             }
@@ -1752,6 +1809,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     ttft_audit?;
     telemetry_verdict?;
+    if phase_required_failed {
+        return Err("required native phase coverage unavailable".into());
+    }
 
     if let Some(ref validation) = isl_osl {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.common.fail_on_osl_mismatch)?;

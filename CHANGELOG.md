@@ -5,6 +5,13 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in measured native cache counter windows to LLM and strategic runs,
+  reusing synchronous boundary GETs and preserving full private label identity.
+  Await baseline before measured issuance, capture terminal after complete drain
+  and declared settling, retain explicit Unknown/conditional continuity and
+  required-versus-optional coverage. Add compatible weighted-counter arithmetic
+  without inferred replica/tier sums or physical cache attribution (#418).
+
 - Add source-pinned native cache metric profiles and opt-in bounded startup
   discovery for vLLM APC/offload, SGLang, LMCache, legacy KVBM and a narrow
   TRT-LLM collector slice. Preserve units, missing/invalid evidence, histogram
