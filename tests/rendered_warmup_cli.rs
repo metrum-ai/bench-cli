@@ -41,7 +41,7 @@ async fn pinned_renderer_binds_actual_wire_and_rejects_overlap_or_unrenderable_b
         "identity":{"tokenizer_id":"fixture/bpe","tokenizer_revision":"a".repeat(40),
           "tokenizer_sha256":body_digest(tokenizer),"chat_template_sha256":body_digest(template),
           "add_special_tokens":false,"add_generation_prompt":true,"hint_nonce_included":false,
-          "renderer_version":"minijinja-chat.v1"},
+          "renderer_version":metrum_ai_bench::chat_rendering::RENDERER_VERSION},
         "special_tokens":{},"max_artifact_bytes":8192,"max_body_bytes":8192,
         "max_rendered_bytes":128,"max_tokens":128,"template_fuel":10000
     }).to_string()).unwrap();

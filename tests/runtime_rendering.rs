@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #![cfg(feature = "tokenizer")]
 
-use metrum_ai_bench::chat_rendering::RenderLimits;
+use metrum_ai_bench::chat_rendering::{RenderLimits, RENDERER_VERSION};
 use metrum_ai_bench::prefix_validation::RenderingIdentity;
 use metrum_ai_bench::runtime_rendering::{prepare_wire_body, PinnedRenderer, TokenizeCrossCheck};
 use metrum_ai_bench::token_overlap::{validate_prefix_disjoint, Phase, Verdict};
@@ -35,7 +35,7 @@ fn exact_wire_ownership_and_optional_cross_check_fail_closed_without_exporting_p
         add_special_tokens: false,
         add_generation_prompt: true,
         hint_nonce_included: false,
-        renderer_version: "minijinja-chat.v1".into(),
+        renderer_version: RENDERER_VERSION.into(),
     };
     let special_tokens = json!({});
     let config = PinnedRenderer {
@@ -53,6 +53,16 @@ fn exact_wire_ownership_and_optional_cross_check_fail_closed_without_exporting_p
         },
     };
     let warm_wire = br#" { "messages" : [{"role":"user","content":"a"}], "metadata":{"private":"KEEP-PRIVATE"} } "#.to_vec();
+    let mut old_identity = identity.clone();
+    old_identity.renderer_version = "minijinja-chat.v1".into();
+    assert_ne!(old_identity.renderer_version, RENDERER_VERSION);
+    let old_config = PinnedRenderer {
+        identity: &old_identity,
+        ..config
+    };
+    assert!(
+        prepare_wire_body("old".into(), Phase::Warmup, warm_wire.clone(), &old_config).is_err()
+    );
     let warm = prepare_wire_body("w".into(), Phase::Warmup, warm_wire.clone(), &config).unwrap();
     assert_eq!(warm.wire_bytes(), warm_wire);
     assert_eq!(warm.evidence().body_sha256, sha(&warm_wire));

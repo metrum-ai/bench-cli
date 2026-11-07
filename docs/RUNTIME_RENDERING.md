@@ -11,6 +11,10 @@ paths (relative to that file), `identity`, `special_tokens`, and explicit
 `max_artifact_bytes`, `max_body_bytes`, `max_rendered_bytes`, `max_tokens`, and
 `template_fuel` limits. Identity uses the producer's `RenderingIdentity` shape.
 The config is capped at 64 KiB; no remote artifact fetch is performed.
+`identity.renderer_version` must name the producer's current renderer
+(`minijinja-chat.v2` for the merged tool-aware/HF JSON context). Older identities
+are rejected, not aliased or silently upgraded; the wire-evidence schema version
+remains separate from the renderer implementation version.
 
 This freezes exact serialized warmup/measured request bytes at setup and reuses
 the existing prebuilt-byte HTTP issuance path. Both pools are rendered and passed
@@ -19,7 +23,7 @@ Fail/Unknown abort even if `--allow-unverified-warmup` was supplied. Without thi
 opt-in, legacy preparation and the explicitly non-certifying Unknown override
 are unchanged. Closed-loop held-out mode remains guarded until dynamic final-body
 bindings are implemented. Rendering/serialization is outside stage timing and
-this timing change is recorded in warmup metadata. Proof budgets cap the planned
+this timing change is recorded in warmup metadata. Validation limits cap the planned
 issued bodies at 100,000 and aggregate rendered tokens at 10,000,000. Repeated
 static pool entries reuse their validated tokenization; request IDs, body-digest
 multiplicity and aggregate token accounting still cover every planned issuance.
