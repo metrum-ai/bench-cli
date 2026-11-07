@@ -307,7 +307,11 @@ single-stage and sessions runs stay quiet) and the HTML report shows the same se
 Analysis that keys on the knee (for example `kv_cache_util_at_knee`) should
 report null, not 0, when `knee` is null.
 The metrics scraper recognizes vLLM, SGLang and TensorRT-LLM names for
-KV-cache utilization, preemptions, and running/waiting queues.
+preemptions and running/waiting queues. KV-cache memory utilization recognizes
+`vllm:gpu_cache_usage_perc`, `vllm:kv_cache_usage_perc`, and
+`trtllm_kv_cache_utilization`. SGLang `cache_hit_rate` is a reuse ratio, not
+memory occupancy, and is never used as `kv_cache_usage`. When no recognized
+occupancy gauge is present, utilization is null. No hit-rate field is added.
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages.
 Rate requests retain their intended schedule while waiting for an in-flight

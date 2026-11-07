@@ -8,6 +8,8 @@
 //! Skipped if `go` is missing.
 
 mod common;
+#[path = "common/pool_fixture.rs"]
+mod pool_fixture;
 
 use common::{request_records, skip, spawn_dummy, summary_record};
 use serde_json::Value;
@@ -315,10 +317,13 @@ fn llm_streaming_reuses_pooled_connections_at_concurrency() {
 
 #[test]
 fn strategic_points_report_http_phase_trace() {
-    let Some(dummy) = spawn_dummy(&["-latency", "20ms", "-chunk-interval", "10ms"]) else {
-        skip("go dummy-model-server not available");
-        return;
-    };
+    strategic_pool_control(true);
+    strategic_pool_control(false);
+}
+
+fn strategic_pool_control(pooled: bool) {
+    let fixture = pool_fixture::PoolFixture::start(pooled, 3, MAX_TOKENS as usize);
+    let expected_body_bytes = fixture.body_bytes as u64;
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = dir.path().join("prompts.jsonl");
     std::fs::write(&prompts, "{\"prompt\":\"alpha\"}\n").expect("prompts");
@@ -326,7 +331,7 @@ fn strategic_points_report_http_phase_trace() {
     let output = Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic"))
         .args([
             "--url",
-            &dummy.url("/v1/chat/completions"),
+            &fixture.url,
             "--model",
             "dummy",
             "--prompts",
@@ -379,13 +384,31 @@ fn strategic_points_report_http_phase_trace() {
         .filter(|row| col(row, "connection_reused") == "true")
         .count();
     assert_eq!(point["connections_reused"], reused);
-    // Concurrency 1 on one pooled connection: at most the first row connects.
-    assert!(reused >= 2, "reused {reused}");
+    let connections = fixture.finish();
+    if pooled {
+        // Concurrency 1 on one drained pooled connection: only the first connects.
+        assert!(
+            reused >= 2,
+            "reused {reused}; accepted sockets {connections}"
+        );
+        assert_eq!(connections, 1);
+    } else {
+        // Connection: close disables persistence without changing client tracing.
+        assert_eq!(
+            reused, 0,
+            "negative control unexpectedly reused a connection"
+        );
+        assert_eq!(connections, 3);
+    }
     for row in &measured {
         let chunks: u64 = col(row, "chunks_received").parse().expect("chunks");
         assert!(chunks >= MAX_TOKENS, "chunks {chunks}");
         let received: u64 = col(row, "bytes_received").parse().expect("bytes");
         assert!(received > 0);
+        assert_eq!(
+            received, expected_body_bytes,
+            "entire body must be consumed"
+        );
         let sent: u64 = col(row, "bytes_sent").parse().expect("bytes_sent");
         assert!(sent > 0);
         let receive: f64 = col(row, "receive_s").parse().expect("receive_s");

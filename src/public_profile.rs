@@ -458,7 +458,7 @@ mod tests {
                     add_special_tokens: false,
                     add_generation_prompt: true,
                     hint_nonce_included: false,
-                    renderer_version: "minijinja-chat.v1".into(),
+                    renderer_version: crate::chat_rendering::RENDERER_VERSION.into(),
                 },
                 tokenizer_path: tok,
                 template_path: tpl,

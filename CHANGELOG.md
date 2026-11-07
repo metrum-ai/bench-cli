@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
+<!-- Copyright (c) 2026 Metrum AI, Inc. Licensed under the Apache License, Version 2.0. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
@@ -15,6 +15,13 @@
   hashes and producer population/truncation fields (never sampled-list totals).
   Fingerprint-only rendering metadata records live cross-check NotRequested;
   closed-loop held-out mode remains guarded pending dynamic bindings (#413).
+
+- Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
+  validation references, effective workload digests, explicit unknowns and
+  phase/reset evidence and timestamps. Retain warmup isolation overrides with
+  both rendered-body digest-list bindings; unknown verdicts cannot claim a Pass.
+  Add schema and offline mock contract tests. This does
+  not yet add runner emission or live engine/cache validation (#421).
 
 - Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
   recorded-history sessions, with sequential turns and no overlapping duplicate
@@ -43,6 +50,10 @@
   order. Pair-list length alone must not determine pass/fail.
 
 ## Unreleased
+
+- Metrum AI: cancel superseded PR workflows while preserving active and queued
+  non-PR evidence with unique run-ID groups, including the self-hosted job.
+  Add a pinned actionlint CI check for all PR-triggered workflows.
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and
   clarify reasoning-only truncation semantics in the output schema.
