@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
+<!-- Copyright (c) 2026 Metrum AI, Inc. Licensed under the Apache License, Version 2.0. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
@@ -32,6 +32,10 @@
   order. Pair-list length alone must not determine pass/fail.
 
 ## Unreleased
+
+- Metrum AI: cancel superseded PR workflows while preserving active and queued
+  non-PR evidence with unique run-ID groups, including the self-hosted job.
+  Add a pinned actionlint CI check for all PR-triggered workflows.
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and
   clarify reasoning-only truncation semantics in the output schema.
