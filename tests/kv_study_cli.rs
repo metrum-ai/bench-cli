@@ -44,7 +44,10 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     for strategic in [false, true] {
-        for case in 0..6 {
+        for case in 0..7 {
+            if strategic && case == 6 {
+                continue;
+            }
             let dir = tempfile::tempdir().unwrap();
             let prompts = dir.path().join("prompts.jsonl");
             std::fs::write(&prompts, "{\"prompt\":\"Hi\"}\n").unwrap();
@@ -61,17 +64,27 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
             }
             std::fs::write(&manifest, serde_json::to_vec(&declaration).unwrap()).unwrap();
             let prefix = dir.path().join("export");
-            let json_path = dir.path().join("export.study.json");
-            let csv_path = dir.path().join("export.study.csv");
-            let html_path = dir.path().join("export.study.html");
+            let stem = if case == 6 {
+                "export.run-0001"
+            } else {
+                "export"
+            };
+            let json_path = dir.path().join(format!("{stem}.study.json"));
+            let csv_path = dir.path().join(format!("{stem}.study.csv"));
+            let html_path = dir.path().join(format!("{stem}.study.html"));
             if case == 2 {
                 std::fs::write(&csv_path, "SENTINEL").unwrap();
             }
-            let mut cmd = tokio::process::Command::new(if strategic {
+            let mut cmd = tokio::process::Command::new(if case == 6 {
+                env!("CARGO_BIN_EXE_metrum-ai-bench-cli")
+            } else if strategic {
                 env!("CARGO_BIN_EXE_metrum-ai-bench-cli-strategic")
             } else {
                 env!("CARGO_BIN_EXE_metrum-ai-bench-cli-llm")
             });
+            if case == 6 {
+                cmd.args(["llm", "--runs", "2"]);
+            }
             cmd.args([
                 "--url",
                 &format!("http://{addr}/chat/completions"),
@@ -139,7 +152,7 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
                         "PRIVATE_EPOCH",
                     ]);
             }
-            let success = case == 0 || case == 5;
+            let success = case == 0 || case == 5 || case == 6;
             let before = count.load(Ordering::SeqCst);
             let output = cmd.output().await.unwrap();
             assert_eq!(
@@ -148,11 +161,22 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
                 "strategic{strategic}case{case}:{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            assert_eq!(count.load(Ordering::SeqCst) - before, usize::from(success));
+            assert_eq!(
+                count.load(Ordering::SeqCst) - before,
+                if case == 6 { 2 } else { usize::from(success) }
+            );
             if success {
                 let data: Value =
                     serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
                 assert_eq!(data["schema_version"], "kv-study-export.v1");
+                if case == 6 {
+                    let second: Value = serde_json::from_slice(
+                        &std::fs::read(dir.path().join("export.run-0002.study.json")).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(second["phases"][0]["requests"], 1);
+                    assert!(!dir.path().join("export.study.json").exists());
+                }
                 if case == 5 {
                     assert!(data["phases"][0]["native_window"]["delta"]["series"].is_array());
                     assert!(!serde_json::to_string(&data).unwrap().contains("PRIVATE"));

@@ -177,3 +177,127 @@ fn scheduling_coverage_not_default_zero_and_reuse_kinds_not_equated_with_prefill
         );
     }
 }
+#[test]
+fn paired_uncertainty_resamples_run_means_not_correlated_turns_and_fails_closed() {
+    use metrum_ai_bench::kv_study_comparison::{paired_run_mean_difference, RunPair, StudyClock};
+    let build = |value: f64, n: usize| {
+        let rows: Vec<_> = (0..n)
+            .map(|_| {
+                let mut r = row(true, Some(0), false);
+                r.ttft_visible_answer_s = Some(value);
+                r
+            })
+            .collect();
+        StudyExport::bind(
+            StudySeed::parse(&serde_json::to_vec(&manifest()).unwrap()).unwrap(),
+            &BTreeMap::from([(
+                "=cmd<script>alert(1)</script>".into(),
+                PhaseRecords::Strategic(&rows),
+            )]),
+        )
+        .unwrap()
+    };
+    let (a, b, c, d) = (
+        build(1.0, 100),
+        build(0.5, 100),
+        build(1.5, 1),
+        build(0.5, 1),
+    );
+    let pairs = [
+        RunPair {
+            pair_key: "run-pair-1",
+            baseline: &a,
+            baseline_phase: 0,
+            treatment: &b,
+            treatment_phase: 0,
+        },
+        RunPair {
+            pair_key: "run-pair-2",
+            baseline: &c,
+            baseline_phase: 0,
+            treatment: &d,
+            treatment_phase: 0,
+        },
+    ];
+    let digest = "a".repeat(64);
+    let comparison =
+        paired_run_mean_difference(&pairs, StudyClock::VisibleAnswer, Some(&digest), 7);
+    let data = serde_json::to_value(&comparison).unwrap();
+    assert_eq!(
+        data["differences"]["n"], 2,
+        "202 correlated turns must remain TWO run clusters"
+    );
+    assert_eq!(data["differences"]["avg"], -0.75);
+    assert_eq!(data["independence"], "operator_declared_unverified");
+    assert_eq!(data["small_cluster_warning"], true);
+    assert_eq!(
+        data["ci95"],
+        serde_json::to_value(metrum_ai_bench::stats::bootstrap_mean_ci(
+            &[-0.5, -1.0],
+            0.95,
+            10_000,
+            7
+        ))
+        .unwrap()
+    );
+    let unknown = serde_json::to_value(paired_run_mean_difference(
+        &pairs,
+        StudyClock::VisibleAnswer,
+        None,
+        7,
+    ))
+    .unwrap();
+    assert!(unknown["ci95"].is_null());
+    assert_eq!(unknown["unknown"], "independent_run_controls_not_declared");
+    let missing_clock = serde_json::to_value(paired_run_mean_difference(
+        &pairs,
+        StudyClock::Headline(metrum_ai_bench::measurement::TtftSource::Stream),
+        Some(&digest),
+        7,
+    ))
+    .unwrap();
+    assert!(missing_clock["ci95"].is_null());
+    let duplicate = [
+        RunPair {
+            pair_key: "duplicate",
+            baseline: &a,
+            baseline_phase: 0,
+            treatment: &b,
+            treatment_phase: 0,
+        },
+        RunPair {
+            pair_key: "duplicate",
+            baseline: &c,
+            baseline_phase: 0,
+            treatment: &d,
+            treatment_phase: 0,
+        },
+    ];
+    assert!(serde_json::to_value(paired_run_mean_difference(
+        &duplicate,
+        StudyClock::VisibleAnswer,
+        Some(&digest),
+        7
+    ))
+    .unwrap()["ci95"]
+        .is_null());
+    let mut view = build(1.0, 1);
+    view.add_comparison(comparison).unwrap();
+    let json: Value = serde_json::from_slice(&view.json().unwrap()).unwrap();
+    let bytes = view.csv().unwrap();
+    let mut csv = csv::Reader::from_reader(bytes.as_slice());
+    let headers = csv.headers().unwrap().clone();
+    let row = csv.records().next().unwrap().unwrap();
+    let cell: Value = serde_json::from_str(
+        row.get(
+            headers
+                .iter()
+                .position(|h| h == "run_comparisons_json")
+                .unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cell, json["comparisons"]);
+    assert!(view.html().unwrap().contains("paired run-mean comparisons"));
+}

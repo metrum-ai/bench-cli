@@ -34,6 +34,7 @@ pub mod imagegen;
 pub mod isl_osl;
 pub mod jsonl;
 pub mod kv_study_cli;
+pub mod kv_study_comparison;
 pub mod kv_study_export;
 pub mod load;
 pub mod measurement;

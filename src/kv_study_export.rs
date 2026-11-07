@@ -215,6 +215,7 @@ pub struct StudyExport {
     engineering_non_certifying: bool,
     metadata_provenance: &'static str,
     publication_blockers: Vec<&'static str>,
+    comparisons: Vec<crate::kv_study_comparison::PairedComparison>,
 }
 impl StudyExport {
     /// Bind each declared measured phase exactly once. Warmup/drain rows remain
@@ -288,7 +289,59 @@ impl StudyExport {
             });
         }
         seed.0["limitations"].as_array_mut().expect("validated limitations").push(json!("Runtime metadata and reset declarations are not independently verified. Cache state, freshness, physical tier participation, saved-prefill tokens and cluster uncertainty remain unknown. Request cached-token reports are not theoretical-overlap or approximate/compressed-reuse proof."));
-        Ok(Self{schema_version:"kv-study-export.v1",report:seed.0,phases,engineering_non_certifying:true,metadata_provenance:"manifest declarations are unverified; phase counts/cohorts bound to supplied runtime rows",publication_blockers:vec!["physical_cache_state_unverified","runtime_and_reset_provenance_unbound","paired_cluster_repetitions_not_supplied","warmup_neutrality_not_independently_verified"]})
+        Ok(Self{schema_version:"kv-study-export.v1",report:seed.0,phases,engineering_non_certifying:true,metadata_provenance:"manifest declarations are unverified; phase counts/cohorts bound to supplied runtime rows",publication_blockers:vec!["physical_cache_state_unverified","runtime_and_reset_provenance_unbound","paired_cluster_repetitions_not_independently_verified","warmup_neutrality_not_independently_verified"],comparisons:Vec::new()})
+    }
+    pub(crate) fn reuse_kind(&self) -> &str {
+        self.report["reuse_kind"].as_str().expect("validated kind")
+    }
+    pub(crate) fn phase_clock_mean(
+        &self,
+        index: usize,
+        clock: crate::kv_study_comparison::StudyClock,
+    ) -> Option<f64> {
+        let phase = self.phases.get(index)?;
+        if phase.cohorts.errors_excluded_from_timing > 0
+            || phase.cohorts.invalid_excluded_from_timing > 0
+        {
+            return None;
+        }
+        let mut n = 0usize;
+        let mut total = 0.0;
+        for group in &phase.cohorts.groups {
+            let dist = match clock {
+                crate::kv_study_comparison::StudyClock::VisibleAnswer => {
+                    Some(&group.visible_answer_ttft_s)
+                }
+                crate::kv_study_comparison::StudyClock::Headline(source) => {
+                    group.headline_ttft_by_source_s.get(source.as_str())
+                }
+            };
+            if group.timing_eligible_requests > 0
+                && dist.is_none_or(|d| d.n != group.timing_eligible_requests)
+            {
+                return None;
+            }
+            if let Some(dist) = dist {
+                if dist.n > 0 {
+                    let mean = dist.avg?;
+                    if !mean.is_finite() {
+                        return None;
+                    }
+                    n = n.checked_add(dist.n)?;
+                    total += mean * dist.n as f64;
+                }
+            }
+        }
+        let mean = total / n as f64;
+        (n > 0 && mean.is_finite()).then_some(mean)
+    }
+    pub fn add_comparison(
+        &mut self,
+        comparison: crate::kv_study_comparison::PairedComparison,
+    ) -> Result<()> {
+        ensure!(self.comparisons.len() < 1000, "study_comparison_limit");
+        self.comparisons.push(comparison);
+        Ok(())
     }
     pub(crate) fn attach_native(&mut self, windows: &[Value]) -> Result<()> {
         ensure!(
@@ -328,6 +381,7 @@ impl StudyExport {
             "cohorts_json",
             "scheduled_delays_json",
             "native_window_json",
+            "run_comparisons_json",
         ])?;
         for row in &self.phases {
             writer.write_record([
@@ -346,6 +400,7 @@ impl StudyExport {
                 serde_json::to_string(&row.cohorts)?,
                 serde_json::to_string(&row.scheduled_delays)?,
                 serde_json::to_string(&row.native_window)?,
+                serde_json::to_string(&self.comparisons)?,
             ])?;
         }
         Ok(writer.into_inner()?)
@@ -394,6 +449,7 @@ impl StudyExport {
             }
             out.push_str(&format!("</table><p>{}</p><details><summary>Canonical phase evidence, native units/coverage and exclusions</summary><pre>{}</pre></details></section>",escape(row.uncertainty),escape(&serde_json::to_string_pretty(row)?)));
         }
+        out.push_str(&format!("<details><summary>Conditional paired run-mean comparisons (not per-turn bootstrap)</summary><pre>{}</pre></details>",escape(&serde_json::to_string_pretty(&self.comparisons)?)));
         out.push_str(&format!("<details><summary>Manifest metadata declarations (unverified)</summary><pre>{}</pre></details></html>",escape(&serde_json::to_string_pretty(&self.report)?)));
         Ok(out)
     }
