@@ -24,8 +24,40 @@ it does not remove them or guarantee eligibility/hits. Legacy controls still wor
 unchanged when no explicit policy is selected.
 
 New nonces prepend the **first message content**, keeping the rest of the history
-intact. Common chat-template tokens before that content can still be cached;
-this is not a claim that all root reuse is eliminated. No nonce clears existing
+intact. The prefix is `[kv-<16 lowercase hex characters>] `: 64 bits from the
+same identity SHA-256, adding exactly **22 ASCII characters**, not a full 64-hex
+digest. This is probabilistic separation, not a collision-free namespace.
+Common chat-template tokens before that content can still be cached; templates
+with long built-in system headers can share **at least one full block** even
+under bust-request or isolate-run. Neither policy implies zero shared blocks.
+When prefix validation runs, retain the native pool maximum for Pass **or Fail**;
+Unknown/unrequested validation has a null residual, never fabricated zero.
+
+The body-free `cache-policy-effects.v1` extension records character overhead,
+nullable signed token overhead, token scope and nullable residual-block evidence.
+Pinned full rendering measures after-minus-before token counts in the same
+identity and binds the after-render to the exact prepared body digest. It is not
+the token count of a standalone nonce: merges at content boundaries can change
+the contextual difference. Without that rendering the token delta is unknown.
+Keep overhead in input-length distributions; do not compare mutated request
+lengths as though they were the unmodified baseline. The #421 manifest accepts
+per-body `workload.policy_effects` entries (duplicates retained for issuance),
+with explicit unknowns; older manifests remain valid. Full rendered token
+differences require recorded tokenizer/template identity in the manifest. The
+per-body before/after rendered token counts retain the actual input-size change.
+
+With held-out pools and an explicit policy/order, all stage bodies are frozen
+before traffic/hooks, including the nonce, then rendered/validated and sent
+without another mutation. `nonce_identity_sequence` is the planned nonce ordinal
+for bust-request, not necessarily the request-row sequence on a stopped run;
+ordinals remain distinct across warmup, measurement and stages. Isolate-run uses
+one invocation nonce across all stages. `config.warmup_stages` retains every
+stage's final-body proof rather than reusing the first stage's nonce digests.
+Planning bounds are 100,000 bodies, 64 MiB of planned wire bytes and 10,000,000
+baseline/final rendered tokens across these policy stages; exceeded bounds fail
+before hooks/HTTP. Unconfigured legacy paths retain their historical behavior.
+
+This is not a claim that all root reuse is eliminated. No nonce clears existing
 tier occupancy. Mutation currently requires string first-message content, and
 unsupported content fails preflight rather than being converted lossily.
 

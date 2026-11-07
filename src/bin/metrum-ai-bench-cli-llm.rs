@@ -1335,6 +1335,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             None
         };
         let body_sha256 = prepared.as_ref().map(|body| body.sha256.clone());
+        let cache_policy_effects = prepared.as_ref().map(|body| {
+            serde_json::to_string(&body.evidence).expect("serialize primitive policy evidence")
+        });
         if let Some(hash) = &body_sha256 {
             body_fingerprints.push(hash.clone());
         }
@@ -1502,6 +1505,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 record
                     .modality_labels
                     .insert("body_sha256".into(), body_sha256);
+                if let Some(effects) = cache_policy_effects {
+                    record
+                        .modality_labels
+                        .insert("cache_policy_effects".into(), effects);
+                }
             }
             if let Err(e) = sink_task.write(&record) {
                 warn!("Failed to write request JSONL: {e}");
@@ -1632,6 +1640,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     "fingerprinted_requests": body_fingerprints.len(),
                     "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
                     "nonce_placement": args.cache_policy.nonce_placement(),
+                    "nonce_added_characters_per_request": args.cache_policy.nonce_added_characters(),
                     "nonce_scope": args.cache_policy.nonce_scope()
                 }));
             }

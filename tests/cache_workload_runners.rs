@@ -70,6 +70,28 @@ fn command(runner: Runner, url: &str, prompts: &Path, dir: &Path, streaming: boo
     command
 }
 
+fn assert_policy_effects(effects: Value, received: &[u8]) {
+    let body: Value = serde_json::from_slice(received).unwrap();
+    let text = body["messages"][0]["content"].as_str().unwrap();
+    let chars = if text.starts_with("[kv-") {
+        assert_eq!(&text[20..22], "] ");
+        assert!(text[4..20].bytes().all(|b| b.is_ascii_hexdigit()));
+        22
+    } else {
+        0
+    };
+    assert_eq!(effects["schema_version"], "cache-policy-effects.v1");
+    assert_eq!(effects["nonce_added_characters"], chars);
+    assert_eq!(
+        effects["nonce_added_tokens"],
+        if chars == 0 { json!(0) } else { Value::Null }
+    );
+    assert!(
+        effects["residual_shared_full_blocks"].is_null(),
+        "no validation is not zero blocks"
+    );
+}
+
 fn assert_evidence(runner: Runner, dir: &Path, received: &[Vec<u8>]) {
     let hashes: Vec<String> = received.iter().map(|bytes| sha256(bytes)).collect();
     let recorded = match runner {
@@ -86,7 +108,15 @@ fn assert_evidence(runner: Runner, dir: &Path, received: &[Vec<u8>]) {
                 .collect();
             rows.sort_by_key(|row| row["seq"].as_u64().unwrap());
             rows.iter()
-                .map(|row| {
+                .enumerate()
+                .map(|(index, row)| {
+                    let effects: Value = serde_json::from_str(
+                        row["modality_labels"]["cache_policy_effects"]
+                            .as_str()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    assert_policy_effects(effects, &received[index]);
                     assert_eq!(
                         row["modality_labels"]["cache_workload_version"],
                         "cache-workload.v1"
@@ -107,7 +137,11 @@ fn assert_evidence(runner: Runner, dir: &Path, received: &[Vec<u8>]) {
                     .unwrap();
             rows.sort_by_key(|row| row.seq);
             rows.into_iter()
-                .map(|row| {
+                .enumerate()
+                .map(|(index, row)| {
+                    let effects: Value =
+                        serde_json::from_str(row.cache_policy_effects.as_deref().unwrap()).unwrap();
+                    assert_policy_effects(effects, &received[index]);
                     assert_eq!(
                         row.cache_workload_version.as_deref(),
                         Some("cache-workload.v1")
