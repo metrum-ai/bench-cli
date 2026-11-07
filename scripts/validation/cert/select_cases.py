@@ -75,6 +75,7 @@ PATH_AREAS = {
     'src/workload_input.rs': {'*'},
     'src/cache_metrics.rs': {'*'},
     'src/cache_phase.rs': {'*'},
+    'src/cache_phase_runtime.rs': {'*'},
     'src/cache_rate.rs': {'*'},
     'src/telemetry/native_boundary.rs': {'*'},
     'src/cache_metric_capture.rs': {'*'},

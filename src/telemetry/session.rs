@@ -544,9 +544,24 @@ impl TelemetrySession {
     /// `--require-telemetry` trip the run stop flag and record the failure
     /// for the `close_session` verdict.
     pub async fn note_boundary_timeout(&mut self, budget_ms: u64) -> BoundaryOutcome {
-        let message = format!(
+        self.note_boundary_timeout_tagged(BOUNDARY_PRE_MEASURED, budget_ms)
+            .await
+    }
+
+    /// Tagged failure for subsequent phase/stage edges; preserve the legacy
+    /// wrapper's exact message/tag and never invent per-source attribution.
+    pub async fn note_boundary_timeout_tagged(
+        &mut self,
+        boundary: &str,
+        budget_ms: u64,
+    ) -> BoundaryOutcome {
+        let message = if boundary == BOUNDARY_PRE_MEASURED {
+            format!(
             "telemetry boundary sample exceeded the {budget_ms}ms budget before measured issuance"
-        );
+        )
+        } else {
+            format!("telemetry boundary {boundary} exceeded the {budget_ms}ms budget")
+        };
         let _ = self
             .writer
             .send_priority(Row::ScrapeError(ScrapeErrorRow {
@@ -555,7 +570,7 @@ impl TelemetrySession {
                 src: "boundary".to_string(),
                 http_status: None,
                 error: message.clone(),
-                boundary: Some(BOUNDARY_PRE_MEASURED.to_string()),
+                boundary: Some(boundary.to_string()),
             }))
             .await;
         if self.require_telemetry {
@@ -1203,6 +1218,148 @@ mod boundary_tests {
             boundary_t < 500_000_000,
             "boundary near epoch: {boundary_t}"
         );
+    }
+
+    #[tokio::test]
+    async fn typed_phase_boundary_ack_budget_and_repeated_stage_are_explicit() {
+        use crate::{
+            cache_phase::{Edge, StudyPhase},
+            cache_phase_runtime::*,
+        };
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let before = Arc::new(AtomicBool::new(true));
+        let after = Arc::new(AtomicBool::new(true));
+        let (seen, allow, b, a) = (
+            entered.clone(),
+            release.clone(),
+            before.clone(),
+            after.clone(),
+        );
+        let app = axum::Router::new().route(
+            "/metrics",
+            axum::routing::get(move |headers: axum::http::HeaderMap| {
+                let (seen, allow, b, a) = (seen.clone(), allow.clone(), b.clone(), a.clone());
+                async move {
+                    let tag = headers
+                        .get("x-metrum-telemetry-boundary")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if tag.ends_with("-before") && b.swap(false, Ordering::SeqCst) {
+                        seen.notify_one();
+                        allow.notified().await;
+                    }
+                    if tag.ends_with("-after") && a.swap(false, Ordering::SeqCst) {
+                        std::future::pending::<()>().await;
+                    }
+                    "# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = TelemetryConfig::from_metrics_url(&format!("http://{addr}/metrics"), 60_000);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.ndjson");
+        let args = TelemetryArgs {
+            ndjson: Some(path.clone()),
+            ..TelemetryArgs::default()
+        };
+        let mut session = args
+            .start_session(Some(&cfg), stamp(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let epoch = session.epoch();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PhaseBoundaryRequest>(4);
+        let actor = tokio::spawn(async move {
+            while let Some(req) = rx.recv().await {
+                session.handle_phase_boundary(req).await;
+            }
+            session
+        });
+        let command = |stage, edge, budget_ms| {
+            let (ack, reply) = tokio::sync::oneshot::channel();
+            let p = crate::cache_metrics::ProfileId::VllmApc;
+            (
+                PhaseBoundaryRequest {
+                    source: "engine".into(),
+                    options: super::super::NativeBoundaryConfig {
+                        profile: p,
+                        source_revision: Some(p.source_revision().into()),
+                    },
+                    tag: PhaseBoundaryTag {
+                        stage,
+                        phase: StudyPhase::Warm,
+                        edge,
+                    },
+                    budget_ms,
+                    ack,
+                },
+                reply,
+            )
+        };
+        let (req, mut reply) = command(3, Edge::Before, 2000);
+        tx.send(req)
+            .await
+            .unwrap_or_else(|_| panic!("actor closed"));
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                reply.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "cannot issue before blocked baseline ack"
+        );
+        release.notify_one();
+        let baseline = reply.await.unwrap();
+        assert!(!baseline.budget_expired);
+        let cap = baseline.outcome.native.unwrap();
+        assert!(cap.failure.is_none());
+        let issued_ns = epoch.elapsed_ns();
+        assert!(cap.fetch_end_ns <= issued_ns);
+        // HTTP/legacy success is deliberately NOT native family coverage.
+        assert!(!cap.probe.unwrap().missing_metrics.is_empty());
+        let work = tokio::spawn(async {
+            tokio::task::yield_now().await;
+        });
+        work.await.unwrap();
+        let drained_ns = epoch.elapsed_ns();
+        let (req, reply) = command(3, Edge::After, 20);
+        tx.send(req)
+            .await
+            .unwrap_or_else(|_| panic!("actor closed"));
+        let terminal = reply.await.unwrap();
+        assert!(terminal.budget_expired);
+        assert!(!terminal.outcome.telemetry.ok);
+        assert!(terminal.outcome.native.is_none());
+        let (req, reply) = command(3, Edge::After, 2000);
+        tx.send(req)
+            .await
+            .unwrap_or_else(|_| panic!("actor closed"));
+        let retry = reply.await.unwrap();
+        assert!(!retry.budget_expired);
+        assert!(retry.outcome.native.unwrap().fetch_start_ns >= drained_ns);
+        let (req, reply) = command(4, Edge::Before, 2000);
+        tx.send(req)
+            .await
+            .unwrap_or_else(|_| panic!("actor closed"));
+        let next = reply.await.unwrap();
+        assert_eq!(next.tag.stage, 4);
+        assert!(next.outcome.telemetry.ok);
+        assert!(next.outcome.native.is_some());
+        drop(tx);
+        let mut session = actor.await.unwrap();
+        let _ = session.join_scrapers().await;
+        session.finish(false).await.unwrap();
+        assert!(read_rows(&path)
+            .iter()
+            .any(|r| r["kind"] == "scrape_error" && r["boundary"] == "cache-stage-3-warm-after"));
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 
     #[tokio::test]
