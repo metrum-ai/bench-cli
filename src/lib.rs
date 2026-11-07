@@ -18,15 +18,18 @@ pub mod endpoints;
 pub mod endpoints_export;
 pub mod environment;
 pub mod error;
+pub mod github_source;
 pub mod http_client;
 pub mod imagegen;
 pub mod isl_osl;
 pub mod jsonl;
 pub mod load;
 pub mod measurement;
+pub mod modeled_tiers;
 pub mod prefix_families;
 pub mod prefix_validation;
 pub mod preflight;
+pub mod pressure_inputs;
 pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
@@ -36,6 +39,8 @@ pub mod public_profile;
 pub mod record;
 pub mod request;
 pub mod runner;
+#[cfg(feature = "tokenizer")]
+pub mod runtime_rendering;
 pub mod session_inputs;
 pub mod session_tools;
 pub mod sse;
@@ -49,8 +54,13 @@ pub mod telemetry;
 pub mod time_weighted;
 pub mod token_overlap;
 pub mod tokenizer;
+pub mod trace_adapters;
+pub mod trace_inputs;
+pub mod trace_presets;
 pub mod usage;
 pub mod vlm;
+pub mod warmup_isolation;
+pub mod workload_input;
 
 /// True when the process was invoked with the `--version-only` flag
 /// (#307).

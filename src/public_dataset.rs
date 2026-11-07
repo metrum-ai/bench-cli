@@ -218,7 +218,11 @@ fn hub_file_url(origin: &DatasetOrigin, file: &SourceFile) -> Result<reqwest::Ur
     Ok(url)
 }
 
-fn copy_verified(reader: impl Read, writer: &mut impl Write, file: &SourceFile) -> Result<()> {
+pub(crate) fn copy_verified(
+    reader: impl Read,
+    writer: &mut impl Write,
+    file: &SourceFile,
+) -> Result<()> {
     let mut limited = reader.take(
         file.bytes
             .checked_add(1)
