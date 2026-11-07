@@ -126,7 +126,11 @@ case in its existing lane. Shared shell dispatch suppresses sibling runners;
 R, G3 and P1 support selected-only records. BC-HW-001 still executes all three
 required reasoning prerequisites on its named class and cannot pass just because
 an unrelated reasoning case did. Their prerequisite observations remain evidence,
-not extra case PASS records. No performance gate thresholds are changed.
+not extra case PASS records. P1 and R reject an unknown `CERT_CASE_ID` before
+argument/input processing or workloads; an unset variable retains bulk mode.
+G3's exit status requires a nonempty selected case set with every case boolean
+exactly true; diagnostic cell dictionaries do not count as case verdicts.
+No performance gate thresholds are changed.
 
 `selected_set.py --selection SELECTION --catalog CATALOG --index INDEX --preflight`
 is the complete-set preflight entry. Omit `--preflight` only for an authorized

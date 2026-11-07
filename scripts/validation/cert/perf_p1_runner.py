@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 
+import case_dispatch
 import l1_runner
 import manifest_tool
 import perf_baseline
@@ -23,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    target = os.environ.get('CERT_CASE_ID')
+    if target is not None and target not in case_dispatch.RUNNERS['perf_p1_runner.py']:
+        parser.error(f'unknown CERT_CASE_ID {target!r} for perf_p1_runner.py')
     for key in ('out', 'candidate', 'baseline', 'manifest', 'telemetry'):
         parser.add_argument('--' + key, type=Path, required=True)
     for key in ('sha', 'model', 'revision', 'image', 'start-utc', 'owner', 'evidence-link'):

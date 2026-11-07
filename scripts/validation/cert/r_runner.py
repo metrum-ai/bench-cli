@@ -90,6 +90,9 @@ def baseline_observed(data, trace, count):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    target = os.environ.get("CERT_CASE_ID")
+    if target is not None and target not in case_dispatch.RUNNERS["r_runner.py"]:
+        parser.error(f"unknown CERT_CASE_ID {target!r} for r_runner.py")
     for name in ("out", "candidate", "baseline", "manifest", "prompt"):
         parser.add_argument("--" + name, type=Path, required=True)
     for name in ("sha", "model", "revision", "image", "start-utc", "owner", "evidence-link"):

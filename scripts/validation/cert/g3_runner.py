@@ -192,7 +192,8 @@ def main():
                   "e2e_slo_rule": "same-cohort answered median for BC-GPU-009", "server_kill_restart_required": True}, "evidence_paths": files}
         result_writer.write_record(args.out, record)
         outcomes[case] = passed
-    return 0 if outcomes and all(outcomes.values()) else 1
+    sel = [c for c in ('BC-GPU-008', 'BC-GPU-009') if case_dispatch.selected(c)]
+    return 0 if sel and all(outcomes[c] is True for c in sel) else 1
 
 
 if __name__ == "__main__":
