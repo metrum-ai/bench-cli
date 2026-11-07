@@ -132,6 +132,11 @@ def enrich(root, record):
             if os.environ.get("CERT_CASE_ID") != record["ID"]:
                 raise ValueError("runner wrote a case outside the selected launcher")
             nested_pins(manifest, "execution")
+            try:
+                import generated_inputs
+                generated_inputs.reject_orphan_runtime(manifest)
+            except ValueError as exc:
+                integrity_errors.append(f'generated inputs: {exc}')
             if 'generated_inputs' in manifest:
                 try:
                     if 'generated_bindings' not in manifest:
@@ -150,6 +155,15 @@ def enrich(root, record):
                         record = {**record, 'versions': {**record.get('versions', {}), 'generated_inputs': ledger}}
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     integrity_errors.append(f'generated inputs: {exc}')
+            if 'derived_inputs' in manifest:
+                try:
+                    receipt = root / 'evidence/l1/input-binding/original-binding.json'
+                    if record['result'] == 'PASS' or receipt.is_file():
+                        import derived_inputs
+                        ledger = derived_inputs.verify(manifest, root)
+                        record = {**record, 'versions': {**record.get('versions', {}), 'derived_inputs': {'l1': ledger}}}
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    integrity_errors.append(f'derived inputs: {exc}')
     if integrity_errors and record["result"] == "PASS":
         raise ValueError("; ".join(integrity_errors))
     if integrity_errors:

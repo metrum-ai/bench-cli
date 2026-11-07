@@ -133,6 +133,28 @@ bind the actual and re-derived bytes, recipe, binding receipt and binding time.
 Binding time is not a measured request clock. CPU/synthetic unit fixtures are
 not real preflight or certification evidence.
 
+L1 also selects a dataset inside `cargo xtask local-smoke llm`. Its case manifest
+freezes an additional `derived_inputs` contract, including the lane's pinned
+`template`, tokenizer and shipped prompts CLI. This preserves the existing
+16-row selection, `chat-short` profile and selector seed **7** (distinct from the
+workload seed 42). With `CERT_INPUT_MANIFEST` set, local-smoke calls the fixed
+certification boundary helper after selection but before the measured CLI.
+The original certification selector also requires explicit local JSONL and uses
+the same offline allowlist environment as independent re-derivation, without
+ambient credentials, proxies or exporter settings.
+The helper independently re-derives the selected bytes and rejects missing
+provenance, changed selector arguments or output mismatches before workload
+issuance. Ordinary non-certification local-smoke behavior is unchanged. Original
+selection, commands, both re-derivations and their receipt are retained; records
+bind them through `versions.derived_inputs`. Every original L1 threshold remains
+in force. Frozen harness inputs include xtask Rust sources, its external
+`count_points` module, Cargo manifests/locks, Cargo alias configuration and any
+checked-in toolchain files, alongside certification Python/shell/schema sources.
+Source drift is rejected before workload issuance. Orphan runtime bindings are
+rejected by preflight, launch and PASS reporting; replay requires an actual
+integer seed (not a boolean or numerically equal float). Typed infrastructure
+FAIL records retain unknown counts and integrity errors.
+
 ## Freeze and launch individual selected cases
 
 After the actual candidate freeze and matching source-version update, dispatch

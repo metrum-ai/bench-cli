@@ -71,6 +71,7 @@
     "versions": {
       "type": "object",
       "properties": {
+        "derived_inputs": {"$ref": "#/properties/versions/properties/generated_inputs"},
         "generated_inputs": {
           "type": "object",
           "additionalProperties": {

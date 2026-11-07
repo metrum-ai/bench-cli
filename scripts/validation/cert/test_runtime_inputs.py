@@ -50,6 +50,23 @@ class RuntimeInputsTests(unittest.TestCase):
         with patch.object(generated, 'run_generator', side_effect=self.generate):
             return runtime.prepare(self.parent, self.manifest, self.root / 'runtime')
 
+    def test_runtime_binding_seed_rejects_boolean_and_float_equal_to_integer(self):
+        entry = self.manifest['generated_inputs'][0]
+        entry['recipe']['seed'] = 1
+        entry['structural'] = generated.validate(entry['recipe'], self.manifest['build_receipt']['path'], 'a' * 40)
+        self.parent.write_text(json.dumps(self.manifest))
+        _, bound = self.prepare()
+        item = bound['generated_bindings']['prompts']
+        path = Path(item['path'])
+        binding = json.loads(path.read_text())
+        for value in (True, 1.0):
+            with self.subTest(seed=value):
+                binding['seed'] = value
+                path.write_text(json.dumps(binding))
+                item.update(runtime.pin(path))
+                with self.assertRaisesRegex(ValueError, 'source/config/seed'):
+                    runtime.verify(bound)
+
     def test_runtime_envelope_binds_actual_bytes_and_preserves_parent(self):
         original = self.parent.read_bytes()
         path, bound = self.prepare()

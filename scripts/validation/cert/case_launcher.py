@@ -42,6 +42,9 @@ def preflight(manifest):
             binary, baseline, '0', **structural)
         if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
             raise ValueError('generator tokenizer revision must match lane model revision')
+    if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:
+        import derived_inputs
+        derived_inputs.validate(manifest)
     subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
     sut_path = pinned(manifest["sut"])
     sut = json.loads(sut_path.read_text())
@@ -104,6 +107,8 @@ def run_case(manifest_path, manifest, case):
         raise InterruptedError(f"launcher interrupted by signal {signum}")
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        import generated_inputs
+        generated_inputs.reject_orphan_runtime(manifest)
         if 'generated_inputs' in manifest:
             import runtime_inputs
             if 'generated_bindings' not in manifest:
@@ -111,7 +116,8 @@ def run_case(manifest_path, manifest, case):
             preflight(manifest)  # Verify actual bytes and all original concrete criteria.
             entry = manifest['cases'][case]
             environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
-        phase(lifecycle, case, 'inputs-ready')
+        if 'derived_inputs' not in manifest:
+            phase(lifecycle, case, 'inputs-ready')  # L1's internal boundary emits this later.
         process = subprocess.Popen(entry["command"], env=environment, start_new_session=True)
         code = process.wait()
         if code:
@@ -128,6 +134,9 @@ def run_case(manifest_path, manifest, case):
         if case == 'BC-GPU-010':
             import gpu010_builds
             gpu010_builds.validate_record(manifest, records[0], out)
+        if case == 'BC-LIVE-001':
+            import derived_inputs
+            derived_inputs.verify(manifest, out)
         phase(lifecycle, case, "record-validated")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         if process is not None and process.poll() is None:

@@ -123,7 +123,7 @@ def verify(manifest):
         recipe = recipes[name]
         if (binding.get('stage') != 'runtime-bound' or binding.get('candidate_sha') != manifest['candidate_sha']
                 or binding.get('recipe_id') != name or binding.get('recipe_sha256') != generated.contract_hash(recipe)
-                or binding.get('seed') != recipe['seed']):
+                or type(binding.get('seed')) is not int or binding.get('seed') != recipe['seed']):
             raise ValueError('runtime binding differs from structural source/config/seed')
         for attempt in ('actual', 'rederived'):
             command = root / name / attempt / 'command.json'

@@ -102,6 +102,102 @@ class FreezeGeneratedTests(unittest.TestCase):
         self.assertEqual(start.call_count, 1)
         self.assertEqual(self.args.out.read_bytes(), original)
 
+    def test_orphan_runtime_entries_reject_preflight_label_and_direct_launch(self):
+        import copy
+        frozen = freeze_case.freeze(self.args)
+        for key in ('generated_bindings', 'parent_structural_manifest', 'generated_inputs'):
+            orphan = copy.deepcopy(frozen)
+            del orphan['generated_inputs']
+            orphan[key] = None if key == 'generated_inputs' else {}
+            with self.subTest(field=key), patch.object(case_launcher.subprocess, 'Popen') as child:
+                with self.assertRaisesRegex(ValueError, 'structural entries'):
+                    case_launcher.preflight(orphan)
+                with self.assertRaisesRegex(ValueError, 'structural entries'):
+                    generated.preflight_label(orphan)
+                child.assert_not_called()
+        orphan = copy.deepcopy(frozen)
+        del orphan['generated_inputs']
+        orphan['generated_bindings'] = {}
+        path = self.root / 'orphan-case.json'
+        path.write_text(json.dumps(orphan))
+        with patch.object(case_launcher.subprocess, 'Popen') as child, \
+             self.assertRaisesRegex(ValueError, 'structural entries'):
+            case_launcher.run_case(path, orphan, self.args.case)
+        child.assert_not_called()
+        record = json.loads((self.args.run_out / 'results' / (self.args.case + '.json')).read_text())
+        self.assertEqual(record['result'], 'FAIL')
+        self.assertEqual(record['infra_history'][0]['type'], 'infra_failed')
+        self.assertIsNone(record['observed_values']['request_count'])
+        self.assertIsNone(record['observed_values']['error_count'])
+        self.assertTrue(any('structural entries' in item for item in record['input_integrity_errors']))
+        import execution_evidence
+        env = {'CERT_INPUT_MANIFEST': str(path), 'CERT_CASE_ID': self.args.case}
+        with patch.dict(execution_evidence.os.environ, env, clear=True), \
+             self.assertRaisesRegex(ValueError, 'structural entries'):
+            execution_evidence.enrich(self.args.run_out, {**record, 'result': 'PASS'})
+
+    def test_freezer_pins_compiled_harness_and_rejects_source_drift(self):
+        module_root = Path(freeze_case.__file__).parent
+        repo = module_root.parents[2]
+        sources = freeze_case.harness_sources(module_root)
+        for relative in ('xtask/src/local_smoke.rs', 'xtask/src/main.rs', 'xtask/Cargo.toml',
+                         'Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'src/count_points.rs'):
+            self.assertIn((repo / relative).resolve(), sources)
+        # Mutate a synthetic source supplied by the source-inventory seam, never
+        # the live repository or another test's source tree.
+        synthetic = self.root / 'synthetic-local-smoke.rs'
+        synthetic.write_text('// SYNTHETIC ORIGINAL HARNESS\n')
+        with patch.object(freeze_case, 'harness_sources', return_value=sources | {synthetic}):
+            frozen = freeze_case.freeze(self.args)
+        frozen_paths = {item['path'] for item in frozen['inputs']}
+        self.assertIn(str((repo / 'xtask/src/local_smoke.rs').resolve()), frozen_paths)
+        self.assertIn(str(synthetic), frozen_paths)
+        synthetic.write_text('// SYNTHETIC CHANGED HARNESS\n')
+        # Version probing is CPU-only, not measured workload issuance.
+        with patch.object(case_launcher.subprocess, 'run'), \
+             patch.object(case_launcher.subprocess, 'Popen') as child, \
+             self.assertRaisesRegex(ValueError, 'pinned input hash mismatch'):
+            case_launcher.preflight(frozen)
+        child.assert_not_called()
+
+    def test_l1_freezer_requires_template_and_freezes_internal_selector_seed_separately(self):
+        # No generator runs; adapt synthetic workflow paths to L1's real layout contract.
+        receipt_path = self.args.build_receipt
+        receipt = json.loads(receipt_path.read_text())
+        registry = receipt['builds']['measured']['binaries']
+        for name, item in registry.items():
+            path = self.root / name
+            path.write_bytes(Path(item['path']).read_bytes())
+            path.chmod(0o755)
+            item['path'] = str(path)
+        receipt_path.write_text(json.dumps(receipt))
+        self.args.candidate = Path(registry['metrum-ai-bench-cli-llm']['path'])
+        recipes = json.loads(self.args.generated_recipes.read_text())['recipes']
+        recipe = recipes[0]
+        self.args.generated_recipes = None
+        sut = json.loads(self.args.sut.read_text())
+        sut['model'] = {'id': 'Qwen/Qwen3-8B', 'revision': 'b' * 40}
+        self.args.sut.write_text(json.dumps(sut))
+        lane = json.loads(self.args.lane_manifest.read_text())
+        cfg = lane['lanes']['G4']
+        cfg.update(prompt_sets={'default': recipe['dataset']}, sut=runtime_inputs.pin(self.args.sut),
+                   prompt_binary=registry['metrum-ai-bench-cli-prompts'])
+        lane['lanes'] = {'L1': cfg}
+        self.args.case = 'BC-LIVE-001'
+        self.args.catalog.write_text('ID,Tier,Parallel group\nBC-LIVE-001,RC-GPU,L1\n')
+        self.args.selection.write_text(json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(self.args.catalog),
+                                                  'selected': {'BC-LIVE-001': ['core']}}))
+        self.args.lane_manifest.write_text(json.dumps(lane))
+        with self.assertRaisesRegex(ValueError, 'file pin'):
+            freeze_case.freeze(self.args)
+        cfg['template'] = recipe['template']
+        self.args.lane_manifest.write_text(json.dumps(lane))
+        frozen = freeze_case.freeze(self.args)
+        self.assertEqual(generated.preflight_label(frozen), 'STRUCTURAL-PREFLIGHT-OK')
+        self.assertEqual(frozen['derived_inputs']['contract']['seed'], 7)
+        self.assertEqual(frozen['derived_inputs']['contract']['config'], {'count': 16, 'profile': 'chat-short'})
+        self.assertEqual(frozen['derived_inputs']['contract']['template'], recipe['template'])
+
     def test_mismatch_stops_child_and_retains_typed_failure(self):
         frozen = freeze_case.freeze(self.args)
         def changing(command, directory):

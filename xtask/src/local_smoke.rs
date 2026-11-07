@@ -268,15 +268,55 @@ pub fn run(args: LocalSmokeArgs) -> Result<()> {
                 "--profile".into(),
                 env::var("PROMPT_PROFILE").unwrap_or_else(|_| "chat-short".into()),
             ]);
-            let prompt_output = Command::new(&prompt_bin)
-                .args(&prompt_args)
-                .output()
-                .context("extract Hub prompts")?;
+            let mut prompt_command = Command::new(&prompt_bin);
+            prompt_command.args(&prompt_args);
+            if env::var_os("CERT_INPUT_MANIFEST").is_some() {
+                if env::var_os("PROMPT_LOCAL_JSONL").is_none() {
+                    bail!("certification prompt selection requires explicit local JSONL");
+                }
+                // Match the isolated re-derivation environment; no credentials,
+                // proxies, exporter settings or Hub lookup in certification.
+                prompt_command.env_clear().envs([
+                    ("PATH", "/bin:/usr/bin"),
+                    ("LANG", "C.UTF-8"),
+                    ("LC_ALL", "C.UTF-8"),
+                    ("HF_HUB_OFFLINE", "1"),
+                    ("TRANSFORMERS_OFFLINE", "1"),
+                    ("NO_BANNER", "1"),
+                ]);
+            }
+            let prompt_output = prompt_command.output().context("extract Hub prompts")?;
             if !prompt_output.status.success() {
                 bail!(
                     "prompt extraction failed: {}",
                     String::from_utf8_lossy(&prompt_output.stderr)
                 );
+            }
+            // Certification binds this internally selected dataset before the
+            // measured CLI is invoked. Ordinary local-smoke behavior is unchanged.
+            if let Some(manifest) = env::var_os("CERT_INPUT_MANIFEST") {
+                let command_path = out.join("prompt-command.json");
+                fs::write(
+                    &command_path,
+                    serde_json::to_vec_pretty(
+                        &json!({"binary": &prompt_bin, "argv": &prompt_args}),
+                    )?,
+                )?;
+                let status = Command::new("python3")
+                    .arg(root.join("scripts/validation/cert/derived_inputs.py"))
+                    .arg("--manifest")
+                    .arg(manifest)
+                    .arg("--command")
+                    .arg(&command_path)
+                    .arg("--input")
+                    .arg(&prompts)
+                    .arg("--out")
+                    .arg(out.join("input-binding"))
+                    .status()
+                    .context("bind certification-derived prompts")?;
+                if !status.success() {
+                    bail!("certification-derived input binding failed before measured launch");
+                }
             }
             let report: Value = serde_json::from_slice(&fs::read(&report_path)?)?;
             let selected = report["selected_count"]

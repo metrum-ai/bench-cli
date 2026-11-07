@@ -26,6 +26,24 @@ def check_case_tokenizer(case, config, path):
         raise ValueError("BC-GPU-010 must probe the same tokenizer bytes as its runner")
 
 
+def harness_sources(root):
+    """Pin interpreted and compiled harness inputs, including Cargo's alias."""
+    root = Path(root).resolve()
+    repo = root.parents[2]
+    sources = {path.resolve() for path in root.iterdir() if path.suffix in ('.py', '.sh', '.json')}
+    sources.update(path.resolve() for path in (repo / 'xtask/src').rglob('*.rs'))
+    # count_points is an external #[path] module compiled into xtask.
+    for relative in ('Cargo.toml', 'Cargo.lock', 'xtask/Cargo.toml', 'xtask/src/main.rs',
+                     'src/count_points.rs', '.cargo/config.toml'):
+        sources.add((repo / relative).resolve(strict=True))
+    for relative in ('xtask/Cargo.lock', 'xtask/build.rs', 'build.rs', '.cargo/config',
+                     'rust-toolchain', 'rust-toolchain.toml'):
+        path = repo / relative
+        if path.is_file():
+            sources.add(path.resolve())
+    return sources
+
+
 def freeze(args):
     require_python()
     selection = json.loads(args.selection.read_text())
@@ -112,7 +130,7 @@ def freeze(args):
         inputs.add(recipe_file.resolve())
         collect_pins(generated)
     # Freeze transitive harness sources, not only the top-level shell wrapper.
-    inputs.update(path.resolve() for path in root.iterdir() if path.suffix in (".py", ".sh", ".json"))
+    inputs.update(harness_sources(root))
     if args.command_json:
         inputs.add(args.command_json.resolve())
     manifest = {"$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
@@ -127,6 +145,10 @@ def freeze(args):
         manifest['feature_variant_tokenizer'] = variant
     if generated:
         manifest.update(generated_inputs=generated, lane=lane, baseline=pin(args.baseline))
+    if lane == 'L1':
+        import derived_inputs
+        manifest.update(lane=lane, baseline=pin(args.baseline))
+        manifest['derived_inputs'] = derived_inputs.declaration(manifest)
     case_launcher.preflight(manifest)
     with args.out.open("x", encoding="utf-8") as stream:
         json.dump(manifest, stream, indent=2, sort_keys=True, allow_nan=False)

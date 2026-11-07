@@ -80,8 +80,15 @@ def contract_hash(recipe):
     return hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
+def reject_orphan_runtime(manifest):
+    if manifest.get('generated_inputs') is None and any(key in manifest for key in
+            ('generated_inputs', 'generated_bindings', 'parent_structural_manifest')):
+        raise ValueError('runtime bindings require nonempty generated structural entries')
+
+
 def structural_context(manifest):
     """Validate frozen structural receipts, not a claim about future output bytes."""
+    reject_orphan_runtime(manifest)
     entries = manifest.get('generated_inputs')
     if entries is None:
         return None
@@ -112,7 +119,9 @@ def structural_context(manifest):
 
 
 def preflight_label(manifest):
-    return 'STRUCTURAL-PREFLIGHT-OK' if 'generated_inputs' in manifest and 'generated_bindings' not in manifest else 'PREFLIGHT-OK'
+    reject_orphan_runtime(manifest)
+    structural = ('generated_inputs' in manifest and 'generated_bindings' not in manifest) or 'derived_inputs' in manifest
+    return 'STRUCTURAL-PREFLIGHT-OK' if structural else 'PREFLIGHT-OK'
 
 
 def run_generator(command, directory):
