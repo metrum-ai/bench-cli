@@ -113,6 +113,35 @@ Probe procedure:
 3. Record that cap on the manifest (it is already in `config.body_template`
    as `max_tokens`) and use it for the full sweep.
 
+## Clock and fallback reference
+
+All clocks below are elapsed seconds from request send, not wall-clock timestamps.
+See the request and summary schemas in [OUTPUT_SCHEMA.md](OUTPUT_SCHEMA.md).
+
+| Field | Meaning |
+| --- | --- |
+| `first_reasoning_s` | First nonempty reasoning delta; null if none was observed. |
+| `ttft_first_any_s` | Earliest observed reasoning or visible delta; an observed stream clock, not an HTTP approximation. |
+| `ttft_s` | Headline resolved first-any TTFT; may use the explicitly enabled HTTP approximation when no token clock is available. Check `ttft_source`. |
+| `ttft_visible_answer_s` | First visible answer delta, independently of reasoning; null if no visible answer was observed. |
+
+`no_output_token` means a completed stream did not provide an answer and did
+not qualify for the reasoning-only length-truncation outcome. Reasoning can
+therefore be observed even when this error is present. Increasing the output
+cap is not a universal remedy: inspect the finish reason and server response.
+
+- `--allow-missing-ttft` permits missing TTFT coverage in the chat audit. It does
+  not invent a time, turn an unanswered response into an answer, or erase
+  `no_output_token` errors. Error/strict-mode exit checks still apply.
+- `--ttft-fallback first-token` is a deprecated, redundant compatibility flag:
+  actual reasoning tokens already participate in first-any TTFT by default.
+- `--infer-ttft-from-first-byte` only supplies a missing headline clock from
+  HTTP response-header arrival. It labels the value `first_byte_approx` in
+  `ttft_source` and reports approximation coverage. Headers are not output
+  tokens, and the value must not be described as visible-answer timing.
+  It does not replace an observed streaming token time. The CLI makes it
+  mutually exclusive with `--ttft-fallback`.
+
 ## Unattended harnesses running thinking models
 
 Report headline `ttft_s`, `ttft_visible_answer_s`, `first_reasoning_s`,

@@ -467,7 +467,7 @@ is never touched).
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
 [CLI reference](docs/CLI.md),
-[strategic telemetry](docs/TELEMETRY.md),
+[strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
 [cache policy/order contracts](docs/CACHE_WORKLOADS.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
 [sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
@@ -481,6 +481,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [public document inputs](docs/PUBLIC_DOCUMENTS.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
+[typed public session normalization](docs/PUBLIC_SESSIONS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).
