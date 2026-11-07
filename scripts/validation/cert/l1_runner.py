@@ -129,8 +129,10 @@ def main():
               "evidence_paths": ["evidence/l1-command.json", "evidence/l1-stdout.txt", "evidence/l1-stderr.txt",
                                  "evidence/l1-headline.txt", "evidence/l1-headline-error.txt", "evidence/models.json",
                                  "evidence/gpu.csv", "evidence/server.log", "evidence/binary-hashes.txt"]}
-    if data_log.is_file():
-        record["evidence_paths"].append("evidence/l1/results.jsonl")
+    # Preserve the internally generated input, original selector command, both
+    # independent generations and their pre-measurement binding receipt.
+    record['evidence_paths'] = sorted(set(record['evidence_paths']) | {
+        str(path.relative_to(args.out)) for path in smoke_dir.rglob('*') if path.is_file()})
     result_writer.write_record(args.out, record)
     return 0 if passed else 1
 

@@ -132,6 +132,38 @@ def enrich(root, record):
             if os.environ.get("CERT_CASE_ID") != record["ID"]:
                 raise ValueError("runner wrote a case outside the selected launcher")
             nested_pins(manifest, "execution")
+            try:
+                import generated_inputs
+                generated_inputs.reject_orphan_runtime(manifest)
+            except ValueError as exc:
+                integrity_errors.append(f'generated inputs: {exc}')
+            if 'generated_inputs' in manifest:
+                try:
+                    if 'generated_bindings' not in manifest:
+                        if record['result'] == 'PASS':
+                            raise ValueError('structural-only inputs cannot produce a measured PASS')
+                    else:
+                        import runtime_inputs
+                        runtime_inputs.verify(manifest)
+                        ledger = {}
+                        for name, item in manifest['generated_bindings'].items():
+                            binding = json.loads(Path(item['path']).read_text())
+                            ledger[name] = {'input_sha256': binding['actual']['prompts.jsonl']['sha256'],
+                                            'rederived_sha256': binding['rederived']['prompts.jsonl']['sha256'],
+                                            'recipe_sha256': binding['recipe_sha256'],
+                                            'binding_sha256': item['sha256'], 'bound_at': binding['bound_at']}
+                        record = {**record, 'versions': {**record.get('versions', {}), 'generated_inputs': ledger}}
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    integrity_errors.append(f'generated inputs: {exc}')
+            if 'derived_inputs' in manifest:
+                try:
+                    receipt = root / 'evidence/l1/input-binding/original-binding.json'
+                    if record['result'] == 'PASS' or receipt.is_file():
+                        import derived_inputs
+                        ledger = derived_inputs.verify(manifest, root)
+                        record = {**record, 'versions': {**record.get('versions', {}), 'derived_inputs': {'l1': ledger}}}
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    integrity_errors.append(f'derived inputs: {exc}')
     if integrity_errors and record["result"] == "PASS":
         raise ValueError("; ".join(integrity_errors))
     if integrity_errors:

@@ -10,6 +10,17 @@ import g2_usage_checks
 import r_checks
 
 
+def check_cell(name, data, trace, code):
+    """Shared runner/post-run replay, preserving the fixed four-request criteria."""
+    if name == 'truncated':
+        return all_truncated(data, trace, code, 4)
+    if name == 'empty':
+        return empty(data, trace, code)
+    if name in ('missing', 'fallback'):
+        return missing(data, trace, code, 4, name == 'fallback')
+    raise ValueError('unknown GPU010 cell')
+
+
 def load(data):
     values = [json.loads(line) for line in data.splitlines() if line.strip()]
     def finite(value):

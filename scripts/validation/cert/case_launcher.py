@@ -28,6 +28,23 @@ def preflight(manifest):
         raise ValueError("candidate_sha must be a full commit")
     binary = pinned(manifest["candidate"], True)
     _, validation_binary = build_roles.check_manifest(manifest)
+    import generated_inputs
+    recipes = generated_inputs.structural_context(manifest)
+    if recipes is not None:
+        import manifest_tool
+        baseline = pinned(manifest['baseline'], True)
+        structural = {'structural_recipe_ids': set(recipes)}
+        if 'generated_bindings' in manifest:
+            import runtime_inputs
+            runtime_inputs.verify(manifest)
+            structural = {}  # Original concrete/domain checks remain mandatory.
+        _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], manifest['lane'],
+            binary, baseline, '0', **structural)
+        if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
+            raise ValueError('generator tokenizer revision must match lane model revision')
+    if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:
+        import derived_inputs
+        derived_inputs.validate(manifest)
     subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
     sut_path = pinned(manifest["sut"])
     sut = json.loads(sut_path.read_text())
@@ -63,14 +80,16 @@ def preflight(manifest):
     from tokenizer_probe import probe
     probe(validation_binary, tokenizer['path'])
     if 'BC-GPU-010' in cases:
-        raise ValueError('BC-GPU-010 measured fallback is unsupported by otlp; explicit gate disposition required')
+        import gpu010_builds
+        gpu010_builds.bindings(manifest)
     return list(cases)
 
 
 def run_case(manifest_path, manifest, case):
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
-        raise ValueError('BC-GPU-010 measured fallback requires explicit gate disposition')
+        import gpu010_builds
+        gpu010_builds.bindings(manifest)
     import signal
     import result_writer
     entry = manifest["cases"][case]
@@ -79,7 +98,6 @@ def run_case(manifest_path, manifest, case):
         raise FileExistsError("refusing to reuse an existing attempt directory")
     lifecycle = out.with_name(out.name + "-lifecycle")
     lifecycle.mkdir(parents=True, exist_ok=False)
-    phase(lifecycle, case, "inputs-ready")
     environment = {**os.environ, "CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
                    "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
                    "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
@@ -89,6 +107,17 @@ def run_case(manifest_path, manifest, case):
         raise InterruptedError(f"launcher interrupted by signal {signum}")
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        import generated_inputs
+        generated_inputs.reject_orphan_runtime(manifest)
+        if 'generated_inputs' in manifest:
+            import runtime_inputs
+            if 'generated_bindings' not in manifest:
+                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated')
+            preflight(manifest)  # Verify actual bytes and all original concrete criteria.
+            entry = manifest['cases'][case]
+            environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
+        if 'derived_inputs' not in manifest:
+            phase(lifecycle, case, 'inputs-ready')  # L1's internal boundary emits this later.
         process = subprocess.Popen(entry["command"], env=environment, start_new_session=True)
         code = process.wait()
         if code:
@@ -102,6 +131,12 @@ def run_case(manifest_path, manifest, case):
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":
             raise ValueError("case failed; retained failure record is not certification")
+        if case == 'BC-GPU-010':
+            import gpu010_builds
+            gpu010_builds.validate_record(manifest, records[0], out)
+        if case == 'BC-LIVE-001':
+            import derived_inputs
+            derived_inputs.verify(manifest, out)
         phase(lifecycle, case, "record-validated")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         if process is not None and process.poll() is None:
@@ -157,7 +192,8 @@ def main():
         raise ValueError("case not in frozen selection")
     if args.preflight:
         for case in selected:
-            print(f"PREFLIGHT-OK {case}")
+            import generated_inputs
+            print(f"{generated_inputs.preflight_label(manifest)} {case}")
         return
     for case in selected:
         if args.manifest.read_bytes() != frozen:
