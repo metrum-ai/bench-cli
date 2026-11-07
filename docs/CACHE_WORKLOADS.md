@@ -41,15 +41,19 @@ system prefix, prompts and output-token limits must also match for equal wire bo
 `--prompt-sequence FILE` reuses the existing fingerprint-first prescribed sequence
 format. Content mismatch fails before traffic; a matching prescription takes
 precedence over shuffle seeds, but conflicts with explicit preserve/shuffle order
-are rejected. Index-only rows remain range-validated. Sequence logging uses the
-already ordered pool exactly once, including a short prescription containing a
-high index from the original pool; it must not apply source indices a second time.
+are rejected. Index-only rows remain range-validated. Sequence logging resolves prescribed indices against the original pool, not the
+expanded/reordered issuance pool. This preserves original indices when a small
+pool is repeated and safely handles a short prescription with a high source
+index; source indices must not be applied a second time to the issuance pool.
 
 Strategic `--prompt-sequence` / `--prompt-sequence-log` currently require
 `--prompts`. The log describes the canonical measured sequence **per stage**;
 measured indexing restarts at zero each stage and warmup has separate accounting.
 Session turns cannot be flattened by a prompt prescription or shuffled out of
-order. This does not promise deterministic physical insertion/eviction order:
+order. Explicit payload policy also applies to closed-loop recorded-history
+issuance: request-scoped nonces span warmup and measurement while original turn
+positions/history and the post-drain reset boundary remain intact. Canonical
+ticketing covers both legacy and closed-loop scheduling paths. This does not promise deterministic physical insertion/eviction order:
 concurrency, routing and feedback-driven session completion remain factors.
 
 LLM `--arrival-seed` is independent of order (historical default: seed + 1).
@@ -98,4 +102,7 @@ framing and nonce-prefix tokens; it is not a production-model isolation certific
 The mock integration suite compares received unary/SSE bytes and recorded digests across
 both runners, including preserve/shuffle/replay, distinct shuffle seeds under
 replay, short-prescription logging, mismatched replay rejection and invocation
-isolation. These prove client payload contracts, not physical cache participation.
+isolation. A session/reset regression additionally checks original turn positions,
+recorded rather than generated assistant history, per-request nonce uniqueness
+across warmup/measurement, and exact received-byte digests. These prove client
+payload contracts, not physical cache participation.

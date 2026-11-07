@@ -2873,13 +2873,15 @@ mod tests {
         export_csv(&path, &[record]).unwrap();
         let mut reader = csv::Reader::from_path(path).unwrap();
         let header = reader.headers().unwrap().clone();
-        assert_eq!(header.get(header.len() - 3), Some("usage_missing"));
+        let cutoff = header
+            .iter()
+            .position(|name| name == "usage_missing")
+            .expect("named historical usage boundary");
+        assert_eq!(header.get(cutoff), Some("usage_missing"));
         let row = reader.records().next().unwrap().unwrap();
         let mut writer = csv::Writer::from_writer(Vec::new());
-        writer
-            .write_record(header.iter().take(header.len() - 3))
-            .unwrap();
-        writer.write_record(row.iter().take(row.len() - 3)).unwrap();
+        writer.write_record(header.iter().take(cutoff)).unwrap();
+        writer.write_record(row.iter().take(cutoff)).unwrap();
         let csv = writer.into_inner().unwrap();
         let legacy: BenchRecord = csv::Reader::from_reader(csv.as_slice())
             .deserialize()
@@ -2887,6 +2889,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(legacy.usage_missing);
+        assert!(legacy.cache_workload_version.is_none());
+        assert!(legacy.body_sha256.is_none());
         let point = summarize_stage(
             1.0,
             &[legacy],
@@ -3163,6 +3167,8 @@ mod tests {
             bytes_received: Some(900),
             chunks_received: Some(9),
             send_offset_s: Some(1.25),
+            cache_workload_version: Some("cache-workload.v1".into()),
+            body_sha256: Some("a".repeat(64)),
             ..Default::default()
         };
         let mut untraced = row.clone();
@@ -3172,17 +3178,16 @@ mod tests {
         untraced.receive_s = None;
         untraced.bytes_received = None;
         untraced.chunks_received = None;
+        untraced.cache_workload_version = None;
+        untraced.body_sha256 = None;
         let mut writer = csv::Writer::from_writer(Vec::new());
         for written in [&row, &untraced] {
             writer.serialize(written).unwrap();
         }
         let bytes = writer.into_inner().unwrap();
         let text = String::from_utf8(bytes.clone()).expect("utf8");
-        assert!(text
-            .lines()
-            .next()
-            .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present"));
+        assert_eq!(text.lines().next().expect("header"),
+            "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,service_latency_s,first_byte_s,connect_s,ttft_s,prefill_s,decode_s,decode_tok_s,itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup,first_reasoning_s,reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,cache_workload_version,body_sha256");
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
@@ -3200,6 +3205,16 @@ mod tests {
         assert_eq!(back[1].receive_s, None);
         assert_eq!(back[1].bytes_received, None);
         assert_eq!(back[1].chunks_received, None);
+        assert_eq!(
+            back[0].cache_workload_version.as_deref(),
+            Some("cache-workload.v1")
+        );
+        assert_eq!(
+            back[0].body_sha256.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert!(back[1].cache_workload_version.is_none());
+        assert!(back[1].body_sha256.is_none());
     }
 
     #[test]
