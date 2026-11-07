@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Metrum AI, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-use axum::{routing::post, Json, Router};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -33,11 +36,15 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
     let count = Arc::new(AtomicUsize::new(0));
     let hits = count.clone();
     let app=Router::new().route("/chat/completions",post(move||{let hits=hits.clone();async move {hits.fetch_add(1,Ordering::SeqCst);Json(json!({"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}))}}));
+    let app=app.route("/metrics",get(|headers:axum::http::HeaderMap|async move {
+        let after=headers.get("x-metrum-telemetry-boundary").and_then(|h|h.to_str().ok()).is_some_and(|h|h.ends_with("after"));
+        format!("# TYPE vllm:prefix_cache_queries_total counter\nvllm:prefix_cache_queries_total{{worker=\"PRIVATE_WORKER\"}} {}\n# TYPE vllm:prefix_cache_hits_total counter\nvllm:prefix_cache_hits_total{{worker=\"PRIVATE_WORKER\"}} {}\n",if after {12}else{10},usize::from(after))
+    }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     for strategic in [false, true] {
-        for case in 0..3 {
+        for case in 0..6 {
             let dir = tempfile::tempdir().unwrap();
             let prompts = dir.path().join("prompts.jsonl");
             std::fs::write(&prompts, "{\"prompt\":\"Hi\"}\n").unwrap();
@@ -45,6 +52,12 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
             let mut declaration = seed();
             if case == 1 {
                 declaration["phases"][0]["cache_state"] = json!("observed_resident");
+            }
+            if case == 3 {
+                declaration["workload"]["cache_policy"] = json!("bust_request");
+            }
+            if case == 4 {
+                declaration["workload"]["order"] = json!("seeded_shuffle");
             }
             std::fs::write(&manifest, serde_json::to_vec(&declaration).unwrap()).unwrap();
             let prefix = dir.path().join("export");
@@ -72,6 +85,8 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
                 "0",
                 "--cache-policy",
                 "reuse",
+                "--prompt-order",
+                "preserve",
                 "--infer-ttft-from-first-byte",
             ])
             .arg("--prompts")
@@ -104,22 +119,49 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
                 .arg("--error-log")
                 .arg(dir.path().join("error.log"));
             }
+            if case == 5 {
+                let telemetry = dir.path().join("telemetry.yaml");
+                std::fs::write(&telemetry,format!("default_interval_ms: 60000\ntimeout_ms: 1000\nsources:\n  - name: engine\n    url: http://{addr}/metrics\n    include: ['^vllm:prefix_cache_.*']\n")).unwrap();
+                cmd.arg("--telemetry")
+                    .arg(telemetry)
+                    .arg("--ndjson")
+                    .arg(dir.path().join("run.ndjson"))
+                    .args([
+                        "--cache-metrics-url",
+                        &format!("http://{addr}/metrics"),
+                        "--cache-metrics-profile",
+                        "vllm-apc",
+                        "--cache-metrics-source-revision",
+                        metrum_ai_bench::cache_metrics::ProfileId::VllmApc.source_revision(),
+                        "--cache-phase-source",
+                        "engine",
+                        "--cache-phase-epoch",
+                        "PRIVATE_EPOCH",
+                    ]);
+            }
+            let success = case == 0 || case == 5;
             let before = count.load(Ordering::SeqCst);
             let output = cmd.output().await.unwrap();
             assert_eq!(
                 output.status.success(),
-                case == 0,
+                success,
                 "strategic{strategic}case{case}:{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            assert_eq!(
-                count.load(Ordering::SeqCst) - before,
-                usize::from(case == 0)
-            );
-            if case == 0 {
+            assert_eq!(count.load(Ordering::SeqCst) - before, usize::from(success));
+            if success {
                 let data: Value =
                     serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
                 assert_eq!(data["schema_version"], "kv-study-export.v1");
+                if case == 5 {
+                    assert!(data["phases"][0]["native_window"]["delta"]["series"].is_array());
+                    assert!(!serde_json::to_string(&data).unwrap().contains("PRIVATE"));
+                } else {
+                    assert_eq!(
+                        data["phases"][0]["native_window"]["unknown"],
+                        "not_requested_or_not_executed"
+                    );
+                }
                 assert_eq!(data["phases"][0]["requests"], 1);
                 assert_eq!(data["phases"][0]["cached_token_known"], 1);
                 assert_eq!(data["phases"][0]["cache_state"], "unknown");

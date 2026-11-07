@@ -53,6 +53,8 @@ impl StudyExportArgs {
         &self,
         expected: usize,
         protected: &[PathBuf],
+        policy: crate::cache_workload::CachePolicy,
+        order: crate::cache_workload::OrderPolicy,
     ) -> Result<Option<StudyExportPlan>> {
         let Some(manifest) = &self.kv_study_manifest else {
             ensure!(self.kv_study_prefix.is_none(), "study_manifest_required");
@@ -68,6 +70,7 @@ impl StudyExportArgs {
             .take(4 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)?;
         let seed = StudySeed::parse(&bytes)?;
+        seed.check_controls(policy, order)?;
         let ids = seed.measured_phase_ids()?;
         ensure!(
             ids.len() == expected,
@@ -123,12 +126,18 @@ impl StudyExportPlan {
         self.committed = true;
         Ok(())
     }
-    pub fn requests(mut self, rows: &[RequestRecord]) -> Result<()> {
+    pub fn requests(mut self, rows: &[RequestRecord], native: &[serde_json::Value]) -> Result<()> {
         let bindings = BTreeMap::from([(self.ids[0].clone(), PhaseRecords::Requests(rows))]);
-        let export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
+        let mut export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
+        export.attach_native(native)?;
         self.write(export)
     }
-    pub fn strategic(mut self, rows: &[BenchRecord], stages: &[f64]) -> Result<()> {
+    pub fn strategic(
+        mut self,
+        rows: &[BenchRecord],
+        stages: &[f64],
+        native: &[serde_json::Value],
+    ) -> Result<()> {
         ensure!(
             stages.len() == self.ids.len(),
             "study_stage_mapping_changed"
@@ -147,7 +156,8 @@ impl StudyExportPlan {
                 .zip(&groups)
                 .map(|(id, rows)| (id.clone(), PhaseRecords::StrategicRefs(rows))),
         );
-        let export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
+        let mut export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
+        export.attach_native(native)?;
         self.write(export)
     }
 }

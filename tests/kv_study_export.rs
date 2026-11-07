@@ -124,3 +124,56 @@ fn no_runtime_binding_cannot_promote_physical_state_or_observed_tiers() {
     let seed = StudySeed::parse(&serde_json::to_vec(&manifest()).unwrap()).unwrap();
     assert!(StudyExport::bind(seed, &BTreeMap::new()).is_err());
 }
+#[test]
+fn scheduling_coverage_not_default_zero_and_reuse_kinds_not_equated_with_prefill_savings() {
+    for kind in ["exact_prefix", "approximate_chunk", "compression"] {
+        let mut declaration = manifest();
+        declaration["reuse_kind"] = json!(kind);
+        let mut scheduled = row(true, Some(0), false);
+        scheduled.scheduled_unix_ns = 123;
+        scheduled.latency_s = 0.25;
+        scheduled.queue_delay_s = 0.5;
+        let missing = row(true, None, false);
+        let error = row(false, Some(8), false);
+        let rows = [scheduled, missing, error];
+        let export = StudyExport::bind(
+            StudySeed::parse(&serde_json::to_vec(&declaration).unwrap()).unwrap(),
+            &BTreeMap::from([(
+                "=cmd<script>alert(1)</script>".into(),
+                PhaseRecords::Strategic(&rows),
+            )]),
+        )
+        .unwrap();
+        let data: Value = serde_json::from_slice(&export.json().unwrap()).unwrap();
+        let delays = &data["phases"][0]["scheduled_delays"];
+        assert_eq!(data["report"]["reuse_kind"], kind);
+        assert_eq!(data["phases"][0]["cache_state"], "unknown");
+        assert!(data["phases"][0].get("saved_prefill_tokens").is_none());
+        assert_eq!(delays["scheduled_rows"], 1);
+        assert_eq!(delays["missing_or_invalid_rows"], 1);
+        assert_eq!(delays["client_queue_delay_s"]["p50"], 0.5);
+        assert_eq!(delays["scheduled_arrival_latency_s"]["p50"], 0.75);
+        assert_eq!(delays["scheduled_arrival_latency_s"]["n"], 1);
+        let bytes = export.csv().unwrap();
+        let mut csv = csv::Reader::from_reader(bytes.as_slice());
+        let headers = csv.headers().unwrap().clone();
+        let row = csv.records().next().unwrap().unwrap();
+        let actual: Value = serde_json::from_str(
+            row.get(
+                headers
+                    .iter()
+                    .position(|h| h == "scheduled_delays_json")
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(&actual, delays);
+        let html = export.html().unwrap();
+        assert!(
+            html.contains("<table>")
+                && html.contains("scheduled-arrival latency")
+                && html.contains("0.75")
+        );
+    }
+}

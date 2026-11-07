@@ -704,7 +704,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         std::path::PathBuf::from(&args.error_log),
     ];
     study_protected.extend(args.telemetry.ndjson.clone());
-    let study_exports = args.study_export.prepare(1, &study_protected)?;
+    let study_exports = args.study_export.prepare(
+        1,
+        &study_protected,
+        args.cache_policy,
+        effective_order_policy,
+    )?;
     let telemetry_cfg = args.telemetry.resolve_config()?;
     let phase_plan = args.phase_metrics.resolve(
         telemetry_cfg.as_ref(),
@@ -1817,7 +1822,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
     }
     if let Some(exports) = study_exports {
-        exports.requests(&records)?;
+        exports.requests(&records, phase_analysis.as_slice())?;
     }
     ttft_audit?;
     telemetry_verdict?;

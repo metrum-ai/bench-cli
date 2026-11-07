@@ -2618,7 +2618,12 @@ async fn main() -> Result<()> {
     let stages = parse_sweep(&args.sweep)?;
     let mut study_protected = vec![args.csv.clone(), args.html.clone()];
     study_protected.extend(args.ndjson.clone());
-    let study_exports = args.study_export.prepare(stages.len(), &study_protected)?;
+    let study_exports = args.study_export.prepare(
+        stages.len(),
+        &study_protected,
+        args.cache_policy,
+        effective_order_policy,
+    )?;
     let study_stage_loads = if study_exports.is_some() {
         stages.clone()
     } else {
@@ -3269,7 +3274,7 @@ async fn main() -> Result<()> {
         bail!("OTLP export requires a build with --features otlp");
     }
     if let Some(exports) = study_exports {
-        exports.strategic(&all_records, &study_stage_loads)?;
+        exports.strategic(&all_records, &study_stage_loads, &phase_reports)?;
     }
     if phase_failed {
         bail!("required native phase coverage unavailable");
