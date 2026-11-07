@@ -77,7 +77,7 @@ contains identity (tokenizer_id, tokenizer_revision, tokenizer_sha256,
 chat_template_sha256, add_special_tokens, add_generation_prompt,
 hint_nonce_included, renderer_version), local tokenizer_path/template_path,
 special_tokens bindings, max_artifact_bytes, max_rendered_bytes, max_tokens and
-template_fuel. Use renderer_version `minijinja-chat.v1`.
+template_fuel. Use renderer_version `minijinja-chat.v2` (tool-context normalization).
 See [CHAT_RENDERING.md](CHAT_RENDERING.md). Local artifact paths never enter the
 public manifest. Unsupported framing and implicit tokenizer truncation/padding fail.
 

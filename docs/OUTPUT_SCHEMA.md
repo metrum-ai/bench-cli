@@ -3,6 +3,14 @@
 
 # JSONL output schema
 
+## Opt-in KV study interchange (v1.9.0 development)
+
+The separate `kv-study-report.v1` manifest/report contract is specified in
+[KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+It preserves unknown evidence and phase/reset provenance and references the
+separately versioned dataset validation manifest by digest. This initial contract
+is not emitted by runners yet and does not change existing JSONL schema versions.
+
 ## Strategic trusted reset metadata (v1.9.0 development)
 
 When opted in, `config.stage_hook` records command SHA-256 (not raw command),
@@ -97,6 +105,15 @@ provenance are documented in
 [PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
 separate units. The adapter does not change runner JSONL or certify token lengths,
 window feasibility, rights beyond caller policy, or observed cache reuse.
+
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
 
 ## Public input provenance sub-contract
 
