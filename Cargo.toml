@@ -109,6 +109,10 @@ zip = { version = "9.4.1", default-features = false, features = ["deflate-flate2
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30.1", default-features = false, features = ["signal", "process"] }
 
+[[example]]
+name = "trace_construct_probe"
+required-features = ["tokenizer"]
+
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 

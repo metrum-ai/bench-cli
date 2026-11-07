@@ -481,6 +481,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [public document inputs](docs/PUBLIC_DOCUMENTS.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
 [structural trace building blocks](docs/TRACE_INPUTS.md),
+[declared constructed trace content](docs/CONSTRUCTED_TRACES.md),
 [logical capacity-aware pressure](docs/PRESSURE_INPUTS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),

@@ -47,6 +47,22 @@ contain private source identifiers; they are not default public evidence.
 Length/time-only inputs and all unrendered structural plans retain rendered-token
 overlap Unknown. These artifacts do not change canonical inputs or runner JSONL.
 
+## Declared constructed trace content
+
+[CONSTRUCTED_TRACES.md](CONSTRUCTED_TRACES.md) describes the separate private
+[constructed-source-trace.v1 schema](../schemas/constructed-source-trace.v1.json).
+It preserves verified source provenance and stores **new constructed literals**,
+raw-prompt token IDs, known source full-node IDs and seeded constructed tails.
+Raw prefix/count validation is not final chat-template overlap or original-text
+recovery. The artifact retains rendered Unknown and physical unavailable; no
+canonical or runner JSONL schema changes. Metadata summaries omit content/IDs.
+Deserialization/JSON Schema shape is not constructor revalidation or rights approval.
+`trace_candidates::construct_candidates_jsonl` explicitly returns checked frozen
+canonical Prompt candidates plus an actual `ValidationManifest`; reference output
+lengths and source graph/history/time remain metadata, not automatic output
+requests, runtime arrivals or dependency replay. Constructed adapter/trace IDs
+label this new content; rendered/corpus/physical evidence remains Unknown.
+
 ## Source trace time metadata
 
 The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
