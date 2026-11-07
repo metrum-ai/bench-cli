@@ -101,6 +101,13 @@ pub fn paired_run_mean_difference(
                 .treatment
                 .phase_clock_mean(pair.treatment_phase, clock)
                 .ok_or("missing_or_invalid_matched_clock")?;
+            if !pair.baseline.matching_population(
+                pair.baseline_phase,
+                pair.treatment,
+                pair.treatment_phase,
+            ) {
+                return Err("unmatched_measured_turn_or_prefix_population");
+            }
             let difference = treatment - baseline;
             if !difference.is_finite() {
                 return Err("nonfinite_paired_difference");

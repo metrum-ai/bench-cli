@@ -235,6 +235,63 @@ fn final_body_binding_preserves_unknowns_and_rejects_invalid_projection_values()
     assert!(!String::from_utf8(bytes).unwrap().contains("PRIVATE_RAW"));
 }
 #[test]
+fn paired_populations_require_matching_turn_counts_not_matching_hit_cohorts() {
+    use metrum_ai_bench::kv_study_comparison::*;
+    let make = |n: usize, turn, cached| {
+        let rows: Vec<_> = (0..n)
+            .map(|_| {
+                let mut r = row(true, Some(cached), false);
+                r.turn = Some(turn);
+                r.ttft_visible_answer_s = Some(1.0);
+                r
+            })
+            .collect();
+        StudyExport::bind(
+            StudySeed::parse(&serde_json::to_vec(&manifest()).unwrap()).unwrap(),
+            &BTreeMap::from([(
+                "=cmd<script>alert(1)</script>".into(),
+                PhaseRecords::Strategic(&rows),
+            )]),
+        )
+        .unwrap()
+    };
+    let b1 = make(1, 1, 0);
+    let b2 = make(1, 1, 0);
+    let t2 = make(1, 1, 10);
+    for (n, turn, expected) in [
+        (2, 1, Some("unmatched_measured_turn_or_prefix_population")),
+        (1, 2, Some("unmatched_measured_turn_or_prefix_population")),
+        (1, 1, None),
+    ] {
+        let t1 = make(n, turn, 10);
+        let pairs = [
+            RunPair {
+                pair_key: "one",
+                baseline: &b1,
+                baseline_phase: 0,
+                treatment: &t1,
+                treatment_phase: 0,
+            },
+            RunPair {
+                pair_key: "two",
+                baseline: &b2,
+                baseline_phase: 0,
+                treatment: &t2,
+                treatment_phase: 0,
+            },
+        ];
+        let data = serde_json::to_value(paired_run_mean_difference(
+            &pairs,
+            StudyClock::VisibleAnswer,
+            Some(&"a".repeat(64)),
+            7,
+        ))
+        .unwrap();
+        assert_eq!(data["unknown"], serde_json::to_value(expected).unwrap());
+        assert_eq!(data["ci95"].is_object(), expected.is_none());
+    }
+}
+#[test]
 fn overflowed_cluster_statistics_remain_unknown_not_serialized_null_confidence() {
     use metrum_ai_bench::kv_study_comparison::*;
     let make = |ttft: f64| {

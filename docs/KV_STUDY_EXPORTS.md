@@ -134,10 +134,15 @@ existing data-log cross-run throughput statistics remain throughput statistics,
 The Rust report API provides `paired_run_mean_difference` and `add_comparison`.
 Supply explicitly matched baseline/treatment exports and phase indices per run
 pair, an explicit clock, a seed and a SHA-256 declaration of fixed controls and
-independent run pairs. That declaration is **operator-declared, unverified**;
+independent complete run pairs (including matched collection windows). Run
+completion/independence is not independently attested by these record adapters.
+That declaration is **operator-declared, unverified**;
 it is not a reset, deployment or physical-state attestation.
 
-Only complete matched clock populations enter the calculation. Errors, invalid
+Only complete matched clock populations enter the calculation. Measured turn and
+prefix-group sample counts must match **within** each pair, ignoring cache-hit
+cohort (the intended treatment response). Cluster sizes may differ **across** run
+pairs; that must not increase a large run's bootstrap weight. Errors, invalid
 or missing clock observations, reused arms/clusters, duplicate pair IDs, mixed
 reuse kinds, missing declarations and fewer than two run pairs produce Unknown.
 Run means use sample-count weights across source-compatible turn/cohort groups;

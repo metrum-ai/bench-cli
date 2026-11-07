@@ -343,6 +343,26 @@ impl StudyExport {
     pub(crate) fn reuse_kind(&self) -> &str {
         self.report["reuse_kind"].as_str().expect("validated kind")
     }
+    pub(crate) fn matching_population(
+        &self,
+        index: usize,
+        other: &Self,
+        other_index: usize,
+    ) -> bool {
+        let population = |phase: &PhaseView| {
+            let mut counts = BTreeMap::new();
+            for group in &phase.cohorts.groups {
+                *counts
+                    .entry((group.turn, group.prefix_group.clone()))
+                    .or_insert(0usize) += group.timing_eligible_requests;
+            }
+            counts
+        };
+        self.phases
+            .get(index)
+            .zip(other.phases.get(other_index))
+            .is_some_and(|(a, b)| population(a) == population(b))
+    }
     pub(crate) fn phase_clock_mean(
         &self,
         index: usize,
