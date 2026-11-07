@@ -22,7 +22,8 @@ class BuildRoleTests(unittest.TestCase):
             path.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# ' + role + '\nexit 0\n')
             path.chmod(0o755)
             self.manifest[key] = {'path': str(path), 'sha256': digest(path), 'candidate_sha': self.sha,
-                                  'profile': 'release', 'features': features, 'role': role}
+                                  'profile': 'release', 'features': features, 'role': role,
+                                  'origin': {'kind': 'pretag-workflow' if role == 'measured' else 'local-cargo-validation'}}
 
     def test_same_source_distinct_roles(self):
         paths = build_roles.check_roles(self.manifest)
@@ -32,7 +33,7 @@ class BuildRoleTests(unittest.TestCase):
     def test_wrong_features_source_profile_role_and_hash_fail(self):
         for key in ('candidate', 'tokenizer_validation'):
             for field, value in [('features', []), ('candidate_sha', 'b' * 40), ('profile', 'debug'),
-                                 ('role', 'other'), ('sha256', '0' * 64)]:
+                                 ('role', 'other'), ('sha256', '0' * 64), ('origin', {'kind': 'local-measured'})]:
                 with self.subTest(key=key, field=field):
                     bad = copy.deepcopy(self.manifest)
                     bad[key][field] = value
@@ -80,6 +81,23 @@ class BuildRoleTests(unittest.TestCase):
         receipt = Path(manifest['build_receipt']['path'])
         receipt.write_text('{}')
         with self.assertRaisesRegex(ValueError, 'receipt hash'):
+            build_roles.check_manifest(manifest)
+
+    def test_arbitrary_binary_cannot_borrow_valid_workflow_origin(self):
+        import json
+        from build_role_test_fixture import bind
+        source = copy.deepcopy(self.manifest)
+        source['cases'] = {}
+        manifest = bind(source, self.root)
+        primary = Path(manifest['candidate']['path'])
+        primary.write_text('#!/bin/sh\n# different locally compiled variant\nexit 0\n')
+        manifest['candidate']['sha256'] = digest(primary)
+        receipt = Path(manifest['build_receipt']['path'])
+        data = json.loads(receipt.read_text())
+        data['builds']['measured']['binaries']['metrum-ai-bench-cli-llm']['sha256'] = digest(primary)
+        receipt.write_text(json.dumps(data))
+        manifest['build_receipt']['sha256'] = digest(receipt)
+        with self.assertRaisesRegex(ValueError, 'verified workflow archive'):
             build_roles.check_manifest(manifest)
 
     def test_validation_binary_and_copy_rejected_in_measured_commands_or_pins(self):

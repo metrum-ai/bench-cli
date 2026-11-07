@@ -72,7 +72,10 @@ def freeze(args):
     inputs.update({args.selection.resolve(), args.catalog.resolve(), args.lane_manifest.resolve(), args.baseline.resolve(),
                    args.build_receipt.resolve(), Path(validation['path']).resolve()})
     inputs.update(Path(item['path']).resolve() for item in measured)
-    inputs.update(args.build_receipt.resolve().parent / (role + '.log') for role in ('measured', 'validation-only'))
+    inputs.add(args.build_receipt.resolve().parent / 'validation-only.log')
+    origin = measured[0]['origin']
+    inputs.update(Path(origin[key]['path']).resolve() for key in
+                  ('run', 'artifact_metadata', 'artifact_listing', 'archive', 'checksum', 'download_log'))
     def collect_pins(value):
         if isinstance(value, dict):
             if "path" in value and "sha256" in value:

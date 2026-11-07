@@ -93,12 +93,24 @@ performance gate configurations are unchanged.
 
 ## Freeze and launch individual selected cases
 
-First run `freeze_builds.py --repo CLEAN_CHECKOUT --candidate-sha SHA --out NEW_DIR
---rust-target RUST_TARGET --zig-target RELEASE_ZIG_TARGET` with the matching
-release-workflow targets. It runs the locked release `cargo zigbuild` commands
-in separate output directories and emits `builds.json` only after both builds
-succeed. Partial logs remain on failure. It records actual executable hashes,
-features, source commit, command argv and build-log hashes, not measured results.
+After the actual candidate freeze and matching source-version update, dispatch
+`pretag-certification.yml` on that frozen public ref with candidate_sha and
+version inputs. Do not create a release/tag or publish. After the complete
+workflow succeeds, run `freeze_builds.py --repo CLEAN_CHECKOUT --candidate-sha SHA
+--version VERSION --workflow-run-id RUN_ID --out NEW_DIR`. It requires the
+workflow run's head to match the frozen source, successful workflow_dispatch
+status and the exact pretag workflow/repository/artifact. It uses
+`gh run download` to fetch `pretag-release-x86_64-unknown-linux-gnu`, verifies the
+workflow-recorded archive checksum and safely copies measured Cargo binaries.
+Local measured compilation is not an option. The helper alone uses native
+`cargo build --locked --release --features otlp,tokenizer` from the same source.
+
+It emits `builds.json` only after artifact verification and validation build
+succeed, binding run/artifact API responses, download log, archive/checksum,
+per-binary hashes, source/features/origin and compiler log. Partial downloads
+and logs remain on failure. Freeze/preflight/direct launch revalidate those
+pins and each measured binary against the verified archive. Synthetic API and
+compiler fixtures in unit tests are not actual workflow or case evidence.
 
 `freeze_case.py --build-receipt NEW_DIR/builds.json` creates an exclusive
 (never overwritten) single-case manifest from that receipt, selector output,

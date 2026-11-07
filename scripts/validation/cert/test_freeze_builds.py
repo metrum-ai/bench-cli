@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Mock compiler outputs exercise receipt generation, not release evidence."""
+"""Synthetic transport/compiler fixtures, NOT real workflow or build evidence."""
 import json
 import subprocess
 import tempfile
@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import freeze_builds
 import build_roles
+from build_role_test_fixture import workflow_evidence
 
 
 class FreezeBuildTests(unittest.TestCase):
@@ -20,41 +21,43 @@ class FreezeBuildTests(unittest.TestCase):
         self.repo = self.root / 'repo'
         self.repo.mkdir()
         self.args = SimpleNamespace(repo=self.repo, out=self.root / 'builds', candidate_sha='a' * 40,
-                                    rust_target='x86_64-unknown-linux-gnu',
-                                    zig_target='x86_64-unknown-linux-gnu.2.17')
+                                    version='1.8.1', workflow_run_id=19)
         self.names = ['metrum-ai-bench-cli-llm', 'metrum-ai-bench-cli-strategic']
-        self.metadata = json.dumps({'packages': [{'name': 'metrum-ai-bench-cli',
-            'manifest_path': str(self.repo / 'Cargo.toml'),
-            'targets': [{'kind': ['bin'], 'name': name} for name in self.names]}]}).encode()
+
+    def download(self, sha, version, run_id, out):
+        content = b'#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic workflow measured\nexit 0\n'
+        origin = workflow_evidence(out, sha, version, {name: content for name in self.names}, run_id)
+        paths = {}
+        for name in self.names:
+            path = out / name
+            path.write_bytes(content)
+            path.chmod(0o755)
+            paths[name] = path
+        return origin, paths
 
     def compiler(self, argv, **kwargs):
+        self.assertEqual(argv[:2], ['cargo', 'build'])
+        self.assertIn('otlp,tokenizer', argv)
         target = Path(argv[argv.index('--target-dir') + 1])
-        features = argv[argv.index('--features') + 1]
-        names = self.names if '--bins' in argv else ['metrum-ai-bench-cli-llm']
-        for name in names:
-            path = target / self.args.rust_target / 'release' / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic ' + features + '\nexit 0\n')
-            path.chmod(0o755)
+        path = target / 'release' / 'metrum-ai-bench-cli-llm'
+        path.parent.mkdir(parents=True)
+        path.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic local validation\nexit 0\n')
+        path.chmod(0o755)
         kwargs['stdout'].write(b'synthetic compiler fixture; not build evidence\n')
 
-    def test_receipt_binds_roles_features_source_logs_and_separate_outputs(self):
+    def test_workflow_measured_and_local_validation_receipt(self):
         with patch.object(freeze_builds, 'clean_source') as clean, \
-             patch.object(freeze_builds.subprocess, 'check_output', return_value=self.metadata), \
+             patch.object(freeze_builds.pretag_artifact, 'download', side_effect=self.download), \
              patch.object(freeze_builds.subprocess, 'run', side_effect=self.compiler) as compile:
             result = freeze_builds.build(self.args)
         self.assertEqual(clean.call_count, 3)
-        self.assertEqual(compile.call_count, 2)
+        self.assertEqual(compile.call_count, 1)  # No local measured compilation.
         primary = result['builds']['measured']['binaries']
         validation = result['builds']['validation-only']['binaries']['metrum-ai-bench-cli-llm']
         self.assertEqual(set(primary), set(self.names))
-        for item in primary.values():
-            self.assertEqual(item['features'], ['otlp'])
-            self.assertEqual(item['role'], 'measured')
-            self.assertEqual(item['candidate_sha'], self.args.candidate_sha)
-        self.assertEqual(validation['features'], ['otlp', 'tokenizer'])
-        self.assertNotEqual(validation['path'], primary['metrum-ai-bench-cli-llm']['path'])
-        self.assertNotEqual(validation['sha256'], primary['metrum-ai-bench-cli-llm']['sha256'])
+        self.assertTrue(all(item['origin']['kind'] == 'pretag-workflow' for item in primary.values()))
+        self.assertEqual(validation['origin']['kind'], 'local-cargo-validation')
+        self.assertNotEqual(validation['sha256'], primary[self.names[0]]['sha256'])
         self.assertEqual(result, json.loads((self.args.out / 'builds.json').read_text()))
         registry, helper = build_roles.load_receipt(self.args.out / 'builds.json', self.args.candidate_sha)
         self.assertEqual(registry, list(primary.values()))
@@ -62,26 +65,25 @@ class FreezeBuildTests(unittest.TestCase):
         with self.assertRaises(FileExistsError), patch.object(freeze_builds, 'clean_source'):
             freeze_builds.build(self.args)
 
-    def test_failed_second_build_retains_logs_without_completed_receipt(self):
-        def compile(argv, **kwargs):
-            if 'otlp,tokenizer' in argv:
-                kwargs['stdout'].write(b'synthetic failed compile\n')
-                raise subprocess.CalledProcessError(1, argv)
-            return self.compiler(argv, **kwargs)
+    def test_failed_validation_retains_downloads_and_log_without_receipt(self):
         with patch.object(freeze_builds, 'clean_source'), \
-             patch.object(freeze_builds.subprocess, 'check_output', return_value=self.metadata), \
-             patch.object(freeze_builds.subprocess, 'run', side_effect=compile), \
+             patch.object(freeze_builds.pretag_artifact, 'download', side_effect=self.download), \
+             patch.object(freeze_builds.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, ['cargo'])), \
              self.assertRaises(subprocess.CalledProcessError):
             freeze_builds.build(self.args)
         self.assertFalse((self.args.out / 'builds.json').exists())
         self.assertTrue((self.args.out / 'validation-only.log').is_file())
+        self.assertTrue(list((self.args.out / 'measured').glob('*.tar.gz')))
 
-    def test_changed_source_or_default_features_rejected(self):
+    def test_changed_source_defaults_or_version_rejected(self):
         with patch.object(freeze_builds, 'git', return_value='b' * 40), self.assertRaisesRegex(ValueError, 'frozen'):
             freeze_builds.clean_source(self.repo, self.args.candidate_sha)
         (self.repo / 'Cargo.toml').write_text('[features]\ndefault=["tokenizer"]\n')
         with patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']), self.assertRaisesRegex(ValueError, 'default features'):
             freeze_builds.clean_source(self.repo, self.args.candidate_sha)
+        (self.repo / 'Cargo.toml').write_text('[package]\nversion="1.8.0"\n')
+        with patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']), self.assertRaisesRegex(ValueError, 'version'):
+            freeze_builds.clean_source(self.repo, self.args.candidate_sha, '1.8.1')
 
 
 if __name__ == '__main__':

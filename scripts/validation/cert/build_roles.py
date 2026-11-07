@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 from execution_evidence import digest
+import pretag_artifact
 
 
 def check_build(item, candidate_sha, role, features):
@@ -20,6 +21,9 @@ def check_build(item, candidate_sha, role, features):
         raise ValueError(f'{role} build role/release profile mismatch')
     if item.get('features') != features:
         raise ValueError(f'{role} build features must be {features}')
+    expected_origin = 'pretag-workflow' if role == 'measured' else 'local-cargo-validation'
+    if item.get('origin', {}).get('kind') != expected_origin:
+        raise ValueError(f'{role} build origin must be {expected_origin}')
     path = Path(item['path']).resolve(strict=True)
     if not path.is_file() or not os.access(path, os.X_OK):
         raise ValueError(f'{role} build must be an executable file')
@@ -49,17 +53,24 @@ def load_receipt(path, sha):
     validation = builds['validation-only']['binaries']['metrum-ai-bench-cli-llm']
     if not measured:
         raise ValueError('measured binary registry is empty')
-    for item in measured.values():
+    origin = builds['measured']['origin']
+    if receipt.get('version') != origin.get('version'):
+        raise ValueError('receipt version must match workflow archive')
+    expected = pretag_artifact.verify(origin, sha)
+    if set(measured) != set(expected):
+        raise ValueError('measured registry must match workflow archive binaries')
+    for name, item in measured.items():
         check_roles({'candidate_sha': sha, 'candidate': item, 'tokenizer_validation': validation})
-    for role, features in [('measured', 'otlp'), ('validation-only', 'otlp,tokenizer')]:
-        entry = builds[role]
-        command = entry['argv']
-        if command[:2] != ['cargo', 'zigbuild'] or command.count('--features') != 1:
-            raise ValueError('build receipt must record release-equivalent command')
-        if command[command.index('--features') + 1] != features or '--release' not in command or '--locked' not in command:
-            raise ValueError('build receipt command/profile mismatch')
-        if digest(path.parent / (role + '.log')) != entry['log_sha256']:
-            raise ValueError('build receipt log hash mismatch')
+        if item['sha256'] != expected[name] or item.get('origin') != origin:
+            raise ValueError('measured binary differs from verified workflow archive')
+    entry = builds['validation-only']
+    command = entry['argv']
+    if command[:2] != ['cargo', 'build'] or command.count('--features') != 1:
+        raise ValueError('validation receipt must record local cargo build')
+    if command[command.index('--features') + 1] != 'otlp,tokenizer' or '--release' not in command or '--locked' not in command:
+        raise ValueError('validation build command/profile mismatch')
+    if digest(path.parent / 'validation-only.log') != entry['log_sha256']:
+        raise ValueError('validation build log hash mismatch')
     return list(measured.values()), validation
 
 
