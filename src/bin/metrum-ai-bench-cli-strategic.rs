@@ -92,6 +92,8 @@ struct Args {
     native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
     #[command(flatten)]
     phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
+    #[command(flatten)]
+    study_export: metrum_ai_bench::kv_study_cli::StudyExportArgs,
     #[arg(long, required_unless_present = "version_only")]
     url: Option<String>,
     #[arg(
@@ -2614,6 +2616,14 @@ async fn main() -> Result<()> {
         .transpose()
         .context("serialize sut")?;
     let stages = parse_sweep(&args.sweep)?;
+    let mut study_protected = vec![args.csv.clone(), args.html.clone()];
+    study_protected.extend(args.ndjson.clone());
+    let study_exports = args.study_export.prepare(stages.len(), &study_protected)?;
+    let study_stage_loads = if study_exports.is_some() {
+        stages.clone()
+    } else {
+        Vec::new()
+    };
     // Flag checks before any file is read, so a wrong flag says so first.
     validate_kind_flags(&args)?;
     if args.ttft_fallback.is_some() {
@@ -3257,6 +3267,9 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "otlp"))]
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
+    }
+    if let Some(exports) = study_exports {
+        exports.strategic(&all_records, &study_stage_loads)?;
     }
     if phase_failed {
         bail!("required native phase coverage unavailable");

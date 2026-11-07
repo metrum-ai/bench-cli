@@ -20,6 +20,17 @@ use std::{
 
 pub struct StudySeed(Value);
 impl StudySeed {
+    pub(crate) fn measured_phase_ids(&self) -> Result<Vec<String>> {
+        self.0["phases"]
+            .as_array()
+            .expect("validated phases")
+            .iter()
+            .map(|p| {
+                ensure!(p["kind"] != "warmup", "study_warmup_adapter_required");
+                Ok(p["id"].as_str().expect("validated id").to_owned())
+            })
+            .collect()
+    }
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         ensure!(bytes.len() <= 4 * 1024 * 1024, "study_manifest_size_limit");
         let value: Value = serde_json::from_slice(bytes)
@@ -66,12 +77,14 @@ impl StudySeed {
 pub enum PhaseRecords<'a> {
     Requests(&'a [RequestRecord]),
     Strategic(&'a [BenchRecord]),
+    StrategicRefs(&'a [&'a BenchRecord]),
 }
 impl PhaseRecords<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Requests(r) => r.len(),
             Self::Strategic(r) => r.len(),
+            Self::StrategicRefs(r) => r.len(),
         }
     }
     fn addresses(&self) -> Vec<(u8, usize)> {
@@ -79,6 +92,10 @@ impl PhaseRecords<'_> {
             Self::Requests(r) => r
                 .iter()
                 .map(|v| (0, v as *const RequestRecord as usize))
+                .collect(),
+            Self::StrategicRefs(r) => r
+                .iter()
+                .map(|v| (1, *v as *const BenchRecord as usize))
                 .collect(),
             Self::Strategic(r) => r
                 .iter()
@@ -90,6 +107,7 @@ impl PhaseRecords<'_> {
         match self {
             Self::Requests(r) => request_cohorts(r),
             Self::Strategic(r) => strategic_cohorts(*r),
+            Self::StrategicRefs(r) => strategic_cohorts(r.iter().copied()),
         }
     }
 }

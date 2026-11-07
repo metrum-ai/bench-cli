@@ -82,6 +82,7 @@ PATH_AREAS = {
     'src/cache_metrics.rs': {'*'},
     'src/cache_phase.rs': {'*'},
     'src/kv_study_export.rs': {'*'},
+    'src/kv_study_cli.rs': {'*'},
     'src/cache_histogram.rs': {'*'},
     'src/cache_phase_cli.rs': {'*'},
     'src/cache_phase_runtime.rs': {'*'},
