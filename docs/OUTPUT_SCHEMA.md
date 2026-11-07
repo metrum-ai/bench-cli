@@ -44,6 +44,25 @@ The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
 and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
 totals remain exact independently of that cap; an empty list can still mean Fail.
 
+## Logical pressure and structural source artifacts
+
+[PRESSURE_INPUTS.md](PRESSURE_INPUTS.md) describes `logical-pressure-plan.v1`,
+a configured-capacity plan and CPU-only modeled LRU outcomes, not observed cache
+hits or physical tier participation. [TRACE_INPUTS.md](TRACE_INPUTS.md) describes
+`structural-source-trace.v1`, preserving source order, lengths, exact time and
+prefix/session topology under explicit mapping/coverage. Full source artifacts
+contain private source identifiers; they are not default public evidence.
+Length/time-only inputs and all unrendered structural plans retain rendered-token
+overlap Unknown. These artifacts do not change canonical inputs or runner JSONL.
+
+## Source trace time metadata
+
+The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
+[TRACE_INPUTS.md](TRACE_INPUTS.md). It retains exact source decimal value/unit,
+positive rational scale, explicit rounding and a precision-loss flag. It does
+not represent an actual arrival or cache measurement, and is not embedded in
+runner JSONL. No runtime record or report schema version changes.
+
 ## Canonical runtime input JSONL
 
 [CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input

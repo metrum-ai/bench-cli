@@ -480,6 +480,8 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [public document inputs](docs/PUBLIC_DOCUMENTS.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
+[structural trace building blocks](docs/TRACE_INPUTS.md),
+[logical capacity-aware pressure](docs/PRESSURE_INPUTS.md),
 [typed public session normalization](docs/PUBLIC_SESSIONS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
