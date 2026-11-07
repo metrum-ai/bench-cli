@@ -90,6 +90,8 @@ struct Args {
     version_only: bool,
     #[command(flatten)]
     native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
+    #[command(flatten)]
+    phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
     #[arg(long, required_unless_present = "version_only")]
     url: Option<String>,
     #[arg(
@@ -2190,6 +2192,14 @@ fn reset_hook(args: &Args) -> Option<metrum_ai_bench::stage_lifecycle::ResetHook
         })
 }
 
+struct StagePhaseAnalysis<'a> {
+    plan: &'a metrum_ai_bench::cache_phase_cli::PhaseMetricPlan,
+    session: &'a mut metrum_ai_bench::telemetry::TelemetrySession,
+    reports: &'a mut Vec<Value>,
+    failed: &'a mut bool,
+    budget_ms: u64,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_stage(
     args: &Args,
@@ -2205,6 +2215,7 @@ async fn run_stage(
     run_id: Arc<String>,
     ndjson: Option<metrum_ai_bench::telemetry::NdjsonWriter>,
     stop: &metrum_ai_bench::runner::StopFlag,
+    mut phase: Option<StagePhaseAnalysis<'_>>,
 ) -> Result<(
     Vec<BenchRecord>,
     Vec<ModalitySample>,
@@ -2338,6 +2349,28 @@ async fn run_stage(
         resets.push(json!({"position": "after_warmup", "acknowledgement": acknowledgement}));
     }
 
+    // Native baseline follows warmup drain AND reset readiness/settling.
+    let mut phase_before = None;
+    if let Some(phase) = phase.as_mut() {
+        let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+            stage: u32::try_from(stage_index)?,
+            phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+            edge: metrum_ai_bench::cache_phase::Edge::Before,
+        };
+        let (req, reply) = phase.plan.request(tag, phase.budget_ms);
+        phase.session.handle_phase_boundary(req).await;
+        phase_before = reply.await.ok();
+        if phase.plan.required
+            && !phase_before
+                .as_ref()
+                .is_some_and(|reply| phase.plan.covered(reply))
+        {
+            *phase.failed = true;
+            stop.stop();
+        }
+    }
+    let phase_issued_ns = run_epoch.elapsed_ns();
+
     // Phase 2: reset measurement epoch; measured prompts restart at index 0.
     // Observed concurrency covers measured slots only (#226).
     inflight_tracker.reset_counts();
@@ -2431,6 +2464,37 @@ async fn run_stage(
                 },
             ))
             .await?;
+    }
+
+    // All measured handles and priority request/stage writes have drained.
+    if let Some(phase) = phase.as_mut() {
+        let drained_ns = run_epoch.elapsed_ns();
+        if phase.plan.settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(phase.plan.settle_ms)).await;
+        }
+        let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+            stage: u32::try_from(stage_index)?,
+            phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+            edge: metrum_ai_bench::cache_phase::Edge::After,
+        };
+        let (req, reply) = phase.plan.request(tag, phase.budget_ms);
+        phase.session.handle_phase_boundary(req).await;
+        let after = reply.await.ok();
+        if phase.plan.required
+            && !after
+                .as_ref()
+                .is_some_and(|reply| phase.plan.covered(reply))
+        {
+            *phase.failed = true;
+            stop.stop();
+        }
+        phase.reports.push(phase.plan.report(
+            &run_id,
+            phase_before,
+            after,
+            Some(phase_issued_ns),
+            Some(drained_ns),
+        ));
     }
 
     // No measured requests means no defined throughput denominator.
@@ -2706,6 +2770,16 @@ async fn main() -> Result<()> {
         bail!("--telemetry / telemetry via --metrics-url requires --ndjson PATH");
     }
 
+    let phase_plan = args.phase_metrics.resolve(
+        telemetry_cfg.as_ref(),
+        args.ndjson.is_some(),
+        &args.native_metrics,
+    )?;
+    let phase_budget_ms = telemetry_cfg
+        .as_ref()
+        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1000)
+        .unwrap_or(5000);
+
     // Same optional keys as the stdout config (#197), so NDJSON-only analysis
     // sees the kind settings; chat/embeddings/rerank run rows are unchanged.
     let mut run_config = json!({
@@ -2912,6 +2986,8 @@ async fn main() -> Result<()> {
     let mut ttft_error = None;
     let mut partial = false;
     let mut stage_resets = Vec::new();
+    let mut phase_reports = Vec::new();
+    let mut phase_failed = false;
     for (stage_index, stage) in stages.into_iter().enumerate() {
         if stop.is_stopped() {
             partial = true;
@@ -2934,8 +3010,21 @@ async fn main() -> Result<()> {
             Arc::clone(&run_id),
             ndjson_writer.clone(),
             &stop,
+            phase_plan
+                .as_ref()
+                .zip(telemetry_session.as_mut())
+                .map(|(plan, session)| StagePhaseAnalysis {
+                    plan,
+                    session,
+                    reports: &mut phase_reports,
+                    failed: &mut phase_failed,
+                    budget_ms: phase_budget_ms,
+                }),
         )
         .await?;
+        if phase_plan.is_some() {
+            redacted_config["native_cache_phase_analysis"] = json!(phase_reports);
+        }
         if fingerprint_enabled {
             redacted_config["cache_workload"]["body_evidence"] = body_order_evidence(&records)?;
             redacted_config["cache_workload"]["evidence_scope"] = json!("stage_including_warmup");
@@ -3146,6 +3235,9 @@ async fn main() -> Result<()> {
     if args.otlp_endpoint.is_some() {
         bail!("OTLP export requires a build with --features otlp");
     }
+    if phase_failed {
+        bail!("required native phase coverage unavailable");
+    }
     if let Some(error) = ttft_error {
         return Err(error);
     }
@@ -3285,6 +3377,7 @@ mod tests {
                 Arc::new("fixture".into()),
                 None,
                 &metrum_ai_bench::runner::StopFlag::new(),
+                None,
             ),
         )
         .await
