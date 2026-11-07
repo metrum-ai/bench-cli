@@ -37,6 +37,22 @@ Pinned rendering is mandatory in catalog mode. Review-only/code-extraction entri
 fail rather than guess context or execute source scripts. Catalog metadata/card
 licenses are not legal clearance or serving-window guarantees.
 
+## Selected target summaries
+
+The existing manifest `checks` map additionally records measured JSON strings
+`selected_requested_output_budgets.v1` and `selected_document_group_sizes.v1`.
+They summarize the actual selected adapter targets: exact requested-budget
+histogram/min/max with explicit unknown count, and group-size histogram with
+explicit ungrouped-target count. Group identities, row IDs and payloads are not
+copied into these summaries. An empty or wholly unknown budget set has null
+extrema, not fabricated zero; an explicitly supplied zero remains a known value.
+
+These are selected-input declarations, not measured generated-output lengths,
+corpus-wide group distributions, achieved scheduling order or final issued-body
+checks. Runtime overrides require fresh evidence. Rendered input lengths/overlap
+still come from the pinned #422 report, not these declarations. The generic
+consolidation keeps unmeasured serving/output/history checks Unknown.
+
 ## Job schema
 
 The local JSON job is limited to 256 KiB and uses

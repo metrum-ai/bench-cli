@@ -88,6 +88,39 @@ pub struct PublicProfileReport {
     pub human_summary: String,
 }
 
+/// Counts of declared selected targets, not generated tokens or corpus estimates.
+fn selected_statistics(
+    records: &[crate::public_dataset::IngestionRecord],
+) -> Result<(String, String)> {
+    let mut budgets = BTreeMap::<u64, u64>::new();
+    let mut unknown_budget = 0u64;
+    let mut groups = BTreeMap::<&str, u64>::new();
+    let mut ungrouped = 0u64;
+    for record in records {
+        if let Some(budget) = record.output_budget {
+            *budgets.entry(budget).or_default() += 1;
+        } else {
+            unknown_budget += 1;
+        }
+        if let Some(group) = record.group_id.as_deref() {
+            *groups.entry(group).or_default() += 1;
+        } else {
+            ungrouped += 1;
+        }
+    }
+    let mut sizes = BTreeMap::<u64, u64>::new();
+    for size in groups.values() {
+        *sizes.entry(*size).or_default() += 1;
+    }
+    let n = u64::try_from(records.len())?;
+    let budget = serde_json::json!({"schema_version":"selected-output-budgets.v1","semantics":"declared_request_targets_not_generated_output","targets":n,"known":n-unknown_budget,"unknown":unknown_budget,"min":budgets.keys().next(),"max":budgets.keys().next_back(),"histogram":budgets});
+    let group = serde_json::json!({"schema_version":"selected-group-sizes.v1","semantics":"selected_document_groups_not_corpus_or_schedule","targets":n,"groups":groups.len(),"ungrouped_targets":ungrouped,"group_size_histogram":sizes});
+    Ok((
+        serde_json::to_string(&budget)?,
+        serde_json::to_string(&group)?,
+    ))
+}
+
 /// Bind all logical parsing/mapping/selection/rendering settings, without local
 /// filesystem paths. Relocation is not a semantic change; output budgets, unused
 /// rendering context and validation limits still invalidate cached validation.
@@ -360,6 +393,15 @@ pub fn build(
             None => Evidence::Unknown,
         },
     );
+    let (budgets, groups) = selected_statistics(&adapted)?;
+    checks.insert(
+        "selected_requested_output_budgets.v1".into(),
+        Evidence::Measured(budgets.clone()),
+    );
+    checks.insert(
+        "selected_document_group_sizes.v1".into(),
+        Evidence::Measured(groups.clone()),
+    );
     let manifest = ValidationManifest {
         schema_version: SCHEMA_VERSION.into(), origin: job.origin.clone(), rights: job.rights.clone(), adapter_id: job.mapping.adapter_id.clone(), adapter_version: job.mapping.adapter_version.clone(),
         field_mapping: BTreeMap::from([("source_row_id".into(), job.mapping.row_id_field.clone()), ("document_id".into(), job.mapping.document_id_field.clone()), ("document".into(), job.mapping.document_field.clone()), ("question".into(), job.mapping.questions_field.clone())]),
@@ -374,7 +416,7 @@ pub fn build(
         .into_iter()
         .map(|record| record.into_canonical(source.clone()))
         .collect::<Result<Vec<_>>>()?;
-    let human_summary = manifest.summary();
+    let human_summary = format!("{}\nSelected requested output budgets (declarations, not generated tokens): {budgets}\nSelected document groups (not corpus or achieved schedule): {groups}",manifest.summary());
     Ok((
         records,
         PublicProfileReport {
@@ -446,6 +488,44 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn selected_statistics_distinguish_unknown_zero_and_hide_private_group_identity() {
+        use crate::public_dataset::{IngestionBody, IngestionRecord};
+        let base = IngestionRecord {
+            record_id: "private-row".into(),
+            session_id: None,
+            trace_id: None,
+            source_row_id: "private-source".into(),
+            source_file_sha256: "a".repeat(64),
+            group_id: Some("private-group".into()),
+            turn_index: None,
+            output_budget: Some(0),
+            body: IngestionBody::Prompt {
+                text: "private-payload".into(),
+            },
+        };
+        let mut second = base.clone();
+        second.output_budget = Some(16);
+        let mut third = base.clone();
+        third.output_budget = None;
+        third.group_id = None;
+        let (budget, group) = selected_statistics(&[base, second, third]).unwrap();
+        assert!(!format!("{budget}{group}").contains("private-"));
+        let b: Value = serde_json::from_str(&budget).unwrap();
+        let g: Value = serde_json::from_str(&group).unwrap();
+        assert_eq!(b["known"], 2);
+        assert_eq!(b["unknown"], 1);
+        assert_eq!(b["histogram"]["0"], 1);
+        assert_eq!(b["max"], 16);
+        assert_eq!(g["groups"], 1);
+        assert_eq!(g["ungrouped_targets"], 1);
+        assert_eq!(g["group_size_histogram"]["2"], 1);
+        let (budget, _) = selected_statistics(&[]).unwrap();
+        let b: Value = serde_json::from_str(&budget).unwrap();
+        assert!(b["min"].is_null());
+        assert!(b["max"].is_null());
+    }
+
+    #[test]
     fn output_preflight_rejects_parent_aliases_and_existing_files_before_writes() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("nested");
@@ -489,6 +569,22 @@ mod tests {
         assert_eq!(report.manifest.corpus_rows, Evidence::Unknown);
         assert!(!cache.exists());
         assert_eq!(report.manifest.selected_source_rows, 2);
+        assert!(report.human_summary.contains("not generated tokens"));
+        assert!(report
+            .human_summary
+            .contains("not corpus or achieved schedule"));
+        let measured = |key: &str| match &report.manifest.checks[key] {
+            Evidence::Measured(value) => serde_json::from_str::<Value>(value).unwrap(),
+            _ => panic!("selected stats must be measured"),
+        };
+        assert_eq!(
+            measured("selected_requested_output_budgets.v1")["histogram"]["8"],
+            2
+        );
+        assert_eq!(
+            measured("selected_document_group_sizes.v1")["group_size_histogram"]["2"],
+            1
+        );
         let mut relocated = job.clone();
         relocated.local_files.insert(
             "source.jsonl".into(),
