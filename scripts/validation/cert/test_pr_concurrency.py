@@ -41,6 +41,18 @@ class PrConcurrencyTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", block)
         self.assertNotIn("github.ref", block)
 
+    def test_literal_self_hosted_label_is_registered_without_wildcards(self):
+        workflow = (WORKFLOWS / 'ci.yml').read_text()
+        block = re.search(r'(?ms)^  self-hosted:\n(.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)', workflow)
+        self.assertIsNotNone(block)
+        self.assertIn('name: test (self-hosted bench-cli)', block.group(1))
+        label = re.search(r'(?m)^    runs-on: ([a-z0-9-]+)$', block.group(1))
+        self.assertIsNotNone(label, 'self-hosted job must retain a literal runner label')
+        config = (WORKFLOWS.parent / 'actionlint.yaml').read_text()
+        labels = re.findall(r'(?m)^    - ([a-z0-9-]+)$', config)
+        self.assertIn(label.group(1), labels, 'register exact custom label; do not suppress lint')
+        self.assertNotIn('*', config, 'wildcard runner labels weaken typo detection')
+
     def test_actionlint_is_pinned_and_checks_every_pr_workflow(self):
         text = (WORKFLOWS / "ci.yml").read_text()
         self.assertIn("name: actionlint (PR workflows)", text)

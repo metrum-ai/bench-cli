@@ -363,6 +363,22 @@ where
     S: Stream<Item = Result<B, reqwest::Error>>,
     B: AsRef<[u8]>,
 {
+    consume_with_clock(stream, || started.elapsed(), allow_missing_ttft, trace).await
+}
+
+// Keep the production std::time clock at the public boundary; tests can inject
+// Tokio's paused clock without changing request timing or the shipped profile.
+async fn consume_with_clock<S, B, F>(
+    stream: S,
+    elapsed: F,
+    allow_missing_ttft: bool,
+    trace: bool,
+) -> Result<ChatStreamResult, ChatStreamFailure>
+where
+    S: Stream<Item = Result<B, reqwest::Error>>,
+    B: AsRef<[u8]>,
+    F: Fn() -> Duration,
+{
     futures_util::pin_mut!(stream);
     let mut consumer = Consumer {
         trace: trace.then(Vec::new),
@@ -374,7 +390,7 @@ where
             usage: consumer.partial_usage(),
         })?;
         consumer
-            .feed(bytes.as_ref(), started.elapsed())
+            .feed(bytes.as_ref(), elapsed())
             .map_err(|error| ChatStreamFailure {
                 error,
                 usage: consumer.partial_usage(),
@@ -386,7 +402,7 @@ where
     let usage = consumer.partial_usage();
     // Latency, TTFT and ITL are fixed here, before any post-`[DONE]` drain.
     let result = consumer
-        .finish(started.elapsed(), allow_missing_ttft)
+        .finish(elapsed(), allow_missing_ttft)
         .map_err(|error| ChatStreamFailure { error, usage });
     if result.is_ok() {
         drain_after_done(stream).await;
@@ -951,7 +967,9 @@ mod tests {
 
     /// PR #222 review: the body is read to its end after `[DONE]` so the
     /// connection can return to the pool, and the tail is not in latency.
-    #[tokio::test]
+    /// Both the 30 ms tail and the injected elapsed clock are virtual: host
+    /// scheduling cannot consume the unchanged <30 ms latency budget.
+    #[tokio::test(start_paused = true)]
     async fn consume_drains_body_after_done_outside_latency() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
@@ -968,10 +986,12 @@ mod tests {
             flag.store(true, Ordering::SeqCst);
             std::task::Poll::Ready(None)
         }));
-        let result = consume(head.chain(tail), Instant::now())
+        let started = tokio::time::Instant::now();
+        let result = consume_with_clock(head.chain(tail), || started.elapsed(), false, false)
             .await
             .expect("stream");
         assert!(ended.load(Ordering::SeqCst), "body end was not read");
+        assert_eq!(started.elapsed(), Duration::from_millis(30));
         assert!(
             result.latency < Duration::from_millis(30),
             "{:?}",

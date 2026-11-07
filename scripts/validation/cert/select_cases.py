@@ -96,6 +96,7 @@ PATH_AREAS = {
     'src/vlm.rs': {'LIVE', 'REASON', 'GPU', 'MATH', 'SCHEMA'},
     'dummy-model-server/**': {'CI'},
     'README.md': {'REL', 'PACK', 'POST', 'CI'},
+    'CONTRIBUTING.md': {'REL', 'PACK', 'POST', 'CI'},
     'CHANGELOG.md': {'REL', 'POST'},
     'scripts/validation/perf/**': {'PERF', 'COMP', 'CI'},
 }

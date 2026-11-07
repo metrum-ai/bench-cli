@@ -6,7 +6,17 @@ set -euo pipefail
 CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cert_parse() {
+  python3 -c 'import sys; sys.version_info >= (3, 12) or sys.exit("certification harness requires Python 3.12 or newer")'
   CERT_LANE=$1; shift
+  if [[ -n "${CERT_CASE_ID:-}" ]]; then
+    local found=0 case_id
+    for case_id in "${CERT_CASES[@]:-}"; do
+      [[ "$case_id" != "$CERT_CASE_ID" ]] || found=1
+    done
+    [[ "$CERT_LANE" != W || "$CERT_CASE_ID" != BC-INTEG-001 ]] || found=1
+    ((found == 1)) || { echo 'selected case does not belong to this lane' >&2; return 2; }
+    CERT_CASES=("$CERT_CASE_ID")
+  fi
   CERT_CANDIDATE='' CERT_BASELINE='' CERT_MANIFEST='' CERT_OUT='' CERT_AUX_OWNER=''
   CERT_PERF_FINALIZE=0
   [[ "$CERT_LANE" != P1 && "$CERT_LANE" != P2 ]] || CERT_PERF_FINALIZE=1
@@ -47,18 +57,32 @@ cert_parse() {
   CERT_CONTAINER="cert-${CERT_LANE,,}-$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
   CERT_STARTED=0
   CERT_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  export CERT_SHA CERT_START_UTC
+  export CERT_SHA CERT_START_UTC CERT_MANIFEST CERT_CANDIDATE CERT_BASELINE CERT_LANE
   CERT_MANIFEST_SHA="$(sha256sum "$CERT_MANIFEST" | cut -d' ' -f1)"
   trap 'cert_on_exit "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   nvidia-smi --id="$CUDA_VISIBLE_DEVICES" --query-gpu=name,driver_version --format=csv,noheader > "$CERT_OUT/evidence/gpu.csv"
   sha256sum "$CERT_CANDIDATE" "$CERT_BASELINE" > "$CERT_OUT/evidence/binary-hashes.txt"
+  # L1's internal selector binds its final bytes later, before workload issuance.
+  if [[ "$CERT_LANE" != L1 || -z "${CERT_INPUT_MANIFEST:-}" ]]; then
+    cert_phase inputs-ready
+  fi
 }
 
 cert_manifest() {
   python3 "$CERT_DIR/manifest_tool.py" --manifest "$CERT_MANIFEST" --lane "$CERT_LANE" \
     --candidate "$CERT_CANDIDATE" --baseline "$CERT_BASELINE" --field "$1"
+}
+
+cert_phase() {
+  local case_id
+  local -a cases=("${CERT_CASES[@]:-}")
+  [[ -z "${CERT_CASE_ID:-}" ]] || cases=("$CERT_CASE_ID")
+  for case_id in "${cases[@]}"; do
+    [[ -n "$case_id" ]] || continue
+    python3 "$CERT_DIR/execution_evidence.py" "${CERT_PHASE_ROOT:-$CERT_OUT}" --case "$case_id" --phase "$1"
+  done
 }
 
 cert_start_server() {
@@ -86,6 +110,7 @@ cert_start_server() {
   local attempt
   for ((attempt=0; attempt<900; attempt++)); do
     if curl --fail --silent --max-time 5 "http://localhost:${CERT_PORT}/v1/models" > "$CERT_OUT/evidence/models.json"; then
+      cert_phase server-ready
       return 0
     fi
     docker inspect "$CERT_CONTAINER" --format '{{.State.Running}}' | grep -qx true || return 1
@@ -101,6 +126,12 @@ cert_server_logs() {
 }
 
 cert_run() {
+  if [[ -n "${CERT_CASE_ID:-}" ]]; then
+    local selected_rc=0
+    python3 "$CERT_DIR/case_dispatch.py" "$CERT_CASE_ID" "$@" || selected_rc=$?
+    [[ "$selected_rc" != 10 ]] || return 0
+    ((selected_rc == 0)) || return "$selected_rc"
+  fi
   "$@" &
   CERT_RUNNER_PID=$!
   local rc=0
@@ -110,7 +141,7 @@ cert_run() {
 }
 
 cert_on_exit() {
-  local rc=$1
+  local rc=$1 original_rc=$1
   trap - EXIT INT TERM
   set +e
   if [[ -n "${CERT_RUNNER_PID:-}" ]]; then
@@ -177,12 +208,13 @@ cert_on_exit() {
     ((rc == 0)) || finalize_args+=(--fail)
     python3 "$CERT_DIR/finalize_perf.py" "${finalize_args[@]}" "${CERT_CASES[@]}" || rc=1
   fi
-  local case_id
+  local case_id failure_type=infra_failed
+  [[ "$original_rc" != 130 && "$original_rc" != 143 ]] || failure_type=infra_interrupted
   for case_id in "${CERT_CASES[@]:-}"; do
     [[ -n "$case_id" ]] || continue
     if [[ ! -e "$CERT_OUT/results/${case_id}.json" ]]; then
       python3 "$CERT_DIR/failure_writer.py" --out "$CERT_OUT" --id "$case_id" --sha "$CERT_SHA" \
-        --start "$CERT_START_UTC" --reason 'lane exited before this case completed' || true
+        --start "$CERT_START_UTC" --type "$failure_type" --reason 'lane exited before this case completed' || true
       rc=1
     fi
   done

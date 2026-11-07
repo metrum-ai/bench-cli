@@ -110,6 +110,7 @@ zip = { version = "9.4.1", default-features = false, features = ["deflate-flate2
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
 
 [dev-dependencies]
+tokio = { version = "1.53.1", features = ["test-util"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [[bench]]

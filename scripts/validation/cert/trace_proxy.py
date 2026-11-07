@@ -8,6 +8,7 @@ private raw evidence. This component does not synthesize server responses.
 """
 import argparse
 import base64
+import datetime as dt
 import hashlib
 import http.client
 import json
@@ -34,7 +35,8 @@ class Recorder:
             return self.next_id
 
     def event(self, request_id, kind, data=None, **extra):
-        record = {"request": request_id, "kind": kind, "monotonic_ns": time.monotonic_ns(), **extra}
+        record = {"request": request_id, "kind": kind, "monotonic_ns": time.monotonic_ns(),
+                  "utc": dt.datetime.now(dt.timezone.utc).isoformat(), **extra}
         if data is not None:
             record["bytes_b64"] = base64.b64encode(data).decode("ascii")
         with self.lock:

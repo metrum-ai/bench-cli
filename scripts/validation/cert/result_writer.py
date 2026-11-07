@@ -8,12 +8,14 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from execution_evidence import enrich, require_python
 
 CASE = re.compile(r"BC-[A-Z]+-[0-9]{3}\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def write_record(root, record):
+    require_python()
     root = Path(root).resolve()
     # The lane-level attempt number is supplied by the operator for an
     # unchanged rerun; never overwrite an earlier attempt directory.
@@ -49,6 +51,7 @@ def write_record(root, record):
     target = directory / (case + ".json")
     if target.exists():
         raise FileExistsError("refusing to overwrite an existing case result")
+    record = enrich(root, record)
     content = json.dumps(record, indent=2, sort_keys=True, allow_nan=False) + "\n"
     fd, temporary = tempfile.mkstemp(prefix=".result-", dir=directory)
     try:

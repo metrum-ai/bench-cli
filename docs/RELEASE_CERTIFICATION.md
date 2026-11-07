@@ -23,6 +23,38 @@ is not a pass. A failure is retained and repeated unchanged; fixing code
 creates a new candidate and requires rerunning the required cases. N/A needs a
 specific technical justification and independent approval before the case.
 
+### Measured and validation-only builds
+
+Certify the shipped feature profile: measured cases use the exact non-publishing
+pretag workflow artifact built with `--features otlp` only, except the explicitly
+scoped BC-GPU-010 fallback cell described below.
+Dispatch `pretag-certification.yml` on the frozen public ref with explicit
+candidate SHA and matching source version. Download its Linux x86_64 release
+artifact using `gh run download`, verify the workflow-produced archive checksum,
+and record run ID, artifact name, archive/binary SHA-256, features and source.
+Locally compiled measured binaries are never certification evidence. Do not
+enable `tokenizer` in the shipped artifact or silently substitute feature-enabled builds.
+
+BC-GPU-010 has four required cells. Truncated, empty and missing-usage cells use
+shipped `otlp`. Only fallback uses a separately packaged **feature-variant build
+(tokenizer)** with `otlp,tokenizer`, from the same frozen commit/version and
+successful pretag run, with its own executable SHA-256 and verified workflow
+provenance. Keep its registry role separate from shipped and validation-only
+builds. Freeze every artifact/provenance pin; record each cell's exact build
+before invocation and replay all unchanged criteria from raw evidence afterward.
+Every cell must pass: no waiver, N/A or omitted fallback. All other measured cases
+continue to use shipped `otlp`; the feature variant is forbidden in their manifests.
+
+Tokenizer input validation uses a separate **validation-only build** with
+plain local `cargo build --locked --release --features otlp,tokenizer` from
+that same frozen commit. Record its distinct SHA-256, features, local origin
+and validation-only role in preflight evidence. Keep these
+builds and the scoped workflow feature variant in separate output directories so neither can overwrite the other.
+The validation-only binary may run preflight/input checks, never measured cases;
+its successful probe is not a measured case result. If a case requires a
+capability absent from the shipped profile, retain that conflict explicitly:
+do not silently drop assertions, substitute builds or claim a pass.
+
 Compare metrics across versions only after matching token populations, timing
 origins, window, inputs, and usage coverage. A v1.8.0 first-any headline is not
 equivalent to v1.7.2 visible-answer TTFT. Preserve raw per-request evidence and
@@ -37,6 +69,40 @@ cases run only after release publication; a POST failure is an incident, not
 a pre-tag pass. The separate wrapper integration case needs wrapper owner
 signoff. See [RELEASING.md](RELEASING.md) for the release workflow and gate
 responsibilities.
+
+## Generated-input structural and runtime binding
+
+A structural-only generated-input declaration is not final preflight or evidence
+of measured requests. `STRUCTURAL-PREFLIGHT-OK` validates fixed recipes and
+available dependency/provenance pins; it never invents future output hashes.
+The supported backend is the verified same-source/version shipped prompts CLI
+with explicit local JSONL, fixed configuration and seed, plus pinned tokenizer
+and template dependencies. Arbitrary commands and moving remote lookups are
+not supported.
+
+Before workload issuance, generate independently in fresh owned directories,
+compare actual prompt bytes, bind their hashes into concrete runtime manifests,
+and apply every original concrete/domain validator. Preserve the structural
+parent, both generations, commands, logs and binding receipts. Source/config/seed
+drift, orphan runtime entries, output substitutions and mismatches must prevent
+measured launch. Typed failures retain unknown counts rather than inventing zeroes.
+Reports re-verify runtime bindings and record actual/re-derived input hashes.
+
+L1 also selects prompts internally. Its frozen declaration preserves selector
+seed 7 separately from workload seed 42. Certification selection requires local
+JSONL and an offline allowlist environment without ambient credentials, proxies
+or exporter settings. A fixed boundary helper compares the original selection
+with independent re-derivation before the measured CLI starts. L1 remains
+structurally labeled during offline preflight; `inputs-ready` is emitted only
+after actual binding at that internal boundary. Ordinary non-certification
+local-smoke behavior and all original workload assertions/thresholds remain unchanged.
+
+Freeze interpreted and compiled harness inputs, including xtask Rust sources,
+its external module, Cargo manifests/locks/alias configuration and checked-in
+toolchain inputs. Local functional probes and synthetic controls validate the
+tooling only; they do not replace workflow-origin measured artifacts or real
+case preflight. See the [certification tooling guide](../scripts/validation/cert/README.md)
+for freezer/launcher details and evidence layout.
 
 ## Frozen selection and qualification
 
