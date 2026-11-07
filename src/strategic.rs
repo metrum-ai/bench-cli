@@ -116,6 +116,9 @@ pub struct BenchRecord {
     pub usage_prompt_tokens_present: Option<bool>,
     #[serde(default)]
     pub usage_completion_tokens_present: Option<bool>,
+    /// JSON-encoded canonical-lineage.v1; never includes prompt/messages.
+    #[serde(default)]
+    pub canonical_lineage_json: Option<String>,
 }
 
 fn unknown_usage_is_missing() -> bool {
@@ -1512,6 +1515,7 @@ struct CsvBenchRecord {
     usage_missing: bool,
     usage_prompt_tokens_present: Option<bool>,
     usage_completion_tokens_present: Option<bool>,
+    canonical_lineage_json: Option<String>,
 }
 
 struct CsvRow<'a>(&'a BenchRecord);
@@ -2873,13 +2877,28 @@ mod tests {
         export_csv(&path, &[record]).unwrap();
         let mut reader = csv::Reader::from_path(path).unwrap();
         let header = reader.headers().unwrap().clone();
-        assert_eq!(header.get(header.len() - 3), Some("usage_missing"));
+        let usage_marker = header
+            .iter()
+            .position(|name| name == "usage_missing")
+            .unwrap();
+        assert_eq!(header.get(usage_marker - 1), Some("answer_completed"));
+        assert_eq!(
+            header.get(usage_marker + 1),
+            Some("usage_prompt_tokens_present")
+        );
+        assert_eq!(
+            header.get(usage_marker + 2),
+            Some("usage_completion_tokens_present")
+        );
+        assert_eq!(header.get(usage_marker + 3), Some("canonical_lineage_json"));
         let row = reader.records().next().unwrap().unwrap();
+        // Reconstruct exactly the historical prefix, before the usage marker
+        // and any subsequent optional columns, not a relative suffix cutoff.
         let mut writer = csv::Writer::from_writer(Vec::new());
         writer
-            .write_record(header.iter().take(header.len() - 3))
+            .write_record(header.iter().take(usage_marker))
             .unwrap();
-        writer.write_record(row.iter().take(row.len() - 3)).unwrap();
+        writer.write_record(row.iter().take(usage_marker)).unwrap();
         let csv = writer.into_inner().unwrap();
         let legacy: BenchRecord = csv::Reader::from_reader(csv.as_slice())
             .deserialize()
@@ -2887,6 +2906,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(legacy.usage_missing);
+        assert!(legacy.canonical_lineage_json.is_none());
         let point = summarize_stage(
             1.0,
             &[legacy],
@@ -3163,6 +3183,9 @@ mod tests {
             bytes_received: Some(900),
             chunks_received: Some(9),
             send_offset_s: Some(1.25),
+            canonical_lineage_json: Some(
+                r#"{"schema_version":"canonical-lineage.v1","source_row_id":"source-row"}"#.into(),
+            ),
             ..Default::default()
         };
         let mut untraced = row.clone();
@@ -3172,6 +3195,7 @@ mod tests {
         untraced.receive_s = None;
         untraced.bytes_received = None;
         untraced.chunks_received = None;
+        untraced.canonical_lineage_json = None;
         let mut writer = csv::Writer::from_writer(Vec::new());
         for written in [&row, &untraced] {
             writer.serialize(written).unwrap();
@@ -3182,7 +3206,7 @@ mod tests {
             .lines()
             .next()
             .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present"));
+            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,canonical_lineage_json"));
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
@@ -3193,6 +3217,8 @@ mod tests {
         assert_eq!(back[0].receive_s, Some(0.25));
         assert_eq!(back[0].bytes_received, Some(900));
         assert_eq!(back[0].chunks_received, Some(9));
+        assert_eq!(back[0].canonical_lineage_json, row.canonical_lineage_json);
+        assert!(back[1].canonical_lineage_json.is_none());
         // Empty cells read back as absent, not 0 or false.
         assert_eq!(back[1].connection_reused, None);
         assert_eq!(back[1].dns_s, None);

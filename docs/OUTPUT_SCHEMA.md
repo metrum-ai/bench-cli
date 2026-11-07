@@ -3,6 +3,22 @@
 
 # JSONL output schema
 
+## Held-out warmup provenance (v1.9.0 development)
+
+Optional `config.warmup` retains source SHA-256, pool/request counts, block size,
+`overlap_report`, `override_unverified` and `rendered_tokens_available`. The report
+binds sorted warmup/measured body-digest lists to exact post-transformation JSON
+request bytes. The `kv-warmup-overlap.v1` consumer projection retains
+`validator_schema_version=kv-token-overlap.v1` from the authoritative validator;
+it does not pretend to be the full producer report schema. Missing pinned final-chat
+rendering still produces Unknown and fails before traffic unless explicitly
+overridden in legacy unconfigured mode. Opt-in `--warmup-render-config` records
+fingerprint-only `rendering_evidence`, explicit NotRequested live-check status,
+and preparation timing. Selected-renderer Fail/Unknown cannot be overridden. Override never changes verdict to Pass; Unknown maxima are not
+measurements. Pair population count/truncation come from the bounded authoritative producer;
+Unknown totals remain null and diagnostic sample length is never substituted. No raw prompts/tokens
+are exported.
+
 ## Opt-in KV study interchange (v1.9.0 development)
 
 The separate `kv-study-report.v1` manifest/report contract is specified in

@@ -107,7 +107,7 @@ minijinja = { version = "3.0.5", default-features = false, features = ["builtins
 zip = { version = "9.4.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.30.1", default-features = false, features = ["signal", "process"] }
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }

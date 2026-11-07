@@ -5,6 +5,17 @@
 
 ## Unreleased (v1.9.0)
 
+- Add held-out strategic warmup pools and a fail-closed rendered-token overlap
+  boundary delegating to the authoritative offline validator. Opt-in static
+  `--warmup-render-config` consumes the producer-owned pinned local renderer,
+  freezes exact HTTP bytes before timing and validates both pools before traffic
+  or reset hooks. Selected-renderer Fail/Unknown abort even with an override.
+  Unconfigured mode retains non-certifying Unknown/explicit-override behavior.
+  The `kv-warmup-overlap.v1` projection retains validator version, body digest-list
+  hashes and producer population/truncation fields (never sampled-list totals).
+  Fingerprint-only rendering metadata records live cross-check NotRequested;
+  closed-loop held-out mode remains guarded pending dynamic bindings (#413).
+
 - Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
   validation references, effective workload digests, explicit unknowns and
   phase/reset evidence and timestamps. Retain warmup isolation overrides with

@@ -38,6 +38,8 @@ pub mod public_profile;
 pub mod record;
 pub mod request;
 pub mod runner;
+#[cfg(feature = "tokenizer")]
+pub mod runtime_rendering;
 pub mod session_inputs;
 pub mod session_tools;
 pub mod sse;
@@ -56,6 +58,8 @@ pub mod trace_inputs;
 pub mod trace_presets;
 pub mod usage;
 pub mod vlm;
+pub mod warmup_isolation;
+pub mod workload_input;
 
 /// True when the process was invoked with the `--version-only` flag
 /// (#307).
