@@ -16,6 +16,61 @@ use crate::chat_rendering::{render_wire_body, RenderLimits, RenderedChat};
 use crate::prefix_validation::RenderingIdentity;
 use crate::token_overlap::{Phase, RenderedBody};
 
+/// Operator-local configuration. Paths resolve relative to this JSON file, not
+/// the dataset; no downloads or remote template code are supported.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalRenderConfig {
+    pub tokenizer_path: std::path::PathBuf,
+    pub template_path: std::path::PathBuf,
+    pub identity: RenderingIdentity,
+    pub special_tokens: Value,
+    pub max_artifact_bytes: u64,
+    pub max_body_bytes: usize,
+    pub max_rendered_bytes: usize,
+    pub max_tokens: usize,
+    pub template_fuel: u64,
+}
+impl LocalRenderConfig {
+    pub fn load(path: &Path) -> Result<Self> {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(65537)
+            .read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 65536,
+            "renderer configuration exceeds 64 KiB"
+        );
+        let mut config: Self = serde_json::from_slice(&bytes)
+            .map_err(|_| anyhow::anyhow!("invalid local renderer configuration"))?;
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        if config.tokenizer_path.is_relative() {
+            config.tokenizer_path = parent.join(&config.tokenizer_path);
+        }
+        if config.template_path.is_relative() {
+            config.template_path = parent.join(&config.template_path);
+        }
+        Ok(config)
+    }
+    pub fn renderer(&self) -> PinnedRenderer<'_> {
+        PinnedRenderer {
+            tokenizer_path: &self.tokenizer_path,
+            template_path: &self.template_path,
+            identity: &self.identity,
+            special_tokens: &self.special_tokens,
+            limits: RenderLimits {
+                max_artifact_bytes: self.max_artifact_bytes,
+                max_body_bytes: self.max_body_bytes,
+                max_rendered_bytes: self.max_rendered_bytes,
+                max_tokens: self.max_tokens,
+                template_fuel: self.template_fuel,
+            },
+            require_server_cross_check: false,
+        }
+    }
+}
+
 /// Local, operator-selected artifacts/context, never dataset-provided executable
 /// templates. The producer checks artifact hashes, budgets and formatting policy.
 pub struct PinnedRenderer<'a> {

@@ -6,12 +6,15 @@
 ## Unreleased (v1.9.0)
 
 - Add held-out strategic warmup pools and a fail-closed rendered-token overlap
-  boundary delegating to the authoritative offline validator. Until pinned final-chat
-  rendering is available, isolation remains Unknown and blocks traffic unless
-  explicitly overridden. Version the consumer projection `kv-warmup-overlap.v1`,
-  retain its validator version and both final-body digest-list hashes; an override
-  never establishes a Pass. Population counts remain unknown pending producer
-  support rather than inferred from diagnostic samples (#413).
+  boundary delegating to the authoritative offline validator. Opt-in static
+  `--warmup-render-config` consumes the producer-owned pinned local renderer,
+  freezes exact HTTP bytes before timing and validates both pools before traffic
+  or reset hooks. Selected-renderer Fail/Unknown abort even with an override.
+  Unconfigured mode retains non-certifying Unknown/explicit-override behavior.
+  The `kv-warmup-overlap.v1` projection retains validator version, body digest-list
+  hashes and producer population/truncation fields (never sampled-list totals).
+  Fingerprint-only rendering metadata records live cross-check NotRequested;
+  closed-loop held-out mode remains guarded pending dynamic bindings (#413).
 
 - Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
   recorded-history sessions, with sequential turns and no overlapping duplicate

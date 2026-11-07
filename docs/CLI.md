@@ -1396,6 +1396,9 @@ Options:
 
           [default: 16]
 
+      --warmup-render-config <WARMUP_RENDER_CONFIG>
+          Pinned local renderer JSON for exact final held-out warmup/measured chat bytes (requires tokenizer feature); Fail/Unknown always abort
+
       --stage-hook <STAGE_HOOK>
           Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement
 

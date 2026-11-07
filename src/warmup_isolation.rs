@@ -27,9 +27,8 @@ pub struct OverlapReport {
 
 impl From<crate::token_overlap::OverlapReport> for OverlapReport {
     fn from(report: crate::token_overlap::OverlapReport) -> Self {
-        // Exhaustive on purpose: the pending producer population-count/capping
-        // amendment must require adapting this projection, not silently dropping
-        // its new fields. Never derive a population total from the pair sample.
+        // Exhaustive: producer contract changes require explicit adaptation.
+        // Never derive a population total from the capped pair sample.
         let crate::token_overlap::OverlapReport {
             schema_version,
             warmup_body_digests_sha256,

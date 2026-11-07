@@ -71,16 +71,20 @@ policy. Source names, prompts and raw tokens are not exported.
 A different file or ID is **not** proof of token-prefix isolation. The preflight
 calls the agreed offline `validate_prefix_disjoint` interface with final request
 body digests, delegating to the authoritative producer-owned validator without
-copying its algorithm. A pinned full-chat token renderer is still unavailable;
-CLI bodies therefore have no validated token IDs and yield `Unknown`, never
-`Pass`. The separately versioned consumer projection retains validator version
-and unknown pair population counts rather than deriving totals from diagnostic
-samples. Thus this development boundary fails before warmup or measured traffic unless
+copying its algorithm. Opt into the producer-owned [pinned local renderer](RUNTIME_RENDERING.md)
+with `--warmup-render-config PATH` and the `tokenizer` build feature. Static
+warmup/measured bodies are frozen and sent as the exact prebuilt bytes rendered
+at setup; rendering/serialization is outside stage timing and disclosed in metadata.
+Fail/Unknown with a selected renderer aborts before traffic/hooks, even with an
+override flag. The consumer projection retains validator version, exact pair
+population count (nullable on Unknown) and diagnostic truncation independently.
+Without renderer configuration, token IDs remain unavailable and verdict Unknown;
+this legacy development boundary fails before traffic unless
 `--allow-unverified-warmup` is explicitly supplied. That override remains an
 `Unknown` result, records both sorted body-digest-list hashes, and cannot justify
 an isolation/cold-cache claim. It is for plumbing tests and explicitly exploratory
 runs, not a substitute for completing rendered-token validation. Unknown maxima
-in a stub report are not overlap measurements.
+in an Unknown report are not overlap measurements.
 
 `--warmup-block-size-tokens` must match the actual serving cache. The default
 passing policy permits zero shared full blocks; tokenizer/template mismatches
@@ -91,8 +95,11 @@ no held-out pool is supplied and makes no isolation claim.
 
 For cold studies, the required protocol remains held-out prefix-disjoint warmup,
 drain, acknowledged tier reset/readiness/settling, then measurement. Do not call
-an unvalidated warmup file prefix-disjoint. The stub is temporary and must be
-replaced by the dataset implementation rather than a competing overlap algorithm.
+an unvalidated warmup file prefix-disjoint. Local rendering pins are operator
+assertions about the serving policy, not independent physical-cache proof. Live
+engine cross-check status is NotRequested until an engine adapter is explicitly
+implemented/selected. Closed-loop held-out issuance remains guarded pending
+validated dynamic final-body bindings.
 
 ## Trusted stage reset lifecycle (v1.9.0 development)
 

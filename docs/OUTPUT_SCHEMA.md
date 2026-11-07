@@ -12,9 +12,11 @@ request bytes. The `kv-warmup-overlap.v1` consumer projection retains
 `validator_schema_version=kv-token-overlap.v1` from the authoritative validator;
 it does not pretend to be the full producer report schema. Missing pinned final-chat
 rendering still produces Unknown and fails before traffic unless explicitly
-overridden. Override never changes verdict to Pass; Unknown maxima are not
-measurements. Nullable pair population count stays unknown while the producer API
-lacks it; diagnostic sample length is never substituted. No raw prompts/tokens
+overridden in legacy unconfigured mode. Opt-in `--warmup-render-config` records
+fingerprint-only `rendering_evidence`, explicit NotRequested live-check status,
+and preparation timing. Selected-renderer Fail/Unknown cannot be overridden. Override never changes verdict to Pass; Unknown maxima are not
+measurements. Pair population count/truncation come from the bounded authoritative producer;
+Unknown totals remain null and diagnostic sample length is never substituted. No raw prompts/tokens
 are exported.
 
 ## Strategic trusted reset metadata (v1.9.0 development)

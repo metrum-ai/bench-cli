@@ -289,6 +289,11 @@ struct Args {
     warmup_block_size_tokens: usize,
     #[arg(
         long,
+        help = "Pinned local renderer JSON for exact final held-out warmup/measured chat bytes (requires tokenizer feature); Fail/Unknown always abort"
+    )]
+    warmup_render_config: Option<PathBuf>,
+    #[arg(
+        long,
         help = "Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement"
     )]
     stage_hook: Option<String>,
@@ -1727,8 +1732,23 @@ fn heldout_warmup_inputs(
         .or(args.warmup_prompts.as_ref())
     {
         Some(path) => path,
-        None => return Ok(None),
+        None => {
+            if args.warmup_render_config.is_some() {
+                bail!("--warmup-render-config requires a held-out warmup pool");
+            }
+            return Ok(None);
+        }
     };
+    #[cfg(not(feature = "tokenizer"))]
+    if args.warmup_render_config.is_some() {
+        bail!("--warmup-render-config requires the tokenizer build feature");
+    }
+    #[cfg(feature = "tokenizer")]
+    let render_config = args
+        .warmup_render_config
+        .as_deref()
+        .map(metrum_ai_bench::runtime_rendering::LocalRenderConfig::load)
+        .transpose()?;
     if !matches!(args.kind, EndpointKind::Chat)
         || args.warmup_requests == 0
         || args.warmup_block_size_tokens == 0
@@ -1761,16 +1781,68 @@ fn heldout_warmup_inputs(
                 .context("warmup prompt path must be UTF-8")
         })
         .transpose()?;
-    let warmup = make_inputs(&warmup_args, model, schema, tools)?;
-    let render = |pool: &[Input], count: u64, phase: Phase| -> Result<Vec<RenderedBody>> {
+    let mut warmup = make_inputs(&warmup_args, model, schema, tools)?;
+    if args.warmup_render_config.is_some() {
+        for input in &mut warmup {
+            input.json = Some(serde_json::to_vec(&*input.body)?.into());
+        }
+    }
+    if args.warmup_render_config.is_some()
+        && args.warmup_requests.saturating_add(args.requests_per_stage) > 100_000
+    {
+        bail!("rendered warmup validation exceeds 100000 issued-body budget");
+    }
+    let rendering_evidence = std::cell::RefCell::new(Vec::<Value>::new());
+    #[cfg(feature = "tokenizer")]
+    let mut rendered_token_total = 0usize;
+    let render = &mut |pool: &[Input], count: u64, phase: Phase| -> Result<Vec<RenderedBody>> {
+        #[cfg(feature = "tokenizer")]
+        let mut cache = std::collections::BTreeMap::<usize, (RenderedBody, Value)>::new();
         (0..count)
             .map(|index| {
-                let input = &pool[index as usize % pool.len()];
-                let bytes = serde_json::to_vec(&*input.body)?;
+                let pool_index = index as usize % pool.len();
+                let input = &pool[pool_index];
+                let wire_bytes = || {
+                    input
+                        .json
+                        .as_ref()
+                        .map(|json| json.to_vec())
+                        .map_or_else(|| serde_json::to_vec(&*input.body), Ok)
+                };
+                #[cfg(feature = "tokenizer")]
+                if let Some(config) = &render_config {
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        cache.entry(pool_index)
+                    {
+                        let prepared = metrum_ai_bench::runtime_rendering::prepare_wire_body(
+                            format!("{phase:?}-{index}"),
+                            phase,
+                            wire_bytes()?,
+                            &config.renderer(),
+                        )?;
+                        entry.insert((
+                            prepared.for_overlap(),
+                            serde_json::to_value(prepared.evidence())?,
+                        ));
+                    }
+                    let (mut rendered, evidence) = cache
+                        .get(&pool_index)
+                        .context("missing rendered input")?
+                        .clone();
+                    rendered.request_id = format!("{phase:?}-{index}");
+                    rendered_token_total = rendered_token_total
+                        .checked_add(rendered.token_ids.len())
+                        .context("rendered token budget overflow")?;
+                    if rendered_token_total > 10_000_000 {
+                        bail!("aggregate rendered token budget exceeded");
+                    }
+                    rendering_evidence.borrow_mut().push(evidence);
+                    return Ok(rendered);
+                }
                 Ok(RenderedBody {
                     request_id: format!("{phase:?}-{index}"),
                     phase,
-                    body_sha256: body_digest(&bytes),
+                    body_sha256: body_digest(&wire_bytes()?),
                     tokenizer_revision: "unknown".into(),
                     chat_template_sha256: "unknown".into(),
                     token_ids: Vec::new(),
@@ -1785,15 +1857,20 @@ fn heldout_warmup_inputs(
         &measured_bodies,
         args.warmup_block_size_tokens,
     );
-    if report.verdict != Verdict::Pass && !args.allow_unverified_warmup {
-        bail!("held-out warmup token-prefix isolation is {:?}; fail closed (pinned rendered-token validation unavailable); --allow-unverified-warmup is an explicit non-certifying override", report.verdict);
+    if report.verdict != Verdict::Pass
+        && (args.warmup_render_config.is_some() || !args.allow_unverified_warmup)
+    {
+        bail!("held-out warmup token-prefix isolation is {:?}; fail closed; a selected renderer cannot be overridden, and unconfigured --allow-unverified-warmup is explicitly non-certifying", report.verdict);
     }
     let source_bytes = std::fs::read(path).context("read held-out warmup source")?;
     let metadata = json!({
         "source_sha256": body_digest(&source_bytes), "pool_requests": warmup.len(),
         "requests_per_stage": args.warmup_requests, "block_size_tokens": args.warmup_block_size_tokens,
         "overlap_report": report, "override_unverified": args.allow_unverified_warmup,
-        "rendered_tokens_available": false
+        "rendered_tokens_available": args.warmup_render_config.is_some(),
+        "rendering_evidence": rendering_evidence.into_inner(),
+        "body_binding_scope": "planned_static_per_stage; stopped/error runs may issue only a subset",
+        "preparation_timing": if args.warmup_render_config.is_some() { "serialization_and_rendering_before_stage_timing" } else { "legacy" }
     });
     Ok(Some((warmup, metadata)))
 }
@@ -2188,7 +2265,7 @@ async fn main() -> Result<()> {
         (None, Some(tools)) => Some(Validity::tool_names(tools)?),
         _ => None,
     };
-    let inputs = match args.kind {
+    let mut inputs = match args.kind {
         EndpointKind::Vlm => vlm_inputs(&args, &model).await?,
         EndpointKind::Asr => asr_inputs(&args).await?,
         EndpointKind::Imagegen => imagegen_inputs(&args, &model)?,
@@ -2196,6 +2273,11 @@ async fn main() -> Result<()> {
             make_inputs(&args, &model, schema.as_ref(), tools.as_ref())?
         }
     };
+    if args.warmup_render_config.is_some() {
+        for input in &mut inputs {
+            input.json = Some(serde_json::to_vec(&*input.body)?.into());
+        }
+    }
     let heldout_warmup =
         heldout_warmup_inputs(&args, &model, schema.as_ref(), tools.as_ref(), &inputs)?;
     let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
