@@ -479,6 +479,8 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [pinned local chat rendering](docs/CHAT_RENDERING.md),
 [synthetic prefix families](docs/PREFIX_FAMILIES.md),
 [public document inputs](docs/PUBLIC_DOCUMENTS.md),
+[optional pinned source catalog](docs/PUBLIC_CATALOG.md),
+[scoped provenance/rights consolidation](docs/VALIDATION_CONSOLIDATION.md),
 [public dataset command](docs/PUBLIC_DATASET_CLI.md),
 [structural trace building blocks](docs/TRACE_INPUTS.md),
 [logical capacity-aware pressure](docs/PRESSURE_INPUTS.md),

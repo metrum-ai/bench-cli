@@ -9,8 +9,9 @@ of questions per document into IngestionRecord/IngestionBody::DocumentQuestion.
 The [dataset command](PUBLIC_DATASET_CLI.md) exports them through the checked
 [ingestion-to-runtime conversion](PUBLIC_DATASETS.md) as the final CanonicalRecord
 with source_row_id and body: CanonicalBody::Chat. Runtime consumption remains a
-separate interface. The optional catalog stays deferred until rights and rendered
-token gates are complete.
+separate interface. The [optional catalog](PUBLIC_CATALOG.md) retains review-only
+and extraction-required candidates; the initial profile requires explicit rights/
+component review and fresh rendered-token gates. Discovery is not access approval.
 
 ## Pinned first fixture
 

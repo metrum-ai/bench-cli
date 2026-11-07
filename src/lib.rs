@@ -33,6 +33,7 @@ pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
 pub mod public_adapters;
+pub mod public_catalog;
 pub mod public_dataset;
 pub mod public_profile;
 pub mod record;
@@ -55,6 +56,7 @@ pub mod trace_adapters;
 pub mod trace_inputs;
 pub mod trace_presets;
 pub mod usage;
+pub mod validation_consolidation;
 pub mod vlm;
 
 /// True when the process was invoked with the `--version-only` flag
