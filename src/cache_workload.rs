@@ -26,6 +26,14 @@ pub enum CachePolicy {
 }
 
 impl CachePolicy {
+    pub fn nonce_added_characters(self) -> u32 {
+        if matches!(self, Self::BustRequest | Self::IsolateRun) {
+            22
+        } else {
+            0
+        }
+    }
+
     pub fn nonce_scope(self) -> &'static str {
         match self {
             Self::BustRequest => "request",
@@ -113,6 +121,75 @@ impl Drop for IssuanceTicket {
 pub struct PreparedBody {
     pub bytes: Vec<u8>,
     pub sha256: String,
+    pub evidence: PolicyEffects,
+}
+
+/// Small, body-free extension; token differences are contextual and can be signed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PolicyEffects {
+    pub schema_version: String,
+    pub nonce_added_characters: u32,
+    pub nonce_identity_sequence: Option<u64>,
+    pub nonce_added_tokens: Option<i64>,
+    pub rendered_body_tokens_before: Option<u64>,
+    pub rendered_body_tokens_after: Option<u64>,
+    pub token_scope: String,
+    pub residual_shared_full_blocks: Option<usize>,
+    pub residual_scope: String,
+    pub residual_verdict: Option<crate::token_overlap::Verdict>,
+}
+impl PolicyEffects {
+    pub fn unrendered(policy: CachePolicy) -> Self {
+        let chars = policy.nonce_added_characters();
+        Self {
+            schema_version: "cache-policy-effects.v1".into(),
+            nonce_added_characters: chars,
+            nonce_identity_sequence: None,
+            nonce_added_tokens: if chars == 0 { Some(0) } else { None },
+            rendered_body_tokens_before: None,
+            rendered_body_tokens_after: None,
+            token_scope: if chars == 0 {
+                "no_policy_nonce"
+            } else {
+                "not_rendered"
+            }
+            .into(),
+            residual_shared_full_blocks: None,
+            residual_scope: "not_validated".into(),
+            residual_verdict: None,
+        }
+    }
+    /// Retain the native validator's pool maximum, including Fail. Unknown is not 0.
+    pub fn record_residual(&mut self, report: &crate::token_overlap::OverlapReport) {
+        self.residual_verdict = Some(report.verdict);
+        self.residual_scope = "validated_pool_maximum".into();
+        self.residual_shared_full_blocks =
+            if report.verdict == crate::token_overlap::Verdict::Unknown {
+                None
+            } else {
+                Some(report.max_shared_full_blocks)
+            };
+    }
+}
+
+impl PreparedBody {
+    #[cfg(feature = "tokenizer")]
+    pub fn record_rendered_nonce_delta(
+        &mut self,
+        before: &crate::chat_rendering::RenderedChat,
+        after: &crate::chat_rendering::RenderedChat,
+    ) -> Result<()> {
+        if before.identity != after.identity || self.sha256 != after.body_sha256 {
+            bail!("nonce overhead rendering identity/body binding mismatch");
+        }
+        let before_len = i64::try_from(before.token_ids.len())?;
+        let after_len = i64::try_from(after.token_ids.len())?;
+        self.evidence.nonce_added_tokens = Some(after_len - before_len);
+        self.evidence.rendered_body_tokens_before = Some(before_len as u64);
+        self.evidence.rendered_body_tokens_after = Some(after_len as u64);
+        self.evidence.token_scope = "full_rendered_body_difference".into();
+        Ok(())
+    }
 }
 
 pub fn sha256(bytes: &[u8]) -> String {
@@ -151,11 +228,19 @@ pub fn prepare_chat_body(
         let text = content
             .as_str()
             .context("explicit cache mutation requires string message content")?;
-        *content = Value::String(format!("[kv-{}] {text}", sha256(&identity)));
+        *content = Value::String(format!("[kv-{}] {text}", &sha256(&identity)[..16]));
     }
     let bytes = serde_json::to_vec(&body)?;
     let sha256 = sha256(&bytes);
-    Ok(PreparedBody { bytes, sha256 })
+    let mut evidence = PolicyEffects::unrendered(policy);
+    if policy == CachePolicy::BustRequest {
+        evidence.nonce_identity_sequence = Some(sequence);
+    }
+    Ok(PreparedBody {
+        bytes,
+        sha256,
+        evidence,
+    })
 }
 
 /// Versioned digest-list evidence; canonical fallback IDs are `body:<sha256>`.
@@ -271,6 +356,67 @@ mod tests {
             0
         )
         .is_err());
+    }
+
+    #[test]
+    fn short_nonce_preserves_hash_identity_and_records_exact_character_overhead() {
+        for policy in [CachePolicy::BustRequest, CachePolicy::IsolateRun] {
+            let source = json!({"messages":[{"role":"user","content":"é original"}]});
+            let prepared = prepare_chat_body(source.clone(), policy, "run-a", 7).unwrap();
+            let value: Value = serde_json::from_slice(&prepared.bytes).unwrap();
+            let text = value["messages"][0]["content"].as_str().unwrap();
+            let identity = if policy == CachePolicy::BustRequest {
+                serde_json::to_vec(&("cache-policy/v1", "request", "run-a", 7_u64)).unwrap()
+            } else {
+                serde_json::to_vec(&("cache-policy/v1", "run", "run-a")).unwrap()
+            };
+            assert_eq!(
+                text,
+                format!("[kv-{}] é original", &sha256(&identity)[..16])
+            );
+            assert_eq!(text.chars().count() - "é original".chars().count(), 22);
+            assert_eq!(prepared.evidence.nonce_added_characters, 22);
+            assert!(prepared.evidence.nonce_added_tokens.is_none());
+            assert!(prepared.evidence.residual_shared_full_blocks.is_none());
+        }
+        assert_eq!(
+            prepare_chat_body(body(), CachePolicy::Reuse, "run-a", 0)
+                .unwrap()
+                .evidence
+                .nonce_added_characters,
+            0
+        );
+    }
+
+    #[test]
+    fn native_residual_evidence_retains_long_header_blocks_and_unknown_not_zero() {
+        use crate::token_overlap::{validate_prefix_disjoint, Phase, RenderedBody, Verdict};
+        let mut warm = RenderedBody {
+            request_id: "warm".into(),
+            phase: Phase::Warmup,
+            body_sha256: sha256(b"warm"),
+            tokenizer_revision: "a".repeat(40),
+            chat_template_sha256: sha256(b"long header fixture"),
+            token_ids: vec![1; 16],
+        };
+        warm.token_ids.push(2);
+        let mut measured = warm.clone();
+        measured.request_id = "measured".into();
+        measured.phase = Phase::Measured;
+        measured.body_sha256 = sha256(b"measured");
+        measured.token_ids[16] = 3;
+        let report = validate_prefix_disjoint(&[warm.clone()], &[measured.clone()], 8);
+        assert_eq!(report.verdict, Verdict::Fail);
+        for policy in [CachePolicy::BustRequest, CachePolicy::IsolateRun] {
+            let mut evidence = PolicyEffects::unrendered(policy);
+            evidence.record_residual(&report);
+            assert_eq!(evidence.residual_shared_full_blocks, Some(2));
+            measured.token_ids.clear();
+            let unknown = validate_prefix_disjoint(&[warm.clone()], &[measured.clone()], 8);
+            evidence.record_residual(&unknown);
+            assert_eq!(evidence.residual_verdict, Some(Verdict::Unknown));
+            assert!(evidence.residual_shared_full_blocks.is_none());
+        }
     }
 
     #[test]

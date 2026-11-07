@@ -1323,6 +1323,9 @@ Options:
       --prompts <PROMPTS>
           JSONL prompt file (objects with "prompt"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests
 
+      --canonical-jsonl <CANONICAL_JSONL>
+          Canonical JSONL; fails closed until the canonical loader is integrated
+
       --max-tokens <MAX_TOKENS>
           Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps
 
@@ -1397,6 +1400,23 @@ Options:
           Per-stage warmup requests excluded from measured aggregates (cold-start control)
 
           [default: 0]
+
+      --warmup-sessions <WARMUP_SESSIONS>
+          Held-out recorded-history warmup sessions; isolation must be validated or explicitly overridden
+
+      --warmup-prompts <WARMUP_PROMPTS>
+          Held-out warmup prompt JSONL; isolation must be validated or explicitly overridden
+
+      --allow-unverified-warmup
+          Explicitly permit Fail/Unknown warmup token-prefix isolation; records override and both digest-list hashes, never a cold/isolation claim
+
+      --warmup-block-size-tokens <WARMUP_BLOCK_SIZE_TOKENS>
+          Token block size for warmup overlap validation (must match the serving engine)
+
+          [default: 16]
+
+      --warmup-render-config <WARMUP_RENDER_CONFIG>
+          Pinned local renderer JSON for exact final held-out warmup/measured chat bytes (requires tokenizer feature); Fail/Unknown always abort
 
       --stage-hook <STAGE_HOOK>
           Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement

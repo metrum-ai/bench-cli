@@ -78,11 +78,12 @@ impl ImageDetail {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     author,
     version,
-    about = "Sweep and benchmark OpenAI-compatible inference endpoints"
+    about = "Sweep and benchmark OpenAI-compatible inference endpoints",
+    group(clap::ArgGroup::new("session_input").args(["sessions", "canonical_jsonl"]).multiple(false))
 )]
 struct Args {
     #[arg(long, help = "Print version information and exit")]
@@ -156,6 +157,8 @@ struct Args {
         help = "JSONL prompt file (objects with \"prompt\"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests"
     )]
     prompts: Option<String>,
+    #[arg(long, conflicts_with_all = ["prompts", "sessions"], help = "Canonical JSONL; fails closed until the canonical loader is integrated")]
+    canonical_jsonl: Option<PathBuf>,
     #[arg(
         long,
         help = "Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps"
@@ -263,6 +266,35 @@ struct Args {
     warmup_requests: u64,
     #[arg(
         long,
+        conflicts_with = "warmup_prompts",
+        help = "Held-out recorded-history warmup sessions; isolation must be validated or explicitly overridden"
+    )]
+    warmup_sessions: Option<PathBuf>,
+    #[arg(
+        long,
+        conflicts_with = "warmup_sessions",
+        help = "Held-out warmup prompt JSONL; isolation must be validated or explicitly overridden"
+    )]
+    warmup_prompts: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Explicitly permit Fail/Unknown warmup token-prefix isolation; records override and both digest-list hashes, never a cold/isolation claim"
+    )]
+    allow_unverified_warmup: bool,
+    #[arg(
+        long,
+        default_value_t = 16,
+        help = "Token block size for warmup overlap validation (must match the serving engine)"
+    )]
+    warmup_block_size_tokens: usize,
+    #[arg(
+        long,
+        help = "Pinned local renderer JSON for exact final held-out warmup/measured chat bytes (requires tokenizer feature); Fail/Unknown always abort"
+    )]
+    warmup_render_config: Option<PathBuf>,
+    #[arg(
+        long,
         help = "Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement"
     )]
     stage_hook: Option<String>,
@@ -312,13 +344,13 @@ struct Args {
     sessions: Option<PathBuf>,
     #[arg(
         long,
-        requires = "sessions",
+        requires = "session_input",
         value_delimiter = ',',
         value_parser = ["user", "tool", "system", "assistant", "developer", "function"],
         help = "Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior"
     )]
     session_request_roles: Vec<String>,
-    #[arg(long, requires = "sessions", value_parser = ["legacy", "closed-loop"], default_value = "legacy",
+    #[arg(long, requires = "session_input", value_parser = ["legacy", "closed-loop"], default_value = "legacy",
         help = "Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only")]
     session_mode: String,
     #[arg(long, value_enum, default_value = "shared")]
@@ -463,8 +495,10 @@ struct Input {
     /// request, so a large base64 body is never encoded or copied inside
     /// the send window (#242).
     json: Option<bytes::Bytes>,
+    policy_effects: Option<Arc<cache_workload::PolicyEffects>>,
     session_id: Option<String>,
     turn: Option<usize>,
+    canonical_lineage_json: Option<Arc<String>>,
     /// `--kind asr`: the audio upload sent as multipart instead of `body`.
     upload: Option<Arc<AudioUpload>>,
     /// `--kind vlm`: image count and payload bytes in `json`.
@@ -635,6 +669,110 @@ fn validate_chat_controls(args: &Args) -> Result<()> {
     Ok(())
 }
 
+fn add_canonical_config(config: &mut Value, inputs: &[Input], args: &Args) -> Result<()> {
+    let mut sources = std::collections::BTreeMap::new();
+    for input in inputs {
+        if let Some(lineage) = &input.canonical_lineage_json {
+            let lineage: Value = serde_json::from_str(lineage)?;
+            let source = lineage["source"].clone();
+            sources.insert(serde_json::to_string(&source)?, source);
+        }
+    }
+    if !sources.is_empty() {
+        config["datasets"] = json!(sources.into_values().collect::<Vec<_>>());
+        config["canonical_input"] = json!({"schema_version":"canonical-lineage.v1",
+            "ordering":"source_order", "history":"recorded_targets_no_prefix_expansion",
+            "session_mode":args.session_mode, "session_scope":"session_id_global_within_input",
+            "selected_terminal_roles":args.session_request_roles,
+            "arrival_offsets":"metadata_only_not_trace_replay",
+            "expected_output_tokens":"source_metadata_only_explicit_max_tokens_controls_body",
+            "request_lineage":"canonical_lineage_json"});
+    }
+    Ok(())
+}
+
+fn canonical_inputs(
+    args: &Args,
+    model: &str,
+    workload: metrum_ai_bench::workload_input::WorkloadInput,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+) -> Result<Vec<Input>> {
+    use metrum_ai_bench::workload_input::{prepare_canonical_record, WorkloadInput};
+    let records = match workload {
+        WorkloadInput::Canonical(records) => records,
+        WorkloadInput::Legacy(_) => bail!("canonical conversion cannot consume legacy strings"),
+    };
+    if args.max_tokens.is_none() {
+        bail!("--canonical-jsonl requires explicit --max-tokens; expected_output_tokens is retained as source metadata, not silently used as a cap");
+    }
+    if args.shuffle_prompts {
+        bail!("canonical source order cannot use --shuffle-prompts");
+    }
+    let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
+    let mut inputs = Vec::with_capacity(records.len());
+    let mut has_arrivals = false;
+    for record in records {
+        let prepared = prepare_canonical_record(record)?;
+        let role = prepared
+            .messages
+            .last()
+            .and_then(|message| message["role"].as_str())
+            .context("canonical target has no terminal role")?;
+        if !args.session_request_roles.is_empty()
+            && !args
+                .session_request_roles
+                .iter()
+                .any(|selected| selected == role)
+        {
+            continue;
+        }
+        if args.session_mode == "closed-loop" && prepared.lineage.session_id.is_none() {
+            bail!("closed-loop canonical targets require session_id");
+        }
+        has_arrivals |= prepared.lineage.arrival_offset_ms.is_some();
+        let messages = controlled_messages(
+            &prepared.messages,
+            args.shared_prefix.as_deref(),
+            args.prefix_control,
+            prepared
+                .lineage
+                .session_id
+                .as_deref()
+                .unwrap_or(&prepared.lineage.record_id),
+        );
+        let mut body = json!({"model":model,"messages":messages,"stream":args.streaming});
+        if args.streaming {
+            body["stream_options"] = json!({"include_usage":true});
+        }
+        apply_chat_controls(
+            &mut body,
+            args.max_tokens,
+            args.ignore_eos,
+            args.min_tokens,
+            args.temperature,
+            extra_body.as_ref(),
+        )?;
+        add_structured(&mut body, schema, tools);
+        inputs.push(Input {
+            body: Arc::new(body),
+            session_id: prepared.lineage.session_id.clone(),
+            // `turn` remains the legacy one-based message position. Canonical
+            // turn_index is preserved without reinterpretation inside lineage.
+            turn: None,
+            canonical_lineage_json: Some(Arc::new(serde_json::to_string(&prepared.lineage)?)),
+            ..Input::default()
+        });
+    }
+    if inputs.is_empty() {
+        bail!("canonical request-boundary selection produced no requests");
+    }
+    if has_arrivals {
+        eprintln!("warning: canonical arrival offsets are retained as source metadata; stage scheduling is not source-trace arrival replay");
+    }
+    Ok(inputs)
+}
+
 fn make_inputs(
     args: &Args,
     model: &str,
@@ -657,13 +795,26 @@ fn make_inputs(
         },
         args.prompt_sequence.is_some(),
     )?;
-    if args.sessions.is_some()
+    if (args.sessions.is_some() || args.canonical_jsonl.is_some())
         && matches!(
             order_policy,
             OrderPolicy::SeededShuffle | OrderPolicy::Prescribed
         )
     {
         bail!("session turn order cannot be shuffled or replaced by a flat prompt sequence");
+    }
+    if let Some(path) = &args.canonical_jsonl {
+        let input = metrum_ai_bench::workload_input::WorkloadInput::Canonical(
+            metrum_ai_bench::canonical_input::load_canonical_jsonl(
+                path,
+                metrum_ai_bench::canonical_input::IngestionLimits {
+                    max_file_bytes: 64 * 1024 * 1024,
+                    max_total_bytes: 64 * 1024 * 1024,
+                    max_rows: 100_000,
+                },
+            )?,
+        );
+        return canonical_inputs(args, model, input, schema, tools);
     }
     let extra_body = parse_extra_body(args.extra_body_json.as_deref())?;
     if args.session_mode == "closed-loop" && !matches!(args.sweep_by, SweepBy::Concurrency) {
@@ -832,6 +983,9 @@ fn imagegen_request(body: &Value) -> Result<ImagegenRequest> {
 /// Reject flags that do not apply to `--kind` before any input is loaded.
 fn validate_kind_flags(args: &Args) -> Result<()> {
     let kind = args.kind;
+    if args.canonical_jsonl.is_some() && kind != EndpointKind::Chat {
+        bail!("--canonical-jsonl currently requires chat");
+    }
     if args.ttft_fallback.is_some() && (!args.streaming || !kind.chat_like()) {
         bail!("--ttft-fallback requires streaming chat or vlm");
     }
@@ -1218,21 +1372,44 @@ fn spawn_one_request(
             .map(|form| client.post(&url).bearer_auth(&api_key).multipart(form))
             .map_err(|err| anyhow::anyhow!("{err}"))
         });
-        let prepared = fingerprint_enabled
-            .then(|| {
-                cache_workload::prepare_chat_body(
-                    (*input.body).clone(),
-                    cache_policy,
-                    &run_id,
-                    sequence,
-                )
-            })
-            .transpose();
+        let prepared = if let Some(effects) = &input.policy_effects {
+            input
+                .json
+                .as_ref()
+                .context("frozen policy body missing bytes")
+                .map(|bytes| {
+                    Some(cache_workload::PreparedBody {
+                        bytes: bytes.to_vec(),
+                        sha256: cache_workload::sha256(bytes),
+                        evidence: (**effects).clone(),
+                    })
+                })
+        } else {
+            fingerprint_enabled
+                .then(|| {
+                    cache_workload::prepare_chat_body(
+                        (*input.body).clone(),
+                        cache_policy,
+                        &run_id,
+                        sequence,
+                    )
+                })
+                .transpose()
+        };
         let body_sha256 = prepared
             .as_ref()
             .ok()
             .and_then(|body| body.as_ref())
             .map(|body| body.sha256.clone());
+        let cache_policy_effects =
+            prepared
+                .as_ref()
+                .ok()
+                .and_then(|body| body.as_ref())
+                .map(|body| {
+                    serde_json::to_string(&body.evidence)
+                        .expect("serialize primitive policy evidence")
+                });
         let sent = Instant::now();
         let t_sent_ns = run_epoch.elapsed_ns();
         let sent_unix_ns = now_unix_ns();
@@ -1490,6 +1667,8 @@ fn spawn_one_request(
                 .map(|_| "cache-workload.v1".to_string()),
             body_sha256,
             cache_evidence,
+            cache_policy_effects,
+            canonical_lineage_json: input.canonical_lineage_json.as_deref().cloned(),
         }
         .with_phase_metrics();
         if let Some(writer) = ndjson {
@@ -1663,6 +1842,297 @@ impl ModalityOptions {
     }
 }
 
+fn freeze_policy_phase(
+    args: &Args,
+    pool: &[Input],
+    count: u64,
+    run_id: &str,
+    base: u64,
+) -> Result<Vec<Input>> {
+    if pool.is_empty() || count > 100_000 {
+        bail!("invalid or oversized frozen policy pool");
+    }
+    #[cfg(feature = "tokenizer")]
+    let config = args
+        .warmup_render_config
+        .as_deref()
+        .map(metrum_ai_bench::runtime_rendering::LocalRenderConfig::load)
+        .transpose()?;
+    #[cfg(feature = "tokenizer")]
+    let mut token_budget = 0usize;
+    let mut wire_budget = 0usize;
+    let mut immutable = std::collections::BTreeMap::<usize, Input>::new();
+    (0..count)
+        .map(|index| {
+            let key = index as usize % pool.len();
+            if args.cache_policy != CachePolicy::BustRequest {
+                if let Some(input) = immutable.get(&key) {
+                    return Ok(input.clone());
+                }
+            }
+            let original = &pool[key];
+            let mut input = original.clone();
+            let prepared = cache_workload::prepare_chat_body(
+                (*original.body).clone(),
+                args.cache_policy,
+                run_id,
+                base.checked_add(index).context("nonce ordinal overflow")?,
+            )?;
+            #[cfg(feature = "tokenizer")]
+            let prepared = if let Some(config) = &config {
+                use metrum_ai_bench::runtime_rendering::prepare_wire_body;
+                use metrum_ai_bench::token_overlap::Phase;
+                let mut prepared = prepared;
+                let before = prepare_wire_body(
+                    "nonce-before".into(),
+                    Phase::Measured,
+                    original
+                        .json
+                        .as_ref()
+                        .map(|b| b.to_vec())
+                        .map_or_else(|| serde_json::to_vec(&*original.body), Ok)?,
+                    &config.renderer(),
+                )?;
+                let after = prepare_wire_body(
+                    "nonce-after".into(),
+                    Phase::Measured,
+                    prepared.bytes.clone(),
+                    &config.renderer(),
+                )?;
+                if before.evidence().identity != after.evidence().identity
+                    || after.evidence().body_sha256 != prepared.sha256
+                {
+                    bail!("nonce render identity/body mismatch");
+                }
+                let (before_len, after_len) = (
+                    before.for_overlap().token_ids.len(),
+                    after.for_overlap().token_ids.len(),
+                );
+                token_budget = token_budget
+                    .checked_add(before_len)
+                    .and_then(|n| n.checked_add(after_len))
+                    .context("nonce token budget overflow")?;
+                if token_budget > 10_000_000 {
+                    bail!("nonce rendering exceeds 10000000 token budget");
+                }
+                prepared.evidence.nonce_added_tokens =
+                    Some(i64::try_from(after_len)? - i64::try_from(before_len)?);
+                prepared.evidence.rendered_body_tokens_before = Some(before_len as u64);
+                prepared.evidence.rendered_body_tokens_after = Some(after_len as u64);
+                prepared.evidence.token_scope = "full_rendered_body_difference".into();
+                prepared
+            } else {
+                prepared
+            };
+            wire_budget = wire_budget
+                .checked_add(prepared.bytes.len())
+                .context("policy byte budget overflow")?;
+            if wire_budget > 64 * 1024 * 1024 {
+                bail!("frozen policy phase exceeds 64MiB wire budget");
+            }
+            input.body = Arc::new(serde_json::from_slice(&prepared.bytes)?);
+            input.json = Some(prepared.bytes.into());
+            input.policy_effects = Some(Arc::new(prepared.evidence));
+            if args.cache_policy != CachePolicy::BustRequest {
+                immutable.insert(key, input.clone());
+            }
+            Ok(input)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn heldout_warmup_inputs(
+    args: &Args,
+    model: &str,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+    measured: &[Input],
+) -> Result<Option<(Vec<Input>, Value)>> {
+    heldout_warmup_inputs_planned(args, model, schema, tools, &mut measured.to_vec(), None)
+}
+
+fn heldout_warmup_inputs_planned(
+    args: &Args,
+    model: &str,
+    schema: Option<&Value>,
+    tools: Option<&Value>,
+    measured: &mut Vec<Input>,
+    nonce_context: Option<(&str, u64)>,
+) -> Result<Option<(Vec<Input>, Value)>> {
+    use metrum_ai_bench::warmup_isolation::{body_digest, Phase, RenderedBody, Verdict};
+    let path = match args
+        .warmup_sessions
+        .as_ref()
+        .or(args.warmup_prompts.as_ref())
+    {
+        Some(path) => path,
+        None => {
+            if args.warmup_render_config.is_some() {
+                bail!("--warmup-render-config requires a held-out warmup pool");
+            }
+            return Ok(None);
+        }
+    };
+    #[cfg(not(feature = "tokenizer"))]
+    if args.warmup_render_config.is_some() {
+        bail!("--warmup-render-config requires the tokenizer build feature");
+    }
+    #[cfg(feature = "tokenizer")]
+    let render_config = args
+        .warmup_render_config
+        .as_deref()
+        .map(metrum_ai_bench::runtime_rendering::LocalRenderConfig::load)
+        .transpose()?;
+    if !matches!(args.kind, EndpointKind::Chat)
+        || args.warmup_requests == 0
+        || args.warmup_block_size_tokens == 0
+    {
+        bail!("held-out warmup requires chat, positive --warmup-requests and positive --warmup-block-size-tokens");
+    }
+    if args.session_mode == "closed-loop" {
+        bail!("held-out warmup with closed-loop sessions requires dynamic final-body bindings; refusing an unbound isolation override");
+    }
+    let concurrency = match args.sweep_by {
+        SweepBy::Concurrency => parse_sweep(&args.sweep)?
+            .into_iter()
+            .map(|s| s.ceil() as u64)
+            .max()
+            .unwrap_or(1),
+        SweepBy::Rate => u64::from(args.max_in_flight),
+    };
+    if args.warmup_requests < concurrency {
+        bail!("held-out warmup requests must be at least the stage concurrency");
+    }
+    let mut warmup_args = args.clone();
+    warmup_args.canonical_jsonl = None;
+    warmup_args.sessions = args.warmup_sessions.clone();
+    warmup_args.prompts = args
+        .warmup_prompts
+        .as_ref()
+        .map(|path| {
+            path.to_str()
+                .map(str::to_owned)
+                .context("warmup prompt path must be UTF-8")
+        })
+        .transpose()?;
+    let mut warmup = make_inputs(&warmup_args, model, schema, tools)?;
+    if args.warmup_render_config.is_some() {
+        for input in &mut warmup {
+            input.json = Some(serde_json::to_vec(&*input.body)?.into());
+        }
+    }
+    if let Some((run_id, base)) = nonce_context {
+        warmup = freeze_policy_phase(args, &warmup, args.warmup_requests, run_id, base)?;
+        *measured = freeze_policy_phase(
+            args,
+            measured,
+            args.requests_per_stage,
+            run_id,
+            base.checked_add(args.warmup_requests)
+                .context("nonce ordinal overflow")?,
+        )?;
+    }
+    if args.warmup_render_config.is_some()
+        && args.warmup_requests.saturating_add(args.requests_per_stage) > 100_000
+    {
+        bail!("rendered warmup validation exceeds 100000 issued-body budget");
+    }
+    let rendering_evidence = std::cell::RefCell::new(Vec::<Value>::new());
+    #[cfg(feature = "tokenizer")]
+    let mut rendered_token_total = 0usize;
+    let render = &mut |pool: &[Input], count: u64, phase: Phase| -> Result<Vec<RenderedBody>> {
+        #[cfg(feature = "tokenizer")]
+        let mut cache = std::collections::BTreeMap::<String, (RenderedBody, Value)>::new();
+        (0..count)
+            .map(|index| {
+                let pool_index = index as usize % pool.len();
+                let input = &pool[pool_index];
+                let wire_bytes = || {
+                    input
+                        .json
+                        .as_ref()
+                        .map(|json| json.to_vec())
+                        .map_or_else(|| serde_json::to_vec(&*input.body), Ok)
+                };
+                #[cfg(feature = "tokenizer")]
+                if let Some(config) = &render_config {
+                    let cache_key = body_digest(&wire_bytes()?);
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        cache.entry(cache_key.clone())
+                    {
+                        let prepared = metrum_ai_bench::runtime_rendering::prepare_wire_body(
+                            format!("{phase:?}-{index}"),
+                            phase,
+                            wire_bytes()?,
+                            &config.renderer(),
+                        )?;
+                        entry.insert((
+                            prepared.for_overlap(),
+                            serde_json::to_value(prepared.evidence())?,
+                        ));
+                    }
+                    let (mut rendered, evidence) = cache
+                        .get(&cache_key)
+                        .context("missing rendered input")?
+                        .clone();
+                    rendered.request_id = format!("{phase:?}-{index}");
+                    rendered_token_total = rendered_token_total
+                        .checked_add(rendered.token_ids.len())
+                        .context("rendered token budget overflow")?;
+                    if rendered_token_total > 10_000_000 {
+                        bail!("aggregate rendered token budget exceeded");
+                    }
+                    rendering_evidence.borrow_mut().push(evidence);
+                    return Ok(rendered);
+                }
+                Ok(RenderedBody {
+                    request_id: format!("{phase:?}-{index}"),
+                    phase,
+                    body_sha256: body_digest(&wire_bytes()?),
+                    tokenizer_revision: "unknown".into(),
+                    chat_template_sha256: "unknown".into(),
+                    token_ids: Vec::new(),
+                })
+            })
+            .collect()
+    };
+    let warmup_bodies = render(&warmup, args.warmup_requests, Phase::Warmup)?;
+    let measured_bodies = render(measured, args.requests_per_stage, Phase::Measured)?;
+    let report = metrum_ai_bench::token_overlap::validate_prefix_disjoint(
+        &warmup_bodies,
+        &measured_bodies,
+        args.warmup_block_size_tokens,
+    );
+    if report.verdict != Verdict::Pass
+        && (args.warmup_render_config.is_some() || !args.allow_unverified_warmup)
+    {
+        let residual = if report.verdict == Verdict::Unknown {
+            None
+        } else {
+            Some(report.max_shared_full_blocks)
+        };
+        bail!("held-out warmup token-prefix isolation is {:?}; residual_shared_full_blocks={residual:?}; fail closed; a selected renderer cannot be overridden, and unconfigured --allow-unverified-warmup is explicitly non-certifying", report.verdict);
+    }
+    for input in warmup.iter_mut().chain(measured.iter_mut()) {
+        if let Some(effects) = &mut input.policy_effects {
+            Arc::make_mut(effects).record_residual(&report);
+        }
+    }
+    let report: metrum_ai_bench::warmup_isolation::OverlapReport = report.into();
+    let source_bytes = std::fs::read(path).context("read held-out warmup source")?;
+    let metadata = json!({
+        "source_sha256": body_digest(&source_bytes), "pool_requests": warmup.len(),
+        "requests_per_stage": args.warmup_requests, "block_size_tokens": args.warmup_block_size_tokens,
+        "overlap_report": report, "override_unverified": args.allow_unverified_warmup,
+        "rendered_tokens_available": args.warmup_render_config.is_some(),
+        "rendering_evidence": rendering_evidence.into_inner(),
+        "body_binding_scope": "planned_static_per_stage; stopped/error runs may issue only a subset",
+        "preparation_timing": if args.warmup_render_config.is_some() { "serialization_and_rendering_before_stage_timing" } else { "legacy" }
+    });
+    Ok(Some((warmup, metadata)))
+}
+
 // Each group has exactly one active cursor. Completed groups rejoin the pending
 // queue, so cycling a small pool never overlaps two instances of a session.
 async fn run_session_requests<F>(
@@ -1739,6 +2209,7 @@ async fn run_stage(
     stage: f64,
     stage_index: usize,
     inputs: &[Input],
+    warmup_inputs: Option<&[Input]>,
     validator: Option<&Validity>,
     seq: Arc<AtomicU64>,
     client: &reqwest::Client,
@@ -1779,14 +2250,21 @@ async fn run_stage(
         resets.push(json!({"position": "before_warmup", "acknowledgement": acknowledgement}));
     }
 
+    let warmup_pool = warmup_inputs.unwrap_or(inputs);
     // Phase 1: fully complete warmup before measurement begins.
     if args.warmup_requests > 0 && !stop.is_stopped() {
         let warmup_epoch = Instant::now();
         let warmup_unix_ns = now_unix_ns();
         let t_start_ns = run_epoch.elapsed_ns();
-        if args.session_mode == "closed-loop" {
-            for (record, sample) in
-                run_session_requests(inputs, args.warmup_requests, concurrency, stop, |input| {
+        if args.session_mode == "closed-loop"
+            && warmup_pool.iter().all(|input| input.session_id.is_some())
+        {
+            for (record, sample) in run_session_requests(
+                warmup_pool,
+                args.warmup_requests,
+                concurrency,
+                stop,
+                |input| {
                     spawn_one_request(
                         args,
                         url,
@@ -1807,8 +2285,9 @@ async fn run_stage(
                         true,
                         Arc::clone(&modality),
                     )
-                })
-                .await?
+                },
+            )
+            .await?
             {
                 records.push(record);
                 samples.push(sample);
@@ -1819,7 +2298,7 @@ async fn run_stage(
                 if stop.is_stopped() {
                     break;
                 }
-                let input = inputs[index as usize % inputs.len()].clone();
+                let input = warmup_pool[index as usize % warmup_pool.len()].clone();
                 warmup_handles.push(spawn_one_request(
                     args,
                     url,
@@ -2083,7 +2562,7 @@ async fn main() -> Result<()> {
         (None, Some(tools)) => Some(Validity::tool_names(tools)?),
         _ => None,
     };
-    let inputs = match args.kind {
+    let mut inputs = match args.kind {
         EndpointKind::Vlm => vlm_inputs(&args, &model).await?,
         EndpointKind::Asr => asr_inputs(&args).await?,
         EndpointKind::Imagegen => imagegen_inputs(&args, &model)?,
@@ -2121,8 +2600,103 @@ async fn main() -> Result<()> {
             None,
         )?;
     }
-    let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
+    if args.warmup_render_config.is_some() {
+        for input in &mut inputs {
+            input.json = Some(serde_json::to_vec(&*input.body)?.into());
+        }
+    }
     let run_id = Arc::new(metrum_ai_bench::unique_id::generate_uuid());
+    let per_stage = args
+        .warmup_requests
+        .checked_add(args.requests_per_stage)
+        .context("planned body count overflow")?;
+    let planned = per_stage
+        .checked_mul(stages.len() as u64)
+        .context("planned body count overflow")?;
+    if args.warmup_render_config.is_some() && planned > 100_000 {
+        bail!("rendered policy planning exceeds 100000 total bodies");
+    }
+    let mut stage_inputs = Vec::new();
+    let mut stage_warmups = Vec::new();
+    let policy_planning =
+        fingerprint_enabled && (args.warmup_prompts.is_some() || args.warmup_sessions.is_some());
+    if policy_planning && planned > 100_000 {
+        bail!("frozen policy planning exceeds 100000 total bodies");
+    }
+    let mut base_measured = inputs.clone();
+    let base_warmup = if !policy_planning {
+        heldout_warmup_inputs_planned(
+            &args,
+            &model,
+            schema.as_ref(),
+            tools.as_ref(),
+            &mut base_measured,
+            None,
+        )?
+    } else {
+        None
+    };
+    let base_measured = Arc::new(base_measured);
+    let base_warmup = Arc::new(base_warmup);
+    let mut planned_wire_bytes = 0usize;
+    for index in 0..stages.len() {
+        if policy_planning {
+            let mut measured = inputs.clone();
+            let warmup = heldout_warmup_inputs_planned(
+                &args,
+                &model,
+                schema.as_ref(),
+                tools.as_ref(),
+                &mut measured,
+                Some((run_id.as_str(), per_stage * index as u64)),
+            )?;
+            let warm = warmup
+                .as_ref()
+                .map(|(pool, _)| pool.as_slice())
+                .unwrap_or(&[]);
+            for input in measured.iter().chain(warm) {
+                planned_wire_bytes = planned_wire_bytes
+                    .checked_add(input.json.as_ref().map_or(0, |b| b.len()))
+                    .context("planned byte budget overflow")?;
+            }
+            if planned_wire_bytes > 64 * 1024 * 1024 {
+                bail!("frozen policy stages exceed 64MiB planned wire budget");
+            }
+            stage_inputs.push(Arc::new(measured));
+            stage_warmups.push(Arc::new(warmup));
+        } else {
+            stage_inputs.push(base_measured.clone());
+            stage_warmups.push(base_warmup.clone());
+        }
+    }
+    let mut planned_token_total = 0_u64;
+    if policy_planning && args.warmup_render_config.is_some() {
+        for (measured, warmup) in stage_inputs.iter().zip(&stage_warmups) {
+            let warm = warmup
+                .as_ref()
+                .as_ref()
+                .map(|(pool, _)| pool.as_slice())
+                .unwrap_or(&[]);
+            for input in measured.iter().chain(warm) {
+                let e = input
+                    .policy_effects
+                    .as_ref()
+                    .context("missing frozen policy effects")?;
+                planned_token_total = planned_token_total
+                    .checked_add(
+                        e.rendered_body_tokens_before
+                            .context("missing baseline token count")?,
+                    )
+                    .and_then(|n| n.checked_add(e.rendered_body_tokens_after?))
+                    .context("aggregate token count overflow")?;
+                if planned_token_total > 10_000_000 {
+                    bail!("aggregate baseline/final rendering exceeds 10000000 tokens");
+                }
+            }
+        }
+    }
+    let heldout_warmup = stage_warmups.first().and_then(|w| w.as_ref().as_ref());
+    let run_epoch = Arc::new(metrum_ai_bench::telemetry::RunEpoch::new());
     let stop = metrum_ai_bench::runner::StopFlag::new();
     metrum_ai_bench::runner::install_stop_handlers(stop.clone());
 
@@ -2157,6 +2731,7 @@ async fn main() -> Result<()> {
         "telemetry": args.telemetry,
         "metrics_url": args.metrics_url,
     });
+    add_canonical_config(&mut run_config, &inputs, &args)?;
     if let Some(temperature) = args.temperature {
         run_config["temperature"] = json!(decimal_f32(temperature));
     }
@@ -2284,10 +2859,24 @@ async fn main() -> Result<()> {
             "order": effective_order_policy, "order_seed": args.order_seed.unwrap_or(args.seed),
             "arrival": "deterministic_stage_rate_or_closed_loop",
             "nonce_placement": args.cache_policy.nonce_placement(),
+            "nonce_added_characters_per_request": args.cache_policy.nonce_added_characters(),
             "nonce_scope": args.cache_policy.nonce_scope(),
             "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
             "prompt_sequence_log_scope": "measured_per_stage"
         });
+    }
+    if let Some((_, metadata)) = &heldout_warmup {
+        redacted_config["warmup"] = metadata.clone();
+        if policy_planning {
+            redacted_config["warmup_stages"] = json!(stage_warmups
+                .iter()
+                .enumerate()
+                .filter_map(|(index, w)| w
+                    .as_ref()
+                    .as_ref()
+                    .map(|(_, m)| json!({"stage":index+1,"evidence":m})))
+                .collect::<Vec<_>>());
+        }
     }
     if let Some(command) = &args.stage_hook {
         redacted_config["stage_hook"] = json!({
@@ -2300,6 +2889,7 @@ async fn main() -> Result<()> {
             "evidence": "trusted_operator_acknowledgement"
         });
     }
+    add_canonical_config(&mut redacted_config, &inputs, &args)?;
     let redact_hostname = args.redact_hostname || args.require_sut;
     let environment =
         metrum_ai_bench::environment::collect(None, Some(model.clone()), redact_hostname);
@@ -2339,7 +2929,11 @@ async fn main() -> Result<()> {
             &url,
             stage,
             stage_index + 1,
-            &inputs,
+            &stage_inputs[stage_index],
+            stage_warmups[stage_index]
+                .as_ref()
+                .as_ref()
+                .map(|(pool, _)| pool.as_slice()),
             validator.as_ref(),
             sequence.clone(),
             &client,
@@ -2594,6 +3188,188 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn canonical_targets_preserve_tool_wire_lineage_and_global_session_identity() {
+        use axum::{extract::State, routing::post, Json, Router};
+        use metrum_ai_bench::canonical_input::CanonicalRecord;
+        use metrum_ai_bench::workload_input::WorkloadInput;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        use std::sync::atomic::AtomicUsize;
+        type MockState = (
+            Arc<std::sync::Mutex<Vec<Value>>>,
+            Arc<(AtomicUsize, AtomicUsize)>,
+        );
+        let occupancy = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let app = Router::new().route("/chat/completions", post(|State((seen, occupancy)): State<MockState>, Json(body): Json<Value>| async move {
+            seen.lock().unwrap().push(body);
+            let active = occupancy.0.fetch_add(1, Ordering::SeqCst) + 1;
+            occupancy.1.fetch_max(active, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            occupancy.0.fetch_sub(1, Ordering::SeqCst);
+            Json(json!({"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":4,"completion_tokens":1}}))
+        })).with_state((seen.clone(), occupancy.clone()));
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let args = Args::try_parse_from([
+            "strategic",
+            "--url",
+            &url,
+            "--model",
+            "mock",
+            "--api-key",
+            "dummy",
+            "--canonical-jsonl",
+            "not-loaded.jsonl",
+            "--session-mode",
+            "closed-loop",
+            "--session-request-roles",
+            "user,tool",
+            "--max-tokens",
+            "8",
+            "--requests-per-stage",
+            "2",
+        ])
+        .unwrap();
+        let tool_messages = json!([
+            {"role":"user","content":"root"},
+            {"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"never_execute","arguments":"{}"}}]},
+            {"role":"tool","content":"inert result","tool_call_id":"call-1"}
+        ]);
+        let records: Vec<CanonicalRecord> = (0..2).map(|index| serde_json::from_value(json!({
+            "record_id":format!("record-{index}"), "source_row_id":format!("row-{index}"),
+            "session_id":"same-id-in-two-sources", "turn_index":index, "group_id":format!("group-{index}"),
+            "trace_id":format!("trace-{index}"), "arrival_offset_ms":100+index, "expected_output_tokens":3,
+            "body": if index == 0 { json!({"Prompt":"plain"}) } else { json!({"Chat":tool_messages.clone()}) },
+            "source":{"source_id":format!("source-{index}"),"files":[]}
+        })).unwrap()).collect();
+        let inputs =
+            canonical_inputs(&args, "mock", WorkloadInput::Canonical(records), None, None).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].session_id, inputs[1].session_id);
+        let logical = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let outcomes = run_session_requests(
+            &inputs,
+            2,
+            2,
+            &metrum_ai_bench::runner::StopFlag::new(),
+            |_| {
+                let logical = logical.clone();
+                let active = logical.0.fetch_add(1, Ordering::SeqCst) + 1;
+                logical.1.fetch_max(active, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    tokio::task::yield_now().await;
+                    logical.0.fetch_sub(1, Ordering::SeqCst);
+                    (BenchRecord::default(), ModalitySample::default())
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(
+            logical.1.load(Ordering::SeqCst),
+            1,
+            "source envelopes must not split a canonical session cursor"
+        );
+        assert_eq!(inputs[1].body["messages"], tool_messages);
+        assert_eq!(inputs[1].body["max_tokens"], 8);
+        assert!(inputs.iter().all(|input| input.turn.is_none()));
+        let mut config = json!({});
+        add_canonical_config(&mut config, &inputs, &args).unwrap();
+        assert_eq!(config["datasets"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            config["canonical_input"]["arrival_offsets"],
+            "metadata_only_not_trace_replay"
+        );
+        let (rows, _, _, _, _) = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_stage(
+                &args,
+                &url,
+                2.0,
+                0,
+                &inputs,
+                None,
+                None,
+                Arc::new(AtomicU64::new(0)),
+                &reqwest::Client::new(),
+                Arc::new(metrum_ai_bench::telemetry::RunEpoch::new()),
+                Arc::new("fixture".into()),
+                None,
+                &metrum_ai_bench::runner::StopFlag::new(),
+            ),
+        )
+        .await
+        .expect("one cursor must advance the global session across source envelopes")
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.success));
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2);
+            assert_eq!(seen[1]["messages"], tool_messages);
+            assert_eq!(occupancy.1.load(Ordering::SeqCst), 1);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("requests.csv");
+        export_csv(&path, &rows).unwrap();
+        let decoded: Vec<BenchRecord> = csv::Reader::from_path(path)
+            .unwrap()
+            .deserialize()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        let mut ids = std::collections::BTreeSet::new();
+        for row in decoded {
+            let lineage: Value =
+                serde_json::from_str(row.canonical_lineage_json.as_ref().unwrap()).unwrap();
+            let index = match lineage["record_id"].as_str() {
+                Some("record-0") => 0,
+                Some("record-1") => 1,
+                other => panic!("unexpected record ID: {other:?}"),
+            };
+            assert!(ids.insert(lineage["record_id"].as_str().unwrap().to_owned()));
+            assert_eq!(lineage["source_row_id"], format!("row-{index}"));
+            assert_eq!(lineage["turn_index"], index);
+            assert_eq!(lineage["group_id"], format!("group-{index}"));
+            assert_eq!(lineage["trace_id"], format!("trace-{index}"));
+            assert_eq!(lineage["arrival_offset_ms"], 100 + index);
+            assert_eq!(lineage["expected_output_tokens"], 3);
+            assert_eq!(lineage["source"]["source_id"], format!("source-{index}"));
+            assert!(lineage.get("body").is_none());
+            assert!(row.turn.is_none());
+        }
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
+
+    #[test]
+    fn heldout_closed_loop_cannot_override_unbound_dynamic_issuance() {
+        let args = Args::try_parse_from([
+            "strategic",
+            "--url",
+            "https://example.invalid/v1/chat/completions",
+            "--model",
+            "fixture",
+            "--api-key",
+            "dummy",
+            "--session-mode",
+            "closed-loop",
+            "--sessions",
+            "not-read.jsonl",
+            "--warmup-sessions",
+            "not-read-warmup.jsonl",
+            "--warmup-requests",
+            "1",
+            "--allow-unverified-warmup",
+        ])
+        .unwrap();
+        let error = heldout_warmup_inputs(&args, "fixture", None, None, &[]).unwrap_err();
+        assert!(error.to_string().contains("dynamic final-body bindings"));
+    }
+
     #[test]
     fn input_only_usage_coverage_does_not_require_output_tokens() {
         let embedding = json!({"usage": {"prompt_tokens": 0}});
@@ -2767,6 +3543,55 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("--sessions"));
+    }
+
+    #[test]
+    fn heldout_warmup_validates_budgets_and_preserves_legacy_without_a_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("warmup.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"session_id":"heldout","messages":[{"role":"user","content":"synthetic"}]}"#,
+        )
+        .unwrap();
+        let mut args = Args::try_parse_from([
+            "bench",
+            "--url",
+            "http://unused",
+            "--model",
+            "mock",
+            "--sweep",
+            "1",
+        ])
+        .unwrap();
+        let measured = make_inputs(&args, "mock", None, None).unwrap();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap()
+            .is_none());
+        args.warmup_sessions = Some(path);
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("positive"));
+        args.warmup_requests = 1;
+        args.sweep = "2".into();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("at least"));
+        args.sweep = "1".into();
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown"));
+        args.allow_unverified_warmup = true;
+        let (warmup, metadata) = heldout_warmup_inputs(&args, "mock", None, None, &measured)
+            .unwrap()
+            .unwrap();
+        assert_eq!(warmup.len(), 1);
+        assert_eq!(metadata["override_unverified"], true);
+        args.warmup_block_size_tokens = 0;
+        assert!(heldout_warmup_inputs(&args, "mock", None, None, &measured).is_err());
     }
 
     #[test]

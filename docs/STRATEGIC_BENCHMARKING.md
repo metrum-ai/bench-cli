@@ -59,6 +59,48 @@ reset after machine warmup; a new file/session ID is not sufficient. These lifec
 and scheduling enhancements are separate steps under #413. Generic prompt-library
 throughput profiles do not establish controlled KV reuse or offload evidence.
 
+## Held-out warmup integration boundary (v1.9.0 development)
+
+`--warmup-sessions FILE` or `--warmup-prompts FILE` isolates the warmup input
+pool from the measured pool. These options are chat-only, mutually exclusive,
+and require a positive warmup request count at least as large as the configured
+stage concurrency. Measured input indexing still restarts at zero after warmup.
+Summary `config.warmup` retains source SHA-256, pool/request counts and overlap
+policy. Source names, prompts and raw tokens are not exported.
+
+A different file or ID is **not** proof of token-prefix isolation. The preflight
+calls the agreed offline `validate_prefix_disjoint` interface with final request
+body digests, delegating to the authoritative producer-owned validator without
+copying its algorithm. Opt into the producer-owned [pinned local renderer](RUNTIME_RENDERING.md)
+with `--warmup-render-config PATH` and the `tokenizer` build feature. Static
+warmup/measured bodies are frozen and sent as the exact prebuilt bytes rendered
+at setup; rendering/serialization is outside stage timing and disclosed in metadata.
+Fail/Unknown with a selected renderer aborts before traffic/hooks, even with an
+override flag. The consumer projection retains validator version, exact pair
+population count (nullable on Unknown) and diagnostic truncation independently.
+Without renderer configuration, token IDs remain unavailable and verdict Unknown;
+this legacy development boundary fails before traffic unless
+`--allow-unverified-warmup` is explicitly supplied. That override remains an
+`Unknown` result, records both sorted body-digest-list hashes, and cannot justify
+an isolation/cold-cache claim. It is for plumbing tests and explicitly exploratory
+runs, not a substitute for completing rendered-token validation. Unknown maxima
+in an Unknown report are not overlap measurements.
+
+`--warmup-block-size-tokens` must match the actual serving cache. The default
+passing policy permits zero shared full blocks; tokenizer/template mismatches
+must remain Unknown. Body digests cover exact serialized JSON bytes after current
+body transformations. Any later mutation policy must regenerate token rendering
+and validation bindings before traffic. Default legacy warmup is unchanged when
+no held-out pool is supplied and makes no isolation claim.
+
+For cold studies, the required protocol remains held-out prefix-disjoint warmup,
+drain, acknowledged tier reset/readiness/settling, then measurement. Do not call
+an unvalidated warmup file prefix-disjoint. Local rendering pins are operator
+assertions about the serving policy, not independent physical-cache proof. Live
+engine cross-check status is NotRequested until an engine adapter is explicitly
+implemented/selected. Closed-loop held-out issuance remains guarded pending
+validated dynamic final-body bindings.
+
 ## Trusted stage reset lifecycle (v1.9.0 development)
 
 `--stage-hook CMD --stage-reset-scope resident,external` is an explicit opt-in
@@ -265,7 +307,11 @@ single-stage and sessions runs stay quiet) and the HTML report shows the same se
 Analysis that keys on the knee (for example `kv_cache_util_at_knee`) should
 report null, not 0, when `knee` is null.
 The metrics scraper recognizes vLLM, SGLang and TensorRT-LLM names for
-KV-cache utilization, preemptions, and running/waiting queues.
+preemptions and running/waiting queues. KV-cache memory utilization recognizes
+`vllm:gpu_cache_usage_perc`, `vllm:kv_cache_usage_perc`, and
+`trtllm_kv_cache_utilization`. SGLang `cache_hit_rate` is a reuse ratio, not
+memory occupancy, and is never used as `kv_cache_usage`. When no recognized
+occupancy gauge is present, utilization is null. No hit-rate field is added.
 
 Use `--sweep-by rate --max-in-flight N` for open-loop request-rate stages.
 Rate requests retain their intended schedule while waiting for an in-flight

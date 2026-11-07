@@ -116,12 +116,18 @@ pub struct BenchRecord {
     pub usage_prompt_tokens_present: Option<bool>,
     #[serde(default)]
     pub usage_completion_tokens_present: Option<bool>,
+    /// JSON-encoded canonical-lineage.v1; never includes prompt/messages.
+    #[serde(default)]
+    pub canonical_lineage_json: Option<String>,
     /// Opt-in post-transformation wire-body evidence extension version.
     #[serde(default)]
     pub cache_workload_version: Option<String>,
     /// SHA-256 of exact serialized request-body bytes, never prompt text.
     #[serde(default)]
     pub body_sha256: Option<String>,
+    /// JSON-encoded cache-policy-effects.v1, without content or token IDs.
+    #[serde(default)]
+    pub cache_policy_effects: Option<String>,
     #[serde(default, deserialize_with = "deserialize_cache_evidence")]
     pub cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
 }
@@ -1290,7 +1296,6 @@ pub fn parse_server_metrics(text: &str) -> ServerMetrics {
             &[
                 "vllm:gpu_cache_usage_perc",
                 "vllm:kv_cache_usage_perc",
-                "sglang:cache_hit_rate",
                 "trtllm_kv_cache_utilization",
             ],
         )
@@ -1521,8 +1526,10 @@ struct CsvBenchRecord {
     usage_missing: bool,
     usage_prompt_tokens_present: Option<bool>,
     usage_completion_tokens_present: Option<bool>,
+    canonical_lineage_json: Option<String>,
     cache_workload_version: Option<String>,
     body_sha256: Option<String>,
+    cache_policy_effects: Option<String>,
     #[serde(serialize_with = "serialize_cache_evidence")]
     cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
 }
@@ -2612,6 +2619,15 @@ mod tests {
     }
 
     #[test]
+    fn cache_hit_rate_is_not_kv_occupancy() {
+        let hit_only = parse_server_metrics("sglang:cache_hit_rate 0.95\n");
+        assert_eq!(hit_only.kv_cache_usage, None);
+        let mixed =
+            parse_server_metrics("vllm:kv_cache_usage_perc 0.20\nsglang:cache_hit_rate 0.95\n");
+        assert_eq!(mixed.kv_cache_usage, Some(0.20));
+    }
+
+    #[test]
     fn validates_json_required_properties() {
         let validator = Validity::json_schema(&json!({
             "type":"object",
@@ -2903,27 +2919,24 @@ mod tests {
         export_csv(&path, &[record]).unwrap();
         let mut reader = csv::Reader::from_path(path).unwrap();
         let header = reader.headers().unwrap().clone();
-        let usage_marker = header
+        let cutoff = header
             .iter()
             .position(|name| name == "usage_missing")
-            .unwrap();
-        assert_eq!(header.get(usage_marker - 1), Some("answer_completed"));
+            .expect("named historical usage boundary");
+        assert_eq!(header.get(cutoff), Some("usage_missing"));
+        assert_eq!(header.get(cutoff - 1), Some("answer_completed"));
+        assert_eq!(header.get(cutoff + 1), Some("usage_prompt_tokens_present"));
         assert_eq!(
-            header.get(usage_marker + 1),
-            Some("usage_prompt_tokens_present")
-        );
-        assert_eq!(
-            header.get(usage_marker + 2),
+            header.get(cutoff + 2),
             Some("usage_completion_tokens_present")
         );
+        assert_eq!(header.get(cutoff + 3), Some("canonical_lineage_json"));
         let row = reader.records().next().unwrap().unwrap();
-        // Reconstruct the historical prefix, excluding the usage marker and all
-        // later extensions rather than assuming those markers are still last.
+        // Reconstruct exactly the historical prefix, before the usage marker
+        // and any subsequent optional columns, not a relative suffix cutoff.
         let mut writer = csv::Writer::from_writer(Vec::new());
-        writer
-            .write_record(header.iter().take(usage_marker))
-            .unwrap();
-        writer.write_record(row.iter().take(usage_marker)).unwrap();
+        writer.write_record(header.iter().take(cutoff)).unwrap();
+        writer.write_record(row.iter().take(cutoff)).unwrap();
         let csv = writer.into_inner().unwrap();
         let legacy: BenchRecord = csv::Reader::from_reader(csv.as_slice())
             .deserialize()
@@ -2934,6 +2947,8 @@ mod tests {
         assert!(legacy.cache_workload_version.is_none());
         assert!(legacy.body_sha256.is_none());
         assert!(legacy.cache_evidence.is_none());
+        assert!(legacy.cache_policy_effects.is_none());
+        assert!(legacy.canonical_lineage_json.is_none());
         let point = summarize_stage(
             1.0,
             &[legacy],
@@ -3210,6 +3225,17 @@ mod tests {
             bytes_received: Some(900),
             chunks_received: Some(9),
             send_offset_s: Some(1.25),
+            canonical_lineage_json: Some(
+                r#"{"schema_version":"canonical-lineage.v1","source_row_id":"source-row"}"#.into(),
+            ),
+            cache_workload_version: Some("cache-workload.v1".into()),
+            body_sha256: Some("a".repeat(64)),
+            cache_policy_effects: Some(
+                serde_json::to_string(&crate::cache_workload::PolicyEffects::unrendered(
+                    crate::cache_workload::CachePolicy::BustRequest,
+                ))
+                .unwrap(),
+            ),
             ..Default::default()
         };
         let mut untraced = row.clone();
@@ -3219,17 +3245,18 @@ mod tests {
         untraced.receive_s = None;
         untraced.bytes_received = None;
         untraced.chunks_received = None;
+        untraced.cache_workload_version = None;
+        untraced.body_sha256 = None;
+        untraced.cache_policy_effects = None;
+        untraced.canonical_lineage_json = None;
         let mut writer = csv::Writer::from_writer(Vec::new());
         for written in [&row, &untraced] {
             writer.serialize(written).unwrap();
         }
         let bytes = writer.into_inner().unwrap();
         let text = String::from_utf8(bytes.clone()).expect("utf8");
-        assert!(text
-            .lines()
-            .next()
-            .expect("header")
-            .ends_with(",reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,cache_workload_version,body_sha256,cache_evidence"));
+        assert_eq!(text.lines().next().expect("header"),
+            "seq,stage,endpoint,scheduled_unix_ns,sent_unix_ns,latency_s,queue_delay_s,service_latency_s,first_byte_s,connect_s,ttft_s,prefill_s,decode_s,decode_tok_s,itl_s,in_flight_at_send,success,valid,input_tokens,output_tokens,session_id,turn,error,warmup,first_reasoning_s,reasoning_tokens,connection_reused,dns_s,bytes_sent,receive_s,bytes_received,chunks_received,send_offset_s,ttft_visible_answer_s,outcome,answer_completed,usage_missing,usage_prompt_tokens_present,usage_completion_tokens_present,canonical_lineage_json,cache_workload_version,body_sha256,cache_policy_effects,cache_evidence");
         let back: Vec<BenchRecord> = csv::Reader::from_reader(bytes.as_slice())
             .deserialize()
             .collect::<std::result::Result<_, _>>()
@@ -3240,6 +3267,10 @@ mod tests {
         assert_eq!(back[0].receive_s, Some(0.25));
         assert_eq!(back[0].bytes_received, Some(900));
         assert_eq!(back[0].chunks_received, Some(9));
+        assert_eq!(back[0].canonical_lineage_json, row.canonical_lineage_json);
+        assert_eq!(back[0].cache_policy_effects, row.cache_policy_effects);
+        assert!(back[1].cache_policy_effects.is_none());
+        assert!(back[1].canonical_lineage_json.is_none());
         // Empty cells read back as absent, not 0 or false.
         assert_eq!(back[1].connection_reused, None);
         assert_eq!(back[1].dns_s, None);
@@ -3247,6 +3278,16 @@ mod tests {
         assert_eq!(back[1].receive_s, None);
         assert_eq!(back[1].bytes_received, None);
         assert_eq!(back[1].chunks_received, None);
+        assert_eq!(
+            back[0].cache_workload_version.as_deref(),
+            Some("cache-workload.v1")
+        );
+        assert_eq!(
+            back[0].body_sha256.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert!(back[1].cache_workload_version.is_none());
+        assert!(back[1].body_sha256.is_none());
     }
 
     #[test]

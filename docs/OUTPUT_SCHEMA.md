@@ -15,11 +15,41 @@ the object as a JSON cell and defaults old missing columns to absent. See
 
 LLM request `modality_labels.cache_workload_version` and `body_sha256` bind
 post-transformation HTTP body bytes without adding raw prompt content. Strategic
-CSV appends optional `cache_workload_version` / `body_sha256` columns (old inputs
-default to absent). Existing core record schema versions remain unchanged; the
+CSV appends optional `cache_workload_version`, `body_sha256` and
+`cache_policy_effects` columns after the already-landed canonical lineage column
+(old inputs default to absent). LLM labels also include `cache_policy_effects`,
+a JSON-encoded `cache-policy-effects.v1` object. This body-free object records
+22-character policy nonce overhead where applied, a nullable signed contextual
+token delta and pinned before/after counts, planned nonce ordinal for busting,
+and the nullable native pool-wide residual shared-full-block maximum. Without
+pinned rendering/validation those quantities remain unknown, not invented zero. Existing core record schema versions remain unchanged; the
 extension is separately versioned. Summary metadata records effective policy,
 order/seeds, nonce scope/placement, digest-list checksums and serialization timing.
 See [CACHE_WORKLOADS.md](CACHE_WORKLOADS.md) for exact digest and coverage semantics.
+
+## Held-out warmup provenance (v1.9.0 development)
+
+Optional `config.warmup` retains source SHA-256, pool/request counts, block size,
+`overlap_report`, `override_unverified` and `rendered_tokens_available`. The report
+binds sorted warmup/measured body-digest lists to exact post-transformation JSON
+request bytes. The `kv-warmup-overlap.v1` consumer projection retains
+`validator_schema_version=kv-token-overlap.v1` from the authoritative validator;
+it does not pretend to be the full producer report schema. Missing pinned final-chat
+rendering still produces Unknown and fails before traffic unless explicitly
+overridden in legacy unconfigured mode. Opt-in `--warmup-render-config` records
+fingerprint-only `rendering_evidence`, explicit NotRequested live-check status,
+and preparation timing. Selected-renderer Fail/Unknown cannot be overridden. Override never changes verdict to Pass; Unknown maxima are not
+measurements. Pair population count/truncation come from the bounded authoritative producer;
+Unknown totals remain null and diagnostic sample length is never substituted. No raw prompts/tokens
+are exported.
+
+## Opt-in KV study interchange (v1.9.0 development)
+
+The separate `kv-study-report.v1` manifest/report contract is specified in
+[KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+It preserves unknown evidence and phase/reset provenance and references the
+separately versioned dataset validation manifest by digest. This initial contract
+is not emitted by runners yet and does not change existing JSONL schema versions.
 
 ## Strategic trusted reset metadata (v1.9.0 development)
 
@@ -53,6 +83,25 @@ not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
 The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
 and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
 totals remain exact independently of that cap; an empty list can still mean Fail.
+
+## Logical pressure and structural source artifacts
+
+[PRESSURE_INPUTS.md](PRESSURE_INPUTS.md) describes `logical-pressure-plan.v1`,
+a configured-capacity plan and CPU-only modeled LRU outcomes, not observed cache
+hits or physical tier participation. [TRACE_INPUTS.md](TRACE_INPUTS.md) describes
+`structural-source-trace.v1`, preserving source order, lengths, exact time and
+prefix/session topology under explicit mapping/coverage. Full source artifacts
+contain private source identifiers; they are not default public evidence.
+Length/time-only inputs and all unrendered structural plans retain rendered-token
+overlap Unknown. These artifacts do not change canonical inputs or runner JSONL.
+
+## Source trace time metadata
+
+The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
+[TRACE_INPUTS.md](TRACE_INPUTS.md). It retains exact source decimal value/unit,
+positive rational scale, explicit rounding and a precision-loss flag. It does
+not represent an actual arrival or cache measurement, and is not embedded in
+runner JSONL. No runtime record or report schema version changes.
 
 ## Canonical runtime input JSONL
 
@@ -96,6 +145,15 @@ provenance are documented in
 [PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
 separate units. The adapter does not change runner JSONL or certify token lengths,
 window feasibility, rights beyond caller policy, or observed cache reuse.
+
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
 
 ## Public input provenance sub-contract
 
@@ -219,6 +277,13 @@ including no-answer outcomes), `fallback_ttft_s` (failed-request fallback
 samples) and `observed_reasoning_tokens` / `observed_visible_completion_tokens`
 distributions and totals (server-reported usage including completed no-answer
 streams). `first_reasoning_s` and `ttft_first_any_s` include these streams;
+The public library `RequestRecord::success` constructor initializes headline
+`ttft_s` and `ttft_first_any_s` from the earliest supplied visible or reasoning
+clock, retaining the visible clock independently in `ttft_visible_answer_s`.
+An explicit `with_resolved_ttft` override retains its supplied provenance.
+`with_chat_outcome` records reasoning truncation as unanswered; it is an error
+only when strict mode is requested.
+
 v5 normally uses first-any headline TTFT (or labelled first-byte approximation) and all-attempt usage with completeness gating. See
 [METRICS.md](METRICS.md#thinking-models-ttft-vs-first-reasoning).
 

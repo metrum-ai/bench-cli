@@ -192,6 +192,11 @@ pub struct RequestRecord {
 }
 
 impl RequestRecord {
+    /// Construct a transport-success record using observed stream clocks.
+    /// `ttft` is the visible-answer clock; headline TTFT is the earliest of it
+    /// and `first_reasoning`. This constructor does not infer answer completion
+    /// or truncation: use `with_chat_outcome` to apply the terminal outcome and
+    /// strictness policy, or `with_resolved_ttft` for an explicit clock source.
     #[allow(clippy::too_many_arguments)]
     pub fn success(
         seq: u64,
@@ -207,6 +212,7 @@ impl RequestRecord {
         completion_tokens: u64,
         total_tokens: u64,
     ) -> Self {
+        let first_any = ttft.into_iter().chain(first_reasoning).min();
         Self {
             schema_version: SCHEMA_VERSION_REQUEST,
             run_id: None,
@@ -230,17 +236,13 @@ impl RequestRecord {
             prefill_s: None,
             decode_s: None,
             decode_tok_s: None,
-            ttft_s: ttft.map(|d| d.as_secs_f64()),
+            ttft_s: first_any.map(|d| d.as_secs_f64()),
             ttft_visible_answer_s: ttft.map(|d| d.as_secs_f64()),
             outcome: None,
             answer_completed: None,
-            ttft_source: ttft.map(|_| crate::measurement::TtftSource::Stream),
+            ttft_source: first_any.map(|_| crate::measurement::TtftSource::Stream),
             first_reasoning_s: first_reasoning.map(|d| d.as_secs_f64()),
-            ttft_first_any_s: match (ttft, first_reasoning) {
-                (Some(a), Some(b)) => Some(a.min(b).as_secs_f64()),
-                (Some(a), None) | (None, Some(a)) => Some(a.as_secs_f64()),
-                (None, None) => None,
-            },
+            ttft_first_any_s: first_any.map(|d| d.as_secs_f64()),
             finish_reason: None,
             itl_s: itl.iter().map(|d| d.as_secs_f64()).collect(),
             in_flight_at_send: None,
@@ -481,6 +483,66 @@ impl RequestRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn success_constructor_preserves_first_any_contract() {
+        for (visible, reasoning, expected) in [
+            (Some(500), Some(100), Some(0.1)),
+            (Some(100), Some(500), Some(0.1)),
+            (Some(500), None, Some(0.5)),
+            (None, Some(100), Some(0.1)),
+            (None, None, None),
+        ] {
+            let now = Utc::now();
+            let rec = RequestRecord::success(
+                0,
+                Phase::Measure,
+                "fixture".into(),
+                now,
+                now,
+                Duration::from_secs(1),
+                visible.map(Duration::from_millis),
+                reasoning.map(Duration::from_millis),
+                vec![],
+                1,
+                2,
+                3,
+            );
+            assert_eq!(rec.ttft_s, expected);
+            let json = serde_json::to_value(&rec).unwrap();
+            assert_eq!(json["ttft_s"], serde_json::json!(expected));
+            assert_eq!(json["ttft_first_any_s"], serde_json::json!(expected));
+            assert_eq!(
+                rec.ttft_visible_answer_s,
+                visible.map(|n| n as f64 / 1000.0)
+            );
+            assert_eq!(rec.ttft_source.is_some(), expected.is_some());
+            let overridden = rec
+                .clone()
+                .with_resolved_ttft(crate::measurement::ResolvedTtft {
+                    ttft_s: Some(0.05),
+                    source: Some(crate::measurement::TtftSource::FirstByteApprox),
+                });
+            assert_eq!(overridden.ttft_s, Some(0.05));
+            assert_eq!(overridden.ttft_first_any_s, expected);
+            assert_eq!(overridden.ttft_visible_answer_s, rec.ttft_visible_answer_s);
+            assert_eq!(
+                overridden.ttft_source,
+                Some(crate::measurement::TtftSource::FirstByteApprox)
+            );
+            if visible.is_none() && reasoning.is_some() {
+                let truncated =
+                    rec.with_chat_outcome(Some(RequestError::ReasoningTruncated), false);
+                assert!(truncated.is_success());
+                assert_eq!(truncated.answer_completed, Some(false));
+                assert_eq!(truncated.outcome.as_deref(), Some("reasoning_truncated"));
+                let strict =
+                    truncated.with_chat_outcome(Some(RequestError::ReasoningTruncated), true);
+                assert!(!strict.is_success());
+                assert_eq!(strict.answer_completed, Some(false));
+            }
+        }
+    }
 
     #[test]
     fn tpot_uses_n_minus_one() {

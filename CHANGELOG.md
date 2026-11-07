@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
+<!-- Copyright (c) 2026 Metrum AI, Inc. Licensed under the Apache License, Version 2.0. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
@@ -16,7 +16,29 @@
   Preserve historical defaults, retain request/run nonce scope and digest-list
   checksums, and extend fingerprint-first prescribed replay to strategic prompts.
   Fix sequence logging to avoid applying original source indices twice after a
-  short prescription reorders the pool. No physical hit/offload claim (#414).
+  short prescription reorders the pool. Use a 16-hex (64-bit) nonce, record its
+  22-character overhead and pinned contextual token differences, and retain
+  actual residual shared blocks (including long template headers). Freeze policy
+  bodies per stage before held-out validation; send those same bytes. No physical
+  hit/offload claim (#414).
+
+- Add held-out strategic warmup pools and a fail-closed rendered-token overlap
+  boundary delegating to the authoritative offline validator. Opt-in static
+  `--warmup-render-config` consumes the producer-owned pinned local renderer,
+  freezes exact HTTP bytes before timing and validates both pools before traffic
+  or reset hooks. Selected-renderer Fail/Unknown abort even with an override.
+  Unconfigured mode retains non-certifying Unknown/explicit-override behavior.
+  The `kv-warmup-overlap.v1` projection retains validator version, body digest-list
+  hashes and producer population/truncation fields (never sampled-list totals).
+  Fingerprint-only rendering metadata records live cross-check NotRequested;
+  closed-loop held-out mode remains guarded pending dynamic bindings (#413).
+
+- Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
+  validation references, effective workload digests, explicit unknowns and
+  phase/reset evidence and timestamps. Retain warmup isolation overrides with
+  both rendered-body digest-list bindings; unknown verdicts cannot claim a Pass.
+  Add schema and offline mock contract tests. This does
+  not yet add runner emission or live engine/cache validation (#421).
 
 - Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
   recorded-history sessions, with sequential turns and no overlapping duplicate
@@ -45,6 +67,10 @@
   order. Pair-list length alone must not determine pass/fail.
 
 ## Unreleased
+
+- Metrum AI: cancel superseded PR workflows while preserving active and queued
+  non-PR evidence with unique run-ID groups, including the self-hosted job.
+  Add a pinned actionlint CI check for all PR-triggered workflows.
 
 - Metrum AI: keep all prerelease tags out of latest release promotion and
   clarify reasoning-only truncation semantics in the output schema.

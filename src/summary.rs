@@ -2549,7 +2549,8 @@ mod first_any_tests {
             "first-any is the earlier clock: {:?}",
             first_any.p50
         );
-        // and the visible clock stays separate.
-        assert!((summary.ttft_s.p50.unwrap() - 1.0).abs() < 1e-9);
+        // Headline is first-any, while the unchanged visible clock stays separate.
+        assert!((summary.ttft_s.p50.unwrap() - 0.3).abs() < 1e-9);
+        assert!((summary.ttft_visible_answer_s.p50.unwrap() - 1.0).abs() < 1e-9);
     }
 }
