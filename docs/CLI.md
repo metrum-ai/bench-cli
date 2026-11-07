@@ -76,6 +76,20 @@ Options:
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
 
+      --cache-phase-source <CACHE_PHASE_SOURCE>
+          Opt-in measured-window native analysis on this exact configured telemetry source
+
+      --cache-phase-epoch <CACHE_PHASE_EPOCH>
+          Explicit operator-declared continuity identifier; not an observed process/manager epoch
+
+      --cache-phase-required
+          Fail when native counter coverage is unavailable; requires explicit revision and continuity declaration
+
+      --cache-phase-settle-ms <CACHE_PHASE_SETTLE_MS>
+          Opt-in native terminal settling after complete request drain (0..10000 ms)
+
+          [default: 0]
+
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
 
@@ -1277,6 +1291,20 @@ Options:
 
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
+
+      --cache-phase-source <CACHE_PHASE_SOURCE>
+          Opt-in measured-window native analysis on this exact configured telemetry source
+
+      --cache-phase-epoch <CACHE_PHASE_EPOCH>
+          Explicit operator-declared continuity identifier; not an observed process/manager epoch
+
+      --cache-phase-required
+          Fail when native counter coverage is unavailable; requires explicit revision and continuity declaration
+
+      --cache-phase-settle-ms <CACHE_PHASE_SETTLE_MS>
+          Opt-in native terminal settling after complete request drain (0..10000 ms)
+
+          [default: 0]
 
       --url <URL>
 
