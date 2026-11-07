@@ -28,6 +28,20 @@ def preflight(manifest):
         raise ValueError("candidate_sha must be a full commit")
     binary = pinned(manifest["candidate"], True)
     _, validation_binary = build_roles.check_manifest(manifest)
+    import generated_inputs
+    recipes = generated_inputs.structural_context(manifest)
+    if recipes is not None:
+        import manifest_tool
+        baseline = pinned(manifest['baseline'], True)
+        structural = {'structural_recipe_ids': set(recipes)}
+        if 'generated_bindings' in manifest:
+            import runtime_inputs
+            runtime_inputs.verify(manifest)
+            structural = {}  # Original concrete/domain checks remain mandatory.
+        _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], manifest['lane'],
+            binary, baseline, '0', **structural)
+        if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
+            raise ValueError('generator tokenizer revision must match lane model revision')
     subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
     sut_path = pinned(manifest["sut"])
     sut = json.loads(sut_path.read_text())
@@ -81,7 +95,6 @@ def run_case(manifest_path, manifest, case):
         raise FileExistsError("refusing to reuse an existing attempt directory")
     lifecycle = out.with_name(out.name + "-lifecycle")
     lifecycle.mkdir(parents=True, exist_ok=False)
-    phase(lifecycle, case, "inputs-ready")
     environment = {**os.environ, "CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
                    "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
                    "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
@@ -91,6 +104,14 @@ def run_case(manifest_path, manifest, case):
         raise InterruptedError(f"launcher interrupted by signal {signum}")
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        if 'generated_inputs' in manifest:
+            import runtime_inputs
+            if 'generated_bindings' not in manifest:
+                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated')
+            preflight(manifest)  # Verify actual bytes and all original concrete criteria.
+            entry = manifest['cases'][case]
+            environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
+        phase(lifecycle, case, 'inputs-ready')
         process = subprocess.Popen(entry["command"], env=environment, start_new_session=True)
         code = process.wait()
         if code:
@@ -162,7 +183,8 @@ def main():
         raise ValueError("case not in frozen selection")
     if args.preflight:
         for case in selected:
-            print(f"PREFLIGHT-OK {case}")
+            import generated_inputs
+            print(f"{generated_inputs.preflight_label(manifest)} {case}")
         return
     for case in selected:
         if args.manifest.read_bytes() != frozen:

@@ -50,9 +50,23 @@ def freeze(args):
         raise ValueError('candidate must be a measured artifact from the build receipt')
     build_roles.check_measured_config(lane_manifest, measured, validation)
     variant = build_roles.load_variant(args.build_receipt, selection['candidate_sha']) if args.case == 'BC-GPU-010' else None
+    import generated_inputs
+    recipe_file = getattr(args, 'generated_recipes', None)
+    generated = []
+    if recipe_file is not None:
+        values = json.loads(recipe_file.read_text(), object_pairs_hook=manifest_tool.unique_object)['recipes']
+        if not isinstance(values, list) or not values:
+            raise ValueError('generated recipe file must declare a nonempty recipe list')
+        generated = [{'recipe': value, 'structural': generated_inputs.validate(
+            value, args.build_receipt, selection['candidate_sha'])} for value in values]
+        if len({item['recipe']['id'] for item in generated}) != len(generated):
+            raise ValueError('duplicate generated recipe id')
     lane = row["Parallel group"]
+    if generated and lane == 'CLEANUP':
+        raise ValueError('cleanup cases cannot generate measured inputs')
     if lane != "CLEANUP":
-        _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0")
+        structural = {'structural_recipe_ids': {item['recipe']['id'] for item in generated}} if generated else {}
+        _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0", **structural)
         if args.tokenizer_revision != config["revision"]:
             raise ValueError("tokenizer revision must match the frozen model revision")
         check_case_tokenizer(args.case, config, args.tokenizer)
@@ -94,6 +108,9 @@ def freeze(args):
             for child in value:
                 collect_pins(child)
     collect_pins(lane_manifest)
+    if generated:
+        inputs.add(recipe_file.resolve())
+        collect_pins(generated)
     # Freeze transitive harness sources, not only the top-level shell wrapper.
     inputs.update(path.resolve() for path in root.iterdir() if path.suffix in (".py", ".sh", ".json"))
     if args.command_json:
@@ -108,6 +125,8 @@ def freeze(args):
                 "cases": {args.case: {"launcher": pin(command[0]), "command": command, "out": str(args.run_out.resolve())}}}
     if variant is not None:
         manifest['feature_variant_tokenizer'] = variant
+    if generated:
+        manifest.update(generated_inputs=generated, lane=lane, baseline=pin(args.baseline))
     case_launcher.preflight(manifest)
     with args.out.open("x", encoding="utf-8") as stream:
         json.dump(manifest, stream, indent=2, sort_keys=True, allow_nan=False)
@@ -123,12 +142,15 @@ def main():
     parser.add_argument("--tokenizer-revision", required=True)
     parser.add_argument("--input", type=Path, action="append", default=[])
     parser.add_argument("--command-json", type=Path)
+    parser.add_argument('--generated-recipes', type=Path)
     args = parser.parse_args()
     try:
         freeze(args)
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
         parser.exit(1, f"case freeze failed: {exc}\n")
-    print(f"PREFLIGHT-OK {args.case}; frozen input manifest: {args.out}")
+    import generated_inputs
+    frozen = json.loads(args.out.read_text())
+    print(f"{generated_inputs.preflight_label(frozen)} {args.case}; frozen input manifest: {args.out}")
 
 
 if __name__ == "__main__":

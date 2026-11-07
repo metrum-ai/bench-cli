@@ -69,7 +69,23 @@
       ]
     },
     "versions": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "generated_inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["input_sha256", "rederived_sha256", "recipe_sha256", "binding_sha256", "bound_at"],
+            "properties": {
+              "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "rederived_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "recipe_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "binding_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "bound_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        }
+      }
     },
     "reason": {
       "type": "string"

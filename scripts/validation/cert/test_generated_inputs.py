@@ -78,6 +78,34 @@ class GeneratedInputTests(unittest.TestCase):
                 self.validate()
             path.write_bytes(original)
 
+    def test_structural_manifest_freezes_contract_and_dependency_pins_but_cannot_launch(self):
+        manifest = {'candidate_sha': self.sha, 'cases': {'BC-GPU-003': {}},
+                    'build_receipt': {'path': str(self.receipt), 'sha256': digest(self.receipt)},
+                    'tokenizer': self.recipe['tokenizer'],
+                    'generated_inputs': [{'recipe': self.recipe, 'structural': self.validate()}]}
+        manifest['inputs'] = [manifest['build_receipt']] + [self.recipe[key] for key in ('generator', 'dataset', 'tokenizer', 'template')]
+        self.assertEqual(generated.structural_context(manifest), {self.recipe['id']: self.recipe})
+        self.assertEqual(generated.preflight_label(manifest), 'STRUCTURAL-PREFLIGHT-OK')
+        self.assertEqual(generated.preflight_label({}), 'PREFLIGHT-OK')
+        import case_launcher
+        manifest['candidate'] = self.recipe['generator']  # Mocked role guard; no executable runs.
+        manifest['cases']['BC-GPU-003'] = {'out': str(self.root / 'attempt'), 'command': ['synthetic-no-execution']}
+        with patch.object(case_launcher.build_roles, 'check_manifest'), \
+             patch('runtime_inputs.prepare', side_effect=ValueError('runtime binding incomplete')), \
+             patch('result_writer.write_record') as write, \
+             patch.object(case_launcher.subprocess, 'Popen') as start, self.assertRaisesRegex(ValueError, 'runtime binding incomplete'):
+            case_launcher.run_case(self.root / 'not-executed.json', manifest, 'BC-GPU-003')
+        start.assert_not_called()
+        self.assertEqual(write.call_args.args[1]['infra_history'][0]['type'], 'infra_failed')
+        bad = copy.deepcopy(manifest)
+        bad['generated_inputs'][0]['recipe']['seed'] += 1
+        with self.assertRaisesRegex(ValueError, 'frozen generator contract'):
+            generated.structural_context(bad)
+        bad = copy.deepcopy(manifest)
+        bad['inputs'].pop()
+        with self.assertRaisesRegex(ValueError, 'freeze every generator dependency'):
+            generated.structural_context(bad)
+
     def fake_generator(self, command, directory):
         self.assertIn('--local-jsonl', command)
         (directory / 'prompts.jsonl').write_text('{"SYNTHETIC_TEST_PROMPT":true}\n')

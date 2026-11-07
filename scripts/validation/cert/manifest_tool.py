@@ -36,7 +36,7 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def load_manifest(path, lane, candidate, baseline, gpu):
+def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids=None):
     if not LANE.fullmatch(lane):
         raise ValueError("invalid lane")
     if not isinstance(gpu, str) or not GPU.fullmatch(gpu):
@@ -73,12 +73,27 @@ def load_manifest(path, lane, candidate, baseline, gpu):
     prompt_sets = config.get("prompt_sets")
     if not isinstance(prompt_sets, dict) or not prompt_sets:
         raise ValueError("at least one pinned prompt set is required")
-    for prompt in prompt_sets.values():
+    symbolic = {}
+    if structural_recipe_ids is not None and (not isinstance(structural_recipe_ids, (set, frozenset))
+            or any(not isinstance(value, str) for value in structural_recipe_ids)):
+        raise ValueError('structural preflight requires an explicit set of validated recipe IDs')
+    for name, prompt in prompt_sets.items():
+        if isinstance(prompt, dict) and set(prompt) == {'generated_input'}:
+            recipe_id = prompt['generated_input']
+            if (structural_recipe_ids is None or not isinstance(recipe_id, str)
+                    or recipe_id not in structural_recipe_ids or recipe_id in symbolic.values()):
+                raise ValueError('generated prompt requires unique validated structural recipe; runtime needs concrete hashes')
+            symbolic[name] = recipe_id
+            continue
         if not isinstance(prompt, dict) or not isinstance(prompt.get("path"), str):
             raise ValueError("prompt entry requires a path and SHA256")
         expected = prompt.get("sha256")
         if not isinstance(expected, str) or not SHA.fullmatch(expected) or sha256_file(prompt["path"]) != expected:
             raise ValueError("prompt set hash mismatch")
+    if structural_recipe_ids is not None and set(symbolic.values()) != structural_recipe_ids:
+        raise ValueError('unused structural generator recipe')
+    if symbolic and lane in ('L2', 'L3'):
+        raise ValueError('tracked modality fixtures cannot be replaced by generated prompt sets')
     if lane in ("L1", "R", "D", "W", "G1", "G2", "G3", "G4", "G5", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
         raise ValueError("this lane requires the pinned Qwen3-8B model")
     if lane in ("P1", "P2"):
@@ -101,13 +116,14 @@ def load_manifest(path, lane, candidate, baseline, gpu):
         verify_perf_baseline(archive["path"], baseline)
         if set(prompt_sets) != {"W1", "W2"}:
             raise ValueError("27B lanes require exactly W1 and W2")
-        if (prompt_sets["W1"]["sha256"] not in ("4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7",
-                                                 "44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340")
-                or prompt_sets["W2"]["sha256"] not in ("e5480af17428c48e614a0840f30eda53acbea7f9efe869c5173cde5d5818edfd",
-                                                        "eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b")):
+        if (("W1" not in symbolic and prompt_sets["W1"]["sha256"] not in ("4adc601afa3e4ce355a204dd042f1f64c3a24bdd7ef57a8a9c9ccd21d0ce0dd7",
+                                                 "44340640d8bf5818cc9467f4e50b23abf3cf329005999b9c77b736d3fb3fa340"))
+                or ("W2" not in symbolic and prompt_sets["W2"]["sha256"] not in ("e5480af17428c48e614a0840f30eda53acbea7f9efe869c5173cde5d5818edfd",
+                                                        "eb1ffdab20236c7aaadf63de3c03350076a47cccf796f279aacd551a38d8df8b"))):
             raise ValueError("27B prompt sets must match the frozen spec")
-        paths = [Path(prompt_sets[w]["path"]).resolve() for w in ("W1", "W2")]
-        if paths[0].name != "W1.jsonl" or paths[1].name != "W2.jsonl" or paths[0].parent != paths[1].parent:
+        paths = [Path(prompt_sets[w]['path']).resolve() for w in ('W1', 'W2') if w not in symbolic]
+        if (any(Path(prompt_sets[w]['path']).name != w + '.jsonl' for w in ('W1', 'W2') if w not in symbolic)
+                or (not symbolic and paths[0].parent != paths[1].parent)):
             raise ValueError("27B prompt sets must be W1.jsonl and W2.jsonl in one directory")
         for key in ("owner", "evidence_link"):
             if not isinstance(config.get(key), str) or not config[key].strip():

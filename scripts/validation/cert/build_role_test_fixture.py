@@ -68,13 +68,19 @@ def bind_variant(manifest, root):
     return manifest
 
 
-def bind(manifest, root):
+def bind(manifest, root, additional=None):
     root = Path(root)
     sha = manifest['candidate_sha']
     measured = manifest['candidate']
+    files = {'metrum-ai-bench-cli-llm': Path(measured['path'])}
+    files.update(additional or {})
     origin = workflow_evidence(root / 'synthetic-workflow', sha, '1.8.1',
-                              {'metrum-ai-bench-cli-llm': Path(measured['path']).read_bytes()})
+                              {name: Path(path).read_bytes() for name, path in files.items()})
     measured.update(candidate_sha=sha, role='measured', profile='release', features=['otlp'], origin=origin)
+    registry = {'metrum-ai-bench-cli-llm': measured}
+    for name, path in (additional or {}).items():
+        registry[name] = {'path': str(path), 'sha256': digest(path), 'candidate_sha': sha,
+                          'role': 'measured', 'profile': 'release', 'features': ['otlp'], 'origin': origin}
     helper = root / 'validation-only-fixture'
     helper.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic validation-only\nexit 0\n')
     helper.chmod(0o755)
@@ -82,11 +88,11 @@ def bind(manifest, root):
                   'role': 'validation-only', 'profile': 'release', 'features': ['otlp', 'tokenizer'],
                   'origin': {'kind': 'local-cargo-validation'}}
     manifest['tokenizer_validation'] = validation
-    manifest['measured_binaries'] = [measured]
+    manifest['measured_binaries'] = list(registry.values())
     log = root / 'validation-only.log'
     log.write_text('SYNTHETIC UNIT FIXTURE; NOT BUILD EVIDENCE\n')
     receipt = {'_copyright': 'Copyright (c) 2026 Metrum AI, Inc.', 'candidate_sha': sha, 'version': '1.8.1',
-        'builds': {'measured': {'origin': origin, 'binaries': {'metrum-ai-bench-cli-llm': measured}},
+        'builds': {'measured': {'origin': origin, 'binaries': registry},
                    'validation-only': {'argv': ['cargo', 'build', '--locked', '--release', '--features', 'otlp,tokenizer'],
                     'log_sha256': digest(log), 'binaries': {'metrum-ai-bench-cli-llm': validation}}}}
     path = root / 'builds.json'

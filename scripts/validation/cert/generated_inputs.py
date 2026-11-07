@@ -62,7 +62,11 @@ def validate(recipe, receipt_path, sha):
             raise ValueError('generator integer configuration outside fixed domain')
     for key in REAL_OPTIONS & set(config):
         value = config[key]
-        if type(value) not in (int, float) or not math.isfinite(value) or value < 0 or (key.endswith('target') and value == 0):
+        try:
+            finite = type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite or value < 0 or (key.endswith('target') and value == 0):
             raise ValueError('generator length configuration must be finite and positive')
     if 'profile' in config:
         if not isinstance(config['profile'], str) or config['profile'] not in PROFILES or {'isl_target', 'osl_target'} & set(config):
@@ -74,6 +78,41 @@ def validate(recipe, receipt_path, sha):
 
 def contract_hash(recipe):
     return hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+def structural_context(manifest):
+    """Validate frozen structural receipts, not a claim about future output bytes."""
+    entries = manifest.get('generated_inputs')
+    if entries is None:
+        return None
+    if not isinstance(entries, list) or not entries or len(manifest.get('cases', {})) != 1:
+        raise ValueError('generated inputs require a nonempty single-case structural contract')
+    receipt = manifest['build_receipt']
+    pin(receipt)
+    recipes = {}
+    frozen_pins = {str(Path(item['path']).resolve()): item['sha256'] for item in manifest.get('inputs', [])}
+    if frozen_pins.get(str(Path(receipt['path']).resolve())) != receipt['sha256']:
+        raise ValueError('structural manifest must freeze its build receipt input')
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {'recipe', 'structural'}:
+            raise ValueError('generated entry must freeze recipe and structural receipt')
+        recipe = entry['recipe']
+        status = validate(recipe, receipt['path'], manifest['candidate_sha'])
+        if entry['structural'] != status or recipe['id'] in recipes:
+            raise ValueError('frozen generator contract/config/seed mismatch or duplicate id')
+        if (recipe['tokenizer']['sha256'] != manifest['tokenizer']['sha256']
+                or recipe['tokenizer']['revision'] != manifest['tokenizer']['revision']):
+            raise ValueError('generator tokenizer differs from frozen case input')
+        for key in ('generator', 'dataset', 'tokenizer', 'template'):
+            item = recipe[key]
+            if frozen_pins.get(str(Path(item['path']).resolve())) != item['sha256']:
+                raise ValueError('structural manifest must freeze every generator dependency')
+        recipes[recipe['id']] = recipe
+    return recipes
+
+
+def preflight_label(manifest):
+    return 'STRUCTURAL-PREFLIGHT-OK' if 'generated_inputs' in manifest and 'generated_bindings' not in manifest else 'PREFLIGHT-OK'
 
 
 def run_generator(command, directory):
