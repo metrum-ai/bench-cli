@@ -1,0 +1,15 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Private explicit source/selection-bound catalog policy review",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "origin_sha256", "selected_ids_sha256", "inventory_complete", "components", "counts"],
+  "properties": {
+    "schema_version": {"const": "public-catalog-review.v1"},
+    "origin_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "selected_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "inventory_complete": {"type": "boolean"},
+    "components": {"type": "object", "maxProperties": 10000, "additionalProperties": {"$ref": "kv-dataset-manifest.v1.json#/$defs/rights"}},
+    "counts": {"$ref": "source-validation-consolidation.v1.json#/properties/counts"}
+  }
+}

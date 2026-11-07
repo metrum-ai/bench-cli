@@ -4,9 +4,12 @@
 pub mod archive_inputs;
 pub mod args_common;
 pub mod asr;
+pub mod cache_cohorts;
 pub mod cache_metric_capture;
 pub mod cache_metrics;
+pub mod cache_report;
 pub mod cache_workload;
+pub mod cached_tokens;
 pub mod canonical_input;
 #[cfg(feature = "tokenizer")]
 pub mod chat_rendering;
@@ -36,6 +39,7 @@ pub mod prompt_inputs;
 pub mod prompt_library;
 pub mod prompt_sequence;
 pub mod public_adapters;
+pub mod public_catalog;
 pub mod public_dataset;
 pub mod public_profile;
 pub mod record;
@@ -60,6 +64,7 @@ pub mod trace_adapters;
 pub mod trace_inputs;
 pub mod trace_presets;
 pub mod usage;
+pub mod validation_consolidation;
 pub mod vlm;
 pub mod warmup_isolation;
 pub mod workload_input;

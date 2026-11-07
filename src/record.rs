@@ -178,6 +178,9 @@ pub struct RequestRecord {
     pub usage_prompt_tokens_present: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_completion_tokens_present: Option<bool>,
+    /// Versioned optional extension; absent does not mean a reported zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_evidence: Option<crate::cached_tokens::CachedTokenEvidence>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub modality_metrics: std::collections::BTreeMap<String, f64>,
     /// String modality fields (e.g. imagegen artifact SHA-256 hex digests).
@@ -255,6 +258,7 @@ impl RequestRecord {
             usage_completion_tokens_present: None,
             modality_metrics: std::collections::BTreeMap::new(),
             modality_labels: std::collections::BTreeMap::new(),
+            cache_evidence: None,
             error: None,
             partial: false,
         }
@@ -315,6 +319,7 @@ impl RequestRecord {
             usage_completion_tokens_present: None,
             modality_metrics: std::collections::BTreeMap::new(),
             modality_labels: std::collections::BTreeMap::new(),
+            cache_evidence: None,
             error: Some(error),
             partial: false,
         }

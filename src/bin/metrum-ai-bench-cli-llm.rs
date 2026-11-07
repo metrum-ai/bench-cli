@@ -270,6 +270,7 @@ struct StreamMetrics {
     usage_presence: (bool, bool),
     nonstream_answer_completed: Option<bool>,
     reasoning_tokens: Option<u64>,
+    cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence,
     output_error: Option<metrum_ai_bench::error::RequestError>,
     finish_reason: Option<String>,
     prompt_words: usize,
@@ -399,6 +400,7 @@ async fn make_request(
             ),
             nonstream_answer_completed: None,
             reasoning_tokens: stream.reasoning_tokens,
+            cached_tokens: stream.cached_tokens,
             output_error,
             finish_reason: stream.finish_reason,
             prompt_words: prompt_word_count,
@@ -512,6 +514,9 @@ async fn make_request(
                 metrum_ai_bench::chat_stream::response_has_visible_output(&json_resp),
             ),
             reasoning_tokens,
+            cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence::from_usage(
+                json_resp.get("usage").unwrap_or(&Value::Null),
+            ),
             output_error: None,
             finish_reason: None,
             prompt_words: prompt_word_count,
@@ -1453,6 +1458,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     rec.usage_missing = usage_missing;
                     rec.usage_prompt_tokens_present = Some(sm.usage_presence.0);
                     rec.usage_completion_tokens_present = Some(sm.usage_presence.1);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then_some(sm.cached_tokens);
                     // Carry stream metrics fields via modality_metrics for console path.
                     rec.modality_metrics
                         .insert("prompt_words".into(), sm.prompt_words as f64);
@@ -1481,9 +1488,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then(Default::default);
                     if let Some(failure) =
                         e.downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
                     {
+                        if rec.cache_evidence.is_some() {
+                            rec.cache_evidence = Some(failure.usage.cached_tokens.as_ref().clone());
+                        }
                         rec.prompt_tokens = failure.usage.prompt_tokens;
                         rec.completion_tokens = failure.usage.completion_tokens;
                         rec.total_tokens = failure.usage.total_tokens;
@@ -1726,6 +1738,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+    if matches!(args.mode, MetrumAiBenchLLMMode::Chat) {
+        eprint!(
+            "{}",
+            metrum_ai_bench::cache_report::format_overview(
+                &metrum_ai_bench::cache_report::request_cohorts(&records)
+            )
+        );
+    }
     let truncated = run_summary.ttft_coverage.reasoning_truncated;
     if truncated > 0 {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
