@@ -70,6 +70,40 @@ a pre-tag pass. The separate wrapper integration case needs wrapper owner
 signoff. See [RELEASING.md](RELEASING.md) for the release workflow and gate
 responsibilities.
 
+## Generated-input structural and runtime binding
+
+A structural-only generated-input declaration is not final preflight or evidence
+of measured requests. `STRUCTURAL-PREFLIGHT-OK` validates fixed recipes and
+available dependency/provenance pins; it never invents future output hashes.
+The supported backend is the verified same-source/version shipped prompts CLI
+with explicit local JSONL, fixed configuration and seed, plus pinned tokenizer
+and template dependencies. Arbitrary commands and moving remote lookups are
+not supported.
+
+Before workload issuance, generate independently in fresh owned directories,
+compare actual prompt bytes, bind their hashes into concrete runtime manifests,
+and apply every original concrete/domain validator. Preserve the structural
+parent, both generations, commands, logs and binding receipts. Source/config/seed
+drift, orphan runtime entries, output substitutions and mismatches must prevent
+measured launch. Typed failures retain unknown counts rather than inventing zeroes.
+Reports re-verify runtime bindings and record actual/re-derived input hashes.
+
+L1 also selects prompts internally. Its frozen declaration preserves selector
+seed 7 separately from workload seed 42. Certification selection requires local
+JSONL and an offline allowlist environment without ambient credentials, proxies
+or exporter settings. A fixed boundary helper compares the original selection
+with independent re-derivation before the measured CLI starts. L1 remains
+structurally labeled during offline preflight; `inputs-ready` is emitted only
+after actual binding at that internal boundary. Ordinary non-certification
+local-smoke behavior and all original workload assertions/thresholds remain unchanged.
+
+Freeze interpreted and compiled harness inputs, including xtask Rust sources,
+its external module, Cargo manifests/locks/alias configuration and checked-in
+toolchain inputs. Local functional probes and synthetic controls validate the
+tooling only; they do not replace workflow-origin measured artifacts or real
+case preflight. See the [certification tooling guide](../scripts/validation/cert/README.md)
+for freezer/launcher details and evidence layout.
+
 ## Frozen selection and qualification
 
 The catalog marks every active case `core` or `extended`. Core includes the A/B
