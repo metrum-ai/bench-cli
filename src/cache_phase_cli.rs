@@ -185,7 +185,7 @@ impl PhaseMetricPlan {
         };
         match (build(before, issued), build(after, drained)) {
             (Some(a), Some(b)) => {
-                json!({"schema_version":"cache-phase-analysis.v1","delta":per_series_deltas(&a,&b),"physical_cache_state":"unknown","sample_freshness":"unknown","workload_exclusivity":"unknown","settle_ms":self.settle_ms})
+                json!({"schema_version":"cache-phase-analysis.v1","delta":per_series_deltas(&a,&b),"histograms":crate::cache_histogram::histogram_windows(&a,&b,&std::collections::BTreeMap::new()),"histogram_layout_evidence":"not_declared; complete distributions and quantiles not certified","physical_cache_state":"unknown","sample_freshness":"unknown","workload_exclusivity":"unknown","settle_ms":self.settle_ms})
             }
             _ => {
                 json!({"schema_version":"cache-phase-analysis.v1","unknown":"capture_unavailable","physical_cache_state":"unknown"})

@@ -96,7 +96,26 @@ conditional endpoint differences, not benchmark-attributed hit ratios. No worker
 partition is inferred for aggregate hit rates. Core record versions and strategic
 CSV column layout remain unchanged.
 
+## Histogram component windows
+
+`cache_histogram::histogram_windows` reuses the validated per-series endpoint
+window. Complete private worker/other-label groups stay separate. A caller must
+explicitly declare the exact bucket layout; it is never inferred from whichever
+buckets happen to be present. The checker requires identical bucket identities,
+matching count/sum components, cumulative baseline/end/delta buckets and an
+infinite bucket equal to count. Missing/invalid components, changed epoch/layout,
+contradictions or absent layout declarations produce Unknown and no complete
+component result. Count and parent-unit sum remain distinct; no quantile,
+transfer bandwidth, mean of worker distributions or tier sum is calculated.
+
+This validates an **explicit declared layout and endpoint component window**,
+not the full executable's histogram contract, sample freshness or manager
+continuity. The CLI has no inferred layout declaration: observed histogram
+groups therefore retain `layout_not_declared` and distribution validation remains
+unverified. Even a successful library check does not independently attest the
+operator's layout declaration or physical tier behavior.
+
 Remaining work: captured source freshness/continuity/contamination evidence,
-histogram family/transfer-window checks and final study exports.
+source-specific transfer attribution and final study exports.
 Synthetic fixtures establish arithmetic contracts, not live exporter compatibility,
 cache state, tier participation or performance.
