@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Metrum AI, Inc. -->
+<!-- Copyright (c) 2026 Metrum AI, Inc. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Changelog
@@ -11,6 +11,32 @@
   checksums, and extend fingerprint-first prescribed replay to strategic prompts.
   Fix sequence logging to avoid applying original source indices twice after a
   short prescription reorders the pool. No physical hit/offload claim (#414).
+
+- Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
+  recorded-history sessions, with sequential turns and no overlapping duplicate
+  session when cycling a small pool. Rate-sweep combinations fail before traffic;
+  request budgets can end at partial sessions (#413, scheduling slice).
+
+- Add opt-in trusted strategic stage reset hooks after warmup drain and before
+  measurement, with exact tier acknowledgement, readiness, total deadlines and
+  optional settle delay/pre-warmup reset. Record non-sensitive acknowledgements
+  and lifecycle timestamps; failures abort measured issuance (#413). Unix hooks
+  run via `/bin/sh -c` in an isolated process group, terminated on cancellation;
+  failures include bounded, escaped stderr diagnostics. Reject settle delays at
+  least as long as the total deadline. Hook stderr must not contain secrets.
+
+- Add opt-in strategic `--session-request-roles` for recorded-history request
+  boundaries, preserving original message indices and legacy defaults. Record
+  boundary/history policy in summary config (#413, first implementation slice).
+
+- Bound warmup/measured prefix validation using a compressed token trie and a
+  default 1,000-pair evidence cap with an explicit-cap helper. Preserve exact
+  maxima, duplicate multiplicity, default thresholds and Unknown handling.
+  Extend unreleased `kv-token-overlap.v1` in place with
+  `pairs_over_threshold_total: Option<u64>` (null on Unknown) and
+  `pairs_over_threshold_truncated: bool`; existing function signatures remain
+  unchanged. Stored pairs now use deterministic measured/token-lexicographic
+  order. Pair-list length alone must not determine pass/fail.
 
 ## Unreleased
 

@@ -30,6 +30,7 @@ exclude = [
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",
     "test-data/endpoints-4servers.yaml",
+    "test-data/public-datasets/**",
 ]
 
 [lib]
@@ -38,7 +39,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-tokenizer = ["dep:tokenizers"]
+tokenizer = ["dep:tokenizers", "dep:minijinja"]
 otlp = []
 
 # Primary binary names (preferred).
@@ -92,16 +93,21 @@ tokio = { version = "1.53.1", features = ["full"] }
 anyhow = "1.0.104"
 base64 = "0.23.1"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
-jsonschema = { version = "0.59.0", default-features = false }
+jsonschema = { version = "0.60.2", default-features = false }
 uuid = { version = "1.26.1", features = ["v4"] }
 tempfile = "3.27.0"
-parquet = { version = "60.0.0", default-features = false, features = ["zstd", "snap"] }
+parquet = { version = "60.0.0", default-features = false, features = ["zstd", "snap", "json"] }
 tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
 pin-project-lite = "0.2"
 regex = { version = "1.13.1", features = ["std"] }
 bytes = "1.12.1"
+minijinja = { version = "3.0.5", default-features = false, features = ["builtins", "json", "fuel", "serde"], optional = true }
+zip = { version = "9.4.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30.1", default-features = false, features = ["signal", "process"] }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
