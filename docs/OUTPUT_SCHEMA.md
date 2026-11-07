@@ -14,6 +14,19 @@ never becomes zero. Physical cache state, sample freshness and exclusivity remai
 Unknown, not implied by numeric coverage. Core versions and CSV columns are
 unchanged. See [CACHE_PHASES.md](CACHE_PHASES.md).
 
+## Opt-in native cache metric discovery
+
+`config.native_cache_metric_discovery` is present only when explicitly requested.
+`cache-metric-capture.v1` contains source/profile reference, operator-declared
+version evidence, coded failures, missing families and redacted observations.
+`cache-metric-capabilities.v1` distinguishes expected descriptors from actual
+observations; neither proves the running executable or physical tier behavior.
+Private endpoint URLs, full labels, invalid raw values and token bodies are not
+projected. IDs are snapshot-local, not cross-snapshot worker identities.
+Startup wall-clock bounds do not establish phase deltas or sample freshness;
+no counter sum, hit-rate ratio, histogram quantile or physical-state claim is
+inferred. See [CACHE_METRIC_PROFILES.md](CACHE_METRIC_PROFILES.md).
+
 ## Cached-token evidence extension (`cached-token-evidence.v1`)
 
 Chat request `cache_evidence` is an optional, separately versioned object retaining

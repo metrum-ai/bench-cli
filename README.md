@@ -470,6 +470,7 @@ Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
 [cache policy/order contracts](docs/CACHE_WORKLOADS.md),
 [measured native metric windows](docs/CACHE_PHASES.md),
+[native cache metric profiles](docs/CACHE_METRIC_PROFILES.md),
 [session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
 [sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
 [trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),

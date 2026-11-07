@@ -208,6 +208,30 @@ command checker. It uses the mock server that the checker starts.
 curl --fail --silent "$MOCK_URL/v1/models" | grep -q 'metrum-ai-bench-cli-mock'
 ```
 
+## PL-KV-01/04: source-stage provenance and evidence boundary
+
+The prompt library remains optional suffix material; public document/trace sources
+are not required to depend on it. Legacy `Vec<String>` loading and existing mix
+selection remain unchanged. Legacy ordinal/repeat/supplied-target provenance is
+not, by itself, a cross-source rights or rendered-cache certificate.
+
+Use the [generic dataset manifest](PUBLIC_DATASETS.md) and
+[source-stage consolidation](VALIDATION_CONSOLIDATION.md) for explicit revision,
+file checksum/size, transformation, selected-row/content and rights evidence.
+Known identical text at distinct rows must remain distinguishable from distinct
+questions sharing a source document. Declared totals, observed viewer subsets,
+selected-file recounts and whole-corpus counts are separate claims; unavailable
+metadata is Unknown, never zero. Historical library inventory numbers must not be
+advertised as a fresh source-file recount or current corpus certificate.
+
+For document profile jobs, [selected target summaries](PUBLIC_DATASET_CLI.md)
+record requested output-budget and document-group-size distributions without row
+or group identities. These declarations are not observed generated-output tokens,
+issued-wire proof, scheduling-order fidelity or physical cache evidence. Actual
+rendered token distributions still require the pinned tokenizer/template validator;
+nonce/history/runtime changes require fresh final validation. Small first-fit or
+convenience samples do not establish corpus percentiles or privacy clearance.
+
 ## Failures
 
 If selection fails, Metrum AI Bench exits nonzero without writing `--output`,
