@@ -848,6 +848,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // #313: prescribed-sequence replay (converter compensation) reorders the
     // pool by content fingerprint and skips the seeded shuffle; the run
     // order is never silently substituted.
+    // Replay logging must resolve source indices against the original pool,
+    // not against the expanded/reordered issuance pool (short prescriptions and
+    // repeated source indices can otherwise double-map or invent new indices).
+    let sequence_log_source = (args.prompt_sequence.is_some()
+        && args.prompt_sequence_log.is_some())
+    .then(|| prompts.clone());
     let prescribed_order = match &args.prompt_sequence {
         Some(path) => {
             let entries = metrum_ai_bench::prompt_sequence::load_prescribed_entries(
@@ -991,12 +997,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(path) = &args.prompt_sequence_log {
         metrum_ai_bench::prompt_sequence::write_sequence_log(
             std::path::Path::new(path),
-            &prompts,
+            sequence_log_source.as_deref().unwrap_or(&prompts),
             u64::from(args.num_requests),
             u64::from(concurrency_limit as u32),
-            // The pool already has its effective prescribed/shuffled order.
-            // Applying original pool indices again can double-map or index past it.
-            None,
+            prescribed_order.as_deref(),
         )
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
     }
