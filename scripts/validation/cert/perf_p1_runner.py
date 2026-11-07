@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 
+import case_dispatch
 import l1_runner
 import manifest_tool
 import perf_baseline
@@ -23,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    target = os.environ.get('CERT_CASE_ID')
+    if target is not None and target not in case_dispatch.RUNNERS['perf_p1_runner.py']:
+        parser.error(f'unknown CERT_CASE_ID {target!r} for perf_p1_runner.py')
     for key in ('out', 'candidate', 'baseline', 'manifest', 'telemetry'):
         parser.add_argument('--' + key, type=Path, required=True)
     for key in ('sha', 'model', 'revision', 'image', 'start-utc', 'owner', 'evidence-link'):
@@ -130,13 +134,17 @@ def main():
         ('BC-TELEM-001', telemetry_pass, {'tool_points': 12, 'min_device_samples_per_point': 2,
                                          'device_identity_matches': True, 'parser_exit': 0}),
     ):
+        if os.environ.get('CERT_CASE_ID') not in (None, case):
+            continue
         record = {'ID': case, 'result': 'PASS' if passed else 'FAIL', 'candidate_sha': args.sha,
                   'attempt': int(os.environ['CERT_ATTEMPT']), 'start_utc': args.start_utc, 'end_utc': end,
                   'owner': args.owner, 'evidence_link': args.evidence_link, 'gpu_class': gpu[0].strip(),
                   'driver': gpu[1].strip() if len(gpu) > 1 else '', 'versions': versions,
                   'observed_values': observed, 'thresholds': thresholds, 'evidence_paths': files}
         (evidence / f'provisional-{case}.json').write_text(json.dumps(record, indent=2, allow_nan=False) + '\n', encoding='utf-8')
-    return 0 if perf_pass and telemetry_pass else 1
+    target = os.environ.get('CERT_CASE_ID')
+    selected_pass = {'BC-PERF-001': perf_pass, 'BC-TELEM-001': telemetry_pass}.get(target, perf_pass and telemetry_pass)
+    return 0 if selected_pass else 1
 
 
 if __name__ == '__main__':
