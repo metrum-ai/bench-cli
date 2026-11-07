@@ -3,6 +3,27 @@
 
 # JSONL output schema
 
+## Opt-in native cache metric discovery
+
+`config.native_cache_metric_discovery` is present only when explicitly requested.
+`cache-metric-capture.v1` contains source/profile reference, operator-declared
+version evidence, coded failures, missing families and redacted observations.
+`cache-metric-capabilities.v1` distinguishes expected descriptors from actual
+observations; neither proves the running executable or physical tier behavior.
+Private endpoint URLs, full labels, invalid raw values and token bodies are not
+projected. IDs are snapshot-local, not cross-snapshot worker identities.
+Startup wall-clock bounds do not establish phase deltas or sample freshness;
+no counter sum, hit-rate ratio, histogram quantile or physical-state claim is
+inferred. See [CACHE_METRIC_PROFILES.md](CACHE_METRIC_PROFILES.md).
+
+## Cached-token evidence extension (`cached-token-evidence.v1`)
+
+Chat request `cache_evidence` is an optional, separately versioned object retaining
+reported counters, source/units, null/missing state and contradiction flags. Core
+schema IDs remain readable; an absent extension is Unknown. Strategic CSV encodes
+the object as a JSON cell and defaults old missing columns to absent. See
+[CACHED_TOKENS.md](CACHED_TOKENS.md) for exact inference and timing-population rules.
+
 ## Opt-in cache workload extension (`cache-workload.v1`)
 
 LLM request `modality_labels.cache_workload_version` and `body_sha256` bind

@@ -5,6 +5,19 @@
 
 ## Unreleased (v1.9.0)
 
+- Add source-pinned native cache metric profiles and opt-in bounded startup
+  discovery for vLLM APC/offload, SGLang, LMCache, legacy KVBM and a narrow
+  TRT-LLM collector slice. Preserve units, missing/invalid evidence, histogram
+  components and source-specific qualifications. Export redacted capability and
+  snapshot metadata without private labels or endpoint URLs. Discovery is not
+  phase sampling, executable-version attestation or physical-tier proof (#417).
+
+- Retain versioned request cached-token evidence for unary/SSE chat, including
+  usage-only final chunks and usage preceding a stream error. Distinguish missing,
+  null and reported zero; keep invalid/contradictory reports Unknown. Add measured
+  cohort aggregation with error/warmup exclusions and separate headline timing
+  provenance/visible-answer timing, without physical-tier attribution (#419).
+
 - Add opt-in shared chat cache policy, effective prompt order and post-transform
   wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
   Preserve historical defaults, retain request/run nonce scope and digest-list

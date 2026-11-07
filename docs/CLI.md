@@ -65,6 +65,17 @@ Options:
       --version-only
           Print version information and exit
 
+      --cache-metrics-url <CACHE_METRICS_URL>
+          Opt-in native metric discovery endpoint; unauthenticated bounded GET outside measurement
+
+      --cache-metrics-profile <CACHE_METRICS_PROFILE>
+          Explicit source-pinned native profile; not backend autodetection
+
+          [possible values: vllm-apc, vllm-external, vllm-offload, sglang, lmcache, dynamo-kvbm, trt-llm]
+
+      --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
+          Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
+
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
 
@@ -1256,6 +1267,17 @@ Usage: metrum-ai-bench-cli-strategic [OPTIONS]
 Options:
       --version-only
           Print version information and exit
+
+      --cache-metrics-url <CACHE_METRICS_URL>
+          Opt-in native metric discovery endpoint; unauthenticated bounded GET outside measurement
+
+      --cache-metrics-profile <CACHE_METRICS_PROFILE>
+          Explicit source-pinned native profile; not backend autodetection
+
+          [possible values: vllm-apc, vllm-external, vllm-offload, sglang, lmcache, dynamo-kvbm, trt-llm]
+
+      --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
+          Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
 
       --url <URL>
 

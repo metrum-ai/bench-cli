@@ -48,6 +48,8 @@ impl std::fmt::Display for MetrumAiBenchLLMMode {
 struct Args {
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
+    #[command(flatten)]
+    native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
 
     #[arg(
         long,
@@ -268,6 +270,7 @@ struct StreamMetrics {
     usage_presence: (bool, bool),
     nonstream_answer_completed: Option<bool>,
     reasoning_tokens: Option<u64>,
+    cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence,
     output_error: Option<metrum_ai_bench::error::RequestError>,
     finish_reason: Option<String>,
     prompt_words: usize,
@@ -397,6 +400,7 @@ async fn make_request(
             ),
             nonstream_answer_completed: None,
             reasoning_tokens: stream.reasoning_tokens,
+            cached_tokens: stream.cached_tokens,
             output_error,
             finish_reason: stream.finish_reason,
             prompt_words: prompt_word_count,
@@ -510,6 +514,9 @@ async fn make_request(
                 metrum_ai_bench::chat_stream::response_has_visible_output(&json_resp),
             ),
             reasoning_tokens,
+            cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence::from_usage(
+                json_resp.get("usage").unwrap_or(&Value::Null),
+            ),
             output_error: None,
             finish_reason: None,
             prompt_words: prompt_word_count,
@@ -612,6 +619,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut args = Args::parse();
+    args.native_metrics.validate()?;
     if args.cache_policy != CachePolicy::LegacyUnspecified
         && (!matches!(args.mode, MetrumAiBenchLLMMode::Chat) || args.common.unique_prompts)
     {
@@ -1000,6 +1008,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
     }
 
+    // Discovery is opt-in and outside the measurement clock, not phase evidence.
+    let native_metrics = args.native_metrics.capture_if_enabled().await?;
     let mut handles = vec![];
 
     // Telemetry starts before the run clock so source probes are not timed.
@@ -1448,6 +1458,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     rec.usage_missing = usage_missing;
                     rec.usage_prompt_tokens_present = Some(sm.usage_presence.0);
                     rec.usage_completion_tokens_present = Some(sm.usage_presence.1);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then_some(sm.cached_tokens);
                     // Carry stream metrics fields via modality_metrics for console path.
                     rec.modality_metrics
                         .insert("prompt_words".into(), sm.prompt_words as f64);
@@ -1476,9 +1488,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then(Default::default);
                     if let Some(failure) =
                         e.downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
                     {
+                        if rec.cache_evidence.is_some() {
+                            rec.cache_evidence = Some(failure.usage.cached_tokens.as_ref().clone());
+                        }
                         rec.prompt_tokens = failure.usage.prompt_tokens;
                         rec.completion_tokens = failure.usage.completion_tokens;
                         rec.total_tokens = failure.usage.total_tokens;
@@ -1630,6 +1647,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if let Some(capture) = &native_metrics {
+                map.insert("native_cache_metric_discovery".into(), serde_json::to_value(capture)?);
+            }
             if cache_workload_enabled {
                 map.insert("cache_workload".into(), json!({
                     "schema_version": "cache-workload.v1", "policy": args.cache_policy,
@@ -1718,6 +1738,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+    if matches!(args.mode, MetrumAiBenchLLMMode::Chat) {
+        eprint!(
+            "{}",
+            metrum_ai_bench::cache_report::format_overview(
+                &metrum_ai_bench::cache_report::request_cohorts(&records)
+            )
+        );
+    }
     let truncated = run_summary.ttft_coverage.reasoning_truncated;
     if truncated > 0 {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
