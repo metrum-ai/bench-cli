@@ -5,6 +5,8 @@ pub mod archive_inputs;
 pub mod args_common;
 pub mod asr;
 pub mod cache_cohorts;
+pub mod cache_metric_capture;
+pub mod cache_metrics;
 pub mod cache_report;
 pub mod cache_workload;
 pub mod cached_tokens;

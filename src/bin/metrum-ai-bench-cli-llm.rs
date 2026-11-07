@@ -48,6 +48,8 @@ impl std::fmt::Display for MetrumAiBenchLLMMode {
 struct Args {
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
+    #[command(flatten)]
+    native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
 
     #[arg(
         long,
@@ -617,6 +619,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut args = Args::parse();
+    args.native_metrics.validate()?;
     if args.cache_policy != CachePolicy::LegacyUnspecified
         && (!matches!(args.mode, MetrumAiBenchLLMMode::Chat) || args.common.unique_prompts)
     {
@@ -1005,6 +1008,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
     }
 
+    // Discovery is opt-in and outside the measurement clock, not phase evidence.
+    let native_metrics = args.native_metrics.capture_if_enabled().await?;
     let mut handles = vec![];
 
     // Telemetry starts before the run clock so source probes are not timed.
@@ -1642,6 +1647,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if let Some(capture) = &native_metrics {
+                map.insert("native_cache_metric_discovery".into(), serde_json::to_value(capture)?);
+            }
             if cache_workload_enabled {
                 map.insert("cache_workload".into(), json!({
                     "schema_version": "cache-workload.v1", "policy": args.cache_policy,
