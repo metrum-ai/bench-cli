@@ -29,6 +29,7 @@ pub mod modeled_tiers;
 pub mod prefix_families;
 pub mod prefix_validation;
 pub mod preflight;
+pub mod pressure_families;
 pub mod pressure_inputs;
 pub mod prompt_inputs;
 pub mod prompt_library;
