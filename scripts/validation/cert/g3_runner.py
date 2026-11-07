@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+import case_dispatch
 import g3_checks
 import g6_counter_runner
 import l1_runner
@@ -162,6 +163,8 @@ def main():
     # Both ordering cells must satisfy the window contract. Goodput is separately
     # evaluated against the retained error-last case; no missing population passes.
     for case in ("BC-GPU-008", "BC-GPU-009"):
+        if not case_dispatch.selected(case):
+            continue
         try:
             if case == "BC-GPU-008":
                 if any("error" in outcomes[order] for order in ("control", "error-first", "error-last")):
@@ -189,7 +192,8 @@ def main():
                   "e2e_slo_rule": "same-cohort answered median for BC-GPU-009", "server_kill_restart_required": True}, "evidence_paths": files}
         result_writer.write_record(args.out, record)
         outcomes[case] = passed
-    return 0 if outcomes["BC-GPU-008"] and outcomes["BC-GPU-009"] else 1
+    sel = [c for c in ('BC-GPU-008', 'BC-GPU-009') if case_dispatch.selected(c)]
+    return 0 if sel and all(outcomes[c] is True for c in sel) else 1
 
 
 if __name__ == "__main__":

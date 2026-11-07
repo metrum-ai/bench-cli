@@ -130,6 +130,26 @@ class PublicCatalogTests(unittest.TestCase):
         unmapped = [path for path in paths if path.endswith('.rs') and path not in select.PATH_AREAS]
         self.assertEqual([], unmapped, f'map newly tracked source paths explicitly: {unmapped}')
 
+    def test_contributor_guide_maps_as_docs_without_masking_measurement_changes(self):
+        path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
+        catalog = validator.load_catalog(path)
+        history = [{'release': 'prior', 'ran': sorted(catalog)}]
+        def selected(paths):
+            return select.make_selection(catalog, select.catalog_hash(path), 'a' * 40,
+                                         .3, 3, paths, history)
+        guide = selected(['CONTRIBUTING.md'])
+        self.assertFalse(guide['unmapped_files'])
+        self.assertEqual(['CI', 'PACK', 'POST', 'REL'], guide['changed_areas'])
+        self.assertEqual(selected(['README.md'])['selected'], guide['selected'])
+        self.assertLess(guide['selected_count'], guide['eligible_count'])
+        measurement = selected(['src/strategic.rs'])
+        mixed = selected(['CONTRIBUTING.md', 'src/strategic.rs'])
+        self.assertFalse(mixed['unmapped_files'])
+        self.assertTrue(set(measurement['selected']) <= set(mixed['selected']))
+        unknown = selected(['unknown-contributor-config'])
+        self.assertEqual(['unknown-contributor-config'], unknown['unmapped_files'])
+        self.assertEqual(unknown['eligible_count'], unknown['selected_count'])
+
     def test_docs_plus_changelog_is_sampled_not_full(self):
         path = Path(__file__).resolve().parents[3] / 'docs' / 'RELEASE_CERTIFICATION_CATALOG.csv'
         catalog = validator.load_catalog(path)

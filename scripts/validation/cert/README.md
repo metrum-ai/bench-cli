@@ -21,6 +21,133 @@ name; it does not compile platform binaries or run a release container. The
 weekly job additionally checks the actual published archives against their tag.
 `check_live_docs.py` crawls only links within the published documentation tree.
 
+## Execution-time records and freeze checks
+
+The harness requires Python 3.12 or newer. The shared result writer atomically
+publishes a case record, evidence SHA256 hashes, candidate identity, typed
+infrastructure history and conservative carry-over eligibility. The shared lane
+entry exports frozen manifest and binary locations so their hashes are captured
+at write time, including every nested input pin for the selected lane.
+Interrupted cases retain null unknown request/error counts. Missing or changed
+inputs prevent PASS; failed attempts retain actual/null hashes with explicit
+`input_integrity_errors` rather than losing their failure record.
+`execution_evidence.py RUN_DIRECTORY` checks retained output hashes and derives
+JSON report/sheet rows; it never constructs a PASS for a missing result. Full
+catalog acceptance still requires `validate_results.py`.
+
+Append phase observations at the actual event, never reconstruct them later:
+
+```sh
+python3 scripts/validation/cert/execution_evidence.py RUN_DIRECTORY --case BC-GPU-001 --phase inputs-ready
+```
+
+Supported append-only events are `rent`, `ssh-ready`, `inputs-ready`,
+`server-ready`, `first-request`, `last-request`, and `record-validated`.
+Provisioning events belong to the external operator. Shared lane lifecycle code
+records input/server readiness. At case-record finalization the writer derives
+first/last request timestamps from actual request `started_at`/`completed_at`
+fields or proxy send/complete observations (the proxy retains UTC alongside its
+monotonic clock). It appends those observed UTC values, not finalization time;
+missing clocks remain null. Per-case launch validation appends record validation.
+Never substitute runner start/end for actual first/last request times.
+
+`case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
+candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
+and content pin, all-smi executable pin, every input pin and each launcher pin.
+Tokenizer validation probes the separately pinned **validation-only build**
+against a one-request loopback CPU fixture with no server usage, never the
+measured candidate. Both builds must be release builds of the same frozen
+commit: measured features are `otlp` only, validation-only features are
+`otlp,tokenizer`. The probe inherits no API/exporter credentials and never
+becomes GPU case evidence or a request-phase measurement. Temporary files and
+the fixture server are cleaned up on success or failure. Preflight allocates
+no hardware or model-serving process.
+
+The manifest binds `candidate_sha`, role-tagged `candidate` and
+`tokenizer_validation` artifacts, the execution-time `build_receipt`, and the
+frozen `lane_manifest`. Build and log hashes are rechecked before launch.
+Secondary CLI pins must belong to the measured artifact registry; a validation
+binary (including renamed copies) cannot appear in measured argv/config.
+BC-GPU-010 is currently blocked: its measured positive-fallback assertion is
+incompatible with the shipped feature profile and requires explicit gate
+disposition. A successful validation-only probe cannot make that case PASS.
+Other fields include `sut`, `all_smi`, `tokenizer` pins
+(`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
+and `cases`, mapping selected IDs to a pinned `launcher`, a fresh `out`
+directory and literal `command` argv containing that exact `--out` value.
+Each launcher must execute only its named case and retain its own attempt
+record. The launcher rejects reused attempt directories. On failure or an
+interrupt it stops its owned process group and preserves a typed FAIL with null
+unknown counts if the case did not publish a record. Existing records are never
+overwritten: a separate failure sentinel prevents an earlier PASS from masking
+a launcher/cleanup failure. A sibling `OUT-lifecycle` directory retains append-only
+input-ready and record-validated observations. External provisioning events must
+still be supplied by the operator at their actual source. Launch one case with `--case ID`, or omit `--case` for the whole selected
+set. Pins are rechecked before each launch; no shell evaluation is performed.
+
+Before candidate freeze, run `bash scripts/validation/cert/before_freeze.sh SHA`
+in a clean candidate checkout. This combines REL-001 prerelease-classifier tests,
+the repository documentation audit and CLI/schema/export-surface tests. It is a
+pre-freeze gate, not a substitute for final pre-tag certification. Existing
+performance gate configurations are unchanged.
+
+## Freeze and launch individual selected cases
+
+After the actual candidate freeze and matching source-version update, dispatch
+`pretag-certification.yml` on that frozen public ref with candidate_sha and
+version inputs. Do not create a release/tag or publish. After the complete
+workflow succeeds, run `freeze_builds.py --repo CLEAN_CHECKOUT --candidate-sha SHA
+--version VERSION --workflow-run-id RUN_ID --out NEW_DIR`. It requires the
+workflow run's head to match the frozen source, successful workflow_dispatch
+status and the exact pretag workflow/repository/artifact. It uses
+`gh run download` to fetch `pretag-release-x86_64-unknown-linux-gnu`, verifies the
+workflow-recorded archive checksum and safely copies measured Cargo binaries.
+Local measured compilation is not an option. The helper alone uses native
+`cargo build --locked --release --features otlp,tokenizer` from the same source.
+
+It emits `builds.json` only after artifact verification and validation build
+succeed, binding run/artifact API responses, download log, archive/checksum,
+per-binary hashes, source/features/origin and compiler log. Partial downloads
+and logs remain on failure. Freeze/preflight/direct launch revalidate those
+pins and each measured binary against the verified archive. Synthetic API and
+compiler fixtures in unit tests are not actual workflow or case evidence.
+
+`freeze_case.py --build-receipt NEW_DIR/builds.json` creates an exclusive
+(never overwritten) single-case manifest from that receipt, selector output,
+catalog, validated lane manifest, candidate/baseline binaries, SUT, tokenizer
+pin and all-smi pin. It verifies the existing lane
+contract offline, freezes every nested lane input pin and all transitive harness
+source files, then runs the per-case offline preflight. Additional data files
+can be declared with repeated `--input` arguments. Use `--help` for required
+paths; missing input files fail before any execution.
+
+The generated command uses `case_entry.sh`, which selects exactly one named
+case in its existing lane. Shared shell dispatch suppresses sibling runners;
+R, G3 and P1 support selected-only records. BC-HW-001 still executes all three
+required reasoning prerequisites on its named class and cannot pass just because
+an unrelated reasoning case did. Their prerequisite observations remain evidence,
+not extra case PASS records. P1 and R reject an unknown `CERT_CASE_ID` before
+argument/input processing or workloads; an unset variable retains bulk mode.
+G3's exit status requires a nonempty selected case set with every case boolean
+exactly true; diagnostic cell dictionaries do not count as case verdicts.
+No performance gate thresholds are changed.
+
+`selected_set.py --selection SELECTION --catalog CATALOG --index INDEX --preflight`
+is the complete-set preflight entry. Omit `--preflight` only for an authorized
+execution. The index contains `candidate_sha`, `selection_sha256`,
+`catalog_sha256`, and ordered `manifests` entries (`path`, `sha256`). Every case
+manifest must have exactly one case; the set must exactly equal the selected
+RC-GPU IDs, without missing/duplicate/extra IDs. All manifests are verified
+before any launch and rechecked at each execution boundary. The order in the
+index is the execution order, so dependencies must precede their barriers.
+
+BC-COMP-001, BC-OPS-001 and externally signed BC-INTEG-001 require an explicit
+pinned command via `freeze_case.py --command-json`: they are respectively a
+post-measurement barrier, external resource cleanup and externally reviewed
+integration evidence, not independent model-load commands. Their required source
+results/sign-off must exist before freezing those case inputs. Do not invent
+future hashes, bypass sign-off, or interpret collection-only output as PASS.
+
 ## GPU development runners
 
 L1, R and G6 have been exercised on a real NVIDIA GPU. Selected cases in D,
@@ -59,7 +186,9 @@ missing source populations fail. G3 uses the hidden certification-only
 `--cert-e2e-median-slo` option to calculate an exploratory answered-cohort e2e
 median for BC-GPU-009. It requires at least two distinct answered latencies and
 zero scheduling delay, and is not a prospective service SLO. G4 requires a pinned tokenizer.json and a
-candidate built with tokenizer support for 010; 011 also pins the VLM binary,
+separate validation-only tokenizer tool. Case 010 remains blocked until the
+shipped-profile measured fallback gate has an explicit disposition; no assertion
+has been relaxed. Case 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct
 `second_port` and `second_proxy_port`, and `--gpu-memory-utilization 0.45` in
@@ -155,7 +284,11 @@ this offline JSON format does not cryptographically establish identity. Raw
 traces, wrapper output and sign-off evidence remain private.
 
 For release evidence, generate and freeze the selection described in
-[the release policy](../../../docs/RELEASE_CERTIFICATION.md). The validator
+[the release policy](../../../docs/RELEASE_CERTIFICATION.md). `CONTRIBUTING.md`
+uses the same documentation areas as `README.md`; combined measurement changes
+still add their own areas. Unknown paths remain listed as unmapped and select
+all extended areas conservatively, rather than silently excluding cases.
+The validator
 requires all selected PR, RC and RC-GPU rows and produces `results.csv` and
 `CERTIFICATION-REPORT.md`, with unselected rows explicitly NOT-SELECTED:
 
