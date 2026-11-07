@@ -24,11 +24,14 @@ class FreezeBuildTests(unittest.TestCase):
                                     version='1.8.1', workflow_run_id=19)
         self.names = ['metrum-ai-bench-cli-llm', 'metrum-ai-bench-cli-strategic']
 
-    def download(self, sha, version, run_id, out):
+    def download(self, sha, version, run_id, out, *, variant=False):
         content = b'#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic workflow measured\nexit 0\n'
-        origin = workflow_evidence(out, sha, version, {name: content for name in self.names}, run_id)
+        if variant:
+            content += b'# synthetic tokenizer feature variant\n'
+        names = ['metrum-ai-bench-cli-llm'] if variant else self.names
+        origin = workflow_evidence(out, sha, version, {name: content for name in names}, run_id, variant=variant)
         paths = {}
-        for name in self.names:
+        for name in names:
             path = out / name
             path.write_bytes(content)
             path.chmod(0o755)
@@ -64,6 +67,20 @@ class FreezeBuildTests(unittest.TestCase):
         self.assertEqual(helper, validation)
         with self.assertRaises(FileExistsError), patch.object(freeze_builds, 'clean_source'):
             freeze_builds.build(self.args)
+
+    def test_variant_is_second_workflow_import_not_second_local_compile(self):
+        self.args.tokenizer_variant = True
+        with patch.object(freeze_builds, 'clean_source'), \
+             patch.object(freeze_builds.pretag_artifact, 'download', side_effect=self.download) as imports, \
+             patch.object(freeze_builds.subprocess, 'run', side_effect=self.compiler) as compile:
+            result = freeze_builds.build(self.args)
+        self.assertEqual(imports.call_count, 2)
+        self.assertEqual(imports.call_args.kwargs, {'variant': True})
+        self.assertEqual(imports.call_args.args[:3], (self.args.candidate_sha, self.args.version, self.args.workflow_run_id))
+        self.assertEqual(compile.call_count, 1)  # Local validation only; never a local measured variant.
+        variant = result['builds']['feature-variant-tokenizer']['binaries']['metrum-ai-bench-cli-llm']
+        self.assertEqual(build_roles.load_variant(self.args.out / 'builds.json', self.args.candidate_sha), variant)
+        self.assertNotEqual(variant['sha256'], result['builds']['validation-only']['binaries']['metrum-ai-bench-cli-llm']['sha256'])
 
     def test_failed_validation_retains_downloads_and_log_without_receipt(self):
         with patch.object(freeze_builds, 'clean_source'), \
