@@ -5,6 +5,15 @@
 
 ## Unreleased (v1.9.0)
 
+- Add opt-in record-bound KV study JSON/CSV/HTML exports, exclusive preflight
+  reservations, request/cache/clock-separated timing tables, scheduling coverage,
+  existing measured native-window and final-wire/policy evidence projections.
+  Keep manifest metadata unverified and physical state Unknown. Repetition
+  prefixes remain unique; conditional paired-run mean TTFT uncertainty reuses
+  whole-run bootstrap statistics, never correlated-turn resampling. Add synthetic
+  HTTP state-machine, reset-failure, unknown-evidence and reconciliation proofs.
+  See [scope and methodology](docs/KV_STUDY_EXPORTS.md).
+
 - Add opt-in measured native cache counter windows to LLM and strategic runs,
   reusing synchronous boundary GETs and preserving full private label identity.
   Await baseline before measured issuance, capture terminal after complete drain

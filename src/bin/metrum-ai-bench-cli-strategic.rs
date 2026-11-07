@@ -3274,7 +3274,8 @@ async fn main() -> Result<()> {
         bail!("OTLP export requires a build with --features otlp");
     }
     if let Some(exports) = study_exports {
-        exports.strategic(&all_records, &study_stage_loads, &phase_reports)?;
+        let runtime = serde_json::json!({"schema_version":"kv-study-runtime-bindings.v1","scope":"actual configuration and public producer evidence; not executable/reset/physical attestation","cache_workload":redacted_config.get("cache_workload"),"warmup":redacted_config.get("warmup"),"warmup_stages":redacted_config.get("warmup_stages"),"stage_resets":redacted_config.get("stage_resets"),"reset_hook_scope":redacted_config.get("stage_hook"),"planned_stage_loads":study_stage_loads,"cap_engagement":"unknown","body_scope":"observed request attempts; not proof of server receipt or all planned issuance"});
+        exports.strategic(&all_records, &study_stage_loads, &phase_reports, &runtime)?;
     }
     if phase_failed {
         bail!("required native phase coverage unavailable");

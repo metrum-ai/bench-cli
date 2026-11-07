@@ -35,7 +35,9 @@ fn seed() -> Value {
 async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_http() {
     let count = Arc::new(AtomicUsize::new(0));
     let hits = count.clone();
-    let app=Router::new().route("/chat/completions",post(move||{let hits=hits.clone();async move {hits.fetch_add(1,Ordering::SeqCst);Json(json!({"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}))}}));
+    let wire_hashes = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let hashes = wire_hashes.clone();
+    let app=Router::new().route("/chat/completions",post(move|body:axum::body::Bytes|{let hits=hits.clone();let hashes=hashes.clone();async move {use sha2::Digest;hashes.lock().unwrap().push(sha2::Sha256::digest(&body).iter().map(|byte|format!("{byte:02x}")).collect::<String>());hits.fetch_add(1,Ordering::SeqCst);Json(json!({"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}))}}));
     let app=app.route("/metrics",get(|headers:axum::http::HeaderMap|async move {
         let after=headers.get("x-metrum-telemetry-boundary").and_then(|h|h.to_str().ok()).is_some_and(|h|h.ends_with("after"));
         format!("# TYPE vllm:prefix_cache_queries_total counter\nvllm:prefix_cache_queries_total{{worker=\"PRIVATE_WORKER\"}} {}\n# TYPE vllm:prefix_cache_hits_total counter\nvllm:prefix_cache_hits_total{{worker=\"PRIVATE_WORKER\"}} {}\n",if after {12}else{10},usize::from(after))
@@ -169,6 +171,20 @@ async fn both_cli_exports_actual_rows_and_refuse_claims_or_overwrites_before_htt
                 let data: Value =
                     serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
                 assert_eq!(data["schema_version"], "kv-study-export.v1");
+                assert_eq!(
+                    data["runtime_bindings"]["schema_version"],
+                    "kv-study-runtime-bindings.v1"
+                );
+                let bodies = data["phases"][0]["observed_final_bodies"]
+                    .as_array()
+                    .unwrap();
+                assert_eq!(bodies.len(), 1);
+                assert_eq!(
+                    bodies[0]["body_sha256"],
+                    wire_hashes.lock().unwrap()[before]
+                );
+                assert_eq!(bodies[0]["policy_effects"]["nonce_added_characters"], 0);
+                assert!(bodies[0]["policy_effects"]["residual_shared_full_blocks"].is_null());
                 if case == 6 {
                     let second: Value = serde_json::from_slice(
                         &std::fs::read(dir.path().join("export.run-0002.study.json")).unwrap(),

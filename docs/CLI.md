@@ -90,6 +90,12 @@ Options:
 
           [default: 0]
 
+      --kv-study-manifest <KV_STUDY_MANIFEST>
+          Opt-in unverified study declaration; measured phases map to planned stages in array order
+
+      --kv-study-prefix <KV_STUDY_PREFIX>
+          New artifact prefix for .study.json/.study.csv/.study.html; never overwrite existing files
+
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
 
@@ -1306,6 +1312,12 @@ Options:
           Opt-in native terminal settling after complete request drain (0..10000 ms)
 
           [default: 0]
+
+      --kv-study-manifest <KV_STUDY_MANIFEST>
+          Opt-in unverified study declaration; measured phases map to planned stages in array order
+
+      --kv-study-prefix <KV_STUDY_PREFIX>
+          New artifact prefix for .study.json/.study.csv/.study.html; never overwrite existing files
 
       --url <URL>
 

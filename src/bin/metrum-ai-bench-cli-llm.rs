@@ -1822,7 +1822,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
     }
     if let Some(exports) = study_exports {
-        exports.requests(&records, phase_analysis.as_slice())?;
+        let runtime = serde_json::json!({"schema_version":"kv-study-runtime-bindings.v1","scope":"actual configuration and public producer evidence; not executable/reset/physical attestation","cache_workload":run_summary.config.as_ref().and_then(|c|c.modality.get("cache_workload")),"effective_max_concurrency":run_summary.config.as_ref().map(|c|c.effective_max_concurrency),"cap_engagement":"unknown","warmup_protocol":"unverified; no generic warmup neutrality inference","body_scope":"observed request attempts; not proof of server receipt or all planned issuance"});
+        exports.requests(&records, phase_analysis.as_slice(), &runtime)?;
     }
     ttft_audit?;
     telemetry_verdict?;

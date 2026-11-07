@@ -5,6 +5,30 @@ use metrum_ai_bench::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+fn assert_export_schema(data: &Value) {
+    let input: Value =
+        serde_json::from_str(include_str!("../schemas/kv-study-report.v1.json")).unwrap();
+    let uri = input["$id"].as_str().unwrap().to_owned();
+    let registry = jsonschema::Registry::new()
+        .add(uri, jsonschema::Resource::from_contents(input))
+        .unwrap()
+        .prepare()
+        .unwrap();
+    let schema: Value =
+        serde_json::from_str(include_str!("../schemas/kv-study-export.v1.json")).unwrap();
+    let validator = jsonschema::options()
+        .with_registry(&registry)
+        .build(&schema)
+        .unwrap();
+    let errors: Vec<_> = validator
+        .iter_errors(data)
+        .map(|e| format!("{}: {e}", e.instance_path()))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let mut stale = data.clone();
+    stale["schema_version"] = json!("kv-study-export.v0");
+    assert!(!validator.is_valid(&stale));
+}
 fn manifest() -> Value {
     let mut runtime = json!({});
     for key in [
@@ -59,6 +83,7 @@ fn all_views_bind_actual_counts_exclude_warmup_errors_and_preserve_null_provenan
     )
     .unwrap();
     let json: Value = serde_json::from_slice(&export.json().unwrap()).unwrap();
+    assert_export_schema(&json);
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/kv-study-report.v1.json")).unwrap();
     assert!(jsonschema::validator_for(&schema)
@@ -178,6 +203,85 @@ fn scheduling_coverage_not_default_zero_and_reuse_kinds_not_equated_with_prefill
     }
 }
 #[test]
+fn final_body_binding_preserves_unknowns_and_rejects_invalid_projection_values() {
+    use metrum_ai_bench::cache_workload::{CachePolicy, PolicyEffects};
+    let mut good = row(true, Some(0), false);
+    good.body_sha256 = Some("b".repeat(64));
+    good.cache_policy_effects =
+        Some(serde_json::to_string(&PolicyEffects::unrendered(CachePolicy::BustRequest)).unwrap());
+    let mut invalid = good.clone();
+    invalid.body_sha256 = Some("PRIVATE_RAW_NOT_A_DIGEST".into());
+    let mut malformed = good.clone();
+    let mut bad: Value =
+        serde_json::from_str(malformed.cache_policy_effects.as_ref().unwrap()).unwrap();
+    bad["nonce_added_tokens"] = json!(0);
+    malformed.cache_policy_effects = Some(serde_json::to_string(&bad).unwrap());
+    let rows = [good, invalid, malformed];
+    let export = StudyExport::bind(
+        StudySeed::parse(&serde_json::to_vec(&manifest()).unwrap()).unwrap(),
+        &BTreeMap::from([(
+            "=cmd<script>alert(1)</script>".into(),
+            PhaseRecords::Strategic(&rows),
+        )]),
+    )
+    .unwrap();
+    let bytes = export.json().unwrap();
+    let data: Value = serde_json::from_slice(&bytes).unwrap();
+    let bodies = &data["phases"][0]["observed_final_bodies"];
+    assert!(bodies[0]["policy_effects"]["nonce_added_tokens"].is_null());
+    assert!(bodies[0]["policy_effects"]["residual_shared_full_blocks"].is_null());
+    assert!(bodies[1]["body_sha256"].is_null() && bodies[1]["policy_effects"].is_null());
+    assert!(bodies[2]["policy_effects"].is_null());
+    assert!(!String::from_utf8(bytes).unwrap().contains("PRIVATE_RAW"));
+}
+#[test]
+fn overflowed_cluster_statistics_remain_unknown_not_serialized_null_confidence() {
+    use metrum_ai_bench::kv_study_comparison::*;
+    let make = |ttft: f64| {
+        let mut record = row(true, Some(0), false);
+        record.latency_s = 1.0e308;
+        record.ttft_s = Some(ttft);
+        record.ttft_visible_answer_s = Some(ttft);
+        StudyExport::bind(
+            StudySeed::parse(&serde_json::to_vec(&manifest()).unwrap()).unwrap(),
+            &BTreeMap::from([(
+                "=cmd<script>alert(1)</script>".into(),
+                PhaseRecords::Strategic(&[record]),
+            )]),
+        )
+        .unwrap()
+    };
+    let b1 = make(0.0);
+    let t1 = make(1.0e308);
+    let b2 = make(0.0);
+    let t2 = make(1.0e308);
+    let pairs = [
+        RunPair {
+            pair_key: "one",
+            baseline: &b1,
+            baseline_phase: 0,
+            treatment: &t1,
+            treatment_phase: 0,
+        },
+        RunPair {
+            pair_key: "two",
+            baseline: &b2,
+            baseline_phase: 0,
+            treatment: &t2,
+            treatment_phase: 0,
+        },
+    ];
+    let data = serde_json::to_value(paired_run_mean_difference(
+        &pairs,
+        StudyClock::VisibleAnswer,
+        Some(&"a".repeat(64)),
+        7,
+    ))
+    .unwrap();
+    assert_eq!(data["unknown"], "nonfinite_run_cluster_statistics");
+    assert!(data["ci95"].is_null() && data["differences"].is_null());
+}
+#[test]
 fn paired_uncertainty_resamples_run_means_not_correlated_turns_and_fails_closed() {
     use metrum_ai_bench::kv_study_comparison::{paired_run_mean_difference, RunPair, StudyClock};
     let build = |value: f64, n: usize| {
@@ -284,6 +388,7 @@ fn paired_uncertainty_resamples_run_means_not_correlated_turns_and_fails_closed(
     let mut view = build(1.0, 1);
     view.add_comparison(comparison).unwrap();
     let json: Value = serde_json::from_slice(&view.json().unwrap()).unwrap();
+    assert_export_schema(&json);
     let bytes = view.csv().unwrap();
     let mut csv = csv::Reader::from_reader(bytes.as_slice());
     let headers = csv.headers().unwrap().clone();

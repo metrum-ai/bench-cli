@@ -111,11 +111,32 @@ pub fn paired_run_mean_difference(
     };
     match evaluate() {
         Ok(values) => {
-            out.included_pairs = values.len();
-            out.independence = "operator_declared_unverified";
-            out.fixed_controls_sha256 = controls_digest.map(str::to_owned);
-            out.differences = Some(DistSummary::from_values(&values));
-            out.ci95 = Some(bootstrap_mean_ci(&values, 0.95, 10_000, seed));
+            let summary = DistSummary::from_values(&values);
+            let ci = bootstrap_mean_ci(&values, 0.95, 10_000, seed);
+            if [
+                summary.min,
+                summary.max,
+                summary.avg,
+                summary.std,
+                summary.mad,
+                summary.p50,
+                summary.p90,
+                summary.p95,
+                summary.p99,
+                ci.low,
+                ci.high,
+            ]
+            .iter()
+            .any(|v| v.is_none_or(|n| !n.is_finite()))
+            {
+                out.unknown = Some("nonfinite_run_cluster_statistics");
+            } else {
+                out.included_pairs = values.len();
+                out.independence = "operator_declared_unverified";
+                out.fixed_controls_sha256 = controls_digest.map(str::to_owned);
+                out.differences = Some(summary);
+                out.ci95 = Some(ci);
+            }
         }
         Err(reason) => out.unknown = Some(reason),
     }

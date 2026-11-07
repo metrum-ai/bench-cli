@@ -84,6 +84,7 @@ PATH_AREAS = {
     'src/kv_study_export.rs': {'*'},
     'src/kv_study_cli.rs': {'*'},
     'src/kv_study_comparison.rs': {'*'},
+    'src/kv_study_bindings.rs': {'*'},
     'src/cache_histogram.rs': {'*'},
     'src/cache_phase_cli.rs': {'*'},
     'src/cache_phase_runtime.rs': {'*'},

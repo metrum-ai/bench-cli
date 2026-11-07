@@ -126,10 +126,16 @@ impl StudyExportPlan {
         self.committed = true;
         Ok(())
     }
-    pub fn requests(mut self, rows: &[RequestRecord], native: &[serde_json::Value]) -> Result<()> {
+    pub fn requests(
+        mut self,
+        rows: &[RequestRecord],
+        native: &[serde_json::Value],
+        runtime: &serde_json::Value,
+    ) -> Result<()> {
         let bindings = BTreeMap::from([(self.ids[0].clone(), PhaseRecords::Requests(rows))]);
         let mut export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
         export.attach_native(native)?;
+        export.attach_runtime(runtime)?;
         self.write(export)
     }
     pub fn strategic(
@@ -137,6 +143,7 @@ impl StudyExportPlan {
         rows: &[BenchRecord],
         stages: &[f64],
         native: &[serde_json::Value],
+        runtime: &serde_json::Value,
     ) -> Result<()> {
         ensure!(
             stages.len() == self.ids.len(),
@@ -158,6 +165,7 @@ impl StudyExportPlan {
         );
         let mut export = StudyExport::bind(self.seed.take().expect("one use seed"), &bindings)?;
         export.attach_native(native)?;
+        export.attach_runtime(runtime)?;
         self.write(export)
     }
 }
