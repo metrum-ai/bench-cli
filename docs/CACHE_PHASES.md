@@ -30,12 +30,29 @@ are not automatically attributable to this workload or a physical cache tier.
 
 Public output excludes source keys, run IDs, epoch strings and raw labels.
 Series IDs are scoped to a report; do not use them as stable worker identities.
-No source/tier/replica sum, ratio, rate, bandwidth, block-to-byte conversion or
-quantile is produced by this first arithmetic slice.
+The per-series slice produces no source/tier/replica sums, bandwidth,
+block-to-byte conversion or quantiles.
 
-Remaining work: explicit compatible denominators, zero/conflicting denominator
-handling, validated non-overlapping worker weighting (not uncontrolled replica
-sums), strict/optional coverage mode, histogram family/transfer-window checks,
-source freshness/contamination evidence and existing-boundary runtime wiring.
+The additional library `cache-phase-rate.v1` unit computes compatible reported
+hit/query ratios over explicit, complete private worker selections. More than
+one worker requires an operator-declared non-overlapping partition; labels are
+never collapsed or inferred to be independent replicas. Unexpected or duplicate
+partitions fail closed. Only matched native Hit/Query cumulative counters with
+identical token/request units qualify; a gauge, miss counter or other denominator
+is not silently substituted.
+
+Weighting is sum(hit deltas)/sum(query deltas), not a mean of worker ratios.
+Sums use exact integer arithmetic and public decimal strings even beyond the
+binary64 integer range; the ratio itself is floating point. Decreases, missing
+pairs, contradictory counters and zero denominator never become a valid zero
+hit rate. Optional mode returns null plus reason; required coverage returns an
+error carrying the diagnostic report. This is counter availability/compatibility
+coverage, not proof of executable version, sample freshness or physical state.
+Shared/unknown traffic yields Unknown. Explicit fixture or operator isolation
+scopes remain labeled; declarations do not independently prove exclusivity.
+
+Remaining work: captured source freshness/continuity/contamination evidence,
+histogram family/transfer-window checks and existing-boundary runtime wiring.
+These arithmetic APIs are not integrated CLI phase sampling or final exports.
 Synthetic fixtures establish arithmetic contracts, not live exporter compatibility,
 cache state, tier participation or performance.

@@ -75,6 +75,7 @@ PATH_AREAS = {
     'src/workload_input.rs': {'*'},
     'src/cache_metrics.rs': {'*'},
     'src/cache_phase.rs': {'*'},
+    'src/cache_rate.rs': {'*'},
     'src/cache_metric_capture.rs': {'*'},
     'src/strategic.rs': {'MODE', 'MATH', 'GPU', 'PERF', 'COMP', 'SCHEMA', 'INTEG'},
     'src/sut.rs': {'HW', 'SCHEMA', 'LIVE', 'GPU', 'INTEG'},

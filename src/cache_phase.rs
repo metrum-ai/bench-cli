@@ -14,7 +14,7 @@ pub enum Edge {
     Before,
     After,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StudyPhase {
     Cold,
