@@ -57,8 +57,9 @@ and content pin, all-smi executable pin, every input pin and each launcher pin.
 Tokenizer validation probes the separately pinned **validation-only build**
 against a one-request loopback CPU fixture with no server usage, never the
 measured candidate. Both builds must be release builds of the same frozen
-commit: measured features are `otlp` only, validation-only features are
-`otlp,tokenizer`. The probe inherits no API/exporter credentials and never
+commit: shipped measured features are `otlp` only, validation-only features are
+`otlp,tokenizer`. The narrowly scoped GPU-010 fallback variant below is separate
+from both roles. The probe inherits no API/exporter credentials and never
 becomes GPU case evidence or a request-phase measurement. Temporary files and
 the fixture server are cleaned up on success or failure. Preflight allocates
 no hardware or model-serving process.
@@ -68,9 +69,17 @@ The manifest binds `candidate_sha`, role-tagged `candidate` and
 frozen `lane_manifest`. Build and log hashes are rechecked before launch.
 Secondary CLI pins must belong to the measured artifact registry; a validation
 binary (including renamed copies) cannot appear in measured argv/config.
-BC-GPU-010 is currently blocked: its measured positive-fallback assertion is
-incompatible with the shipped feature profile and requires explicit gate
-disposition. A successful validation-only probe cannot make that case PASS.
+BC-GPU-010 requires a separate `feature_variant_tokenizer` entry from the same
+frozen-source pretag run, with its own executable hash, archive build-profile
+record and frozen provenance pins. Only its fallback cell uses this workflow-built
+`otlp,tokenizer` executable, labelled **feature-variant build (tokenizer)**.
+Truncated, empty and missing-usage cells use shipped `otlp`; every other measured
+case remains shipped `otlp`. Missing bindings fail closed before any cell issues a
+request. Validation-only executables or their copies cannot fill the variant slot.
+Every cell must pass unchanged criteria; no waiver, N/A or skipped fallback is
+accepted. Each cell writes a build proof before invocation and an exit outcome
+afterward. The launcher replays the original checks from raw data/trace, verifies
+command/build/proof identity and rejects partial or changed results.
 Other fields include `sut`, `all_smi`, `tokenizer` pins
 (`path`, `sha256`, plus tokenizer `revision`); an optional `inputs` list of pins;
 and `cases`, mapping selected IDs to a pinned `launcher`, a fresh `out`
@@ -104,6 +113,11 @@ status and the exact pretag workflow/repository/artifact. It uses
 workflow-recorded archive checksum and safely copies measured Cargo binaries.
 Local measured compilation is not an option. The helper alone uses native
 `cargo build --locked --release --features otlp,tokenizer` from the same source.
+For BC-GPU-010, also pass `--tokenizer-variant`: this downloads the separate
+`pretag-tokenizer-x86_64-unknown-linux-gnu` artifact from that same successful
+workflow, verifies its archive checksum and exact source/version/features/argv
+build-profile declaration, and records the `feature-variant-tokenizer` role.
+It never compiles a local measured variant or relabels the validation helper.
 
 It emits `builds.json` only after artifact verification and validation build
 succeed, binding run/artifact API responses, download log, archive/checksum,
@@ -186,9 +200,9 @@ missing source populations fail. G3 uses the hidden certification-only
 `--cert-e2e-median-slo` option to calculate an exploratory answered-cohort e2e
 median for BC-GPU-009. It requires at least two distinct answered latencies and
 zero scheduling delay, and is not a prospective service SLO. G4 requires a pinned tokenizer.json and a
-separate validation-only tokenizer tool. Case 010 remains blocked until the
-shipped-profile measured fallback gate has an explicit disposition; no assertion
-has been relaxed. Case 011 also pins the VLM binary,
+separate validation-only tokenizer tool. Case 010 additionally requires the
+scoped workflow feature variant and per-cell build bindings described above;
+all four cells retain their original assertions and thresholds. Case 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct
 `second_port` and `second_proxy_port`, and `--gpu-memory-utilization 0.45` in

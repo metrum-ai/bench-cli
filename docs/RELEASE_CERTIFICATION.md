@@ -25,20 +25,31 @@ specific technical justification and independent approval before the case.
 
 ### Measured and validation-only builds
 
-Certify the shipped feature profile: every measured case uses the exact
-non-publishing pretag workflow artifact built with `--features otlp` only.
+Certify the shipped feature profile: measured cases use the exact non-publishing
+pretag workflow artifact built with `--features otlp` only, except the explicitly
+scoped BC-GPU-010 fallback cell described below.
 Dispatch `pretag-certification.yml` on the frozen public ref with explicit
 candidate SHA and matching source version. Download its Linux x86_64 release
 artifact using `gh run download`, verify the workflow-produced archive checksum,
 and record run ID, artifact name, archive/binary SHA-256, features and source.
 Locally compiled measured binaries are never certification evidence. Do not
-enable `tokenizer` in the shipped artifact or substitute feature-enabled builds.
+enable `tokenizer` in the shipped artifact or silently substitute feature-enabled builds.
+
+BC-GPU-010 has four required cells. Truncated, empty and missing-usage cells use
+shipped `otlp`. Only fallback uses a separately packaged **feature-variant build
+(tokenizer)** with `otlp,tokenizer`, from the same frozen commit/version and
+successful pretag run, with its own executable SHA-256 and verified workflow
+provenance. Keep its registry role separate from shipped and validation-only
+builds. Freeze every artifact/provenance pin; record each cell's exact build
+before invocation and replay all unchanged criteria from raw evidence afterward.
+Every cell must pass: no waiver, N/A or omitted fallback. All other measured cases
+continue to use shipped `otlp`; the feature variant is forbidden in their manifests.
 
 Tokenizer input validation uses a separate **validation-only build** with
 plain local `cargo build --locked --release --features otlp,tokenizer` from
 that same frozen commit. Record its distinct SHA-256, features, local origin
-and validation-only role in preflight evidence. Keep the two
-builds in separate output directories so neither can overwrite the other.
+and validation-only role in preflight evidence. Keep these
+builds and the scoped workflow feature variant in separate output directories so neither can overwrite the other.
 The validation-only binary may run preflight/input checks, never measured cases;
 its successful probe is not a measured case result. If a case requires a
 capability absent from the shipped profile, retain that conflict explicitly:

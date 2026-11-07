@@ -46,6 +46,28 @@ def workflow_evidence(root, sha, version, binaries, run_id=19, *, variant=False)
             'download_log': pretag.pin(root / 'download.log')}
 
 
+def bind_variant(manifest, root):
+    """Extend an existing synthetic receipt; NEVER real workflow evidence."""
+    root = Path(root)
+    path = root / 'synthetic-tokenizer-variant'
+    path.write_bytes(b'#!/bin/sh\n# SYNTHETIC WORKFLOW FEATURE VARIANT\nexit 0\n')
+    path.chmod(0o755)
+    origin = workflow_evidence(root / 'synthetic-variant-origin', manifest['candidate_sha'], '1.8.1',
+                              {'metrum-ai-bench-cli-llm': path.read_bytes()}, variant=True)
+    item = {'path': str(path), 'sha256': digest(path), 'candidate_sha': manifest['candidate_sha'],
+            'role': 'feature-variant-tokenizer', 'profile': 'release',
+            'features': ['otlp', 'tokenizer'], 'origin': origin}
+    receipt = Path(manifest['build_receipt']['path'])
+    data = json.loads(receipt.read_text())
+    data['builds']['feature-variant-tokenizer'] = {'origin': origin, 'binaries': {'metrum-ai-bench-cli-llm': item}}
+    receipt.write_text(json.dumps(data))
+    manifest['build_receipt'] = pretag.pin(receipt)
+    manifest['feature_variant_tokenizer'] = item
+    manifest['inputs'] = [pretag.pin(path), manifest['build_receipt']] + [origin[key] for key in
+        ('run', 'artifact_metadata', 'artifact_listing', 'archive', 'checksum', 'download_log')]
+    return manifest
+
+
 def bind(manifest, root):
     root = Path(root)
     sha = manifest['candidate_sha']

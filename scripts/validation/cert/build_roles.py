@@ -99,6 +99,8 @@ def load_variant(path, sha):
 
 
 def check_manifest(manifest):
+    if 'feature_variant_tokenizer' in manifest and set(manifest.get('cases', {})) != {'BC-GPU-010'}:
+        raise ValueError('tokenizer feature variant is forbidden outside the GPU010-only manifest')
     primary, helper = check_roles(manifest)
     receipt = manifest['build_receipt']
     if digest(Path(receipt['path'])) != receipt['sha256']:

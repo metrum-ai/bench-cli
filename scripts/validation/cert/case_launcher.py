@@ -63,14 +63,16 @@ def preflight(manifest):
     from tokenizer_probe import probe
     probe(validation_binary, tokenizer['path'])
     if 'BC-GPU-010' in cases:
-        raise ValueError('BC-GPU-010 measured fallback is unsupported by otlp; explicit gate disposition required')
+        import gpu010_builds
+        gpu010_builds.bindings(manifest)
     return list(cases)
 
 
 def run_case(manifest_path, manifest, case):
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
-        raise ValueError('BC-GPU-010 measured fallback requires explicit gate disposition')
+        import gpu010_builds
+        gpu010_builds.bindings(manifest)
     import signal
     import result_writer
     entry = manifest["cases"][case]
@@ -102,6 +104,9 @@ def run_case(manifest_path, manifest, case):
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":
             raise ValueError("case failed; retained failure record is not certification")
+        if case == 'BC-GPU-010':
+            import gpu010_builds
+            gpu010_builds.validate_record(manifest, records[0], out)
         phase(lifecycle, case, "record-validated")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         if process is not None and process.poll() is None:

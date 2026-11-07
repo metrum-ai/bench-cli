@@ -9,11 +9,45 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import freeze_case
 import selected_set
-from build_role_test_fixture import bind
+from build_role_test_fixture import bind, bind_variant
 from execution_evidence import digest
 
 
 class FreezeCaseTests(unittest.TestCase):
+    def test_gpu010_freeze_pins_variant_and_requires_missing_provenance(self):
+        # Synthetic workflow/API and tokenizer-probe fixtures, not real preflight.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / 'binary'
+            binary.write_text('#!/bin/sh\n# SYNTHETIC SHIPPED BUILD\nexit 0\n')
+            binary.chmod(0o755)
+            fixture = bind({'candidate_sha': 'a' * 40, 'candidate': {'path': str(binary), 'sha256': digest(binary)}}, root)
+            bind_variant(fixture, root)
+            sut = root / 'sut.json'
+            sut.write_text(json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
+            catalog = root / 'catalog.csv'
+            catalog.write_text('ID,Tier,Parallel group\nBC-GPU-010,RC-GPU,G4\n')
+            selection = root / 'selection.json'
+            selection.write_text(json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-010': ['core']}}))
+            lane = root / 'lane.json'
+            config = {'revision': 'b' * 40, 'tokenizer': {'path': str(binary), 'sha256': digest(binary)}}
+            lane.write_text(json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(binary),
+                                       'baseline_binary_sha256': digest(binary), 'lanes': {'G4': config}}))
+            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
+                case='BC-GPU-010', lane_manifest=lane, candidate=binary, baseline=binary, sut=sut, tokenizer=binary,
+                tokenizer_revision='b' * 40, all_smi=binary, input=[], command_json=None,
+                out=root / 'frozen.json', run_out=root / 'run')
+            with patch.object(freeze_case.manifest_tool, 'load_manifest', return_value=({}, config)), patch('tokenizer_probe.probe'):
+                frozen = freeze_case.freeze(args)
+                self.assertEqual(frozen['candidate'], fixture['candidate'])
+                self.assertEqual(frozen['feature_variant_tokenizer'], fixture['feature_variant_tokenizer'])
+                self.assertIn(fixture['feature_variant_tokenizer']['path'], {item['path'] for item in frozen['inputs']})
+                self.assertEqual(freeze_case.case_launcher.preflight(frozen), ['BC-GPU-010'])
+                # Post-freeze tampering of a pinned provenance file still blocks.
+                Path(frozen['feature_variant_tokenizer']['origin']['checksum']['path']).write_text('changed')
+                with self.assertRaises(ValueError):
+                    freeze_case.case_launcher.preflight(frozen)
+
     def test_freeze_and_complete_set_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
