@@ -1,0 +1,93 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Private structural source trace, not runtime records or physical cache evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "mapping", "license_spdx", "rights_policy_sha256", "source_file_sha256", "normalization_sha256", "requests", "source_physical_lines", "rendered_token_overlap", "physical_cache_evidence"],
+  "properties": {
+    "schema_version": {"const": "structural-source-trace.v1"},
+    "source": {"$ref": "#/$defs/source"},
+    "mapping": {"$ref": "#/$defs/mapping"},
+    "license_spdx": {"type": ["string", "null"]},
+    "rights_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "source_file_sha256": {"$ref": "#/$defs/sha256"},
+    "normalization_sha256": {"$ref": "#/$defs/sha256"},
+    "requests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/request"}},
+    "source_physical_lines": {"$ref": "#/$defs/positive"},
+    "rendered_token_overlap": {"const": "unknown"},
+    "physical_cache_evidence": {"const": "unavailable"}
+  },
+  "$defs": {
+    "uint": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+    "positive": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "text": {"type": "string", "minLength": 1},
+    "nullable_text": {"type": ["string", "null"]},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scale": {
+      "type": "object", "additionalProperties": false,
+      "required": ["numerator", "denominator"],
+      "properties": {"numerator": {"$ref": "#/$defs/positive"}, "denominator": {"$ref": "#/$defs/positive"}}
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "resolved_revision", "config", "split", "files"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/text"},
+        "resolved_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+        "config": {"$ref": "#/$defs/text"}, "split": {"$ref": "#/$defs/text"},
+        "files": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["path", "sha256", "bytes"],
+          "properties": {"path": {"$ref": "#/$defs/text"}, "sha256": {"$ref": "#/$defs/sha256"}, "bytes": {"$ref": "#/$defs/uint"}}
+        }}
+      }
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["adapter_id", "adapter_version", "row_id_field", "source_domain", "selection", "parent_root_sentinel", "metadata_fields", "input_tokens_field", "output_tokens_field", "timestamp_field", "time_unit", "time_scale", "rounding", "hashes_field", "block_tokens", "hash_coverage", "hash_encoding", "prefix_parent_field", "session_parent_field"],
+      "properties": {
+        "adapter_id": {"$ref": "#/$defs/text"}, "adapter_version": {"$ref": "#/$defs/text"},
+        "row_id_field": {"$ref": "#/$defs/nullable_text"}, "input_tokens_field": {"$ref": "#/$defs/text"},
+        "source_domain": {"enum": ["local_pinned", "hugging_face_hub", "git_hub_public"]},
+        "parent_root_sentinel": {},
+        "metadata_fields": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "selection": {"type": ["object", "null"], "additionalProperties": false, "required": ["start_line", "max_selected_rows"], "properties": {"start_line": {"$ref": "#/$defs/uint"}, "max_selected_rows": {"$ref": "#/$defs/positive"}}},
+        "output_tokens_field": {"$ref": "#/$defs/nullable_text"}, "timestamp_field": {"$ref": "#/$defs/nullable_text"},
+        "time_unit": {"enum": ["seconds", "milliseconds", "microseconds"]},
+        "time_scale": {"$ref": "#/$defs/scale"}, "rounding": {"enum": ["reject", "floor"]},
+        "hashes_field": {"$ref": "#/$defs/nullable_text"}, "block_tokens": {"$ref": "#/$defs/positive"},
+        "hash_coverage": {"enum": ["full_blocks_only", "including_partial_tail", "partial_prefix"]},
+        "hash_encoding": {"oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "complete_chain"}}},
+          {"type": "object", "additionalProperties": false, "required": ["kind", "reused_full_blocks_field"], "properties": {"kind": {"const": "parent_delta"}, "reused_full_blocks_field": {"$ref": "#/$defs/text"}}}
+        ]},
+        "prefix_parent_field": {"$ref": "#/$defs/nullable_text"}, "session_parent_field": {"$ref": "#/$defs/nullable_text"}
+      }
+    },
+    "time": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "required": ["source_value", "source_unit", "scale", "rounding", "milliseconds", "discarded_fraction"],
+      "properties": {
+        "source_value": {"type": "string", "maxLength": 64, "pattern": "^[0-9]+(\\.[0-9]{1,18})?$"},
+        "source_unit": {"enum": ["seconds", "milliseconds", "microseconds"]},
+        "scale": {"$ref": "#/$defs/scale"}, "rounding": {"enum": ["reject", "floor"]},
+        "milliseconds": {"$ref": "#/$defs/uint"}, "discarded_fraction": {"type": "boolean"}
+      }
+    },
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_row_id", "source_line", "source_attributes", "source_input_tokens", "source_output_tokens", "source_time", "prefix_parent", "session_parent", "reused_parent_full_blocks", "known_full_prefix_nodes", "partial_tail_symbol_sha256"],
+      "properties": {
+        "source_row_id": {"$ref": "#/$defs/text"}, "source_line": {"$ref": "#/$defs/uint"},
+        "source_attributes": {"type": "object"},
+        "source_input_tokens": {"$ref": "#/$defs/uint"},
+        "source_output_tokens": {"anyOf": [{"$ref": "#/$defs/uint"}, {"type": "null"}]},
+        "source_time": {"$ref": "#/$defs/time"},
+        "prefix_parent": {"$ref": "#/$defs/nullable_text"}, "session_parent": {"$ref": "#/$defs/nullable_text"},
+        "reused_parent_full_blocks": {"anyOf": [{"$ref": "#/$defs/uint"}, {"type": "null"}]},
+        "known_full_prefix_nodes": {"type": ["array", "null"], "uniqueItems": true, "items": {"$ref": "#/$defs/uint"}},
+        "partial_tail_symbol_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+      }
+    }
+  }
+}
