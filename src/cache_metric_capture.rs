@@ -4,7 +4,9 @@
 //! Opt-in bounded native-metric capture and deliberate public projection. No
 //! requests by default; no labels, endpoint URLs or raw invalid values exported.
 
-use crate::cache_metrics::{probe, HistogramPart, Probe, ProfileId, Role, Unit, Unknown};
+use crate::cache_metrics::{
+    probe, HistogramPart, HistogramSpec, MetricSpec, Probe, ProfileId, Role, Unit, Unknown,
+};
 use crate::telemetry::MetricType;
 use serde::Serialize;
 
@@ -93,6 +95,98 @@ pub enum CaptureFailure {
     Deadline,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclaredSourceStatus {
+    NotDeclared,
+    MatchesReference,
+    Unsupported,
+}
+
+#[derive(Serialize)]
+pub struct MetricCapability {
+    pub metric: &'static str,
+    pub expected_family_type: &'static str,
+    pub unit: Unit,
+    pub role: Role,
+    pub required_for_profile: bool,
+    pub cumulative: bool,
+    pub histogram: Option<HistogramSpec>,
+}
+
+#[derive(Serialize)]
+pub struct ProfileCapabilities {
+    pub schema_version: &'static str,
+    pub profile: ProfileId,
+    pub reference_source_revision: &'static str,
+    pub operator_declared_source_status: DeclaredSourceStatus,
+    pub release_aliases: Vec<&'static str>,
+    pub release_restriction: Option<&'static str>,
+    pub complete_profile_support: bool,
+    pub executable_version_verified: bool,
+    pub physical_tier_validation: bool,
+    pub phase_delta_validation: bool,
+    pub histogram_distribution_validation: bool,
+    pub quantile_reconstruction: bool,
+    pub unmapped_engines: Vec<&'static str>,
+    pub descriptors: Vec<MetricCapability>,
+}
+
+fn expected_family_type(spec: &MetricSpec) -> &'static str {
+    if spec.histogram.is_some() {
+        "histogram"
+    } else {
+        match spec.kind {
+            MetricType::Counter => "counter",
+            MetricType::Gauge => "gauge",
+            _ => "unsupported",
+        }
+    }
+}
+
+impl ProfileCapabilities {
+    pub fn new(profile: ProfileId, revision: Option<&str>) -> Self {
+        Self {
+            schema_version: "cache-metric-capabilities.v1",
+            profile,
+            reference_source_revision: profile.source_revision(),
+            operator_declared_source_status: match revision {
+                None => DeclaredSourceStatus::NotDeclared,
+                Some(revision) if revision == profile.source_revision() => {
+                    DeclaredSourceStatus::MatchesReference
+                }
+                _ => DeclaredSourceStatus::Unsupported,
+            },
+            release_aliases: Vec::new(),
+            release_restriction: matches!(profile, ProfileId::DynamoKvbm)
+                .then_some("legacy Dynamo <=1.6.x only; later releases do not ship KVBM"),
+            complete_profile_support: false,
+            executable_version_verified: false,
+            physical_tier_validation: false,
+            phase_delta_validation: false,
+            histogram_distribution_validation: false,
+            quantile_reconstruction: false,
+            unmapped_engines: vec!["trt-llm"],
+            descriptors: profile
+                .metrics()
+                .iter()
+                .map(|spec| MetricCapability {
+                    metric: spec.metric,
+                    expected_family_type: expected_family_type(spec),
+                    unit: spec.unit,
+                    role: spec.role,
+                    required_for_profile: spec.required,
+                    cumulative: matches!(
+                        spec.kind,
+                        MetricType::Counter | MetricType::HistogramBucket
+                    ),
+                    histogram: spec.histogram,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct PublicMetricSample {
     pub series_id: usize,
@@ -113,6 +207,7 @@ pub struct NativeMetricCapture {
     pub schema_version: &'static str,
     pub profile: ProfileId,
     pub reference_source_revision: &'static str,
+    pub capabilities: ProfileCapabilities,
     pub declared_source_revision: Option<String>,
     pub version_evidence: &'static str,
     pub series_id_scope: &'static str,
@@ -133,6 +228,7 @@ impl NativeMetricCapture {
             schema_version: "cache-metric-capture.v1",
             profile,
             reference_source_revision: profile.source_revision(),
+            capabilities: ProfileCapabilities::new(profile, revision),
             // Arbitrary operator text is not public version provenance.
             declared_source_revision: revision
                 .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -168,13 +264,7 @@ impl NativeMetricCapture {
                 PublicMetricSample {
                     series_id: index + 1,
                     metric: row.spec.metric,
-                    expected_family_type: if row.spec.histogram.is_some() {
-                        "histogram"
-                    } else if row.spec.kind == MetricType::Counter {
-                        "counter"
-                    } else {
-                        "gauge"
-                    },
+                    expected_family_type: expected_family_type(&row.spec),
                     histogram_part: row.spec.histogram.map(|h| h.part),
                     unit: row.spec.unit,
                     role: row.spec.role,

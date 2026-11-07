@@ -56,6 +56,19 @@ independent observation of the executable version or deployed tier.
   same-cohort phase hit rates. A known counter zero is different from a missing
   counter, and neither alone proves physical-cache absence or participation.
 
+## Machine-readable capability boundaries
+
+Each capture includes `cache-metric-capabilities.v1`: expected metric names,
+family types, units/roles, required-family and cumulative flags, and histogram
+parent identity/unit separate from bucket/count observation units. These are
+source-reference descriptors, not assertions that a server exported them.
+Operator-declared source compatibility is separately `not_declared`,
+`matches_reference` or `unsupported`; a match does not verify the executable.
+Release aliases remain empty, legacy Dynamo's restriction remains explicit,
+and TRT-LLM remains unmapped. Complete-profile support, physical-tier validation,
+phase-delta validation, complete-distribution validation and quantile
+reconstruction are explicitly false in this prototype.
+
 ## Opt-in startup discovery (development)
 
 Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optional
@@ -84,8 +97,8 @@ There is no replica/tier summation, distribution reconstruction or request/tier
 attribution. Discovery values are cumulative endpoint observations, not phase
 counter deltas, rates, hit ratios or client timing measurements.
 
-Remaining work includes exporter-derived fixtures, complete capability/release
-metadata, broader histogram coverage and complete-family distribution validation,
+Remaining work includes captured-exporter fixtures, validated release aliases
+and broader capability coverage, broader histogram coverage and complete-family distribution validation,
 residency/capacity/eviction/failure coverage and TRT-LLM scope. Full telemetry-phase
 integration and phase-scoped deltas/reset/identity handling belong to subsequent
 work; none is inferred from a startup snapshot.

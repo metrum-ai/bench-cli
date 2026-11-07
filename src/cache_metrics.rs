@@ -80,7 +80,7 @@ pub enum HistogramPart {
     Count,
     Sum,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct HistogramSpec {
     pub family: &'static str,
     pub unit: Unit,
