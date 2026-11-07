@@ -1094,6 +1094,7 @@ Usage: metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-
        metrum-ai-bench-cli-prompts dataset --job <PATH> --output <PATH> --report <PATH> [OPTIONS]
 
 Commands:
+  catalog  List optional pinned public sources; never download or grant access
   dataset  Ingest pinned public document files into canonical runtime JSONL
   help     Print this message or the help of the given subcommand(s)
 
