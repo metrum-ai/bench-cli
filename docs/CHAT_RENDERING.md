@@ -29,6 +29,29 @@ messages, optional `tools` and `documents` (null if absent), and the declared
 as `bos_token`/`eos_token` cannot override those reserved fields. Role, tool pairing
 and causal history must be validated by canonical adapters/runtime beforehand.
 
+Renderer identity `minijinja-chat.v2` normalizes assistant function-call arguments
+from serialized OpenAI JSON strings to HF-style JSON objects in template context
+only. Already-object arguments are preserved; malformed/scalar arguments and
+unsupported tool types fail without echoing arguments. Tools, call IDs, tool-result
+content and message order remain inert data; no tool is executed. Generation-prompt
+framing is controlled explicitly by identity, never inferred from the final role.
+This changes rendering semantics from v1 and therefore requires a new renderer
+identity; the public function signature and canonical message types are unchanged.
+
+Object insertion order is preserved from the actual wire JSON, including decoded
+function-argument objects, without changing canonical serde serialization. The
+bounded `tojson` filter implements the default HF subset: spaced delimiters,
+Unicode retained, insertion order retained and no HTML escaping. Explicit default
+`ensure_ascii=false`, `sort_keys=false`, null indent/separators are accepted.
+Nondefault formatting options, unknown keywords and floating-number serialization
+are rejected rather than approximated (Python float spellings can differ).
+
+HF template compatibility must be established for the exact pinned template;
+passing synthetic HF-style goldens does not establish universal Python/Jinja
+compatibility. Templates requiring unsupported JSON options fail closed. Unsupported features fail, and backend
+cross-check mismatches must be Unknown. The runtime owns the exact issued-wire
+hash even though this helper returns a convenience body digest.
+
 No implicit tokenizer truncation or padding is accepted. Oversized or unsupported
 inputs fail rather than silently clipping. Encoding does not prove serving-window
 fit or that a particular backend applies the same chat framing. Runtime must

@@ -9,8 +9,9 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::canonical_input::{validate_messages, Message, Role, ToolCall};
+use crate::canonical_input::{validate_messages, Message, Role};
 use crate::public_dataset::{sha256, DatasetOrigin, HistoryMode, RightsPolicy};
+use crate::session_tools::{self, ToolArgumentsEncoding, ToolDefinition};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -38,6 +39,12 @@ pub struct SessionMapping {
     pub row_id_field: String,
     pub history_mode: HistoryMode,
     pub expected_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub tools_field: Option<String>,
+    #[serde(default)]
+    pub tool_arguments_encoding: ToolArgumentsEncoding,
+    #[serde(default)]
+    pub tool_result_json: bool,
     pub shape: SessionShape,
 }
 
@@ -57,6 +64,7 @@ pub struct SessionTranscript {
     pub session_id: String,
     pub history_mode: HistoryMode,
     pub messages: Vec<Message>,
+    pub tools: Vec<ToolDefinition>,
     pub expected_output_tokens: Option<u32>,
     pub normalization_sha256: String,
 }
@@ -119,10 +127,25 @@ pub fn normalize(
             sha256(&serde_json::to_vec(&(
                 &origin.source_id,
                 &origin.resolved_revision,
+                &origin.config,
+                &origin.split,
                 &source_row_id
             ))?)
         );
         ensure!(ids.insert(session_id.clone()), "duplicate source session");
+        ensure!(
+            mapping.tools_field.as_deref() == Some("tools")
+                || row
+                    .get("tools")
+                    .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty)),
+            "unmapped source tool definitions"
+        );
+        let tools = session_tools::definitions(
+            mapping
+                .tools_field
+                .as_ref()
+                .and_then(|field| row.get(field)),
+        )?;
         let messages = match &mapping.shape {
             SessionShape::Chat {
                 messages_field,
@@ -152,6 +175,9 @@ pub fn normalize(
                         let content = match raw.get(content_field) {
                             None | Some(Value::Null) => None,
                             Some(Value::String(s)) => Some(s.clone()),
+                            Some(value) if role == Role::Tool && mapping.tool_result_json => {
+                                Some(serde_json::to_string(value)?)
+                            }
                             _ => anyhow::bail!("session content must be text or null"),
                         };
                         ensure!(
@@ -166,11 +192,8 @@ pub fn normalize(
                             "unmapped tool result identity"
                         );
                         let calls = tool_calls_field.as_ref().and_then(|key| raw.get(key));
-                        let tool_calls: Vec<ToolCall> = match calls {
-                            None | Some(Value::Null) => vec![],
-                            Some(value) => serde_json::from_value(value.clone())
-                                .map_err(|_| anyhow::anyhow!("invalid typed source tool calls"))?,
-                        };
+                        let tool_calls =
+                            session_tools::calls(calls, mapping.tool_arguments_encoding)?;
                         let tool_call_id =
                             match tool_call_id_field.as_ref().and_then(|key| raw.get(key)) {
                                 None | Some(Value::Null) => None,
@@ -230,7 +253,7 @@ pub fn normalize(
             .checked_add(messages.len())
             .context("session message count overflow")?;
         total_bytes = total_bytes
-            .checked_add(serde_json::to_vec(&messages)?.len())
+            .checked_add(serde_json::to_vec(&(&messages, &tools))?.len())
             .context("session byte count overflow")?;
         ensure!(
             total_messages <= limits.max_messages && total_bytes <= limits.max_body_bytes,
@@ -241,6 +264,7 @@ pub fn normalize(
             source_file_sha256,
             &source_row_id,
             &messages,
+            &tools,
         ))?);
         output.push(SessionTranscript {
             source_row_id,
@@ -248,6 +272,7 @@ pub fn normalize(
             session_id,
             history_mode: mapping.history_mode.clone(),
             messages,
+            tools,
             expected_output_tokens: mapping.expected_output_tokens,
             normalization_sha256,
         });
@@ -311,6 +336,9 @@ mod tests {
             row_id_field: "id".into(),
             history_mode: HistoryMode::Recorded,
             expected_output_tokens: Some(8),
+            tools_field: None,
+            tool_arguments_encoding: ToolArgumentsEncoding::SerializedJson,
+            tool_result_json: false,
             shape: SessionShape::Chat {
                 messages_field: "messages".into(),
                 role_field: "role".into(),
@@ -370,6 +398,68 @@ mod tests {
         }
         assert!(evidence.contains("unknown"));
     }
+    #[test]
+    fn agent_schema_object_arguments_and_json_results_require_explicit_mapping() {
+        let (origin, rights, mut mapping, limits) = setup();
+        let mut row = json!({"id":"agent","tools":[{"type":"function","function":{"name":"never_execute","description":"inert","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"question"},{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"never_execute","arguments":{"command":"SENTINEL"}}}]},{"role":"tool","tool_call_id":"c","content":{"result":"recorded"}},{"role":"assistant","content":"REFERENCE"}]});
+        assert!(normalize(
+            std::slice::from_ref(&row),
+            &origin,
+            &origin.files[0].sha256,
+            &rights,
+            &mapping,
+            limits
+        )
+        .is_err());
+        mapping.tools_field = Some("tools".into());
+        mapping.tool_arguments_encoding = ToolArgumentsEncoding::JsonObject;
+        assert!(normalize(
+            std::slice::from_ref(&row),
+            &origin,
+            &origin.files[0].sha256,
+            &rights,
+            &mapping,
+            limits
+        )
+        .is_err());
+        mapping.tool_result_json = true;
+        mapping.history_mode = HistoryMode::Generated;
+        let result = normalize(
+            std::slice::from_ref(&row),
+            &origin,
+            &origin.files[0].sha256,
+            &rights,
+            &mapping,
+            limits,
+        )
+        .unwrap();
+        assert_eq!(result[0].tools.len(), 1);
+        assert_eq!(result[0].tools[0].function.name, "never_execute");
+        assert_eq!(result[0].history_mode, HistoryMode::Generated);
+        assert_eq!(result[0].messages[3].content.as_deref(), Some("REFERENCE"));
+        assert_eq!(
+            serde_json::from_str::<Value>(result[0].messages[2].content.as_ref().unwrap()).unwrap(),
+            json!({"result":"recorded"})
+        );
+        for private in ["REFERENCE", "SENTINEL", "never_execute", "recorded"] {
+            assert!(!metadata(&result).unwrap().to_string().contains(private));
+        }
+        row["tools"][0]["function"]["description"] = json!("changed");
+        let changed = normalize(
+            &[row],
+            &origin,
+            &origin.files[0].sha256,
+            &rights,
+            &mapping,
+            limits,
+        )
+        .unwrap();
+        assert_ne!(
+            result[0].normalization_sha256,
+            changed[0].normalization_sha256
+        );
+    }
+
     #[test]
     fn mtbench_style_turns_never_fabricate_assistants_or_arrivals() {
         let (origin, rights, mut mapping, limits) = setup();

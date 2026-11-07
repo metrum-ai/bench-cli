@@ -31,6 +31,12 @@ real-user fixture is committed, no gate is bypassed and no live endpoint is used
 
 SessionMapping declares adapter ID/version, expected config/split, row identity,
 recorded versus generated history mode, optional expected_output_tokens and shape.
+Optional `tools_field` retains typed function definitions (name, description,
+parameters schema and optional strict flag). Unknown definition fields/types and
+duplicate names fail rather than disappearing. `tool_arguments_encoding` defaults
+to `serialized_json`; `json_object` explicitly serializes source objects into inert
+canonical argument strings. `tool_result_json=true` explicitly serializes non-text
+tool results; otherwise non-text content fails. No representation is guessed.
 The Chat shape declares messages, role/content fields, an explicit role-label map,
 and optional tool_calls/tool_call_id fields. For example, role/value conventions
 can map human to User and gpt to Assistant without guessing unknown labels.
@@ -39,7 +45,7 @@ turn. Missing/empty/unknown-role/multimodal fields fail. No assistant placeholde
 are fabricated; multi-turn prompt-only recorded replay is rejected.
 
 Source row identities may be strings or unsigned integers. Opaque session IDs hash
-source ID/revision plus the source-row identity, independently of row order. Duplicate
+source ID/revision/config/split plus the source-row identity, independently of row order. Duplicate
 session identities fail within a normalization batch; callers combining files must
 also reject duplicate session IDs across their combined source set. File digest must
 belong to the pinned origin. The caller verifies file bytes before parsing: a parsed
@@ -75,7 +81,8 @@ arrival time, think time or production timing is inferred from conversation orde
 normalization fingerprint. Raw source IDs, messages and tool arguments are omitted.
 Corpus counts, arrivals and live-history overlap remain unknown. The normalization
 fingerprint includes mapping/version, mode, source-file digest, row identity and full
-message content; a changed reference response invalidates it. It is not a final HTTP
+message content and retained tool definitions; changed source references or schemas
+invalidate it. It is not a final HTTP
 body fingerprint, server hit rate, saved tokens or observed cache-tier activity.
 
 Small synthetic UltraChat-shaped and MT-Bench-shaped fixtures test source reference
