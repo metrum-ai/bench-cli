@@ -38,7 +38,7 @@ name = "metrum_ai_bench"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["tokenizer"]
 tokenizer = ["dep:tokenizers", "dep:minijinja"]
 otlp = []
 

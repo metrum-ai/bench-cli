@@ -5,6 +5,10 @@
 
 ## Unreleased (v1.9.0)
 
+- Enable the `tokenizer` feature by default for crate builds and explicitly in
+  release binaries. Source builds can opt out with `--no-default-features`; those
+  builds cannot perform pinned local tokenizer/chat-template validation.
+
 - Add opt-in record-bound KV study JSON/CSV/HTML exports, exclusive preflight
   reservations, request/cache/clock-separated timing tables, scheduling coverage,
   existing measured native-window and final-wire/policy evidence projections.
