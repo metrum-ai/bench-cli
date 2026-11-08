@@ -1,42 +1,37 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Prepare and independently reproduce a source-pinned all-smi executable.
-
-CPU-only offline build. The emitted hash can be entered into the frozen P1
-manifest only if this command exits successfully. It does not certify a GPU.
-"""
+"""Stage a downloaded fork release offline; never overwrite an existing output."""
 import argparse
 import json
 from pathlib import Path
-import signal
-import sys
+import tarfile
 
 import perf_all_smi
+from manifest_tool import sha256_file
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    for key in ('checkout', 'protoc-crate', 'output', 'evidence'):
+    for key in ('asset', 'checksum', 'output', 'evidence'):
         parser.add_argument('--' + key, type=Path, required=True)
-    args = parser.parse_args()
-    args.evidence.mkdir()
-    first = args.evidence / 'bootstrap'; first.mkdir()
-    second = args.evidence / 'verification'; second.mkdir()
+    args = parser.parse_args(argv)
     try:
-        initial = perf_all_smi.reproduce(args.checkout, None, None, args.protoc_crate, first, bootstrap_output=args.output)
-        verified = perf_all_smi.reproduce(args.checkout, args.output, initial['binary_sha256'], args.protoc_crate, second)
-        if initial != verified:
-            raise ValueError('build provenance differed between independent offline builds')
-        (args.evidence / 'verified-provenance.json').write_text(json.dumps(verified, indent=2) + '\n', encoding='utf-8')
-        print(verified['binary_sha256'])
-        return 0
-    except (OSError, ValueError, KeyError, perf_all_smi.subprocess.SubprocessError, perf_all_smi.tarfile.TarError) as exc:
-        print(f'all-smi preparation failed; retain evidence: {exc}', file=sys.stderr)
-        return 1
+        checksum_sha = sha256_file(args.checksum)
+        data, _ = perf_all_smi.inspect_release_asset(args.asset, args.checksum, checksum_sha)
+        with args.output.open('xb') as output:
+            output.write(data)
+        args.output.chmod(0o755)
+        binary_sha = sha256_file(args.output)
+        perf_all_smi.verify_release_asset(args.output, binary_sha, args.asset,
+                                          args.checksum, checksum_sha, args.evidence)
+        pins = {key: {'path': str(path.resolve()), 'sha256': sha256_file(path)} for key, path in (
+            ('all_smi_binary', args.output), ('all_smi_release_asset', args.asset),
+            ('all_smi_published_checksum', args.checksum))}
+        print(json.dumps(pins, indent=2))
+    except (OSError, ValueError, tarfile.TarError) as exc:
+        parser.exit(1, f'all-smi preparation failed: {exc}\n')
+    return 0
 
 
 if __name__ == '__main__':
-    def interrupted(signum, _frame): raise SystemExit(128 + signum)
-    signal.signal(signal.SIGTERM, interrupted)
-    signal.signal(signal.SIGINT, interrupted)
-    sys.exit(main())
+    raise SystemExit(main())
