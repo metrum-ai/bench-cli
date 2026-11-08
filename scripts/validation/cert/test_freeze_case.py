@@ -9,12 +9,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import freeze_case
 import selected_set
-from build_role_test_fixture import bind, bind_variant
+from build_role_test_fixture import bind
 from execution_evidence import digest
 
 
 class FreezeCaseTests(unittest.TestCase):
-    def test_gpu010_freeze_pins_variant_and_requires_missing_provenance(self):
+    def test_gpu010_freeze_pins_shipped_build_and_rechecks_provenance(self):
         # Synthetic workflow/API and tokenizer-probe fixtures, not real preflight.
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -22,7 +22,6 @@ class FreezeCaseTests(unittest.TestCase):
             binary.write_text('#!/bin/sh\n# SYNTHETIC SHIPPED BUILD\nexit 0\n')
             binary.chmod(0o755)
             fixture = bind({'candidate_sha': 'a' * 40, 'candidate': {'path': str(binary), 'sha256': digest(binary)}}, root)
-            bind_variant(fixture, root)
             sut = root / 'sut.json'
             sut.write_text(json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
             catalog = root / 'catalog.csv'
@@ -40,11 +39,11 @@ class FreezeCaseTests(unittest.TestCase):
             with patch.object(freeze_case.manifest_tool, 'load_manifest', return_value=({}, config)), patch('tokenizer_probe.probe'):
                 frozen = freeze_case.freeze(args)
                 self.assertEqual(frozen['candidate'], fixture['candidate'])
-                self.assertEqual(frozen['feature_variant_tokenizer'], fixture['feature_variant_tokenizer'])
-                self.assertIn(fixture['feature_variant_tokenizer']['path'], {item['path'] for item in frozen['inputs']})
+                self.assertNotIn('feature_variant_tokenizer', frozen)
+                self.assertIn(fixture['candidate']['path'], {item['path'] for item in frozen['inputs']})
                 self.assertEqual(freeze_case.case_launcher.preflight(frozen), ['BC-GPU-010'])
                 # Post-freeze tampering of a pinned provenance file still blocks.
-                Path(frozen['feature_variant_tokenizer']['origin']['checksum']['path']).write_text('changed')
+                Path(frozen['candidate']['origin']['checksum']['path']).write_text('changed')
                 with self.assertRaises(ValueError):
                     freeze_case.case_launcher.preflight(frozen)
 

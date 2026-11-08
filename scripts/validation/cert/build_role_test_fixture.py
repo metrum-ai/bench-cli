@@ -9,11 +9,11 @@ from execution_evidence import digest
 import pretag_artifact as pretag
 
 
-def workflow_evidence(root, sha, version, binaries, run_id=19, *, variant=False):
+def workflow_evidence(root, sha, version, binaries, run_id=19):
     root = Path(root)
     root.mkdir()
-    artifact_name = pretag.TOKENIZER_ARTIFACT if variant else pretag.ARTIFACT
-    prefix = f'metrum-ai-bench-cli-v{version}-{pretag.TARGET}' + ('-tokenizer' if variant else '')
+    artifact_name = pretag.ARTIFACT
+    prefix = f'metrum-ai-bench-cli-v{version}-{pretag.TARGET}'
     archive = root / (prefix + '.tar.gz')
     with tarfile.open(archive, 'w:gz') as tar:
         for name, content in binaries.items():
@@ -21,12 +21,6 @@ def workflow_evidence(root, sha, version, binaries, run_id=19, *, variant=False)
             info.size = len(content)
             info.mode = 0o755
             tar.addfile(info, io.BytesIO(content))
-        if variant:
-            profile = json.dumps(pretag.variant_profile(sha, version)).encode()
-            info = tarfile.TarInfo(prefix + '/build-profile.json')
-            info.size = len(profile)
-            info.mode = 0o644
-            tar.addfile(info, io.BytesIO(profile))
     checksum = Path(str(archive) + '.sha256')
     checksum.write_text(digest(archive) + '  ' + archive.name + '\n')
     run = {'id': run_id, 'head_sha': sha, 'head_repository': {'full_name': pretag.REPOSITORY},
@@ -46,28 +40,6 @@ def workflow_evidence(root, sha, version, binaries, run_id=19, *, variant=False)
             'download_log': pretag.pin(root / 'download.log')}
 
 
-def bind_variant(manifest, root):
-    """Extend an existing synthetic receipt; NEVER real workflow evidence."""
-    root = Path(root)
-    path = root / 'synthetic-tokenizer-variant'
-    path.write_bytes(b'#!/bin/sh\n# SYNTHETIC WORKFLOW FEATURE VARIANT\nexit 0\n')
-    path.chmod(0o755)
-    origin = workflow_evidence(root / 'synthetic-variant-origin', manifest['candidate_sha'], '1.8.1',
-                              {'metrum-ai-bench-cli-llm': path.read_bytes()}, variant=True)
-    item = {'path': str(path), 'sha256': digest(path), 'candidate_sha': manifest['candidate_sha'],
-            'role': 'feature-variant-tokenizer', 'profile': 'release',
-            'features': ['otlp', 'tokenizer'], 'origin': origin}
-    receipt = Path(manifest['build_receipt']['path'])
-    data = json.loads(receipt.read_text())
-    data['builds']['feature-variant-tokenizer'] = {'origin': origin, 'binaries': {'metrum-ai-bench-cli-llm': item}}
-    receipt.write_text(json.dumps(data))
-    manifest['build_receipt'] = pretag.pin(receipt)
-    manifest['feature_variant_tokenizer'] = item
-    manifest['inputs'] = [pretag.pin(path), manifest['build_receipt']] + [origin[key] for key in
-        ('run', 'artifact_metadata', 'artifact_listing', 'archive', 'checksum', 'download_log')]
-    return manifest
-
-
 def bind(manifest, root, additional=None):
     root = Path(root)
     sha = manifest['candidate_sha']
@@ -76,11 +48,11 @@ def bind(manifest, root, additional=None):
     files.update(additional or {})
     origin = workflow_evidence(root / 'synthetic-workflow', sha, '1.8.1',
                               {name: Path(path).read_bytes() for name, path in files.items()})
-    measured.update(candidate_sha=sha, role='measured', profile='release', features=['otlp'], origin=origin)
+    measured.update(candidate_sha=sha, role='measured', profile='release', features=['otlp', 'tokenizer'], origin=origin)
     registry = {'metrum-ai-bench-cli-llm': measured}
     for name, path in (additional or {}).items():
         registry[name] = {'path': str(path), 'sha256': digest(path), 'candidate_sha': sha,
-                          'role': 'measured', 'profile': 'release', 'features': ['otlp'], 'origin': origin}
+                          'role': 'measured', 'profile': 'release', 'features': ['otlp', 'tokenizer'], 'origin': origin}
     helper = root / 'validation-only-fixture'
     helper.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic validation-only\nexit 0\n')
     helper.chmod(0o755)

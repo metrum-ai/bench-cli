@@ -67,7 +67,6 @@ def freeze(args):
     if len(matching) != 1:
         raise ValueError('candidate must be a measured artifact from the build receipt')
     build_roles.check_measured_config(lane_manifest, measured, validation)
-    variant = build_roles.load_variant(args.build_receipt, selection['candidate_sha']) if args.case == 'BC-GPU-010' else None
     import generated_inputs
     recipe_file = getattr(args, 'generated_recipes', None)
     generated = []
@@ -109,10 +108,6 @@ def freeze(args):
     origin = measured[0]['origin']
     inputs.update(Path(origin[key]['path']).resolve() for key in
                   ('run', 'artifact_metadata', 'artifact_listing', 'archive', 'checksum', 'download_log'))
-    if variant is not None:
-        import gpu010_builds
-        inputs.add(Path(variant['path']).resolve())
-        inputs.update(Path(variant['origin'][key]['path']).resolve() for key in gpu010_builds.ORIGIN_PINS)
     def collect_pins(value):
         if isinstance(value, dict):
             if "path" in value and "sha256" in value:
@@ -141,8 +136,6 @@ def freeze(args):
                 "tokenizer": {**pin(args.tokenizer), "revision": args.tokenizer_revision}, "all_smi": pin(args.all_smi),
                 "inputs": [pin(path) for path in sorted(inputs)],
                 "cases": {args.case: {"launcher": pin(command[0]), "command": command, "out": str(args.run_out.resolve())}}}
-    if variant is not None:
-        manifest['feature_variant_tokenizer'] = variant
     if generated:
         manifest.update(generated_inputs=generated, lane=lane, baseline=pin(args.baseline))
     if lane == 'L1':

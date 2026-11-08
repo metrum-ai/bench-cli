@@ -82,6 +82,9 @@ def preflight(manifest):
     if 'BC-GPU-010' in cases:
         import gpu010_builds
         gpu010_builds.bindings(manifest)
+        # The fallback is measured with the shipped binary, so verify its
+        # tokenizer capability as well as the separate validation helper.
+        probe(binary, tokenizer['path'])
     return list(cases)
 
 

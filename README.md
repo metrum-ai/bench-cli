@@ -137,7 +137,11 @@ cd bench-cli
 cargo build --release
 ```
 
-Rust 1.89 or later is required to build from source. The dummy server used in
+Rust 1.89 or later is required to build from source. The default crate build
+(including `cargo install`) enables `tokenizer` for pinned local tokenizer and
+chat-template rendering; release binaries include both `otlp` and `tokenizer`.
+Use `--no-default-features` only for a deliberate tokenizer-free source build;
+rendered-token validation is unavailable in that build. The dummy server used in
 Quickstart and the examples requires Go when built from source; a release
 tarball already includes it. The benchmark binaries do not need Go. Pass
 `--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
