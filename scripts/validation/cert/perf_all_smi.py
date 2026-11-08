@@ -1,126 +1,86 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Verify the all-smi spec source and reproduce its pinned executable offline."""
+"""Verify the pinned all-smi release asset against its published checksum.
+
+all-smi provenance is the official metrum-ai/all-smi fork release asset whose
+sha256 matches the release's published checksum, recorded with the source URL,
+tag and hash. Reproducing the binary byte-for-byte from source is NOT a
+requirement; the previous offline rebuild-equality check was a wrong
+requirement and is removed. Everything is offline: the release tarball and its
+published checksum are pinned inputs, and the pinned binary must be the binary
+carried by that exact tarball.
+"""
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
-import platform
-import shutil
-import signal
-import subprocess
 import tarfile
-import tempfile
 
 from manifest_tool import sha256_file
 
-SOURCE_REVISION = '3b6eaec3364d3c2eb897bf1433ee93eef609c6a9'
-# These Cargo.lock-verified crate archives provide protoc and its include tree.
-PROTOC_CRATES = {
-    'x86_64': ('linux-x86_64', 'b38b07546580df720fa464ce124c4b03630a6fb83e05c336fea2a241df7e5d78'),
-    'aarch64': ('linux-aarch_64', 'c350df4d49b5b9e3ca79f7e646fde2377b199e13cfa87320308397e1f37e1a4c'),
-}
+FORK_REPO = 'metrum-ai/all-smi'
+RELEASE_TAG = 'v0.28.1-metrum.3'
+ASSET_NAME = 'all-smi-linux-x86_64.tar.gz'
+ASSET_URL = f'https://github.com/{FORK_REPO}/releases/download/{RELEASE_TAG}/{ASSET_NAME}'
+PUBLISHED_CHECKSUM_URL = ASSET_URL + '.sha256'
+# Published by the release (all-smi-linux-x86_64.tar.gz.sha256).
+PUBLISHED_ASSET_SHA256 = '99b33cf31b14e6bc44b45b44a50b996aab99b5181d5a23c7d48886d084c29f4e'
+BINARY_NAME = 'all-smi'
 
 
-def build(command, cwd, env, evidence):
-    process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-    try:
-        try:
-            out, err = process.communicate(timeout=1800)
-            code = process.returncode
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                out, err = process.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                out, err = process.communicate()
-            err += b'\noffline all-smi build timed out\n'
-            code = 124
-        (evidence / 'all-smi-build.stdout').write_bytes(out)
-        (evidence / 'all-smi-build.stderr').write_bytes(err)
-        return code
-    finally:
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            except ProcessLookupError:
-                process.wait()
+def _extract_binary(asset_path):
+    """Return (name, sha256) of the all-smi binary inside the release tarball."""
+    with tarfile.open(asset_path, mode='r:gz') as tar:
+        member = next((m for m in tar.getmembers() if Path(m.name).name == BINARY_NAME and m.isfile()), None)
+        if member is None:
+            raise ValueError('release asset does not contain the all-smi binary')
+        data = tar.extractfile(member).read()
+    return BINARY_NAME, hashlib.sha256(data).hexdigest()
 
 
-def reproduce(checkout, binary, expected, protoc_crate, evidence, bootstrap_output=None):
-    checkout, protoc_crate, evidence = Path(checkout).resolve(), Path(protoc_crate).resolve(), Path(evidence)
-    if bootstrap_output is None:
-        binary = Path(binary).resolve()
-        if sha256_file(binary) != expected or not os.access(binary, os.X_OK):
-            raise ValueError('pinned all-smi binary missing, non-executable or changed')
-    elif binary is not None or expected is not None:
-        raise ValueError('bootstrap and verification modes are exclusive')
-    platform_pin = PROTOC_CRATES.get(platform.machine())
-    if platform_pin is None or sha256_file(protoc_crate) != platform_pin[1]:
-        raise ValueError('protoc archive does not match the architecture-specific Cargo.lock pin')
-    revision = subprocess.run(['git', '-C', str(checkout), 'rev-parse', '--verify', 'HEAD'],
-                              check=True, capture_output=True, text=True, timeout=20).stdout.strip()
-    if revision != SOURCE_REVISION:
-        raise ValueError('all-smi checkout is not the unchanged spec revision')
-    # Archive the committed tree rather than trusting a possibly dirty checkout.
-    archive = subprocess.run(['git', '-C', str(checkout), 'archive', '--format=tar', SOURCE_REVISION],
-                             check=True, capture_output=True, timeout=60).stdout
-    version = subprocess.run(['rustc', '--version'], check=True, capture_output=True, text=True, timeout=20).stdout.strip()
-    cargo = subprocess.run(['cargo', '--version'], check=True, capture_output=True, text=True, timeout=20).stdout.strip()
-    epoch = subprocess.run(['git', '-C', str(checkout), 'show', '-s', '--format=%ct', SOURCE_REVISION],
-                           check=True, capture_output=True, text=True, timeout=20).stdout.strip()
-    if not epoch.isdigit(): raise ValueError('invalid source commit timestamp')
-    with tempfile.TemporaryDirectory(prefix='cert-all-smi-') as tmp:
-        root = Path(tmp); source = root / 'source'; source.mkdir()
-        with tarfile.open(fileobj=io.BytesIO(archive), mode='r:') as tar:
-            tar.extractall(source, filter='data')
-        tools = root / 'tools'; tools.mkdir()
-        with tarfile.open(protoc_crate, mode='r:gz') as tar:
-            tar.extractall(tools, filter='data')
-        protoc_root = tools / f'protoc-bin-vendored-{platform_pin[0]}-3.2.0'
-        if not os.access(protoc_root / 'bin/protoc', os.X_OK) or not (protoc_root / 'include').is_dir():
-            raise ValueError('pinned protoc archive lacks executable or includes')
-        # Do not pass service credentials or arbitrary compiler flags to build scripts.
-        env = {key: os.environ[key] for key in ('PATH', 'RUSTUP_HOME', 'CARGO_HOME', 'LANG', 'LC_ALL', 'TMPDIR') if key in os.environ}
-        env['HOME'] = str(root / 'home'); Path(env['HOME']).mkdir()
-        env.setdefault('CARGO_HOME', str(Path.home() / '.cargo'))
-        env['CARGO_NET_OFFLINE'] = 'true'
-        env['SOURCE_DATE_EPOCH'] = epoch
-        # Normalize build roots in Rust and C/C++ dependencies. Different temp
-        # paths must not silently produce different approved binary bytes.
-        cargo_home = str(Path(env['CARGO_HOME']).resolve())
-        remaps = [(str(root), '/cert-all-smi'), (cargo_home, '/cert-cargo-home')]
-        env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(f'--remap-path-prefix={source}={target}' for source, target in remaps)
-        flags = ' '.join(f'-ffile-prefix-map={source}={target} -fdebug-prefix-map={source}={target}' for source, target in remaps)
-        env['CFLAGS'] = flags; env['CXXFLAGS'] = flags
-        env['PROTOC'] = str(protoc_root / 'bin/protoc')
-        env['PROTOC_INCLUDE'] = str(protoc_root / 'include')
-        command = ['cargo', 'build', '--locked', '--offline', '--release', '--bin', 'all-smi', '--target-dir', str(root / 'target')]
-        if build(command, source, env, evidence) != 0:
-            raise ValueError('offline pinned all-smi build failed')
-        built = root / 'target/release/all-smi'
-        actual = sha256_file(built)
-        (evidence / 'all-smi-built.sha256').write_text(actual + '\n', encoding='utf-8')
-        if bootstrap_output is not None:
-            output = Path(bootstrap_output)
-            with built.open('rb') as source, output.open('xb') as target:
-                shutil.copyfileobj(source, target)
-            output.chmod(0o755)
-        elif actual != expected:
-            raise ValueError('pinned all-smi binary differs from fresh offline source build')
-    return {'source_revision': revision, 'source_archive_sha256': hashlib.sha256(archive).hexdigest(),
-            'binary_sha256': actual, 'protoc_crate_sha256': platform_pin[1], 'rustc': version, 'cargo': cargo,
-            'source_date_epoch': epoch, 'build_profile': 'offline-locked-release-remapped-v1'}
+def verify_release_asset(binary, binary_sha256, asset, evidence):
+    """Verify the pinned binary is the pinned fork release asset's binary.
+
+    binary:  path to the staged all-smi executable.
+    binary_sha256: pinned sha256 of that executable.
+    asset:   path to the pinned release tarball (all-smi-linux-x86_64.tar.gz).
+    evidence: directory receiving all-smi-provenance.json.
+    """
+    binary = Path(binary).resolve()
+    asset = Path(asset).resolve()
+    evidence = Path(evidence).resolve()
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise ValueError('pinned all-smi binary missing or non-executable')
+    if sha256_file(binary) != binary_sha256:
+        raise ValueError('pinned all-smi binary changed')
+    if not asset.is_file():
+        raise ValueError('pinned all-smi release asset missing')
+    asset_sha256 = sha256_file(asset)
+    if asset_sha256 != PUBLISHED_ASSET_SHA256:
+        raise ValueError('all-smi release asset does not match the published checksum')
+    _, extracted_sha256 = _extract_binary(asset)
+    if extracted_sha256 != binary_sha256:
+        raise ValueError('pinned all-smi binary is not the binary carried by the pinned release asset')
+    result = {
+        'provenance': 'official-fork-release-asset',
+        'repo': FORK_REPO,
+        'release_tag': RELEASE_TAG,
+        'asset_name': ASSET_NAME,
+        'asset_url': ASSET_URL,
+        'published_checksum_url': PUBLISHED_CHECKSUM_URL,
+        'published_asset_sha256': PUBLISHED_ASSET_SHA256,
+        'asset_sha256': asset_sha256,
+        'binary_name': BINARY_NAME,
+        'binary_sha256': binary_sha256,
+        'rebuild_equality_required': False,
+    }
+    (evidence / 'all-smi-provenance.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    return result
 
 
 def main():
     import argparse
-    import json
     import manifest_tool
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ('manifest', 'candidate', 'baseline', 'evidence'):
@@ -130,15 +90,12 @@ def main():
         _, config = manifest_tool.load_manifest(args.manifest, 'P1', args.candidate, args.baseline,
                                                 os.environ['CUDA_VISIBLE_DEVICES'])
         pin = config['all_smi_binary']
-        result = reproduce(config['all_smi_checkout'], pin['path'], pin['sha256'], config['all_smi_protoc_crate']['path'], args.evidence)
-        (args.evidence / 'all-smi-provenance.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as exc:
+        asset = config['all_smi_release_asset']
+        verify_release_asset(pin['path'], pin['sha256'], asset['path'], args.evidence)
+    except (OSError, ValueError, KeyError, tarfile.TarError) as exc:
         parser.exit(1, f'all-smi provenance failed: {exc}\n')
     return 0
 
 
 if __name__ == '__main__':
-    def interrupted(signum, _frame): raise SystemExit(128 + signum)
-    signal.signal(signal.SIGTERM, interrupted)
-    signal.signal(signal.SIGINT, interrupted)
     raise SystemExit(main())

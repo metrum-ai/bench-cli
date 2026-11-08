@@ -46,8 +46,11 @@ def main():
                 or config['image'] != args.image or args.telemetry.resolve() != Path(config['telemetry_config']['path']).resolve()):
             raise ValueError('manifest identity differs from invocation')
         source = json.loads((evidence / 'all-smi-provenance.json').read_text(encoding='utf-8'))
-        if source.get('source_revision') != '3b6eaec3364d3c2eb897bf1433ee93eef609c6a9' or source.get('binary_sha256') != config['all_smi_binary']['sha256']:
-            raise ValueError('all-smi source-to-binary provenance missing')
+        # all-smi provenance = official metrum-ai/all-smi fork release asset whose
+        # sha256 matches the release's published checksum; no source-checkout
+        # rebuild and no hardcoded source revision.
+        if source.get('provenance') != 'official-fork-release-asset' or source.get('binary_sha256') != config['all_smi_binary']['sha256']:
+            raise ValueError('all-smi release-asset provenance missing')
         versions['all_smi'] = source
         versions['telemetry_config_sha256'] = config['telemetry_config']['sha256']
         noise = config.get('noise_floor'); noise_copy = None

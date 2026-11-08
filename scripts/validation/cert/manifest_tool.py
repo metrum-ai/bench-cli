@@ -140,8 +140,9 @@ def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids
                     raise ValueError(f"P1 requires pinned {key}")
             if not os.access(config["all_smi_binary"]["path"], os.X_OK):
                 raise ValueError("all-smi binary must be executable")
-            if not isinstance(config.get("all_smi_checkout"), str) or not Path(config["all_smi_checkout"]).is_dir():
-                raise ValueError("P1 requires the pinned all-smi source checkout")
+            # Release-asset provenance: no source checkout or vendored protoc needed.
+            if "all_smi_checkout" in config and (not isinstance(config.get("all_smi_checkout"), str) or not Path(config["all_smi_checkout"]).is_dir()):
+                raise ValueError("P1 all_smi_checkout pin, if present, must be a directory")
             preset = Path(__file__).resolve().parents[3] / "docs/telemetry/examples/all-smi.yaml"
             if Path(config["telemetry_config"]["path"]).resolve() != preset.resolve():
                 raise ValueError("P1 telemetry config must be the tracked loopback all-smi preset")
