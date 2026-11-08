@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
           test "${RELEASE_TAG}" = "v${crate_version}"
-          cargo publish --dry-run --locked --features otlp
+          cargo publish --dry-run --locked --features otlp,tokenizer
       # docs/DATA_POINTS.md goes into the release notes, so a stale copy
       # (schema changed, file not regenerated) stops the release (#202).
       - name: Data-point counts are current
@@ -159,7 +159,7 @@ jobs:
         run: rustup target add "${{ matrix.rust_target }}"
       - name: cargo zigbuild
         run: >-
-          cargo zigbuild --locked --release --features otlp
+          cargo zigbuild --locked --release --features otlp,tokenizer
           --target "${{ matrix.zig_target }}" --bins
       - name: Package binaries
         shell: bash
@@ -515,4 +515,4 @@ jobs:
             echo "::warning::CRATES_IO_TOKEN is not configured; skipping the crates.io publish."
             exit 0
           fi
-          cargo publish --locked --features otlp
+          cargo publish --locked --features otlp,tokenizer

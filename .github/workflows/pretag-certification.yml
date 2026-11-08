@@ -61,7 +61,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CERT_CANDIDATE"
           crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
           test "$crate_version" = "$CERT_VERSION"
-          cargo publish --dry-run --locked --features otlp
+          cargo publish --dry-run --locked --features otlp,tokenizer
 
   codeql:
     needs: validate-inputs
@@ -187,7 +187,7 @@ jobs:
       - name: Add Rust target
         run: rustup target add "${{ matrix.rust_target }}"
       - name: Build release-equivalent binaries
-        run: cargo zigbuild --locked --release --features otlp --target "${{ matrix.zig_target }}" --bins
+        run: cargo zigbuild --locked --release --features otlp,tokenizer --target "${{ matrix.zig_target }}" --bins
       - name: Package and compare every tracked documentation byte
         shell: bash
         run: |

@@ -118,7 +118,7 @@ class VariantBuildTests(unittest.TestCase):
 
     def test_nonpublishing_workflow_keeps_shipping_profile_and_separate_variant(self):
         workflow = (Path(__file__).resolve().parents[3] / '.github/workflows/pretag-certification.yml').read_text()
-        self.assertIn('cargo zigbuild --locked --release --features otlp --target', workflow)
+        self.assertIn('cargo zigbuild --locked --release --features otlp,tokenizer --target "${{ matrix.zig_target }}" --bins', workflow)
         self.assertIn('cargo zigbuild --locked --release --features otlp,tokenizer --target x86_64-unknown-linux-gnu.2.17 --bin metrum-ai-bench-cli-llm', workflow)
         self.assertIn('name: pretag-tokenizer-x86_64-unknown-linux-gnu', workflow)
         self.assertIn("'label': 'feature-variant build (tokenizer)'", workflow)

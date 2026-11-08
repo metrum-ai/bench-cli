@@ -108,7 +108,9 @@ zip 9.4.1 (declared MSRV 1.88), with only Deflate support enabled beyond stored 
 
 ### Pinned rendering and selection
 
-Rendering requires a binary built with `--features tokenizer`. A rendering object
+Rendering requires the `tokenizer` feature, enabled by default and included in
+release binaries. A source build with `--no-default-features` disables it unless
+`--features tokenizer` is also supplied. A rendering object
 contains identity (tokenizer_id, tokenizer_revision, tokenizer_sha256,
 chat_template_sha256, add_special_tokens, add_generation_prompt,
 hint_nonce_included, renderer_version), local tokenizer_path/template_path,
