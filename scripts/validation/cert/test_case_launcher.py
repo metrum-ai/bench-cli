@@ -37,9 +37,15 @@ class CaseLauncherTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "missing tokenizer capability"):
                     case_launcher.preflight(guarded)
                 probe.assert_called_once_with(Path(manifest['tokenizer_validation']['path']).resolve(), str(binary))
-            with patch.object(case_launcher.subprocess, 'run'), patch('tokenizer_probe.probe'):
-                with self.assertRaisesRegex(ValueError, 'frozen feature-variant binding required'):
+            with patch.object(case_launcher.subprocess, 'run'), patch('tokenizer_probe.probe') as probe:
+                with self.assertRaisesRegex(ValueError, 'frozen input pins'):
                     case_launcher.preflight(guarded)
+                from gpu010_builds import ORIGIN_PINS
+                guarded['inputs'] = [guarded['build_receipt'], pin(binary)] + [guarded['candidate']['origin'][key] for key in ORIGIN_PINS]
+                probe.reset_mock()
+                self.assertEqual(case_launcher.preflight(guarded), ['BC-GPU-010'])
+                self.assertEqual(probe.call_count, 2)
+                probe.assert_any_call(binary.resolve(), str(binary))
             for field in ("host_os", "memory_gb"):
                 bad = {"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}
                 bad.pop(field)

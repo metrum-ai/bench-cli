@@ -44,48 +44,13 @@ class PretagArtifactTests(unittest.TestCase):
         self.assertEqual(pretag.verify(origin, self.sha), expected)
         self.assertEqual({name: digest(path) for name, path in paths.items()}, expected)
 
-    def test_variant_is_explicit_and_cannot_substitute_shipping(self):
-        variant = workflow_evidence(self.root / 'variant', self.sha, '1.8.1',
-            {'metrum-ai-bench-cli-llm': b'#!/bin/sh\n# SYNTHETIC TOKENIZER VARIANT\nexit 0\n'}, variant=True)
-        self.assertIn('metrum-ai-bench-cli-llm', pretag.verify(variant, self.sha, variant=True))
-        with self.assertRaises(ValueError):
-            pretag.verify(variant, self.sha)
-        with self.assertRaises(ValueError):
-            pretag.verify(self.origin, self.sha, variant=True)
-        with self.assertRaisesRegex(ValueError, 'pretag workflow'):
-            pretag.verify(variant, 'b' * 40, variant=True)
-
-    def test_variant_download_cannot_select_shipping_artifact(self):
-        variant = workflow_evidence(self.root / 'variant', self.sha, '1.8.1',
-            {'metrum-ai-bench-cli-llm': b'#!/bin/sh\n# SYNTHETIC TOKENIZER VARIANT\nexit 0\n'}, variant=True)
-        metadata = json.loads(Path(variant['artifact_metadata']['path']).read_text())
-        listing = {'total_count': 2, 'artifacts': [self.artifact, metadata]}
-        def transfer(argv, **kwargs):
-            self.assertEqual(argv[argv.index('--name') + 1], pretag.TOKENIZER_ARTIFACT)
-            destination = Path(argv[argv.index('--dir') + 1])
-            destination.mkdir()
-            for key in ('archive', 'checksum'):
-                source = Path(variant[key]['path'])
-                shutil.copyfile(source, destination / source.name)
-            kwargs['stdout'].write(b'SYNTHETIC VARIANT TRANSPORT; NOT WORKFLOW EVIDENCE\n')
-        with patch.object(pretag.subprocess, 'check_output', side_effect=[json.dumps(self.run), json.dumps(listing)]), \
-             patch.object(pretag.subprocess, 'run', side_effect=transfer):
-            origin, paths = pretag.download(self.sha, '1.8.1', 19, self.root / 'downloaded', variant=True)
-        self.assertEqual(pretag.verify(origin, self.sha, variant=True), {k: digest(v) for k, v in paths.items()})
-        with self.assertRaises(ValueError):
-            pretag.verify(origin, self.sha)
-
-    def test_variant_requires_distinct_checksum_archive_and_run_artifact_identity(self):
-        variant = workflow_evidence(self.root / 'variant', self.sha, '1.8.1',
-            {'metrum-ai-bench-cli-llm': b'#!/bin/sh\n# SYNTHETIC TOKENIZER VARIANT\nexit 0\n'}, variant=True)
-        # Valid shipping evidence cannot be relabelled as a variant artifact.
+    def test_only_shipped_artifact_name_is_accepted(self):
         fake = copy.deepcopy(self.origin)
-        fake['artifact_name'] = pretag.TOKENIZER_ARTIFACT
+        fake['artifact_name'] = 'pretag-tokenizer-x86_64-unknown-linux-gnu'
         with self.assertRaises(ValueError):
-            pretag.verify(fake, self.sha, variant=True)
-        variant['checksum'] = self.origin['checksum']
-        with self.assertRaisesRegex(ValueError, 'recorded checksum'):
-            pretag.verify(variant, self.sha, variant=True)
+            pretag.verify(fake, self.sha)
+        with self.assertRaisesRegex(ValueError, 'pretag workflow'):
+            pretag.verify(self.origin, 'b' * 40)
 
     def test_wrong_run_source_workflow_event_status_or_repository(self):
         for key, value in [('head_sha', 'b' * 40), ('id', 20), ('path', 'release.yml'),

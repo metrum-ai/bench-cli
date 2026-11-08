@@ -9,31 +9,25 @@ import build_roles
 from execution_evidence import digest
 
 CELLS = ('truncated', 'empty', 'missing', 'fallback')
-VARIANT_KEY = 'feature_variant_tokenizer'
 ORIGIN_PINS = ('run', 'artifact_metadata', 'artifact_listing', 'archive', 'checksum', 'download_log')
 
 
 def bindings(manifest):
     if set(manifest.get('cases', {})) != {'BC-GPU-010'}:
-        raise ValueError('tokenizer feature variant is scoped exclusively to BC-GPU-010 fallback')
-    if not manifest.get(VARIANT_KEY):
-        raise ValueError('BC-GPU-010 explicit frozen feature-variant binding required')
+        raise ValueError('GPU010 build bindings require an exclusive BC-GPU-010 manifest')
     build_roles.check_manifest(manifest)
     receipt = manifest['build_receipt']
-    variant = build_roles.load_variant(receipt['path'], manifest['candidate_sha'])
-    if manifest.get(VARIANT_KEY) != variant:
-        raise ValueError('GPU010 feature variant must match the frozen workflow registry')
     data = json.loads(Path(receipt['path']).read_text())
     shipped = data['builds']['measured']['binaries']['metrum-ai-bench-cli-llm']
     if manifest['candidate'] != shipped:
         raise ValueError('GPU010 primary must be the shipped LLM CLI')
     pins = {str(Path(item['path']).resolve()): item['sha256'] for item in manifest.get('inputs', [])}
-    required = [receipt, variant] + [variant['origin'][key] for key in ORIGIN_PINS]
+    required = [receipt, shipped] + [shipped['origin'][key] for key in ORIGIN_PINS]
     for item in required:
         path = Path(item['path']).resolve(strict=True)
         if pins.get(str(path)) != item['sha256'] or digest(path) != item['sha256']:
-            raise ValueError('GPU010 variant executable/receipt/provenance must be frozen input pins')
-    return {name: variant if name == 'fallback' else shipped for name in CELLS}
+            raise ValueError('GPU010 shipped executable/receipt/provenance must be frozen input pins')
+    return {name: shipped for name in CELLS}
 
 
 def validate_record(manifest, record, out):
@@ -44,8 +38,8 @@ def validate_record(manifest, record, out):
     if (record.get('ID') != 'BC-GPU-010' or record.get('candidate_sha') != manifest['candidate_sha']
             or record.get('result') != 'PASS'
             or versions.get('candidate_binary_sha256') != manifest['candidate']['sha256']
-            or versions.get('feature_variant_binary_sha256') != manifest[VARIANT_KEY]['sha256']
-            or versions.get('feature_variant_label') != 'feature-variant build (tokenizer)'):
+            or versions.get('fallback_binary_sha256') != manifest['candidate']['sha256']
+            or versions.get('fallback_build_label') != 'shipped build (otlp,tokenizer)'):
         raise ValueError('GPU010 result build/source/version labels mismatch')
     expected_thresholds = {'requests_per_live_cell': 4, 'empty_issuance_count': 0, 'legacy_rate_tolerance_pct': 1}
     thresholds = record.get('thresholds', {})
@@ -116,7 +110,7 @@ def cell(manifest, name):
     if name not in CELLS:
         raise ValueError('unknown GPU010 cell')
     item = bindings(manifest)[name]
-    label = 'feature-variant build (tokenizer)' if name == 'fallback' else 'shipped build (otlp)'
+    label = 'shipped build (otlp,tokenizer)'
     proof = {'cell': name, 'label': label, 'role': item['role'], 'features': item['features'],
              'profile': item['profile'], 'candidate_sha': item['candidate_sha'],
              'binary_sha256': item['sha256'], 'build_receipt_sha256': manifest['build_receipt']['sha256'],
