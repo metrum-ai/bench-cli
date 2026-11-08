@@ -1,93 +1,145 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""CPU fixtures for pinned offline all-smi provenance; no exporter runs."""
+"""Offline release provenance and staging fixtures."""
+import contextlib
 import hashlib
 import io
-import os
+import json
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
 
-import perf_all_smi
-import perf_all_smi_prepare
+import perf_all_smi as smi
+import perf_all_smi_prepare as prepare
 
 
-def archive():
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode='w') as tar:
-        info = tarfile.TarInfo('Cargo.toml'); info.size = 7
-        tar.addfile(info, io.BytesIO(b'fixture'))
-    return stream.getvalue()
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
 
 
-class AllSmiTests(unittest.TestCase):
-    def test_reproduce_uses_pinned_tree_and_offline_secret_free_environment(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp); binary = root / 'all-smi'; binary.write_bytes(b'binary'); binary.chmod(0o700)
-            protoc = root / 'protoc.crate'
-            with tarfile.open(protoc, 'w:gz') as tar:
-                info = tarfile.TarInfo('protoc-bin-vendored-linux-x86_64-3.2.0/bin/protoc')
-                info.mode = 0o755; info.size = 7; tar.addfile(info, io.BytesIO(b'fixture'))
-                info = tarfile.TarInfo('protoc-bin-vendored-linux-x86_64-3.2.0/include')
-                info.type = tarfile.DIRTYPE; tar.addfile(info)
-            expected = hashlib.sha256(b'binary').hexdigest(); seen = []
-            tool_hash = hashlib.sha256(protoc.read_bytes()).hexdigest()
-            def run(args, **kwargs):
-                result = unittest.mock.Mock(returncode=0, stderr=b'')
-                if args[0] == 'git' and 'rev-parse' in args: result.stdout = perf_all_smi.SOURCE_REVISION + '\n'
-                elif args[0] == 'git' and 'show' in args: result.stdout = '1700000000\n'
-                elif args[0] == 'git': result.stdout = archive()
-                elif args[0] in ('rustc', 'cargo') and '--version' in args: result.stdout = 'fixture compiler\n'
-                else: raise AssertionError('unexpected command')
-                return result
-            def build(args, _cwd, env, _evidence):
-                seen.append(env)
-                out = Path(args[args.index('--target-dir') + 1]) / 'release/all-smi'; out.parent.mkdir(parents=True)
-                out.write_bytes(b'binary')
-                return 0
-            with patch.dict(os.environ, {'GH_TOKEN': 'fixture-only', 'HF_TOKEN': 'fixture-only'}), \
-                 patch.object(perf_all_smi.subprocess, 'run', side_effect=run), \
-                 patch.object(perf_all_smi.platform, 'machine', return_value='x86_64'), \
-                 patch.dict(perf_all_smi.PROTOC_CRATES, {'x86_64': ('linux-x86_64', tool_hash)}), \
-                 patch.object(perf_all_smi, 'build', side_effect=build):
-                value = perf_all_smi.reproduce(root, binary, expected, protoc, root)
-            self.assertEqual(value['source_revision'], perf_all_smi.SOURCE_REVISION)
-            self.assertEqual(seen[0]['CARGO_NET_OFFLINE'], 'true')
-            self.assertEqual(seen[0]['SOURCE_DATE_EPOCH'], '1700000000')
-            self.assertIn('--remap-path-prefix=', seen[0]['CARGO_ENCODED_RUSTFLAGS'])
-            self.assertIn('-ffile-prefix-map=', seen[0]['CFLAGS'])
-            self.assertNotIn('GH_TOKEN', seen[0]); self.assertNotIn('HF_TOKEN', seen[0])
+class ReleaseAssetProvenance(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.data = b'\x7fELF\x02\x01' + bytes(12) + (62).to_bytes(2, 'little') + bytes(44)
+        self.binary = self.root / 'all-smi'
+        self.binary.write_bytes(self.data)
+        self.binary.chmod(0o755)
+        self.asset = self.root / 'all-smi-linux-x86_64.tar.gz'
+        self.checksum = self.root / 'published.sha256'
+        self.table = patch.dict(smi.ASSETS, {})
+        self.table.start()
+        self.addCleanup(self.table.stop)
+        host = patch.object(smi.platform, 'machine', return_value='x86_64')
+        host.start()
+        self.addCleanup(host.stop)
+        self.make_asset()
 
-    def test_prepare_requires_a_second_identical_build(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            argv = ['prepare', '--checkout', str(root), '--protoc-crate', str(root / 'crate'),
-                    '--output', str(root / 'binary'), '--evidence', str(root / 'evidence')]
-            with patch('sys.argv', argv), patch('sys.stderr', new_callable=io.StringIO), \
-                 patch.object(perf_all_smi_prepare.perf_all_smi, 'reproduce',
-                    side_effect=[{'binary_sha256': 'one'}, ValueError('mismatch')]):
-                self.assertEqual(perf_all_smi_prepare.main(), 1)
-            self.assertFalse((root / 'evidence/verified-provenance.json').exists())
+    def make_asset(self, count=1, kind=tarfile.REGTYPE):
+        with tarfile.open(self.asset, 'w:gz') as tar:
+            for _ in range(count):
+                member = tarfile.TarInfo('all-smi')
+                member.type = kind
+                member.linkname = 'elsewhere' if kind != tarfile.REGTYPE else ''
+                member.size = len(self.data) if kind == tarfile.REGTYPE else 0
+                tar.addfile(member, io.BytesIO(self.data))
+        self.asset_sha = digest(self.asset.read_bytes())
+        libc = 'musl' if 'musl' in self.asset.name else 'gnu'
+        smi.ASSETS[self.asset.name] = ('x86_64', libc, self.asset_sha)
+        self.checksum.write_text(f'{self.asset_sha}  {self.asset.name}\n')
 
-    def test_timed_out_build_signals_its_process_group(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            process = unittest.mock.Mock(pid=1234)
-            process.communicate.side_effect = [perf_all_smi.subprocess.TimeoutExpired('fixture', 1800), (b'', b'')]
-            process.poll.return_value = 0
-            with patch.object(perf_all_smi.subprocess, 'Popen', return_value=process), \
-                 patch.object(perf_all_smi.os, 'killpg') as kill:
-                code = perf_all_smi.build(['fixture'], Path(tmp), {}, Path(tmp))
-            self.assertEqual(code, 124)
-            kill.assert_called_once_with(1234, perf_all_smi.signal.SIGTERM)
+    def verify(self, pin=None):
+        return smi.verify_release_asset(self.binary, pin or digest(self.binary.read_bytes()),
+                                       self.asset, self.checksum, digest(self.checksum.read_bytes()) if self.checksum.exists() else '0' * 64,
+                                       self.root / 'evidence')
 
-    def test_wrong_binary_hash_fails_before_processes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp); binary = root / 'binary'; binary.write_bytes(b'not-pinned'); binary.chmod(0o700)
-            with patch.object(perf_all_smi.subprocess, 'run') as run:
-                with self.assertRaises(ValueError): perf_all_smi.reproduce(root, binary, '0' * 64, root, root)
-                run.assert_not_called()
+    def test_gnu(self):
+        result = self.verify()
+        self.assertEqual(result['libc'], 'gnu')
+        self.assertEqual(result['arch'], 'x86_64')
+        self.assertEqual(result['published_checksum_file_sha256'], digest(self.checksum.read_bytes()))
+        self.assertFalse(result['rebuild_equality_required'])
+        self.assertEqual(json.loads((self.root / 'evidence/all-smi-provenance.json').read_text()), result)
+
+    def test_musl(self):
+        self.asset = self.root / 'all-smi-linux-x86_64-musl.tar.gz'
+        self.make_asset()
+        self.assertEqual(self.verify()['libc'], 'musl')
+
+    def test_unknown_asset(self):
+        self.asset = self.asset.rename(self.root / 'unknown.tar.gz')
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_missing_checksum(self):
+        self.checksum.unlink()
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_malformed_wrong_name_and_checksum_mismatch(self):
+        for text in ('bad', f'{self.asset_sha}  wrong.tar.gz\n',
+                     f'{self.asset_sha}  {self.asset.name}\nextra\n',
+                     f'{"0" * 64}  {self.asset.name}\n'):
+            with self.subTest(text=text):
+                self.checksum.write_text(text)
+                with self.assertRaises(ValueError): self.verify()
+
+    def test_checksum_file_pin_changed(self):
+        with self.assertRaises(ValueError):
+            smi.inspect_release_asset(self.asset, self.checksum, '0' * 64)
+
+    def test_asset_changed(self):
+        self.asset.write_bytes(self.asset.read_bytes() + b'changed')
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_binary_not_in_asset(self):
+        self.binary.write_bytes(b'other')
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_member_count_and_links(self):
+        for count, kind in ((0, tarfile.REGTYPE), (2, tarfile.REGTYPE),
+                            (1, tarfile.SYMTYPE), (1, tarfile.LNKTYPE)):
+            with self.subTest(count=count, kind=kind):
+                self.make_asset(count, kind)
+                with self.assertRaises(ValueError): self.verify()
+
+    def test_elf_mismatch(self):
+        self.data = self.data[:18] + (183).to_bytes(2, 'little') + self.data[20:]
+        self.make_asset()
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_aarch64(self):
+        self.data = self.data[:18] + (183).to_bytes(2, 'little') + self.data[20:]
+        self.binary.write_bytes(self.data)
+        self.asset = self.root / 'all-smi-linux-aarch64.tar.gz'
+        self.make_asset()
+        smi.ASSETS[self.asset.name] = ('aarch64', 'gnu', self.asset_sha)
+        with patch.object(smi.platform, 'machine', return_value='aarch64'):
+            self.assertEqual(self.verify()['arch'], 'aarch64')
+
+    def test_host_mismatch(self):
+        with patch.object(smi.platform, 'machine', return_value='aarch64'):
+            with self.assertRaises(ValueError): self.verify()
+
+    def test_changed_binary_pin(self):
+        with self.assertRaises(ValueError): self.verify('0' * 64)
+
+    def test_prepare_and_refuse_overwrite(self):
+        output = self.root / 'staged'
+        args = ['--asset', str(self.asset), '--checksum', str(self.checksum),
+                '--output', str(output), '--evidence', str(self.root / 'prepared')]
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            self.assertEqual(prepare.main(args), 0)
+        pins = json.loads(stream.getvalue())
+        self.assertEqual(set(pins), {'all_smi_binary', 'all_smi_release_asset', 'all_smi_published_checksum'})
+        self.assertEqual(output.read_bytes(), self.data)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o755)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit): prepare.main(args)
+        self.assertEqual(output.read_bytes(), self.data)
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()

@@ -272,9 +272,12 @@ For v1.8.0 P1/P2, the approved previous release is the SHA256-verified v1.7.2
 release asset, not the historical v1.5.4 study-build entry in the unchanged
 perf spec. The prospective P1/P2 runners require the release archive pin in
 `baseline_asset`, the exact spec model/server/input pins, and a prepopulated
-`CERT_HF_HUB_CACHE`. P1 additionally requires the spec-pinned all-smi checkout,
-a binary reproduced offline from its committed tree, an architecture-specific
-locked protoc crate and the pinned telemetry preset. A wider pre-recorded noise
+`CERT_HF_HUB_CACHE`. P1 additionally requires pinned `all_smi_binary`,
+`all_smi_release_asset`, `all_smi_published_checksum` (each `{path, sha256}`)
+and the pinned telemetry preset. The binary must match the official
+`metrum-ai/all-smi` fork release `v0.28.1-metrum.3` asset, verified against its
+published `.sha256` and the harness table pin. Legacy checkout/protoc fields
+are ignored. A wider pre-recorded noise
 floor must be pinned with `recorded_utc` and `evidence_link` and independently
 reviewed; the default is 5%. Measured prompt sequences and independent legacy
 cohorts are checked for all six points per model. Candidate native first-any
@@ -295,19 +298,24 @@ python3 scripts/validation/cert/perf_comp001_barrier.py \
 This requires twelve passing legacy points and retains the candidate's native
 headlines separately. CPU fixtures do not establish GPU results.
 
-To prepare the P1 exporter offline on the target architecture, first populate the
-locked Cargo cache and obtain the architecture-specific `protoc-bin-vendored`
-3.2.0 crate matching the source Cargo.lock. Then run:
+To prepare the P1 exporter offline on the target architecture, download the
+release asset and its published checksum first. Choose `all-smi-linux-x86_64.tar.gz`
+for GNU libc, `all-smi-linux-x86_64-musl.tar.gz` for musl, or
+`all-smi-linux-aarch64.tar.gz` for aarch64 GNU libc. ELF architecture must match
+both the selected asset and the host. For example:
 
 ```sh
+gh release download v0.28.1-metrum.3 -R metrum-ai/all-smi \
+  -p 'all-smi-linux-x86_64.tar.gz' -p 'all-smi-linux-x86_64.tar.gz.sha256'
 python3 scripts/validation/cert/perf_all_smi_prepare.py \
-  --checkout PINNED_ALL_SMI_CHECKOUT --protoc-crate PINNED_PROTOC.crate \
-  --output NEW_ALL_SMI_BINARY --evidence NEW_BUILD_EVIDENCE_DIR
+  --asset all-smi-linux-x86_64.tar.gz --checksum all-smi-linux-x86_64.tar.gz.sha256 \
+  --output NEW_ALL_SMI_BINARY --evidence NEW_PROVENANCE_DIR
 ```
 
-It builds twice from the committed tree with normalized paths and fails if the
-bytes differ. Pin the reported binary SHA only after success and retain the
-build evidence; the P1 lane independently rebuilds it again. The build and
+The helper makes no network calls, verifies the checksum and asset, and stages
+an executable without overwriting an existing file. Copy its printed manifest
+pins and retain `all-smi-provenance.json`. The P1 lane independently verifies
+these inputs again; no source rebuild or byte-equality rebuild is required.
 CPU fixture results are not NVIDIA or release-certification evidence.
 
 ### W: external platform wrapper and manual sign-off
