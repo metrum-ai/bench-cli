@@ -60,7 +60,7 @@ class CleanupTests(unittest.TestCase):
             fake = root / 'docker'
             fake.write_text('#!/bin/sh\ncase "$1" in logs) printf "startup\\n"; '
                             '[ "${PHASE:-}" != teardown ] || printf "workload-complete\\n";; '
-                            'rm) :;; *) exit 2;; esac\n')
+                            'rm) test ! -e "$OUT/evidence/server-teardown.sha256";; *) exit 2;; esac\n')
             fake.chmod(0o755)
             record = {'ID': 'BC-GPU-001', 'result': 'PASS', 'candidate_sha': 'a' * 40, 'attempt': 1,
                       'observed_values': {'fixture': True}, 'thresholds': {'fixture': True},

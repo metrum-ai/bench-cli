@@ -170,9 +170,6 @@ cert_on_exit() {
       docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/$log_name" 2>&1 || {
         [[ "${CERT_PERF_FINALIZE:-0}" != 1 && "${CERT_LANE:-}" != W ]] || rc=1
       }
-      if [[ "$log_name" == server-teardown.log ]]; then
-        (cd "$CERT_OUT/evidence" && sha256sum server-teardown.log > server-teardown.sha256) || rc=1
-      fi
       if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
         echo 'failed to stop owned server container' >&2
         rc=1
@@ -180,6 +177,9 @@ cert_on_exit() {
         local remaining
         remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_CONTAINER_OWNER" --format '{{.ID}}')" || rc=1
         [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
+      fi
+      if [[ "$log_name" == server-teardown.log ]]; then
+        (cd "$CERT_OUT/evidence" && sha256sum server-teardown.log > server-teardown.sha256) || rc=1
       fi
     fi
   fi
