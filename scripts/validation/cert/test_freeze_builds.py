@@ -24,12 +24,10 @@ class FreezeBuildTests(unittest.TestCase):
                                     version='1.8.1', workflow_run_id=19)
         self.names = ['metrum-ai-bench-cli-llm', 'metrum-ai-bench-cli-strategic']
 
-    def download(self, sha, version, run_id, out, *, variant=False):
+    def download(self, sha, version, run_id, out):
         content = b'#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# synthetic workflow measured\nexit 0\n'
-        if variant:
-            content += b'# synthetic tokenizer feature variant\n'
-        names = ['metrum-ai-bench-cli-llm'] if variant else self.names
-        origin = workflow_evidence(out, sha, version, {name: content for name in names}, run_id, variant=variant)
+        names = self.names
+        origin = workflow_evidence(out, sha, version, {name: content for name in names}, run_id)
         paths = {}
         for name in names:
             path = out / name
@@ -68,19 +66,16 @@ class FreezeBuildTests(unittest.TestCase):
         with self.assertRaises(FileExistsError), patch.object(freeze_builds, 'clean_source'):
             freeze_builds.build(self.args)
 
-    def test_variant_is_second_workflow_import_not_second_local_compile(self):
-        self.args.tokenizer_variant = True
+    def test_extra_variant_receipt_is_rejected(self):
         with patch.object(freeze_builds, 'clean_source'), \
-             patch.object(freeze_builds.pretag_artifact, 'download', side_effect=self.download) as imports, \
-             patch.object(freeze_builds.subprocess, 'run', side_effect=self.compiler) as compile:
+             patch.object(freeze_builds.pretag_artifact, 'download', side_effect=self.download), \
+             patch.object(freeze_builds.subprocess, 'run', side_effect=self.compiler):
             result = freeze_builds.build(self.args)
-        self.assertEqual(imports.call_count, 2)
-        self.assertEqual(imports.call_args.kwargs, {'variant': True})
-        self.assertEqual(imports.call_args.args[:3], (self.args.candidate_sha, self.args.version, self.args.workflow_run_id))
-        self.assertEqual(compile.call_count, 1)  # Local validation only; never a local measured variant.
-        variant = result['builds']['feature-variant-tokenizer']['binaries']['metrum-ai-bench-cli-llm']
-        self.assertEqual(build_roles.load_variant(self.args.out / 'builds.json', self.args.candidate_sha), variant)
-        self.assertNotEqual(variant['sha256'], result['builds']['validation-only']['binaries']['metrum-ai-bench-cli-llm']['sha256'])
+        result['builds']['feature-variant-tokenizer'] = {}
+        receipt = self.args.out / 'builds.json'
+        receipt.write_text(json.dumps(result))
+        with self.assertRaisesRegex(ValueError, 'only shipped measured'):
+            build_roles.load_receipt(receipt, self.args.candidate_sha)
 
     def test_failed_validation_retains_downloads_and_log_without_receipt(self):
         with patch.object(freeze_builds, 'clean_source'), \
@@ -95,10 +90,14 @@ class FreezeBuildTests(unittest.TestCase):
     def test_changed_source_defaults_or_version_rejected(self):
         with patch.object(freeze_builds, 'git', return_value='b' * 40), self.assertRaisesRegex(ValueError, 'frozen'):
             freeze_builds.clean_source(self.repo, self.args.candidate_sha)
+        for features in ('[]', '["otlp"]', '["tokenizer", "otlp"]'):
+            (self.repo / 'Cargo.toml').write_text(f'[features]\ndefault={features}\n')
+            with self.subTest(features=features), patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']), self.assertRaisesRegex(ValueError, 'default features'):
+                freeze_builds.clean_source(self.repo, self.args.candidate_sha)
         (self.repo / 'Cargo.toml').write_text('[features]\ndefault=["tokenizer"]\n')
-        with patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']), self.assertRaisesRegex(ValueError, 'default features'):
+        with patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']):
             freeze_builds.clean_source(self.repo, self.args.candidate_sha)
-        (self.repo / 'Cargo.toml').write_text('[package]\nversion="1.8.0"\n')
+        (self.repo / 'Cargo.toml').write_text('[package]\nversion="1.8.0"\n[features]\ndefault=["tokenizer"]\n')
         with patch.object(freeze_builds, 'git', side_effect=[self.args.candidate_sha, '']), self.assertRaisesRegex(ValueError, 'version'):
             freeze_builds.clean_source(self.repo, self.args.candidate_sha, '1.8.1')
 

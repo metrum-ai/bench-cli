@@ -21,7 +21,7 @@ def check_build(item, candidate_sha, role, features):
         raise ValueError(f'{role} build role/release profile mismatch')
     if item.get('features') != features:
         raise ValueError(f'{role} build features must be {features}')
-    expected_origin = 'pretag-workflow' if role in ('measured', 'feature-variant-tokenizer') else 'local-cargo-validation'
+    expected_origin = 'pretag-workflow' if role == 'measured' else 'local-cargo-validation'
     if item.get('origin', {}).get('kind') != expected_origin:
         raise ValueError(f'{role} build origin must be {expected_origin}')
     path = Path(item['path']).resolve(strict=True)
@@ -36,7 +36,7 @@ def check_roles(manifest):
     sha = manifest['candidate_sha']
     measured = manifest['candidate']
     validation = manifest.get('tokenizer_validation')
-    primary = check_build(measured, sha, 'measured', ['otlp'])
+    primary = check_build(measured, sha, 'measured', ['otlp', 'tokenizer'])
     helper = check_build(validation, sha, 'validation-only', ['otlp', 'tokenizer'])
     if primary.samefile(helper) or measured['sha256'] == validation['sha256']:
         raise ValueError('measured and validation-only builds must be distinct')
@@ -49,6 +49,8 @@ def load_receipt(path, sha):
     if receipt.get('candidate_sha') != sha:
         raise ValueError('build receipt must match frozen candidate')
     builds = receipt['builds']
+    if set(builds) != {'measured', 'validation-only'}:
+        raise ValueError('build receipt must contain only shipped measured and validation-only roles')
     measured = builds['measured']['binaries']
     validation = builds['validation-only']['binaries']['metrum-ai-bench-cli-llm']
     if not measured:
@@ -74,33 +76,9 @@ def load_receipt(path, sha):
     return list(measured.values()), validation
 
 
-def load_variant(path, sha):
-    """A distinct workflow-built role, never silently promoted validation output."""
-    measured, validation = load_receipt(path, sha)
-    receipt = json.loads(Path(path).read_text())
-    entry = receipt['builds'].get('feature-variant-tokenizer')
-    if not isinstance(entry, dict):
-        raise ValueError('BC-GPU-010 requires a workflow tokenizer feature variant')
-    origin = entry['origin']
-    if (origin.get('run_id') != measured[0]['origin']['run_id']
-            or origin.get('version') != receipt['version']):
-        raise ValueError('variant must share the frozen pretag run/version')
-    expected = pretag_artifact.verify(origin, sha, variant=True)
-    binaries = entry['binaries']
-    if set(binaries) != {'metrum-ai-bench-cli-llm'} or set(expected) != set(binaries):
-        raise ValueError('variant registry must contain only the verified LLM CLI')
-    item = binaries['metrum-ai-bench-cli-llm']
-    binary = check_build(item, sha, 'feature-variant-tokenizer', ['otlp', 'tokenizer'])
-    if (item['sha256'] != expected['metrum-ai-bench-cli-llm'] or item.get('origin') != origin
-            or any(item['sha256'] == m['sha256'] or binary.samefile(m['path']) for m in measured)
-            or item['sha256'] == validation['sha256'] or binary.samefile(validation['path'])):
-        raise ValueError('feature variant differs from workflow or aliases shipped/validation build')
-    return item
-
-
 def check_manifest(manifest):
-    if 'feature_variant_tokenizer' in manifest and set(manifest.get('cases', {})) != {'BC-GPU-010'}:
-        raise ValueError('tokenizer feature variant is forbidden outside the GPU010-only manifest')
+    if 'feature_variant_tokenizer' in manifest:
+        raise ValueError('tokenizer feature variant is not a v1.9.0 measured build')
     primary, helper = check_roles(manifest)
     receipt = manifest['build_receipt']
     if digest(Path(receipt['path'])) != receipt['sha256']:

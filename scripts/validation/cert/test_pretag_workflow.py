@@ -32,10 +32,9 @@ class PretagWorkflowTests(unittest.TestCase):
             self.assertNotEqual(self.validate(version=version), 0)
 
     def assert_checkout_bindings(self, text):
-        # Seven jobs now: the existing six plus the separate tokenizer variant.
         # Check each step rather than allowing an unpinned step to borrow another's ref.
         steps = text.split('      - uses: actions/checkout@')[1:]
-        self.assertEqual(len(steps), 7)
+        self.assertEqual(len(steps), 6)
         for step in steps:
             block = step.split('\n      - ', 1)[0]
             self.assertEqual(re.findall(r'^\s+ref:\s*(.+)$', block, re.M), ['${{ inputs.candidate_sha }}'])
@@ -46,7 +45,7 @@ class PretagWorkflowTests(unittest.TestCase):
         for field, value in [('ref: ${{ inputs.candidate_sha }}', 'ref: main'),
                              ('persist-credentials: false', 'persist-credentials: true')]:
             matches = list(re.finditer(re.escape(field), text))
-            self.assertEqual(len(matches), 7)
+            self.assertEqual(len(matches), 6)
             for index, match in enumerate(matches):
                 with self.subTest(field=field, checkout=index), self.assertRaises(AssertionError):
                     self.assert_checkout_bindings(text[:match.start()] + value + text[match.end():])

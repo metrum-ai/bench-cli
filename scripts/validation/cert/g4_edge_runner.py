@@ -80,8 +80,8 @@ def main():
                            'baseline_binary_sha256': manifest_tool.sha256_file(args.baseline),
                            'manifest_sha256': manifest_tool.sha256_file(args.manifest),
                            'tokenizer_sha256': tokenizer['sha256'] if tokenizer else None,
-                           'feature_variant_binary_sha256': frozen_builds[gpu010_builds.VARIANT_KEY]['sha256'] if frozen_builds else None,
-                           'feature_variant_label': 'feature-variant build (tokenizer)' if frozen_builds else None},
+                           'fallback_binary_sha256': frozen_builds['candidate']['sha256'] if frozen_builds else None,
+                           'fallback_build_label': 'shipped build (otlp,tokenizer)' if frozen_builds else None},
               'observed_values': {'cells': cells, 'failed_cells': errors},
               'thresholds': {'requests_per_live_cell': 4, 'empty_issuance_count': 0, 'legacy_rate_tolerance_pct': 1},
               'evidence_paths': files}

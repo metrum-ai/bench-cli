@@ -16,7 +16,7 @@ class BuildRoleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.sha = 'a' * 40
         self.manifest = {'candidate_sha': self.sha}
-        for key, role, features in [('candidate', 'measured', ['otlp']),
+        for key, role, features in [('candidate', 'measured', ['otlp', 'tokenizer']),
                                    ('tokenizer_validation', 'validation-only', ['otlp', 'tokenizer'])]:
             path = self.root / key
             path.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# ' + role + '\nexit 0\n')

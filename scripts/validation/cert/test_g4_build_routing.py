@@ -19,8 +19,7 @@ class G4BuildRoutingTests(unittest.TestCase):
         self.args = SimpleNamespace(out=root / 'out', candidate=root / 'shipped', baseline=root / 'baseline',
             manifest=root / 'lane.json', sha='a' * 40, model='synthetic', revision='b' * 40,
             image='synthetic', start_utc='2026-01-01T00:00:00Z', owner='test', evidence_link='synthetic')
-        self.variant = root / 'variant'
-        for path in (self.args.candidate, self.args.baseline, self.variant):
+        for path in (self.args.candidate, self.args.baseline):
             path.write_text('SYNTHETIC NON-EXECUTABLE ' + path.name)
         self.evidence = self.args.out / 'evidence'
         self.evidence.mkdir(parents=True)
@@ -29,23 +28,23 @@ class G4BuildRoutingTests(unittest.TestCase):
         tokenizer.write_text('{"synthetic":true}')
         self.args.manifest.write_text(json.dumps({'lanes': {'G4': {'tokenizer': {'path': str(tokenizer), 'sha256': digest(tokenizer)}}}}))
 
-    def test_runner_selects_variant_only_for_fallback_and_binds_proof_before_run_cell(self):
+    def test_runner_uses_shipped_build_for_all_cells_and_binds_proof_before_run_cell(self):
         proofs = {}
         def select(manifest, name):
-            path = self.variant if name == 'fallback' else self.args.candidate
-            proof = {'binary_sha256': digest(path), 'label': 'feature-variant build (tokenizer)' if name == 'fallback' else 'shipped build (otlp)'}
+            path = self.args.candidate
+            proof = {'binary_sha256': digest(path), 'label': 'shipped build (otlp,tokenizer)'}
             proofs[name] = proof
             return path, proof
         def execute(args, label, binary, count, cap, thinking, extra, **kwargs):
             name = label.removeprefix('g4-edge-')
-            self.assertEqual(binary, self.variant if name == 'fallback' else args.candidate)
+            self.assertEqual(binary, args.candidate)
             self.assertEqual(json.loads((self.evidence / (label + '-build.json')).read_text()), proofs[name])
             self.assertEqual((count, cap, kwargs['concurrency']), (4, 128, 1))
             self.assertEqual(thinking, name == 'truncated')
             self.assertEqual(kwargs['fault'], 'remove_usage' if name in ('missing', 'fallback') else None)
             self.assertEqual('--tokenizer' in extra, name == 'fallback')
             return '', '', 0, None
-        frozen = {'feature_variant_tokenizer': {'sha256': digest(self.variant)}}
+        frozen = {'candidate': {'sha256': digest(self.args.candidate)}}
         with patch.object(runner.argparse.ArgumentParser, 'parse_args', return_value=self.args), \
              patch.object(runner.gpu010_builds, 'from_environment', return_value=frozen), \
              patch.object(runner.gpu010_builds, 'cell', side_effect=select), \
@@ -61,7 +60,8 @@ class G4BuildRoutingTests(unittest.TestCase):
         for name in runner.gpu010_builds.CELLS:
             self.assertEqual(record['observed_values']['cells'][name]['build'], proofs[name])
         self.assertEqual(record['versions']['candidate_binary_sha256'], digest(self.args.candidate))
-        self.assertEqual(record['versions']['feature_variant_binary_sha256'], digest(self.variant))
+        self.assertEqual(record['versions']['fallback_binary_sha256'], digest(self.args.candidate))
+        self.assertEqual(record['versions']['fallback_build_label'], 'shipped build (otlp,tokenizer)')
         self.assertEqual(record['thresholds'], {'requests_per_live_cell': 4, 'empty_issuance_count': 0, 'legacy_rate_tolerance_pct': 1})
 
     def test_missing_provenance_blocks_every_cell_before_any_measured_request(self):
