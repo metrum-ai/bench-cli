@@ -49,7 +49,9 @@ def main():
         # all-smi provenance = official metrum-ai/all-smi fork release asset whose
         # sha256 matches the release's published checksum; no source-checkout
         # rebuild and no hardcoded source revision.
-        if source.get('provenance') != 'official-fork-release-asset' or source.get('binary_sha256') != config['all_smi_binary']['sha256']:
+        if (source.get('provenance') != 'official-fork-release-asset'
+                or source.get('binary_sha256') != config['all_smi_binary']['sha256']
+                or not all(source.get(key) for key in ('release_tag', 'asset_name', 'asset_sha256'))):
             raise ValueError('all-smi release-asset provenance missing')
         versions['all_smi'] = source
         versions['telemetry_config_sha256'] = config['telemetry_config']['sha256']

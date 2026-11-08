@@ -133,16 +133,19 @@ def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids
                                   or not SHA.fullmatch(str(noise.get("sha256", ""))) or sha256_file(noise["path"]) != noise["sha256"]):
             raise ValueError("27B noise floor must be a pinned file")
         if lane == "P1":
-            for key in ("all_smi_binary", "all_smi_protoc_crate", "telemetry_config"):
+            for key in ("all_smi_binary", "all_smi_release_asset", "all_smi_published_checksum", "telemetry_config"):
                 item = config.get(key)
                 if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
                         or not SHA.fullmatch(str(item.get("sha256", ""))) or sha256_file(item["path"]) != item["sha256"]):
                     raise ValueError(f"P1 requires pinned {key}")
             if not os.access(config["all_smi_binary"]["path"], os.X_OK):
                 raise ValueError("all-smi binary must be executable")
-            # Release-asset provenance: no source checkout or vendored protoc needed.
-            if "all_smi_checkout" in config and (not isinstance(config.get("all_smi_checkout"), str) or not Path(config["all_smi_checkout"]).is_dir()):
-                raise ValueError("P1 all_smi_checkout pin, if present, must be a directory")
+            # Legacy checkout/protoc fields are ignored; only release inputs matter.
+            from perf_all_smi import ASSETS
+            asset = config["all_smi_release_asset"]
+            name = Path(asset["path"]).name
+            if name not in ASSETS or asset["sha256"] != ASSETS[name][2]:
+                raise ValueError("P1 release asset must match a supported table pin")
             preset = Path(__file__).resolve().parents[3] / "docs/telemetry/examples/all-smi.yaml"
             if Path(config["telemetry_config"]["path"]).resolve() != preset.resolve():
                 raise ValueError("P1 telemetry config must be the tracked loopback all-smi preset")
