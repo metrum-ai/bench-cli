@@ -62,8 +62,11 @@ class CleanupTests(unittest.TestCase):
                             '[ "${PHASE:-}" != teardown ] || printf "workload-complete\\n";; '
                             'rm) :;; *) exit 2;; esac\n')
             fake.chmod(0o755)
-            record = {'ID': 'BC-GPU-001', 'result': 'FAIL', 'candidate_sha': 'a' * 40,
-                      'evidence_paths': ['evidence/server.log']}
+            record = {'ID': 'BC-GPU-001', 'result': 'PASS', 'candidate_sha': 'a' * 40, 'attempt': 1,
+                      'observed_values': {'fixture': True}, 'thresholds': {'fixture': True},
+                      'versions': {'fixture': True}, 'owner': 'fixture', 'evidence_link': 'fixture',
+                      'start_utc': '2026-01-01T00:00:00Z', 'end_utc': '2026-01-01T00:00:01Z',
+                      'gpu_class': 'fixture', 'driver': 'fixture', 'evidence_paths': ['evidence/server.log']}
             (root / 'record.json').write_text(json.dumps(record))
             env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'],
                    'OUT': str(root), 'CERT_HOME': str(HERE)}
@@ -74,12 +77,30 @@ class CleanupTests(unittest.TestCase):
             completed = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=10)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads((root / 'results/BC-GPU-001.json').read_text())
+            self.assertEqual(result['result'], 'PASS')
             retained = (evidence / 'server.log').read_bytes()
             self.assertEqual(result['output_hashes']['evidence/server.log'], hashlib.sha256(retained).hexdigest())
             self.assertEqual(retained, b'startup\n')
             final = (evidence / 'server-teardown.log').read_bytes()
             self.assertEqual(final, b'startup\nworkload-complete\n')
             self.assertEqual((evidence / 'server-teardown.sha256').read_text().split()[0], hashlib.sha256(final).hexdigest())
+
+    def test_w_finalizes_its_log_before_external_signoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); evidence = root / 'evidence'; evidence.mkdir(); (root / 'results').mkdir()
+            (evidence / 'server.log').write_text('startup\n')
+            fake = root / 'docker'
+            fake.write_text('#!/bin/sh\ncase "$1" in logs) printf "startup\\nfinal\\n";; rm) :;; *) exit 2;; esac\n')
+            fake.chmod(0o755)
+            env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'],
+                   'OUT': str(root), 'CERT_HOME': str(HERE)}
+            script = ('source "$CERT_HOME/common.sh"; CERT_DIR="$CERT_HOME"; CERT_OUT="$OUT"; '
+                      'CERT_STARTED=1; CERT_CONTAINER=fixture; CERT_CASES=(); CERT_LANE=W; cert_on_exit 0')
+            completed = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual((evidence / 'server.log').read_text(), 'startup\nfinal\n')
+            self.assertEqual(json.loads((evidence / 'cleanup-verified.json').read_text()), {'cleanup': 'verified'})
+            self.assertFalse((evidence / 'server-teardown.log').exists())
 
 
 if __name__ == '__main__': unittest.main()
