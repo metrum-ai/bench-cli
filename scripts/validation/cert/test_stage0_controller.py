@@ -43,8 +43,16 @@ class ControllerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'expectations.json'
         self.cases = ['BC-GPU-001', 'BC-GPU-002']
-        self.plan = {'boxes': [{'id': 'box-a', 'cases': [
-            {'id': case, 'allowed_classes': ['COMPLETE']} for case in self.cases]}]}
+        self.candidate = 'a' * 40
+        entries = []
+        for case in self.cases:
+            manifest = Path(self.temp.name) / (case + '.json')
+            manifest.write_text(json.dumps({'candidate_sha': self.candidate, 'cases': {case: {}}}))
+            entries.append({'id': case, 'allowed_classes': ['COMPLETE'], 'cap_seconds': 150,
+                            'grace_seconds': 30, 'manifest': {'path': str(manifest),
+                            'sha256': hashlib.sha256(manifest.read_bytes()).hexdigest()},
+                            'request_log': 'evidence/requests.jsonl'})
+        self.plan = {'candidate_sha': self.candidate, 'boxes': [{'id': 'box-a', 'cases': entries}]}
         self.path.write_text(json.dumps(self.plan))
         self.sha = hashlib.sha256(self.path.read_bytes()).hexdigest()
         self.adapter = FakeAdapter()
@@ -110,6 +118,20 @@ class ControllerTests(unittest.TestCase):
             self.run_box()
         self.assertEqual(self.adapter.stopped, ['box-a'])
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
+
+    def test_changed_manifest_or_invalid_cap_stops_before_launch(self):
+        manifest = Path(self.plan['boxes'][0]['cases'][0]['manifest']['path'])
+        manifest.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'manifest hash changed'):
+            self.run_box()
+        self.assertFalse(self.adapter.launched)
+        self.assertEqual(self.adapter.stopped, ['box-a'])
+        self.plan['boxes'][0]['cases'][0]['grace_seconds'] = 150
+        self.path.write_text(json.dumps(self.plan))
+        self.sha = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'cap and cleanup grace'):
+            self.run_box()
+        self.assertFalse(self.adapter.launched)
 
     def test_duplicate_omitted_or_unassigned_case_rejected(self):
         self.plan['boxes'][0]['cases'].pop()

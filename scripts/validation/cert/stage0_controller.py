@@ -38,6 +38,8 @@ def pinned_expectations(path, expected):
 
 def box_cases(expectations, box, required):
     """A controller may not omit, duplicate, invent, or silently reorder cases."""
+    if not isinstance(expectations.get('candidate_sha'), str) or not re.fullmatch(r'[a-f0-9]{40}', expectations['candidate_sha']):
+        raise ValueError('expectations require a full candidate SHA')
     if not isinstance(box, str) or not box or not isinstance(required, list) or not required:
         raise ValueError('explicit box and assigned cases required')
     if (any(not isinstance(x, str) or not CASE.fullmatch(x) for x in required)
@@ -52,7 +54,8 @@ def box_cases(expectations, box, required):
     cases = matches[0]['cases']
     actual = []
     for item in cases:
-        if not isinstance(item, dict) or set(item) != {'id', 'allowed_classes'}:
+        fields = {'id', 'allowed_classes', 'cap_seconds', 'grace_seconds', 'manifest', 'request_log'}
+        if not isinstance(item, dict) or set(item) != fields:
             raise ValueError('invalid case expectation')
         case, classes = item['id'], item['allowed_classes']
         if not isinstance(case, str) or not CASE.fullmatch(case):
@@ -60,10 +63,37 @@ def box_cases(expectations, box, required):
         if (not isinstance(classes, list) or not classes or any(not isinstance(x, str) for x in classes)
                 or len(classes) != len(set(classes)) or not set(classes) <= CLASSES):
             raise ValueError('invalid allowed terminal classes')
+        cap, grace, manifest, request_log = (item['cap_seconds'], item['grace_seconds'],
+                                             item['manifest'], item['request_log'])
+        if type(cap) is not int or type(grace) is not int or not 0 < grace < cap:
+            raise ValueError('case cap and cleanup grace must be positive integers')
+        if (not isinstance(manifest, dict) or set(manifest) != {'path', 'sha256'}
+                or not isinstance(manifest['path'], str) or not Path(manifest['path']).is_absolute()
+                or '..' in Path(manifest['path']).parts
+                or not isinstance(manifest['sha256'], str) or not SHA.fullmatch(manifest['sha256'])):
+            raise ValueError('case manifest must be absolute and hash-pinned')
+        if (not isinstance(request_log, str) or not request_log or not Path(request_log).parts
+                or Path(request_log).is_absolute() or '..' in Path(request_log).parts
+                or '\x00' in request_log):
+            raise ValueError('case request log must be relative')
         actual.append(case)
     if actual != required:
         raise ValueError('box case plan differs from independently assigned ordered cases')
     return cases
+
+
+def pinned_manifest(item, candidate):
+    path = Path(item['manifest']['path'])
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('case manifest must be a regular non-symlink file')
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != item['manifest']['sha256']:
+        raise ValueError('case manifest hash changed')
+    manifest = json.loads(raw, object_pairs_hook=manifest_tool.unique_object)
+    if (not isinstance(manifest, dict) or manifest.get('candidate_sha') != candidate
+            or not isinstance(manifest.get('cases'), dict) or list(manifest['cases']) != [item['id']]):
+        raise ValueError('manifest must bind the candidate and one expected case')
+    return manifest
 
 
 def run_box(expectations_path, expected_sha256, box, required, adapter):
@@ -90,9 +120,11 @@ def run_box(expectations_path, expected_sha256, box, required, adapter):
         for sig in (signal.SIGINT, signal.SIGTERM):
             previous[sig] = signal.signal(sig, interrupted)
         cases = frozen_cases()
+        candidate = pinned_expectations(expectations_path, expected_sha256)['candidate_sha']
         must('backstop_armed', box)
         for item in cases:
             frozen_cases()  # detect changes before every case
+            pinned_manifest(item, candidate)
             must('backstop_armed', box)
             must('preflight', item)
             outcome = adapter.launch(item)
@@ -106,6 +138,7 @@ def run_box(expectations_path, expected_sha256, box, required, adapter):
             # A PASS must be explicitly covered by COMPLETE in this case's plan.
             must('verify_milestones', item, outcome)
             must('verify_cleanup', item)
+            pinned_manifest(item, candidate)
         frozen_cases()
         must('backstop_armed', box)
         return {'classification': 'Stage-0 smoke, not certification', 'box': box,
