@@ -25,8 +25,10 @@ weekly job additionally checks the actual published archives against their tag.
 
 The pre-rental RC-GPU gate is a **loopback offline rehearsal (no netns isolation)**:
 it exercises the selected RC-GPU cases' non-Docker launch paths using frozen inputs,
-candidate binaries and loopback stand-ins. Docker-dependent steps are deferred to
-GPU-session smoke, not counted as passes. Non-GPU cases run directly in certification;
+candidate binaries and loopback stand-ins, including production argument/input
+assembly, record writing and validator intake. Docker-dependent steps and their
+required runtime receipts are deferred to GPU-session smoke, not counted as passes.
+Non-GPU cases run directly in certification;
 post-tag and future-dependent inputs are frozen at their trigger points. Approved N/As
 remain N/As, not simulated executions. The partial probes below are not the complete
 gate. They provide no OS-enforced network isolation or physical-tier evidence.
