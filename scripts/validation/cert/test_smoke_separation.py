@@ -77,6 +77,25 @@ class SmokeSeparationTests(unittest.TestCase):
         self.assertFalse(sheet.exists())
         self.assertFalse(report.exists())
 
+    def test_unimplemented_lane_fallback_labels_every_failure(self):
+        binary = self.root / 'binary'
+        binary.write_text('fixture')
+        manifest = self.root / 'manifest.json'
+        manifest.write_text('{}')
+        out = self.smoke / 'unimplemented'
+        lane = Path(result_writer.__file__).with_name('lane.py')
+        cmd = [sys.executable, str(lane), 'G1', '--candidate', str(binary), '--baseline', str(binary),
+               '--manifest', str(manifest), '--out', str(out)]
+        run = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 1, run.stderr)
+        outputs = sorted((out / 'results').glob('*.json'))
+        self.assertTrue(outputs)
+        for path in outputs:
+            record = json.loads(path.read_text())
+            self.assertEqual(record['result'], 'FAIL')
+            self.assertEqual(record['evidence_class'], result_writer.SMOKE_CLASS)
+            self.assertEqual(record['stage0_expectations_sha256'], 'a' * 64)
+
     def test_invalid_or_nested_markers_and_unmarked_smoke_fail_closed(self):
         self.marker.write_text('{"classification":"invalid"}')
         with self.assertRaisesRegex(ValueError, 'invalid smoke root'):

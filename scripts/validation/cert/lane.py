@@ -7,6 +7,7 @@ import csv
 import datetime as dt
 import json
 from pathlib import Path
+import result_writer
 
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG = ROOT / "docs/RELEASE_CERTIFICATION_CATALOG.csv"
@@ -48,6 +49,7 @@ def main():
         record = {"ID": case["ID"], "result": "FAIL", "reason": "lane not implemented; no test executed",
                   "observed_values": {}, "thresholds": {}, "evidence_paths": [], "attempt": 1,
                   "start_utc": now, "end_utc": now, "gpu_class": None, "driver": None, "versions": {}}
+        record = result_writer.classify_smoke(args.out.resolve(), record)
         (result_dir / (case["ID"] + ".json")).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"Lane {args.lane} is not implemented; all {len(selected)} cases FAIL.")
     return 1
