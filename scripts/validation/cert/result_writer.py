@@ -21,9 +21,10 @@ class NonCertificationEvidence(ValueError):
     """Abort the inventory entirely; do not emit a certification report/sheet."""
 
 
-def classify_smoke(root, record):
-    """Permanently label records written beneath a marked smoke-only root."""
+def smoke_origin(root):
+    """Return the marked root and metadata, or None for certification paths."""
     import manifest_tool
+    root = Path(root).resolve()
     found = []
     for directory in (root, *root.parents):
         marker = directory / SMOKE_MARKER
@@ -37,17 +38,42 @@ def classify_smoke(root, record):
                     or data['classification'] != SMOKE_CLASS or not isinstance(data['expectations_sha256'], str)
                     or not SHA256.fullmatch(data['expectations_sha256'])):
                 raise ValueError('invalid smoke root marker')
-            found.append(data)
+            found.append((directory, data))
     if len(found) > 1:
         raise ValueError('nested smoke roots are not permitted')
-    if found:
+    return found[0] if found else None
+
+
+def classify_smoke(root, record):
+    """Permanently label records written beneath a marked smoke-only root."""
+    origin = smoke_origin(root)
+    if origin:
         if 'evidence_class' in record or 'stage0_expectations_sha256' in record:
             raise ValueError('smoke classification is controlled by its root marker')
         return {**record, 'evidence_class': SMOKE_CLASS,
-                'stage0_expectations_sha256': found[0]['expectations_sha256']}
+                'stage0_expectations_sha256': origin[1]['expectations_sha256']}
     if record.get('evidence_class') == SMOKE_CLASS:
         raise ValueError('smoke record requires a marked smoke root')
     return record
+
+
+def require_same_evidence_origin(destination, source, record=None):
+    """Never copy evidence across certification/smoke roots or between smoke roots."""
+    try:
+        dst, src = smoke_origin(destination), smoke_origin(source)
+    except (ValueError, OSError) as exc:
+        raise NonCertificationEvidence('invalid smoke evidence origin') from exc
+    if dst != src:
+        raise NonCertificationEvidence('evidence crosses smoke and certification roots')
+    if record is not None:
+        if not isinstance(record, dict):
+            raise NonCertificationEvidence('invalid predecessor record')
+        if src is None:
+            if record.get('evidence_class', 'certification') != 'certification' or 'stage0_expectations_sha256' in record:
+                raise NonCertificationEvidence('non-certification predecessor record')
+        elif (record.get('evidence_class') != SMOKE_CLASS
+              or record.get('stage0_expectations_sha256') != src[1]['expectations_sha256']):
+            raise NonCertificationEvidence('smoke predecessor classification mismatch')
 
 
 def reject_smoke_root(directory):

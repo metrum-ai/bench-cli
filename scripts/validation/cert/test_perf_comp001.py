@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import manifest_tool
 import perf_comp001_barrier as barrier
+import result_writer
 import test_perf_evidence
 
 PERF = Path(__file__).resolve().parent.parent / 'perf/test_compare.py'
@@ -63,6 +64,74 @@ def bundle(root, lane, model, revision, manifest_hash, candidate_hash, baseline_
 
 
 class BarrierTests(unittest.TestCase):
+    def test_smoke_predecessors_do_not_cross_roots_or_create_cert_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            smoke = root / 'smoke'; smoke.mkdir()
+            marker = {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'd' * 64}
+            (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(marker))
+            source = smoke / 'p1'; (source / 'results').mkdir(parents=True)
+            record = {'ID': 'BC-PERF-001', 'result': 'PASS', 'candidate_sha': 'a' * 40,
+                      'evidence_class': result_writer.SMOKE_CLASS, 'stage0_expectations_sha256': 'd' * 64}
+            (source / 'results/BC-PERF-001.json').write_text(json.dumps(record))
+            manifest = root / 'manifest.json'; manifest.write_text('{}')
+            out = root / 'cert-out'
+            argv = ['barrier', '--p1-out', str(source), '--p2-out', str(root / 'missing'), '--manifest', str(manifest),
+                    '--out', str(out), '--owner', 'fixture', '--evidence-link', 'fixture']
+            with patch('sys.argv', argv):
+                self.assertEqual(barrier.main(), 1)
+            self.assertFalse(out.exists())
+            barrier.check_predecessor_origin(source, smoke / 'out', 'BC-PERF-001')
+            other = root / 'other-smoke'; other.mkdir()
+            (other / result_writer.SMOKE_MARKER).write_text(json.dumps(marker))
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                barrier.check_predecessor_origin(source, other / 'out', 'BC-PERF-001')
+            record.pop('evidence_class')
+            (source / 'results/BC-PERF-001.json').write_text(json.dumps(record))
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                barrier.check_predecessor_origin(source, smoke / 'out', 'BC-PERF-001')
+            # A mislabeled record copied out of a smoke root must still fail.
+            copied = root / 'copied'; (copied / 'results').mkdir(parents=True)
+            record['evidence_class'] = result_writer.SMOKE_CLASS
+            (copied / 'results/BC-PERF-001.json').write_text(json.dumps(record))
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                barrier.check_predecessor_origin(copied, out, 'BC-PERF-001')
+            # An unmarked bundle containing a nested smoke root must also fail before copying.
+            record.pop('evidence_class'); record.pop('stage0_expectations_sha256')
+            (copied / 'results/BC-PERF-001.json').write_text(json.dumps(record))
+            nested = copied / 'nested'; nested.mkdir()
+            (nested / result_writer.SMOKE_MARKER).write_text(json.dumps(marker))
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                barrier.check_predecessor_origin(copied, out, 'BC-PERF-001')
+
+    def test_synthetic_same_smoke_root_barrier_keeps_classification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); smoke = root / 'smoke'; smoke.mkdir()
+            marker = {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'd' * 64}
+            (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(marker))
+            b, c = 'b' * 64, 'c' * 64
+            def config(model, revision):
+                return {'model': model, 'revision': revision, 'image': 'image',
+                        'prompt_sets': {w: {'sha256': w, 'path': str(smoke / f'{w}.jsonl')} for w in ('W1', 'W2')}}
+            manifest = {'candidate_sha': 'a' * 40, 'candidate_binary_sha256': c, 'baseline_binary_sha256': b,
+                        'lanes': {'P1': config('model-p1', 'rev1'), 'P2': config('model-p2', 'rev2')}}
+            file = root / 'manifest.json'; file.write_text(json.dumps(manifest)); digest = manifest_tool.sha256_file(file)
+            for name, lane, model, rev, case in (('a', 'P1', 'model-p1', 'rev1', 'BC-PERF-001'),
+                                                 ('b', 'P2', 'model-p2', 'rev2', 'BC-PERF-002')):
+                bundle(smoke / name, lane, model, rev, digest, c, b)
+                path = smoke / name / 'results' / f'{case}.json'
+                rec = json.loads(path.read_text()); rec.update(evidence_class=result_writer.SMOKE_CLASS,
+                                                               stage0_expectations_sha256='d' * 64)
+                path.write_text(json.dumps(rec))
+            out = smoke / 'out'
+            argv = ['barrier', '--p1-out', str(smoke / 'a'), '--p2-out', str(smoke / 'b'), '--manifest', str(file),
+                    '--out', str(out), '--owner', 'fixture', '--evidence-link', 'fixture']
+            with patch('sys.argv', argv), patch.dict(os.environ, {}, clear=False):
+                self.assertEqual(barrier.main(), 0)
+            rec = json.loads((out / 'results/BC-COMP-001.json').read_text())
+            self.assertEqual(rec['evidence_class'], result_writer.SMOKE_CLASS)
+            self.assertEqual(rec['stage0_expectations_sha256'], 'd' * 64)
+
     def test_both_models_required_and_copied_evidence_rechecked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); b = 'b' * 64; c = 'c' * 64
