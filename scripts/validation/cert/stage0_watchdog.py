@@ -8,12 +8,13 @@ provide an independently approved provider adapter and ensure its process stays
 alive. This module does not provision a box, authenticate an adapter, or itself
 establish that a real backstop is armed. No credentials belong in receipts.
 """
+import math
 import time
 
 import stage0_backstop
 
 
-def watch(scope, provider, state, *, clock=time.time, pause=time.sleep, interval=3):
+def watch(scope, provider, state, *, clock=time.time, steady=time.monotonic, pause=time.sleep, interval=3):
     """Arm before create; delete only the exact scoped resource when triggered.
 
     Keep monitoring if create is still in flight or a provider operation fails.
@@ -22,7 +23,16 @@ def watch(scope, provider, state, *, clock=time.time, pause=time.sleep, interval
     """
     if type(interval) not in (int, float) or not 0 < interval <= 30:
         raise ValueError('invalid watchdog interval')
-    stage0_backstop.check_available(scope, provider.inventory, clock())
+    wall_start, steady_start = clock(), steady()
+    if (type(steady_start) not in (int, float) or not math.isfinite(steady_start)):
+        raise ValueError('invalid monotonic watchdog clock')
+    stage0_backstop.check_available(scope, provider.inventory, wall_start)
+    wall_after, tick_after = clock(), steady()
+    if (type(wall_after) not in (int, float) or not math.isfinite(wall_after)
+            or type(tick_after) not in (int, float) or not math.isfinite(tick_after)
+            or tick_after < steady_start
+            or max(wall_after, wall_start + (tick_after - steady_start)) >= scope.deadline_epoch):
+        raise ValueError('watchdog deadline elapsed during pre-arm inventory')
     state.armed(scope)
     def report(exc):
         try:
@@ -33,19 +43,30 @@ def watch(scope, provider, state, *, clock=time.time, pause=time.sleep, interval
             pass
 
     absent = 0
+    triggered = False
+    last_tick = tick_after
     while True:
-        now = clock()
         try:
+            wall, tick = clock(), steady()
+            if (type(wall) not in (int, float) or not math.isfinite(wall)
+                    or type(tick) not in (int, float) or not math.isfinite(tick) or tick < last_tick):
+                raise ValueError('invalid watchdog clock')
+            last_tick = tick
+            # A backwards wall-clock adjustment must not extend a running cap.
+            now = max(wall, wall_start + (tick - steady_start))
             stop = state.stop_requested()
             if type(stop) is not bool:
                 raise ValueError('invalid stop state')
         except Exception as exc:
-            # Unknown controller state requires a stop, not more execution.
+            # Unknown controller or clock state requires a stop, not more execution.
             report(exc)
-            stop = True
-        if now < scope.deadline_epoch and not stop:
+            now, stop = scope.deadline_epoch, True
+        if now < scope.deadline_epoch and not stop and not triggered:
             pause(min(interval, max(0.0, scope.deadline_epoch - now)))
             continue
+        # Teardown is irreversible even if a stop flag disappears or time changes.
+        triggered = True
+        stop = True
         try:
             closed = state.creation_closed()
             absent_once = stage0_backstop.enforce(scope, provider.inventory, provider.delete,

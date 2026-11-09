@@ -94,6 +94,36 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.state.cleaned_count, 0)
         self.assertEqual(self.provider.deletions, ['owned-id'])
 
+    def test_backward_wall_clock_does_not_extend_deadline(self):
+        wall, tick = [1], [0]
+        def pause(seconds):
+            tick[0] += seconds
+            wall[0] = -100
+        watch(self.scope, self.provider, self.state, clock=lambda: wall[0],
+              steady=lambda: tick[0], pause=pause, interval=3)
+        self.assertGreaterEqual(tick[0], 9)
+        self.assertEqual(self.provider.deletions, ['owned-id'])
+        self.assertEqual(self.state.cleaned_count, 1)
+
+    def test_early_stop_is_latched_until_cleanup(self):
+        calls = [0]
+        def transient_stop():
+            calls[0] += 1
+            return calls[0] == 1
+        self.state.stop_requested = transient_stop
+        watch(self.scope, self.provider, self.state, clock=self.clock, pause=self.pause, interval=1)
+        self.assertLess(self.now, self.scope.deadline_epoch)
+        self.assertEqual(self.provider.deletions, ['owned-id'])
+        self.assertEqual(self.state.cleaned_count, 1)
+
+    def test_invalid_clock_fails_safe_to_deletion(self):
+        ticks = iter([0, 0, float('nan'), 1, 2])
+        watch(self.scope, self.provider, self.state, clock=self.clock,
+              steady=lambda: next(ticks), pause=self.pause, interval=1)
+        self.assertEqual(self.provider.deletions, ['owned-id'])
+        self.assertIn('ValueError', self.state.errors)
+        self.assertEqual(self.state.cleaned_count, 1)
+
     def test_stop_state_failure_fails_safe_to_deletion(self):
         def broken_stop(): raise OSError('not logged')
         self.state.stop_requested = broken_stop
@@ -130,6 +160,18 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(count[0], 2)
         self.assertGreaterEqual(self.provider.inventories, 6)  # arm, delete, four absent
         self.assertEqual(self.state.cleaned_count, 1)
+
+    def test_slow_inventory_never_arms_after_deadline(self):
+        ticks = [0]
+        def inventory():
+            ticks[0] = 11
+            return []
+        self.provider.inventory = inventory
+        with self.assertRaisesRegex(ValueError, 'deadline elapsed'):
+            watch(self.scope, self.provider, self.state, clock=self.clock,
+                  steady=lambda: ticks[0], pause=self.pause, interval=1)
+        self.assertEqual(self.state.armed_count, 0)
+        self.assertFalse(self.provider.deletions)
 
     def test_collision_blocks_arm(self):
         self.provider.resources = [{'name': self.scope.name, 'id': 'other-id'}]
