@@ -63,6 +63,11 @@ def tool_prompt(config):
     prompt = Path(tool['path']).resolve(strict=True)
     if not prompt.is_file() or manifest_tool.sha256_file(prompt) != tool['sha256']:
         raise ValueError('tool prompt pin mismatch')
+    rows = [json.loads(line, object_pairs_hook=manifest_tool.unique_object)
+            for line in prompt.read_text(encoding='utf-8').splitlines() if line.strip()]
+    if not rows or any(not isinstance(row, dict) or not isinstance(row.get('prompt'), str)
+                       or not row['prompt'].strip() for row in rows):
+        raise ValueError('tool prompt must contain nonempty JSONL prompt strings')
     return prompt
 
 

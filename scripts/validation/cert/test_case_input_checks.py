@@ -33,6 +33,10 @@ class CaseInputChecksTests(unittest.TestCase):
         config = {'server_flags': ['--enable-auto-tool-choice', '--tool-call-parser', 'hermes'],
                   'prompt_sets': {'tool': self.pin(self.prompt)}}
         case_input_checks.check('BC-GPU-003', config, self.candidate)
+        self.prompt.write_text('{"prompt":""}\n')
+        config['prompt_sets']['tool'] = self.pin(self.prompt)
+        with self.assertRaises(ValueError):
+            case_input_checks.check('BC-GPU-003', config, self.candidate)
         del config['prompt_sets']['tool']
         with self.assertRaises(KeyError):
             case_input_checks.check('BC-GPU-003', config, self.candidate)
