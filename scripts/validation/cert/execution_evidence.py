@@ -186,6 +186,8 @@ def enrich(root, record):
 def report_rows(root):
     """Verify content hashes before deriving rows; never manufacture missing results."""
     rows = []
+    if (Path(root) / 'results/lane-error.json').exists():
+        raise ValueError('lane error prevents acceptance of case records')
     for path in sorted((Path(root) / "results").glob("BC-*.json")):
         record = json.loads(path.read_text())
         if not re.fullmatch(r"[a-f0-9]{40}", record.get("candidate_sha", "")) or record.get("result") not in ("PASS", "FAIL"):

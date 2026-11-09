@@ -41,9 +41,9 @@ def evaluate(data, process_exit, assert_exit):
     return passed, observed
 
 
-def call(command, stdout, stderr, timeout, env=None):
+def call(command, stdout, stderr, timeout, env=None, cwd=None):
     try:
-        process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        process = subprocess.Popen(command, cwd=ROOT if cwd is None else cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    env=env, start_new_session=True)
     except OSError as exc:
         stdout.write_bytes(b"")
@@ -77,6 +77,17 @@ def call(command, stdout, stderr, timeout, env=None):
                 process.wait()
 
 
+def smoke_invocation(args, smoke_dir):
+    """Assemble the actual L1 smoke argv and environment additions."""
+    command = ["cargo", "--locked", "xtask", "local-smoke", "llm", "--url", f"http://localhost:{args.port}",
+               "--model", args.model, "--sut", str(args.sut), "--out", str(smoke_dir), "--num-requests", "16",
+               "--concurrency", "2", "--warmup", "0", "--seed", "42", "--root", str(ROOT)]
+    additions = {"BENCH_BIN_DIR": str(args.candidate.parent), "PROMPT_LOCAL_JSONL": str(args.prompt),
+                 "MAX_TOKENS": "128", "LLM_EXTRA_BODY": '{"chat_template_kwargs":{"enable_thinking":false}}',
+                 "MIN_SUCCESS_RATIO": "1.0"}
+    return command, additions
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("out", "candidate", "baseline", "manifest", "sut", "prompt"):
@@ -90,13 +101,9 @@ def main():
     data_log = smoke_dir / "results.jsonl"
     stdout, stderr = evidence / "l1-stdout.txt", evidence / "l1-stderr.txt"
     assert_out, assert_err = evidence / "l1-headline.txt", evidence / "l1-headline-error.txt"
-    command = ["cargo", "--locked", "xtask", "local-smoke", "llm", "--url", f"http://localhost:{args.port}",
-               "--model", args.model, "--sut", str(args.sut), "--out", str(smoke_dir), "--num-requests", "16",
-               "--concurrency", "2", "--warmup", "0", "--seed", "42", "--root", str(ROOT)]
+    command, additions = smoke_invocation(args, smoke_dir)
     env = os.environ.copy()
-    env.update({"BENCH_BIN_DIR": str(args.candidate.parent), "PROMPT_LOCAL_JSONL": str(args.prompt),
-                "MAX_TOKENS": "128", "LLM_EXTRA_BODY": '{"chat_template_kwargs":{"enable_thinking":false}}',
-                "MIN_SUCCESS_RATIO": "1.0"})
+    env.update(additions)
     (evidence / "l1-command.json").write_text(json.dumps({"argv": command, "bench_bin": str(args.candidate),
         "prompt": str(args.prompt), "max_tokens": 128, "thinking": False}, indent=2) + "\n", encoding="utf-8")
     process_exit = call(command, stdout, stderr, 900, env=env)

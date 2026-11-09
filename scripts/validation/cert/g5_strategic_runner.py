@@ -21,6 +21,28 @@ import result_writer
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def invocations(args, strategic, evidence):
+    """Build the production restart and export-failure commands."""
+    prefix = 'g5-strategic-'
+    trace = evidence / (prefix + 'trace.jsonl')
+    csv_path = evidence / (prefix + 'records.csv')
+    command = [str(strategic), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
+               '--model', args.model, '--kind', 'chat', '--streaming', '--requests-per-stage', '4', '--sweep', '1,2',
+               '--prompts', str(args.prompt), '--max-tokens', '128', '--temperature', '0', '--seed', '42',
+               '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}', '--timeout-seconds', '600',
+               '--fail-on-error', '--csv', str(csv_path), '--html', str(evidence / (prefix + 'report.html')),
+               '--ndjson', str(evidence / (prefix + 'telemetry.jsonl'))]
+    proxy = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
+             '--upstream-port', str(args.port), '--out', str(trace), '--retry-seconds', '240']
+    failure_dir = evidence / (prefix + 'invalid-csv-destination')
+    failure = [str(strategic), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
+               '--model', args.model, '--kind', 'chat', '--streaming', '--requests-per-stage', '1', '--sweep', '1',
+               '--prompts', str(args.prompt), '--max-tokens', '128', '--temperature', '0', '--seed', '42',
+               '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}', '--timeout-seconds', '600',
+               '--fail-on-error', '--csv', str(failure_dir)]
+    return command, proxy, failure, trace, csv_path, failure_dir
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('out', 'candidate', 'baseline', 'manifest', 'prompt'):
@@ -35,24 +57,13 @@ def main():
     proxy = client = None
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['G5']
-        pinned = config['strategic_binary']
-        strategic = Path(pinned['path']).resolve(strict=True)
-        if strategic != args.candidate.resolve().parent / 'metrum-ai-bench-cli-strategic' or not os.access(strategic, os.X_OK) or manifest_tool.sha256_file(strategic) != pinned['sha256']:
-            raise ValueError('strategic binary must be pinned beside candidate')
+        import g4_modality_runner
+        strategic = g4_modality_runner.pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', args.candidate)
         container = (evidence / 'container-id.txt').read_text(encoding='utf-8').strip()
         if not container or any(c not in '0123456789abcdef' for c in container):
             raise ValueError('owned real server identity missing')
         prefix = 'g5-strategic-'
-        trace = evidence / (prefix + 'trace.jsonl')
-        csv_path = evidence / (prefix + 'records.csv')
-        command = [str(strategic), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
-                   '--model', args.model, '--kind', 'chat', '--streaming', '--requests-per-stage', '4', '--sweep', '1,2',
-                   '--prompts', str(args.prompt), '--max-tokens', '128', '--temperature', '0', '--seed', '42',
-                   '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}', '--timeout-seconds', '600',
-                   '--fail-on-error', '--csv', str(csv_path), '--html', str(evidence / (prefix + 'report.html')),
-                   '--ndjson', str(evidence / (prefix + 'telemetry.jsonl'))]
-        proxy_command = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
-                         '--upstream-port', str(args.port), '--out', str(trace), '--retry-seconds', '240']
+        command, proxy_command, failure_command, trace, csv_path, failure_dir = invocations(args, strategic, evidence)
         (evidence / (prefix + 'command.json')).write_text(json.dumps({'benchmark': command, 'proxy': proxy_command}, indent=2) + '\n', encoding='utf-8')
         with (evidence / (prefix + 'proxy-error.txt')).open('wb') as perr, (evidence / (prefix + 'summary.json')).open('wb') as out, (evidence / (prefix + 'stderr.txt')).open('wb') as err:
             proxy = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT)
@@ -79,13 +90,7 @@ def main():
             code = client.wait(timeout=1800)
         # A separate successful real one-request stage has a deliberately invalid
         # export destination; JSON must already be emitted when that export fails.
-        failure_dir = evidence / (prefix + 'invalid-csv-destination')
         failure_dir.mkdir()
-        failure_command = [str(strategic), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
-                           '--model', args.model, '--kind', 'chat', '--streaming', '--requests-per-stage', '1', '--sweep', '1',
-                           '--prompts', str(args.prompt), '--max-tokens', '128', '--temperature', '0', '--seed', '42',
-                           '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}', '--timeout-seconds', '600',
-                           '--fail-on-error', '--csv', str(failure_dir)]
         (evidence / (prefix + 'export-failure-command.json')).write_text(json.dumps(failure_command, indent=2) + '\n', encoding='utf-8')
         fail_out, fail_err = evidence / (prefix + 'export-failure.json'), evidence / (prefix + 'export-failure-stderr.txt')
         failure_code = l1_runner.call(failure_command, fail_out, fail_err, 900)

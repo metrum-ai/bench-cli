@@ -77,6 +77,15 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
+    import case_input_checks
+    targeted = set(cases) & case_input_checks.LANES.keys()
+    if targeted:
+        import manifest_tool
+        lane_path = pinned(manifest['lane_manifest'])
+        lane_data = json.loads(lane_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        for case in targeted:
+            config = lane_data['lanes'][case_input_checks.LANES[case]]
+            case_input_checks.check(case, config, binary)
     from tokenizer_probe import probe
     probe(validation_binary, tokenizer['path'])
     if 'BC-GPU-010' in cases:
@@ -125,6 +134,12 @@ def run_case(manifest_path, manifest, case):
         code = process.wait()
         if code:
             raise subprocess.CalledProcessError(code, entry["command"])
+        # A child may have written a PASS already. Do not validate the record
+        # if any registered binary, build provenance, lane or frozen input
+        # changed while it ran; the error path retains a lane-error marker.
+        build_roles.check_manifest(manifest)
+        for item in manifest.get('inputs', []):
+            pinned(item)
         target = out / "results" / (case + ".json")
         if not target.is_file():
             raise ValueError("case exited without an execution record")
@@ -173,8 +188,11 @@ def run_case(manifest_path, manifest, case):
                         os.environ[key] = value
         else:
             # A failing launcher/cleanup cannot be masked by a previously written PASS.
-            with (out / "results" / "lane-error.json").open("x") as stream:
-                json.dump({"error": str(exc)}, stream)
+            try:
+                with (out / "results" / "lane-error.json").open("x") as stream:
+                    json.dump({"error": str(exc)}, stream)
+            except FileExistsError:
+                pass  # Preserve the child's existing cleanup/lane failure marker.
         raise
     finally:
         for sig, handler in previous.items():

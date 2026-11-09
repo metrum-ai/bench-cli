@@ -19,6 +19,22 @@ import schema_checks
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def fixture_command():
+    return ["cargo", "test", "--locked", "--offline", "--test", "schema_history", "--test", "schema_migration"]
+
+
+def strategic_command(args, evidence):
+    prefix = 'g6-schema-'
+    csv_path, ndjson = evidence / (prefix + 'strategic.csv'), evidence / (prefix + 'strategic-telemetry.jsonl')
+    html = evidence / (prefix + 'strategic.html')
+    command = [str(args.strategic), "--url", f"http://localhost:{args.port}/v1/chat/completions", "--api-key", "dummy",
+               "--model", args.model, "--kind", "chat", "--streaming", "--requests-per-stage", "8", "--sweep", "1",
+               "--prompts", str(args.prompt), "--max-tokens", "4096", "--temperature", "0", "--seed", "42",
+               "--extra-body-json", json.dumps({"chat_template_kwargs": {"enable_thinking": True}}),
+               "--timeout-seconds", "1200", "--csv", str(csv_path), "--html", str(html), "--ndjson", str(ndjson)]
+    return command, csv_path, ndjson, html
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("out", "candidate", "strategic", "manifest", "prompt"):
@@ -34,23 +50,16 @@ def main():
     prefix = "g6-schema-"
     try:
         fixture_out, fixture_err = evidence / (prefix + "fixtures.txt"), evidence / (prefix + "fixtures-error.txt")
-        fixture_command = ["cargo", "test", "--locked", "--offline", "--test", "schema_history", "--test", "schema_migration"]
-        (evidence / (prefix + "fixture-command.json")).write_text(json.dumps(fixture_command, indent=2) + "\n", encoding="utf-8")
-        if l1_runner.call(fixture_command, fixture_out, fixture_err, 1800) != 0:
+        fixtures = fixture_command()
+        (evidence / (prefix + "fixture-command.json")).write_text(json.dumps(fixtures, indent=2) + "\n", encoding="utf-8")
+        if l1_runner.call(fixtures, fixture_out, fixture_err, 1800) != 0:
             raise ValueError("frozen old-reader/wrapper migration tests failed")
         llm_ndjson = evidence / (prefix + "llm-telemetry.jsonl")
         llm_data, llm_trace, code, _files = r_runner.run_cell(args, prefix + "llm", args.candidate, 16, 4096, True,
                                                                ["--ndjson", str(llm_ndjson)])
         r_checks.adequate_cell(llm_data, llm_trace, 16, code)
         strategic_out, strategic_err = evidence / (prefix + "strategic.json"), evidence / (prefix + "strategic-error.txt")
-        strategic_csv, strategic_ndjson = evidence / (prefix + "strategic.csv"), evidence / (prefix + "strategic-telemetry.jsonl")
-        strategic_html = evidence / (prefix + "strategic.html")
-        command = [str(args.strategic), "--url", f"http://localhost:{args.port}/v1/chat/completions", "--api-key", "dummy",
-                   "--model", args.model, "--kind", "chat", "--streaming", "--requests-per-stage", "8", "--sweep", "1",
-                   "--prompts", str(args.prompt), "--max-tokens", "4096", "--temperature", "0", "--seed", "42",
-                   "--extra-body-json", json.dumps({"chat_template_kwargs": {"enable_thinking": True}}),
-                   "--timeout-seconds", "1200", "--csv", str(strategic_csv), "--html", str(strategic_html),
-                   "--ndjson", str(strategic_ndjson)]
+        command, strategic_csv, strategic_ndjson, strategic_html = strategic_command(args, evidence)
         (evidence / (prefix + "strategic-command.json")).write_text(json.dumps(command, indent=2) + "\n", encoding="utf-8")
         if l1_runner.call(command, strategic_out, strategic_err, 1800) != 0:
             raise ValueError("strategic live run exited nonzero")

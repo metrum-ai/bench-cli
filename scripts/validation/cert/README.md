@@ -51,6 +51,118 @@ monotonic clock). It appends those observed UTC values, not finalization time;
 missing clocks remain null. Per-case launch validation appends record validation.
 Never substitute runner start/end for actual first/last request times.
 
+For VLM cases whose runner requires absolute image paths, prepare a new pinned
+prompt file before freezing, using `prepare_vlm_input.py --source SOURCE
+--source-sha256 SHA --image IMAGE --image-sha256 SHA --root REPOSITORY_ROOT
+--out NEW_JSONL`. It rejects remote, mismatched, multiple and ambiguous images,
+never overwrites a file, and prints the new path/hash for the lane manifest.
+Freeze the original source and image as inputs too; the prepared JSONL is an
+ordinary frozen input consumed unchanged by the runner. This is input preparation,
+not an offline launch rehearsal or certification evidence.
+
+For product `--require-sut` consumers, `prepare_product_sut.py --inventory
+OBSERVED.json --inventory-sha256 SHA --lane-manifest LANE.json --lane-sha256 SHA
+--lane L1 --out NEW_SUT.json` produces a separate product-schema declaration from
+exactly one observed GPU inventory and the pinned lane. Its fields distinguish
+observed inventory from declared server/model; fractional GiB is rounded down.
+Pin the original inventory and lane, and pin the generated declaration as the
+lane SUT. Do not use synthetic inventory as live evidence. Input preparation
+alone does not prove that the product parser accepts the result. The narrow
+`rehearse_product_llm.py --binary FROZEN_LLM --binary-sha256 SHA --sut NEW_SUT.json
+--sut-sha256 SHA` loopback probe checks the actual pinned LLM binary's
+`--require-sut` parser and resulting summary against the SUT identity; it cannot
+stand in for parsing other modalities or exercising the case runner. It uses
+only temporary outputs and an isolated disposable local server.
+
+`rehearse_live_modalities.py --manifest FROZEN_CASE.json --case BC-LIVE-001`
+(or BC-LIVE-002/003/004) is a partial CPU-only loopback check: it verifies the
+frozen case entry argv and pinned harness, uses the same smoke/headline command
+assembly as the actual runner, invokes the frozen modality binary through
+`cargo --locked xtask`, and verifies the required-SUT summary and local request
+cohort. For L1 it checks xtask's actual selector argv against the frozen recipe
+and compares its output with an independent double generation. Since this uses
+temporary output paths, it does not call the production case-output boundary;
+the loopback requests precede the independent check and are never evidence.
+It does not call a record writer or exercise non-live cases, physical GPU behavior
+or the native offload gate, and is **not** the complete selected-set rehearsal.
+Its disposable loopback server is not an OS network sandbox; use independently
+enforced offline policy.
+
+`rehearse_g1_variants.py --manifest FROZEN_CASE.json` is a partial GPU-003
+check: it validates the frozen G1 inputs and actual runner's tool prompt, then
+runs all six real product/proxy command variants against a synthetic loopback
+server using disposable output. It checks each product request and forwarded
+variant fields, but does not run the GPU-003 validator or write a case record.
+Its loopback fixture is not an OS network sandbox, real-model evidence, or the
+complete selected-set rehearsal. Independently enforce offline policy.
+
+`rehearse_g5_strategic.py --manifest FROZEN_CASE.json` exercises the GPU-013
+strategic benchmark and intentional export-failure argv with the pinned product
+binary, real trace proxy and synthetic loopback responses. It does not kill or
+restart a server, invoke the validator or write a case record; it is not real
+server evidence or the complete selected-set rehearsal. Its fixture is not an OS
+network sandbox; independently enforce offline policy.
+
+`rehearse_g5_endpoints.py --manifest FROZEN_CASE.json` exercises the GPU-015
+four-port configuration check and actual endpoint-file/product argv against two
+synthetic local servers with two trace proxies. It verifies successful measured
+requests reach both endpoints, but does not kill a server, invoke the validator
+or write a case record. Temporary loopback ports replace the frozen ports after
+checking them; it is not an OS network sandbox, real failover evidence or the
+complete selected-set rehearsal. Independently enforce offline policy.
+
+`rehearse_vlm_reasoning.py --manifest FROZEN_CASE.json` exercises the actual
+REASON-005 VLM product/proxy argv against a synthetic local server, verifies
+seven completed product requests and compares the wire-embedded image bytes
+with the frozen image pin. It checks the actual runner's input validation but
+does not invoke its result validator or write a case record. It is not a network
+sandbox, real reasoning evidence or the complete selected-set rehearsal;
+independently enforce offline policy.
+
+`rehearse_g4_modality.py --manifest FROZEN_CASE.json` exercises GPU-011's
+actual LLM, VLM and two strategic product/proxy command cohorts against a
+synthetic local server, checks model/options and pinned VLM image bytes on the
+wire, and uses temporary outputs. It does not stop or launch model servers,
+invoke the GPU-011 validator or write a case record. It is not a network sandbox,
+real-model evidence or the complete selected-set rehearsal.
+
+`rehearse_d_default.py --manifest FROZEN_CASE.json` exercises REASON-006's
+actual 64-request field-default runner/product/proxy argv on a synthetic local
+server, checking the pinned model, thinking option and 512-token cap on the
+wire. It does not invoke the truncation validator or write a case record; it is
+not a network sandbox, real-model evidence or the complete selected-set rehearsal.
+
+`rehearse_g6_schema.py --manifest FROZEN_CASE.json` runs GPU-016's actual
+locked/offline schema fixtures plus its LLM and strategic product argv against a
+synthetic server. It fails when the executing host's Cargo cache is incomplete.
+It does not invoke the live schema result validator, write a case record, provide
+an OS network sandbox or replace the complete selected-set rehearsal.
+
+For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
+--source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
+ShareGPT and order inputs from exactly 64 distinct source prompts, validates
+them with the real runner's input checks and emits a pinned receipt. The order
+rows include the product parser's required concurrency-one `cohort`; regenerate
+any earlier order file that lacks it before freezing. Freeze the source, receipt
+and all three outputs; this preparation does not run the case.
+`rehearse_comp_candidate.py --manifest FROZEN_CASE.json --tokenizer-cache CACHE`
+checks the frozen tokenizer snapshot and executes the actual candidate-side argv
+and prompt order against synthetic loopback. It assembles the reference command
+but does **not** execute the vLLM reference parser or container, invoke the
+comparison validator, or write a case record; it is not a complete rehearsal or
+an OS network sandbox.
+
+Before going offline for BC-GPU-016, run `scripts/validation/cert/prepare_schema_cache.sh`
+with the intended Cargo home and toolchain. It runs `cargo fetch --locked` followed
+by an offline no-run build of the exact schema-history/migration test targets;
+this preparatory step is not itself evidence that the measured case ran. The
+operator must arrange and verify that cache on the actual execution host.
+
+Freeze now also calls the actual runner's input checks for selected known cases
+(GPU-003/011/013/015, REASON-005, COMP-002). These are early checks only, not
+complete runner argv or SUT parsing and **not** the complete offline rehearsal
+required before rental; missing selected-case coverage remains a blocker.
+
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
 and content pin, all-smi executable pin, every input pin and each launcher pin.
@@ -71,7 +183,13 @@ Secondary CLI pins must belong to the measured artifact registry; a validation
 binary (including renamed copies) cannot appear in measured argv/config.
 All four BC-GPU-010 cells use the same workflow-built shipped LLM binary with
 `otlp,tokenizer`. Its receipt, executable and workflow-origin evidence must be
-frozen as inputs; a separate variant is forbidden. Missing bindings fail closed
+frozen as inputs; a separate variant is forbidden. L1–L4 also require xtask's
+canonical `BENCH_BIN_DIR` binaries to resolve to the registered measured paths;
+ambient search fallback is not acceptable. After a case exits, the launcher
+rechecks the build, lane and frozen input pins before validating a record. A
+lane-error marker rejects the case in `report_rows` even if its runner already
+wrote PASS. These checks do not replace immutable execution environments or the
+pre-qualification integrity audit. Missing bindings fail closed
 before any cell issues a request. Validation-only executables or their copies
 cannot be substituted for the shipped binary.
 Every cell must pass unchanged criteria; no waiver, N/A or skipped fallback is

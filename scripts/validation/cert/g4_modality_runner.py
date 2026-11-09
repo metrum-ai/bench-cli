@@ -47,17 +47,17 @@ def image_prompts(prompt, image):
             raise ValueError('VLM image must be the pinned local file; remote inputs are forbidden')
 
 
-def run_proxy(args, label, command, image=False):
+def run_proxy(args, label, command, image=False, env=None, cwd=None):
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
                  '--upstream-port', str(args.port), '--out', str(trace), *(['--record-image-identity'] if image else [])]
     (evidence / f'{label}-command.json').write_text(json.dumps({'command': command, 'proxy': proxy_cmd}, indent=2) + '\n', encoding='utf-8')
     with (evidence / f'{label}-proxy-error.txt').open('wb') as perr:
-        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT)
+        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800)
+            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env, cwd=cwd)
             if code != 0:
                 raise ValueError(f'{label} exited {code}')
             g7_runner.wait_for_trace(trace)
@@ -69,7 +69,7 @@ def run_proxy(args, label, command, image=False):
     return trace.read_text(encoding='utf-8')
 
 
-def strategic(args, binary, label, model, prompt, kind):
+def strategic_command(args, binary, label, model, prompt, kind):
     evidence = args.out / 'evidence'
     csv_path, ndjson = evidence / f'{label}.csv', evidence / f'{label}-telemetry.jsonl'
     command = [str(binary), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
@@ -77,15 +77,21 @@ def strategic(args, binary, label, model, prompt, kind):
                '--prompts', str(prompt), '--max-tokens', '4096', '--temperature', '0', '--seed', '42',
                '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":true}}', '--timeout-seconds', '1200',
                '--csv', str(csv_path), '--ndjson', str(ndjson)]
-    trace = run_proxy(args, label, command, image=(kind == 'vlm'))
+    return command, csv_path, ndjson
+
+
+def strategic(args, binary, label, model, prompt, kind, env=None, cwd=None):
+    evidence = args.out / 'evidence'
+    command, csv_path, ndjson = strategic_command(args, binary, label, model, prompt, kind)
+    trace = run_proxy(args, label, command, image=(kind == 'vlm'), env=env, cwd=cwd)
     return {'summary': (evidence / f'{label}-stdout.txt').read_text(encoding='utf-8'),
             'csv': csv_path.read_text(encoding='utf-8'), 'telemetry': ndjson.read_text(encoding='utf-8'), 'trace': trace}
 
 
-def run(args, config):
-    evidence = args.out / 'evidence'
-    strategic_bin = pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', args.candidate)
-    vlm_bin = pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', args.candidate)
+def modality_inputs(config, candidate):
+    """Validate and assemble the pinned modality inputs used by this runner."""
+    strategic_bin = pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', candidate)
+    vlm_bin = pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', candidate)
     image = pinned_file(config, 'vlm_image')
     prompt = pinned_file(config['prompt_sets'], 'vlm')
     image_prompts(prompt, image)
@@ -99,6 +105,23 @@ def run(args, config):
         raise ValueError('pinned compatible qwen3 parser and disabled prefix caching required')
     if any(not isinstance(flag, str) or flag.split('=', 1)[0] in manifest_tool.FORBIDDEN for flag in flags):
         raise ValueError('invalid VLM server flags')
+    return strategic_bin, vlm_bin, image, prompt, vlm, flags
+
+
+def vlm_command(args, binary, prompt, model, data, telemetry):
+    """Assemble the actual G4 VLM product invocation."""
+    evidence = args.out / 'evidence'
+    return [str(binary), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
+            '--scenario', 'g4-modality-vlm', '--num-requests', '4', '--concurrency', '1', '--prompts', str(prompt),
+            '--model', model, '--data-log', str(data), '--streaming', '--max-tokens', '4096', '--temperature', '0',
+            '--warmup-requests', '0', '--seed', '42', '--request-timeout', '1200', '--slo', 'e2e=600',
+            '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":true}}', '--ndjson', str(telemetry),
+            '--debug-log', str(evidence / 'g4-modality-vlm-debug.log'), '--error-log', str(evidence / 'g4-modality-vlm-error.log')]
+
+
+def run(args, config):
+    evidence = args.out / 'evidence'
+    strategic_bin, vlm_bin, image, prompt, vlm, flags = modality_inputs(config, args.candidate)
     models = json.loads((evidence / 'models.json').read_text(encoding='utf-8'))
     if not any(row.get('id') == args.model for row in models.get('data', [])):
         raise ValueError('first server did not serve the pinned LLM model')
@@ -145,12 +168,7 @@ def run(args, config):
             raise ValueError('real VLM server readiness timeout')
         (evidence / 'g4-modality-vlm-models.json').write_text(json.dumps(models, indent=2) + '\n', encoding='utf-8')
         data, telemetry = evidence / 'g4-modality-vlm-requests.jsonl', evidence / 'g4-modality-vlm-telemetry.jsonl'
-        bench = [str(vlm_bin), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
-                 '--scenario', 'g4-modality-vlm', '--num-requests', '4', '--concurrency', '1', '--prompts', str(prompt),
-                 '--model', vlm['model'], '--data-log', str(data), '--streaming', '--max-tokens', '4096', '--temperature', '0',
-                 '--warmup-requests', '0', '--seed', '42', '--request-timeout', '1200', '--slo', 'e2e=600',
-                 '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":true}}', '--ndjson', str(telemetry),
-                 '--debug-log', str(evidence / 'g4-modality-vlm-debug.log'), '--error-log', str(evidence / 'g4-modality-vlm-error.log')]
+        bench = vlm_command(args, vlm_bin, prompt, vlm['model'], data, telemetry)
         trace = run_proxy(args, 'g4-modality-vlm', bench, image=True)
         vlm_strategic = strategic(args, strategic_bin, 'g4-modality-vlm-strategic', vlm['model'], prompt, 'vlm')
         return g4_modality_checks.evaluate(llm_data, llm_trace, llm_ndjson.read_text(encoding='utf-8'), llm_strategic,
