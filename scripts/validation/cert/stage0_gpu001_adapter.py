@@ -65,7 +65,8 @@ class Adapter:
         if self.completed is None or self.completed[0] != item['id'] or outcome != {'terminal': 'COMPLETE', 'record_result': 'PASS'}:
             return False
         output = self.completed[1]
-        stage0_milestones.check_r4_identity(output, gpu_name=self.gpu, index=r4.INDEX, child=r4.AMD64, config=r4.CONFIG)
+        stage0_milestones.check_r4_identity(output, gpu_name=self.gpu, gpu_uuid=self.forwarded['CUDA_VISIBLE_DEVICES'],
+                                             index=r4.INDEX, child=r4.AMD64, config=r4.CONFIG)
         stage0_milestones.check_readiness(output.with_name(output.name + '-lifecycle'), item['id'])
         record = stage0_milestones.check_record(output, case=item['id'], candidate=self.candidate,
             expectations_sha256=self.expectations_sha256, manifest_sha256=item['manifest']['sha256'],

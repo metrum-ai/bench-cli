@@ -417,8 +417,11 @@ tests but no live execution, no independently verified backstop, no complete
 classification or case-adapter set, and no hard upper bound for every blocking
 cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
 COMPLETE/PASS; it rejects unsupported assigned cases before the first launch.
-The attempt helper probes the reviewed GPU name/UUID before launch and again
-after cleanup, but fake probes do not attest a live execution host. Their offline tests exercise per-box control flow,
+The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
+index) and probes the reviewed GPU name/UUID before launch and again after
+cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID
+before readiness; it does not prove actual container-visible hardware. Fake
+probes do not attest a live execution host. Their offline tests exercise per-box control flow,
 process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
 a fake-provider watchdog loop. They do not start an independent watchdog or
 provide a deployed provider watchdog, implement all modality and performance

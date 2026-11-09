@@ -46,7 +46,7 @@ class AttemptTests(unittest.TestCase):
     def run_attempt(self, **overrides):
         args = {'candidate': self.sha, 'expectations_sha256': self.exp, 'smoke_root': self.smoke,
                 'cgroup_root': '/approved/cgroup', 'expected_gpu': 'NVIDIA H100',
-                'forwarded': {'CUDA_VISIBLE_DEVICES': '0'}}
+                'forwarded': {'CUDA_VISIBLE_DEVICES': 'GPU-11111111-1111-1111-1111-111111111111'}}
         args.update(overrides)
         return stage0_attempt.run(self.item, **args)
 
@@ -118,7 +118,7 @@ class AttemptTests(unittest.TestCase):
 
     def test_unapproved_environment_rejected_before_launch(self):
         with self.assertRaisesRegex(ValueError, 'environment'):
-            self.run_attempt(forwarded={'CUDA_VISIBLE_DEVICES': '0', 'PATH': '/bad'})
+            self.run_attempt(forwarded={'CUDA_VISIBLE_DEVICES': 'GPU-11111111-1111-1111-1111-111111111111', 'PATH': '/bad'})
         self.mocks[2].assert_not_called()
 
 

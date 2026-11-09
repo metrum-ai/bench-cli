@@ -20,7 +20,7 @@ class DeviceTests(unittest.TestCase):
         for p in self.patches: self.addCleanup(p.stop)
 
     def probe(self, **kwargs):
-        return stage0_device.probe(self.tools, device=kwargs.pop('device', '0'),
+        return stage0_device.probe(self.tools, device=kwargs.pop('device', 'GPU-11111111-1111-1111-1111-111111111111'),
                                    expected_name=kwargs.pop('expected_name', 'NVIDIA H100'), **kwargs)
 
     def test_exact_identity_and_pinned_tool(self):
@@ -28,18 +28,30 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(identity['name'], 'NVIDIA H100')
         self.assertTrue(identity['uuid'].startswith('GPU-'))
         argv = self.mocks[2].call_args.args[0]
-        self.assertEqual(argv[:2], ['/pinned/nvidia-smi', '--id=0'])
+        self.assertEqual(argv[:2], ['/pinned/nvidia-smi', '--id=GPU-11111111-1111-1111-1111-111111111111'])
         self.assertEqual(self.mocks[2].call_args.kwargs['env']['PATH'], '/nonexistent')
 
     def test_wrong_identity_or_multiple_devices_fails(self):
         with self.assertRaisesRegex(ValueError, 'approved box'): self.probe(expected_name='other')
         self.result.stdout += self.result.stdout
         with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe()
-        with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe(device='0,1')
+        with self.assertRaisesRegex(ValueError, 'full GPU UUID'): self.probe(device='0,1')
+        with self.assertRaisesRegex(ValueError, 'full GPU UUID'): self.probe(device='0')
         self.result.stdout = b'NVIDIA H100, GPU-11111111-1111-1111-1111-111111111111, 550.1\n'
         with self.assertRaisesRegex(ValueError, 'approved box'):
             self.probe(device='GPU-22222222-2222-2222-2222-222222222222')
-        with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe(device='GPU-11111111')
+        with self.assertRaisesRegex(ValueError, 'full GPU UUID'): self.probe(device='GPU-11111111')
+
+    def test_container_request_requires_exclusive_probed_uuid(self):
+        uuid = 'GPU-11111111-1111-1111-1111-111111111111'
+        request = {'DeviceIDs': [uuid], 'Count': 0, 'Driver': '', 'Capabilities': [['gpu']]}
+        container = {'HostConfig': {'DeviceRequests': [request]}}
+        self.assertEqual(stage0_device.check_container_request(container, uuid), uuid)
+        for replacement in ({**request, 'DeviceIDs': ['0']}, {**request, 'DeviceIDs': [uuid, '0']},
+                            {**request, 'Count': -1}, {**request, 'Capabilities': [['utility']]}):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                stage0_device.check_container_request({'HostConfig': {'DeviceRequests': [replacement]}}, uuid)
+        with self.assertRaises(ValueError): stage0_device.check_container_request({}, uuid)
 
     def test_changed_tool_or_expired_cap_fails(self):
         self.mocks[1].return_value = 'b' * 64

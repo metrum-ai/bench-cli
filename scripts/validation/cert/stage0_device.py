@@ -11,13 +11,28 @@ from pathlib import Path
 import execution_policy
 
 UUID = re.compile(r'GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z')
-TOKEN = re.compile(r'[0-9]+\Z')
+
+
+def check_container_request(container, device):
+    """Verify Docker requested exactly the same physical UUID for the server."""
+    if not isinstance(device, str) or not UUID.fullmatch(device) or not isinstance(container, dict):
+        raise ValueError('invalid container GPU binding')
+    host = container.get('HostConfig')
+    requests = host.get('DeviceRequests') if isinstance(host, dict) else None
+    if not isinstance(requests, list) or len(requests) != 1 or not isinstance(requests[0], dict):
+        raise ValueError('missing exclusive container GPU request')
+    request = requests[0]
+    if (request.get('DeviceIDs') != [device] or request.get('Count') != 0
+            or request.get('Driver') not in ('', 'nvidia')
+            or request.get('Capabilities') != [['gpu']]):
+        raise ValueError('container GPU request differs from the probed GPU')
+    return device
 
 
 def probe(tools, *, device, expected_name, deadline=None, clock=time.monotonic):
-    if (not isinstance(device, str) or not (TOKEN.fullmatch(device) or UUID.fullmatch(device))
+    if (not isinstance(device, str) or not UUID.fullmatch(device)
             or not isinstance(expected_name, str) or not expected_name.strip()):
-        raise ValueError('exactly one GPU and a reviewed GPU name are required')
+        raise ValueError('one full GPU UUID and a reviewed GPU name are required')
     checked = execution_policy.validate_tools(tools)
     if 'nvidia-smi' not in checked:
         raise ValueError('pinned GPU identity tool missing')
@@ -44,7 +59,7 @@ def probe(tools, *, device, expected_name, deadline=None, clock=time.monotonic):
         raise ValueError('GPU identity must identify exactly one device')
     fields = [field.strip() for field in lines[0].split(',')]
     if (len(fields) != 3 or fields[0] != expected_name or not UUID.fullmatch(fields[1]) or not fields[2]
-            or (UUID.fullmatch(device) and fields[1].lower() != device.lower())):
+            or fields[1].lower() != device.lower()):
         raise ValueError('GPU identity differs from the approved box')
     # Detect a tool swap while probing; it is not a host attestation.
     if execution_policy.file_hash(Path(tool)) != checked['nvidia-smi']['sha256']:

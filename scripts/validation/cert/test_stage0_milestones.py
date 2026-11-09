@@ -128,15 +128,18 @@ class MilestoneTests(unittest.TestCase):
         evidence = self.case_root / 'evidence'
         (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
         expected = {'image_index': 'sha256:' + '1' * 64, 'platform_manifest': 'sha256:' + '2' * 64,
-                    'image_config': 'sha256:' + '3' * 64, 'platform': 'linux/amd64', 'container_verified': True}
+                    'image_config': 'sha256:' + '3' * 64, 'platform': 'linux/amd64', 'container_verified': True,
+                    'gpu_uuid': 'GPU-11111111-1111-1111-1111-111111111111'}
         (evidence / 'r4-image-runtime.json').write_text(json.dumps(expected))
-        kwargs = {'gpu_name': 'NVIDIA H100', 'index': expected['image_index'],
+        kwargs = {'gpu_name': 'NVIDIA H100', 'gpu_uuid': expected['gpu_uuid'], 'index': expected['image_index'],
                   'child': expected['platform_manifest'], 'config': expected['image_config']}
         checks.check_r4_identity(self.case_root, **kwargs)
         with self.assertRaisesRegex(ValueError, 'GPU identity'):
             checks.check_r4_identity(self.case_root, **{**kwargs, 'gpu_name': 'NVIDIA RTX'})
         with self.assertRaisesRegex(ValueError, 'runtime container identity'):
             checks.check_r4_identity(self.case_root, **{**kwargs, 'config': 'sha256:' + '4' * 64})
+        with self.assertRaisesRegex(ValueError, 'runtime container identity'):
+            checks.check_r4_identity(self.case_root, **{**kwargs, 'gpu_uuid': 'GPU-22222222-2222-2222-2222-222222222222'})
 
 
 if __name__ == '__main__':

@@ -86,6 +86,14 @@ def runtime(image_ref, container, out):
     image = inspect(['docker', 'image', 'inspect', image_ref])
     observed_container = inspect(['docker', 'inspect', container]) if container else None
     result = verify(index, child, image, observed_container)
+    # Smoke requires an explicit device-request binding before readiness or
+    # workload. Certification behavior and full gates are unchanged.
+    if container:
+        import result_writer
+        if result_writer.smoke_origin(Path(out).parent):
+            import stage0_device
+            result['gpu_uuid'] = stage0_device.check_container_request(
+                observed_container, os.environ.get('CUDA_VISIBLE_DEVICES'))
     Path(out).write_text(json.dumps(result, sort_keys=True, indent=2) + '\n', encoding='utf-8')
     return result
 

@@ -33,7 +33,7 @@ class AdapterTests(unittest.TestCase):
         self.stop = MagicMock(return_value=True)
         self.adapter = stage0_gpu001_adapter.Adapter(box='box-a', gpu='NVIDIA H100', candidate=self.sha,
             expectations_sha256=self.exp, smoke_root=self.out.parent, cgroup_root='/cgroup',
-            forwarded={'CUDA_VISIBLE_DEVICES': '0'}, control_index=self.root / 'control.json',
+            forwarded={'CUDA_VISIBLE_DEVICES': 'GPU-11111111-1111-1111-1111-111111111111'}, control_index=self.root / 'control.json',
             control_index_sha256='b' * 64, selection_sha256='c' * 64, catalog_sha256='d' * 64,
             backstop_probe=lambda _: True, stop_and_verify=self.stop)
         def run(*_args, **_kwargs):

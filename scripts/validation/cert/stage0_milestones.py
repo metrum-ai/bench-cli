@@ -144,12 +144,12 @@ def check_readiness(lifecycle_root, case):
         raise ValueError('missing production server-ready phase')
 
 
-def check_r4_identity(case_root, *, gpu_name, index, child, config):
+def check_r4_identity(case_root, *, gpu_name, gpu_uuid, index, child, config):
     gpu = local_file(case_root, 'evidence/gpu.csv').read_text(encoding='utf-8').strip().split(',', 1)
     if len(gpu) != 2 or gpu[0].strip() != gpu_name or not gpu[1].strip():
         raise ValueError('GPU identity or driver differs from the reviewed expectation')
     receipt = read_json(local_file(case_root, 'evidence/r4-image-runtime.json'))
     expected = {'image_index': index, 'platform_manifest': child, 'image_config': config,
-                'platform': 'linux/amd64', 'container_verified': True}
+                'platform': 'linux/amd64', 'container_verified': True, 'gpu_uuid': gpu_uuid}
     if receipt != expected:
         raise ValueError('runtime container identity differs from the reviewed expectation')

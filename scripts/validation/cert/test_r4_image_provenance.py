@@ -85,6 +85,32 @@ class OCIProvenanceTests(unittest.TestCase):
             provenance.runtime(provenance.pins.IMAGE, 'fixture-container', output)
         self.assertFalse(output.exists())
 
+    def test_smoke_runtime_checks_container_gpu_before_receipt(self):
+        import result_writer
+        index, index_digest = self.index([self.entry])
+        uuid = 'GPU-11111111-1111-1111-1111-111111111111'
+        (self.root / result_writer.SMOKE_MARKER).write_text(json.dumps({
+            'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'a' * 64}))
+        evidence = self.root / 'evidence'; evidence.mkdir()
+        output = evidence / 'r4-image-runtime.json'
+        request = {'DeviceIDs': [uuid], 'Count': 0, 'Driver': '', 'Capabilities': [['gpu']]}
+        container = {**self.container, 'HostConfig': {'DeviceRequests': [request]}}
+        def docker(command, **kwargs):
+            return SimpleNamespace(stdout=json.dumps([self.image if command[1:3] == ['image', 'inspect'] else container]))
+        verify = provenance.verify
+        def synthetic(index_path, child_path, image, container):
+            return verify(index_path, child_path, image, container,
+                          index_digest=index_digest, child_digest=self.child_digest)
+        env = {'CERT_R4_OCI_INDEX': str(index), 'CERT_R4_OCI_AMD64': str(self.child), 'CUDA_VISIBLE_DEVICES': uuid}
+        with patch.dict('os.environ', env), patch.object(provenance, 'verify', side_effect=synthetic), \
+             patch.object(provenance.subprocess, 'run', side_effect=docker):
+            self.assertEqual(provenance.runtime(provenance.pins.IMAGE, 'fixture', output)['gpu_uuid'], uuid)
+            output.unlink()
+            request['DeviceIDs'] = ['0']
+            with self.assertRaisesRegex(ValueError, 'container GPU request'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+
     def test_successful_records_require_bound_runtime_receipts(self):
         import execution_evidence
         evidence = self.root / 'evidence'
