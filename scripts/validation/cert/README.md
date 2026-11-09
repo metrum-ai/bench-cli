@@ -96,6 +96,13 @@ variant fields, but does not run the GPU-003 validator or write a case record.
 Its loopback fixture is not an OS network sandbox, real-model evidence, or the
 complete selected-set rehearsal. Independently enforce offline policy.
 
+`rehearse_g5_strategic.py --manifest FROZEN_CASE.json` exercises the GPU-013
+strategic benchmark and intentional export-failure argv with the pinned product
+binary, real trace proxy and synthetic loopback responses. It does not kill or
+restart a server, invoke the validator or write a case record; it is not real
+server evidence or the complete selected-set rehearsal. Its fixture is not an OS
+network sandbox; independently enforce offline policy.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
