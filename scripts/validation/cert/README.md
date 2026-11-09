@@ -126,6 +126,12 @@ wire, and uses temporary outputs. It does not stop or launch model servers,
 invoke the GPU-011 validator or write a case record. It is not a network sandbox,
 real-model evidence or the complete selected-set rehearsal.
 
+`rehearse_d_default.py --manifest FROZEN_CASE.json` exercises REASON-006's
+actual 64-request field-default runner/product/proxy argv on a synthetic local
+server, checking the pinned model, thinking option and 512-token cap on the
+wire. It does not invoke the truncation validator or write a case record; it is
+not a network sandbox, real-model evidence or the complete selected-set rehearsal.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
