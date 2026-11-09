@@ -39,6 +39,29 @@ async fn omitted_native_arguments_are_inert_and_partial_groups_are_rejected() {
     }
 }
 
+#[test]
+fn vllm_4ba_profiles_are_selectable_by_their_documented_names() {
+    use metrum_ai_bench::cache_metrics::ProfileId;
+    for (name, expected) in [
+        ("vllm4ba-apc", ProfileId::Vllm4baApc),
+        ("vllm4ba-external", ProfileId::Vllm4baExternal),
+        ("vllm4ba-offload", ProfileId::Vllm4baOffload),
+    ] {
+        let flags = Flags::try_parse_from([
+            "fixture",
+            "--cache-metrics-url",
+            "http://127.0.0.1:1/metrics",
+            "--cache-metrics-profile",
+            name,
+            "--cache-metrics-source-revision",
+            expected.source_revision(),
+        ])
+        .unwrap();
+        flags.native.validate().unwrap();
+        assert_eq!(flags.native.cache_metrics_profile, Some(expected));
+    }
+}
+
 #[tokio::test]
 async fn invalid_native_configuration_cannot_trigger_capture_or_echo_private_text() {
     for (url, revision) in [

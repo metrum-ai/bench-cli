@@ -21,6 +21,10 @@ pub enum ProfileId {
     VllmApc,
     VllmExternal,
     VllmOffload,
+    /// vLLM source revision 4ba787ec, as identified by the v0.33.0 image.
+    Vllm4baApc,
+    Vllm4baExternal,
+    Vllm4baOffload,
     Sglang,
     Lmcache,
     DynamoKvbm,
@@ -415,6 +419,9 @@ impl ProfileId {
             Self::VllmApc | Self::VllmExternal | Self::VllmOffload => {
                 "aa4022dc8176db8f769f93445d845f8755f9b4ca"
             }
+            Self::Vllm4baApc | Self::Vllm4baExternal | Self::Vllm4baOffload => {
+                "4ba787ec9959e566d3b587a796dff07673324da5"
+            }
             Self::Sglang => "188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a",
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
@@ -423,9 +430,9 @@ impl ProfileId {
     }
     pub fn metrics(self) -> &'static [MetricSpec] {
         match self {
-            Self::VllmApc => VLLM_APC,
-            Self::VllmExternal => VLLM_EXTERNAL,
-            Self::VllmOffload => VLLM_OFFLOAD,
+            Self::VllmApc | Self::Vllm4baApc => VLLM_APC,
+            Self::VllmExternal | Self::Vllm4baExternal => VLLM_EXTERNAL,
+            Self::VllmOffload | Self::Vllm4baOffload => VLLM_OFFLOAD,
             Self::Sglang => SGLANG,
             Self::Lmcache => LMCACHE,
             Self::DynamoKvbm => KVBM,
@@ -493,9 +500,9 @@ pub fn probe(
     static KVBM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static TRTLLM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     let matcher = match profile {
-        ProfileId::VllmApc => &APC,
-        ProfileId::VllmExternal => &EXTERNAL,
-        ProfileId::VllmOffload => &OFFLOAD,
+        ProfileId::VllmApc | ProfileId::Vllm4baApc => &APC,
+        ProfileId::VllmExternal | ProfileId::Vllm4baExternal => &EXTERNAL,
+        ProfileId::VllmOffload | ProfileId::Vllm4baOffload => &OFFLOAD,
         ProfileId::Sglang => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
