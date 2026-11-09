@@ -43,6 +43,9 @@ fn exact_pinned_profiles_preserve_units_types_labels_and_missing_not_zero() {
         ProfileId::VllmApc,
         ProfileId::VllmExternal,
         ProfileId::VllmOffload,
+        ProfileId::Vllm4baApc,
+        ProfileId::Vllm4baExternal,
+        ProfileId::Vllm4baOffload,
         ProfileId::Sglang,
         ProfileId::Lmcache,
         ProfileId::DynamoKvbm,
@@ -79,6 +82,64 @@ fn exact_pinned_profiles_preserve_units_types_labels_and_missing_not_zero() {
         .metrics()
         .iter()
         .any(|v| v.unit == Unit::Blocks));
+}
+
+#[test]
+fn vllm_4ba_and_aa_profiles_do_not_accept_each_others_revisions() {
+    for (old, new) in [
+        (ProfileId::VllmApc, ProfileId::Vllm4baApc),
+        (ProfileId::VllmExternal, ProfileId::Vllm4baExternal),
+        (ProfileId::VllmOffload, ProfileId::Vllm4baOffload),
+    ] {
+        let page = fixture(new);
+        for (profile, other_revision) in [
+            (old, new.source_revision()),
+            (new, old.source_revision()),
+            (new, "4ba787ec"),
+        ] {
+            let result = probe(profile, Some(other_revision), &page).unwrap();
+            assert!(!result.observations.is_empty());
+            assert!(result.observations.iter().all(|row| {
+                row.value.is_none()
+                    && row.unknown == Some(Unknown::RevisionNotDeclaredOrUnsupported)
+            }));
+        }
+    }
+}
+
+#[test]
+fn vllm_4ba_profiles_keep_invalid_or_incomplete_data_unknown() {
+    for p in [
+        ProfileId::Vllm4baApc,
+        ProfileId::Vllm4baExternal,
+        ProfileId::Vllm4baOffload,
+    ] {
+        let page = fixture(p);
+        let no_types: String = page
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert!(probe(p, Some(p.source_revision()), &no_types)
+            .unwrap()
+            .observations
+            .iter()
+            .all(|row| row.unknown == Some(Unknown::TypeNotDeclaredOrConflicting)));
+        let first_required = p.metrics().iter().find(|item| item.required).unwrap();
+        let missing = page
+            .lines()
+            .filter(|line| !line.starts_with(first_required.metric))
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        let result = probe(p, Some(p.source_revision()), &missing).unwrap();
+        assert!(result
+            .missing_required_metrics
+            .contains(&first_required.metric));
+        assert!(result
+            .observations
+            .iter()
+            .all(|row| row.unknown == Some(Unknown::MissingRequired)));
+    }
 }
 
 #[test]

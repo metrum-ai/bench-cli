@@ -10,6 +10,9 @@ fn exact_declared_source_compatibility_never_claims_executable_or_complete_suppo
         ProfileId::VllmApc,
         ProfileId::VllmExternal,
         ProfileId::VllmOffload,
+        ProfileId::Vllm4baApc,
+        ProfileId::Vllm4baExternal,
+        ProfileId::Vllm4baOffload,
         ProfileId::Sglang,
         ProfileId::Lmcache,
         ProfileId::DynamoKvbm,
@@ -30,7 +33,13 @@ fn exact_declared_source_compatibility_never_claims_executable_or_complete_suppo
         assert!(cap.unmapped_engines.is_empty());
         assert_eq!(
             cap.semantic_qualifiers.is_empty(),
-            profile != ProfileId::TrtLlm
+            !matches!(
+                profile,
+                ProfileId::TrtLlm
+                    | ProfileId::Vllm4baApc
+                    | ProfileId::Vllm4baExternal
+                    | ProfileId::Vllm4baOffload
+            )
         );
         assert_eq!(cap.descriptors.len(), profile.metrics().len());
         assert_eq!(

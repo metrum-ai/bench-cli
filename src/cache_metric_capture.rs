@@ -178,7 +178,21 @@ impl ProfileCapabilities {
                 "block and tokens-per-block gauges are not sufficient for byte conversion",
             ]
             } else {
-                Vec::new()
+                match profile {
+                    ProfileId::Vllm4baApc => vec![
+                        "local prefix counts exclude skipped lookups and preempted-request statistics",
+                        "cache utilization is an engine-reported ratio, not physical allocation proof",
+                    ],
+                    ProfileId::Vllm4baExternal => vec![
+                        "connector token counts describe admitted matches, not completed transfer or physical-tier proof",
+                        "cache-read opt-out and scheduling affect population and cross-version comparability",
+                    ],
+                    ProfileId::Vllm4baOffload => vec![
+                        "transfer counters record successful completed jobs only when size and duration are supplied",
+                        "transfer aggregates do not identify a request or independently prove a CPU-tier hit",
+                    ],
+                    _ => Vec::new(),
+                }
             },
             descriptors: profile
                 .metrics()
