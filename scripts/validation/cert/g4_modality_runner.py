@@ -47,17 +47,17 @@ def image_prompts(prompt, image):
             raise ValueError('VLM image must be the pinned local file; remote inputs are forbidden')
 
 
-def run_proxy(args, label, command, image=False):
+def run_proxy(args, label, command, image=False, env=None):
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
                  '--upstream-port', str(args.port), '--out', str(trace), *(['--record-image-identity'] if image else [])]
     (evidence / f'{label}-command.json').write_text(json.dumps({'command': command, 'proxy': proxy_cmd}, indent=2) + '\n', encoding='utf-8')
     with (evidence / f'{label}-proxy-error.txt').open('wb') as perr:
-        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT)
+        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800)
+            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env)
             if code != 0:
                 raise ValueError(f'{label} exited {code}')
             g7_runner.wait_for_trace(trace)

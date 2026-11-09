@@ -111,6 +111,14 @@ or write a case record. Temporary loopback ports replace the frozen ports after
 checking them; it is not an OS network sandbox, real failover evidence or the
 complete selected-set rehearsal. Independently enforce offline policy.
 
+`rehearse_vlm_reasoning.py --manifest FROZEN_CASE.json` exercises the actual
+REASON-005 VLM product/proxy argv against a synthetic local server, verifies
+seven completed product requests and compares the wire-embedded image bytes
+with the frozen image pin. It checks the actual runner's input validation but
+does not invoke its result validator or write a case record. It is not a network
+sandbox, real reasoning evidence or the complete selected-set rehearsal;
+independently enforce offline policy.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
