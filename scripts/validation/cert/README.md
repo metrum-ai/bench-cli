@@ -74,6 +74,12 @@ alone does not prove that the product parser accepts the result. The narrow
 stand in for parsing other modalities or exercising the case runner. It uses
 only temporary outputs and an isolated disposable local server.
 
+Before going offline for BC-GPU-016, run `scripts/validation/cert/prepare_schema_cache.sh`
+with the intended Cargo home and toolchain. It runs `cargo fetch --locked` followed
+by an offline no-run build of the exact schema-history/migration test targets;
+this preparatory step is not itself evidence that the measured case ran. The
+operator must arrange and verify that cache on the actual execution host.
+
 Freeze now also calls the actual runner's input checks for selected known cases
 (GPU-003/011/013/015, REASON-005, COMP-002). These are early checks only, not
 complete runner argv or SUT parsing and **not** the complete offline rehearsal
