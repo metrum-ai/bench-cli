@@ -165,6 +165,11 @@ but does **not** execute the vLLM reference parser or container, invoke the
 comparison validator, or write a case record; it is not a complete rehearsal or
 an OS network sandbox.
 
+Selected-set preflight recomputes the production selection policy before case
+preflight; rehashing an edited selected list is insufficient. This does not
+independently attest the supplied change and history inputs, which must still be
+verified against the candidate and release records.
+
 Before going offline for BC-GPU-016, run `scripts/validation/cert/prepare_schema_cache.sh`
 with the intended Cargo home and toolchain. It runs `cargo fetch --locked` followed
 by an offline no-run build of the exact schema-history/migration test targets;

@@ -36,6 +36,12 @@ def load_set(selection_path, catalog_path, index_path):
         raise ValueError("selected-set candidate mismatch")
     if digest(selection_path) != index.get("selection_sha256") or digest(catalog_path) != index.get("catalog_sha256"):
         raise ValueError("selection/catalog pin mismatch")
+    # A hash only binds the submitted file; it cannot prove cases were not
+    # removed before the index was frozen. Recompute the production policy.
+    import validate_results
+    rows_for_policy = validate_results.load_catalog(Path(catalog_path))
+    validate_results.load_selection(Path(selection_path), Path(catalog_path), rows_for_policy,
+                                    selection['candidate_sha'])
     entries = []
     seen = set()
     for item in index["manifests"]:
