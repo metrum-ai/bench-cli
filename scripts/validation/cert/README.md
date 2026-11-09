@@ -427,11 +427,13 @@ review, live execution, a verified backstop and bounded cleanup.
 L2 uses a small modality-launch hook: it binds the selected GPU and output path,
 records the readiness phase, and matches the create response to the inspected
 container; its live behavior remains untested. Required overrides (not
-implemented) are P1/P2/telemetry performance and exporter layouts; G7
-full-grid performance; L3/L4 modality servers; G4's
+implemented) are P1/P2/telemetry performance and exporter layouts;
+L3/L4 modality servers; G4's
 additional VLM server; G5's additional endpoint server; the COMP-002 reference
 container; and trigger-bound COMP-001/OPS-001 or external INTEG-001 flows.
-These cannot silently fall back to the common adapter.
+These cannot silently fall back to the common adapter. G7 can use the common
+adapter only for a complete PASS of its unchanged full grid; no short G7
+profile or incomplete-grid terminal class is implemented.
 The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
 index) and probes the reviewed GPU name/UUID before launch and again after
 cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID

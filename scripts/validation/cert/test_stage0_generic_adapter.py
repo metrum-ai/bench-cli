@@ -55,8 +55,10 @@ class AdapterTests(unittest.TestCase):
 
     def case(self, case, lane):
         lane_file = self.root / (case + '-lane.json')
-        lane_file.write_text(json.dumps({'lanes': {lane: {'model': r4_model_pins.GENERAL_MODEL,
-            'revision': r4_model_pins.GENERAL_REVISION, 'image': r4_model_pins.IMAGE}}}))
+        model = r4_model_pins.SMALL_MODEL if lane == 'G7' else r4_model_pins.GENERAL_MODEL
+        revision = r4_model_pins.SMALL_REVISION if lane == 'G7' else r4_model_pins.GENERAL_REVISION
+        lane_file.write_text(json.dumps({'lanes': {lane: {'model': model, 'revision': revision,
+                                                          'image': r4_model_pins.IMAGE}}}))
         out = str(self.smoke / case); launcher = str(stage0_dispatch.HERE / 'case_entry.sh')
         manifest = {'candidate_sha': self.sha, 'lane': lane, 'harness_repo': str(stage0_dispatch.REPO),
             'candidate': {'path': '/candidate'}, 'baseline': {'path': '/baseline'},
@@ -86,6 +88,12 @@ class AdapterTests(unittest.TestCase):
         self.items.append(self.case('BC-LIVE-002', 'L2')); self.save_plan()
         result = self.run_box()
         self.assertEqual(result['cases'][-1], 'BC-LIVE-002')
+        self.assertEqual(self.mocks[0].call_count, 3)
+        self.assertEqual(self.mocks[5].call_count, 3)
+
+    def test_g7_full_completion_uses_common_milestones(self):
+        self.items.append(self.case('BC-PERF-003', 'G7')); self.save_plan()
+        self.assertEqual(self.run_box()['cases'][-1], 'BC-PERF-003')
         self.assertEqual(self.mocks[0].call_count, 3)
         self.assertEqual(self.mocks[5].call_count, 3)
 
