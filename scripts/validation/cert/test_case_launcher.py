@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import case_launcher
+import result_writer
 from build_role_test_fixture import bind
 from execution_evidence import digest
 
@@ -59,6 +60,20 @@ class CaseLauncherTests(unittest.TestCase):
                         "cases": {"BC-GPU-001": {"launcher": pin(binary), "out": str(root / "attempt"),
                                                     "command": [str(binary), "--out", str(root / "attempt")]}}}
             bind(manifest, root)
+            smoke = root / 'smoke'; smoke.mkdir()
+            (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+                {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'd' * 64}))
+            smoke_sut = smoke / 'sut.json'; smoke_sut.write_text(sut.read_text())
+            contaminated = copy.deepcopy(manifest)
+            contaminated['sut'] = pin(smoke_sut)
+            with patch.object(case_launcher.subprocess, 'run') as version, patch('tokenizer_probe.probe') as probe:
+                with self.assertRaises(result_writer.NonCertificationEvidence):
+                    case_launcher.preflight(contaminated)
+                version.assert_not_called(); probe.assert_not_called()
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                case_launcher.check_input_origins({'deep': [{'nested': pin(smoke_sut)}]}, root / 'cert-out')
+            case_launcher.check_input_origins({'sut': pin(sut)}, smoke / 'isolated-out')
+            case_launcher.check_input_origins({'sut': pin(smoke_sut)}, smoke / 'isolated-out')
             with patch.object(case_launcher.subprocess, "run") as run, patch('tokenizer_probe.probe'):
                 self.assertEqual(case_launcher.preflight(manifest), ["BC-GPU-001"])
                 run.assert_called_once()

@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 import build_roles
 import manifest_tool
+import result_writer
 from execution_evidence import digest, require_python, phase
 
 
@@ -31,19 +32,37 @@ def check_harness(manifest):
         raise ValueError('frozen harness closure differs from candidate checkout')
 
 
+def check_input_origins(manifest, output):
+    """Prevent marked smoke pins, including nested pins, entering cert execution."""
+    def visit(value):
+        if isinstance(value, dict):
+            if isinstance(value.get('path'), str) and isinstance(value.get('sha256'), str):
+                result_writer.require_input_origin(output, Path(value['path']).resolve().parent)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(manifest)
+
+
 def preflight(manifest):
     require_python()
     if not re.fullmatch(r"[a-f0-9]{40}", manifest.get("candidate_sha", "")):
         raise ValueError("candidate_sha must be a full commit")
     check_harness(manifest)
-    binary = pinned(manifest["candidate"], True)
-    _, validation_binary = build_roles.check_manifest(manifest)
-    import generated_inputs
-    recipes = generated_inputs.structural_context(manifest)
     cases = manifest.get('cases')
     if not isinstance(cases, dict) or len(cases) != 1:
         raise ValueError('frozen launcher requires exactly one selected case')
     only_case = next(iter(cases))
+    entry = cases[only_case]
+    if not isinstance(entry, dict) or not isinstance(entry.get('out'), str) or not entry['out']:
+        raise ValueError('case requires an output directory')
+    check_input_origins(manifest, entry['out'])
+    binary = pinned(manifest["candidate"], True)
+    _, validation_binary = build_roles.check_manifest(manifest)
+    import generated_inputs
+    recipes = generated_inputs.structural_context(manifest)
     lane = manifest.get('lane')
     if not isinstance(lane, str) or not lane:
         raise ValueError('frozen lane is required')
