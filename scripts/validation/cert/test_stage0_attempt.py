@@ -47,7 +47,7 @@ class AttemptTests(unittest.TestCase):
                         patch.object(stage0_attempt.stage0_docker, 'Docker'),
                         patch.object(stage0_attempt.stage0_device, 'probe', return_value={
                             'name': 'NVIDIA H100', 'uuid': 'GPU-' + '1' * 32, 'driver': '550.1'}),
-                        patch.object(stage0_attempt.stage0_settlement, 'successful_gpu001_create', return_value=True)]
+                        patch.object(stage0_attempt.stage0_settlement, 'successful_create', return_value=True)]
         self.mocks = [p.start() for p in self.patches]
         for p in self.patches: self.addCleanup(p.stop)
 
@@ -104,7 +104,7 @@ class AttemptTests(unittest.TestCase):
         self.item['id'] = self.case
         self.item['manifest']['sha256'] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
         self.mocks[4].side_effect = [ValueError('bad server'), 'clean']
-        with patch.object(stage0_attempt, 'validate_dispatch'), self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
+        with patch.object(stage0_attempt.stage0_dispatch, 'validate'), self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
             self.run_attempt()
         self.assertEqual(self.mocks[4].call_count, 2)
 
@@ -118,7 +118,7 @@ class AttemptTests(unittest.TestCase):
         self.data['cases'][self.case]['command'].append('--extra')
         self.manifest.write_text(json.dumps(self.data))
         self.item['manifest']['sha256'] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
-        with self.assertRaisesRegex(ValueError, 'unsupported smoke dispatch'): self.run_attempt()
+        with self.assertRaisesRegex(ValueError, 'dispatch does not match'): self.run_attempt()
         self.mocks[2].assert_not_called()
         self.group.close_if_empty.assert_not_called()
 

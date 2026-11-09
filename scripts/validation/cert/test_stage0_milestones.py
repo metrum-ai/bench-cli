@@ -116,6 +116,22 @@ class MilestoneTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not bound'):
             self.check()
 
+    def test_common_server_evidence_requires_bound_log_and_matching_model(self):
+        evidence = self.case_root / 'evidence'
+        log = evidence / 'server.log'; log.write_text('server started\n')
+        models = evidence / 'models.json'; models.write_text(json.dumps({'data': [{'id': 'model-a'}]}))
+        with self.assertRaisesRegex(ValueError, 'not bound'):
+            checks.check_server_evidence(self.case_root, model='model-a', record=self.record)
+        self.record['evidence_paths'].append('evidence/server.log')
+        self.record['output_hashes']['evidence/server.log'] = self.hash(log)
+        self.save_record(); record = self.check()
+        checks.check_server_evidence(self.case_root, model='model-a', record=record)
+        with self.assertRaisesRegex(ValueError, 'approved model'):
+            checks.check_server_evidence(self.case_root, model='model-b', record=record)
+        log.write_text('changed\n')
+        with self.assertRaisesRegex(ValueError, 'output hash'):
+            self.check()
+
     def test_server_ready_must_match_case(self):
         lifecycle = self.root / 'lifecycle'
         lifecycle.mkdir()

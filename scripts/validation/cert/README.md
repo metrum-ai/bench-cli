@@ -407,21 +407,28 @@ smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
 The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`,
-`stage0_gpu001_adapter.py`, `stage0_device.py`, `stage0_settlement.py`, `stage0_process.py`,
+`stage0_generic_adapter.py`, `stage0_dispatch.py`, `stage0_device.py`,
+`stage0_settlement.py`, `stage0_process.py`,
 `stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
 `stage0_cleanup.py`, `stage0_docker.py`, `stage0_cgroup.py`,
 `stage0_cgroup_exec.py`, `stage0_watchdog_state.py` and `stage0_watchdog.py`
 modules are **incomplete control primitives**, not a runnable Stage-0 controller.
-The attempt helper and a narrow GPU-001 adapter have fake-based orchestration
-tests but no live execution, no independently verified backstop, no complete
-classification or case-adapter set, and no hard upper bound for every blocking
-cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
-COMPLETE/PASS; it rejects unsupported assigned cases before the first launch.
-The attempt helper currently permits only the exact GPU-001 G1 production
-dispatch; even a successful exit requires a matched create ID and owned runtime
-receipt. This narrow settlement assumption still needs independent review and
-real Docker race tests. Failed or interrupted creates remain ambiguous; other
-cases lack a settlement basis.
+One generic adapter handles supported common r4 single-server dispatches with
+expectations-pinned request logs and an explicitly predeclared COMPLETE/PASS.
+It validates all assigned cases before the first launch; unsupported layouts
+and terminal classes fail closed. The common checks require a bound writer
+record and request, server-ready lifecycle event, bound nonempty server log,
+matching ready-model response, runtime identity, and isolated intake rejection.
+Even successful execution requires a matched create ID and owned runtime
+receipt. Failed or interrupted creates remain ambiguous. The adapter and
+settlement assumptions have fake-based tests only; they still need independent
+review, live execution, a verified backstop and bounded cleanup.
+
+Required overrides (not implemented) are P1/P2/telemetry performance and
+exporter layouts; G7 full-grid performance; L2/L3/L4 modality servers; G4's
+additional VLM server; G5's additional endpoint server; the COMP-002 reference
+container; and trigger-bound COMP-001/OPS-001 or external INTEG-001 flows.
+These cannot silently fall back to the common adapter.
 The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
 index) and probes the reviewed GPU name/UUID before launch and again after
 cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID

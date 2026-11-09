@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Narrow BC-GPU-001 Stage-0 adapter; not a complete box controller.
+"""Generic common-server Stage-0 milestone adapter; not a complete runtime.
 
 Only a normal production PASS, explicitly predeclared as COMPLETE, is supported.
-All other cases and terminal classes fail closed before the first box case.
+Unsupported layouts and terminal classes fail closed before the first box case.
 Provider/backstop identity, liveness and teardown must be independently bound
 by the caller; injected callbacks alone are not an armed watchdog.
 """
+import json
 from pathlib import Path
 
+import case_launcher
+import manifest_tool
 import r4_image_provenance as r4
+import r4_model_pins
 import stage0_attempt
 import stage0_controller
+import stage0_dispatch
 import stage0_milestones
+import execution_evidence
 
 
 class Adapter:
@@ -31,21 +37,33 @@ class Adapter:
     def validate_box(self, box, cases, expectations, expectations_sha256):
         boxes = expectations.get('boxes', [])
         matches = [item for item in boxes if isinstance(item, dict) and item.get('id') == box]
-        return (box == self.box and len(matches) == 1 and matches[0].get('gpu') == self.gpu
+        if not (box == self.box and len(matches) == 1 and matches[0].get('gpu') == self.gpu
                 and matches[0].get('cgroup_root') == str(self.cgroup_root)
                 and expectations_sha256 == self.expectations_sha256
                 and expectations.get('candidate_sha') == self.candidate
                 and expectations.get('selection_sha256') == self.selection_sha256
                 and expectations.get('catalog_sha256') == self.catalog_sha256
                 and expectations.get('smoke_root') == str(self.smoke_root)
-                and isinstance(cases, list) and bool(cases)
-                and all(item['id'] == 'BC-GPU-001' and item['allowed_classes'] == ['COMPLETE'] for item in cases))
+                and isinstance(cases, list) and bool(cases)):
+            return False
+        catalog = stage0_dispatch.REPO / 'docs/RELEASE_CERTIFICATION_CATALOG.csv'
+        if execution_evidence.digest(catalog) != self.catalog_sha256:
+            return False
+        # Check every assigned case before the first case launches.
+        return all(self.preflight(item) for item in cases)
 
     def backstop_armed(self, box):
         return box == self.box and self.backstop_probe(box) is True
 
     def preflight(self, item):
-        return item['id'] == 'BC-GPU-001' and item['allowed_classes'] == ['COMPLETE']
+        if item['allowed_classes'] != ['COMPLETE']:
+            return False
+        manifest = stage0_controller.pinned_manifest(item, self.candidate)
+        lane = stage0_dispatch.validate(manifest, item['id'])
+        path = case_launcher.pinned(manifest['lane_manifest'])
+        data = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        r4_model_pins.check(data['lanes'][lane], lane, item['id'])
+        return True
 
     def launch(self, item):
         self.completed = None
@@ -73,6 +91,11 @@ class Adapter:
             request_path=item['request_log'])
         if record.get('result') != 'PASS':
             return False
+        manifest = stage0_controller.pinned_manifest(item, self.candidate)
+        lane_path = case_launcher.pinned(manifest['lane_manifest'])
+        lane_data = json.loads(lane_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        model = lane_data['lanes'][manifest['lane']]['model']
+        stage0_milestones.check_server_evidence(output, model=model, record=record)
         stage0_milestones.check_execution_intake_rejection(output, index_path=self.control_index,
             index_sha256=self.control_index_sha256, candidate=self.candidate,
             selection_sha256=self.selection_sha256, catalog_sha256=self.catalog_sha256,

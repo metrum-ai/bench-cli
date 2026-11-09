@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Narrow successful GPU-001 create confirmation, not a timeout proof."""
+"""Common single-server create confirmation, not a timeout proof."""
 import re
 
 
@@ -15,11 +15,11 @@ def container_id(root):
     return data[:-1].decode('ascii')
 
 
-def successful_gpu001_create(root, *, gpu_name, gpu_uuid):
+def successful_create(root, *, gpu_name, gpu_uuid):
     """Require the successful CLI ID and matching owner/image/GPU inspect receipt.
 
-    Only meaningful for the exact known GPU-001 dispatch after an ordinary
-    successful launcher and an empty cgroup. Never closes ambiguous creates.
+    Only meaningful for a supported exact single-server dispatch after an
+    ordinary successful launcher and an empty cgroup. Never closes ambiguous creates.
     """
     import r4_image_provenance as r4
     import stage0_milestones

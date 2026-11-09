@@ -26,7 +26,7 @@ class SettlementTests(unittest.TestCase):
         self.path = self.evidence / 'r4-image-runtime.json'; self.path.write_text(json.dumps(self.receipt))
 
     def check(self):
-        return stage0_settlement.successful_gpu001_create(self.root, gpu_name='NVIDIA H100', gpu_uuid=self.uuid)
+        return stage0_settlement.successful_create(self.root, gpu_name='NVIDIA H100', gpu_uuid=self.uuid)
 
     def test_matching_create_and_inspect(self):
         self.assertTrue(self.check())
