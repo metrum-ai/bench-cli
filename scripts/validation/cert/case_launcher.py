@@ -10,6 +10,7 @@ import re
 import subprocess
 from pathlib import Path
 import build_roles
+import manifest_tool
 from execution_evidence import digest, require_python, phase
 
 
@@ -40,7 +41,6 @@ def preflight(manifest):
     lane_path = pinned(manifest['lane_manifest'])
     baseline = pinned(manifest['baseline'], True)
     if lane != 'CLEANUP':
-        import manifest_tool
         structural = {'structural_recipe_ids': set(recipes)} if recipes is not None else {}
         if recipes is not None and 'generated_bindings' in manifest:
             import runtime_inputs
@@ -65,7 +65,7 @@ def preflight(manifest):
         derived_inputs.validate(manifest)
     subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
     sut_path = pinned(manifest["sut"])
-    sut = json.loads(sut_path.read_text())
+    sut = json.loads(sut_path.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if not isinstance(sut.get("host_os"), str) or not sut["host_os"].strip():
         raise ValueError("SUT host_os is required")
     for memory in (sut.get("memory_gb"), sut.get("gpu", {}).get("memory_gb")):
@@ -98,7 +98,6 @@ def preflight(manifest):
     import case_input_checks
     targeted = set(cases) & case_input_checks.LANES.keys()
     if targeted:
-        import manifest_tool
         lane_path = pinned(manifest['lane_manifest'])
         lane_data = json.loads(lane_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
         for case in targeted:
@@ -254,7 +253,7 @@ def main():
     parser.add_argument("--case", action="append")
     args = parser.parse_args()
     frozen = args.manifest.read_bytes()
-    manifest = json.loads(frozen)
+    manifest = json.loads(frozen, object_pairs_hook=manifest_tool.unique_object)
     cases = preflight(manifest)
     selected = args.case or cases
     if set(selected) - set(cases):

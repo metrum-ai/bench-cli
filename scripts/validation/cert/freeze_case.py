@@ -46,17 +46,20 @@ def harness_sources(root):
 
 def freeze(args):
     require_python()
-    selection = json.loads(args.selection.read_text())
+    selection = json.loads(args.selection.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if selection.get("catalog_sha256") != digest(args.catalog):
         raise ValueError("selection was frozen against a different catalog")
     if args.case not in selection["selected"]:
         raise ValueError("case is not selected")
     with args.catalog.open(newline="") as stream:
-        catalog = {row["ID"]: row for row in csv.DictReader(stream)}
+        rows = list(csv.DictReader(stream))
+    catalog = {row["ID"]: row for row in rows}
+    if not catalog or len(catalog) != len(rows):
+        raise ValueError('catalog contains duplicate IDs or is empty')
     row = catalog[args.case]
     if row["Tier"] != "RC-GPU":
         raise ValueError("per-case GPU launcher requires an RC-GPU catalog case")
-    lane_manifest = json.loads(args.lane_manifest.read_text())
+    lane_manifest = json.loads(args.lane_manifest.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if lane_manifest["candidate_sha"] != selection["candidate_sha"]:
         raise ValueError("lane manifest and selection candidate mismatch")
     if digest(args.candidate) != lane_manifest["candidate_binary_sha256"] or digest(args.baseline) != lane_manifest["baseline_binary_sha256"]:
@@ -94,7 +97,7 @@ def freeze(args):
     if args.command_json:
         if args.case not in ('BC-COMP-001', 'BC-OPS-001', 'BC-INTEG-001'):
             raise ValueError('custom commands are restricted to barrier/cleanup/signoff cases')
-        command = json.loads(args.command_json.read_text())
+        command = json.loads(args.command_json.read_text(), object_pairs_hook=manifest_tool.unique_object)
     else:
         if args.case in ("BC-COMP-001", "BC-OPS-001", "BC-INTEG-001"):
             raise ValueError("barrier/cleanup/external-signoff cases require an explicit frozen command")

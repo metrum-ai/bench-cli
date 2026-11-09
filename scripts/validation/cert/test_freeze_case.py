@@ -14,6 +14,21 @@ from execution_evidence import digest
 
 
 class FreezeCaseTests(unittest.TestCase):
+    def test_ambiguous_selection_and_catalog_fail_before_freeze(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog = root / 'catalog.csv'
+            catalog.write_text('ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\n')
+            selection = root / 'selection.json'
+            selection.write_text('{"selected":{},"selected":{}}')
+            args = SimpleNamespace(selection=selection, catalog=catalog, case='BC-GPU-001')
+            with self.assertRaisesRegex(ValueError, 'duplicate'):
+                freeze_case.freeze(args)
+            catalog.write_text('ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\nBC-GPU-001,RC-GPU,G2\n')
+            selection.write_text(json.dumps({'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-001': ['core']}}))
+            with self.assertRaisesRegex(ValueError, 'duplicate'):
+                freeze_case.freeze(args)
+
     def test_gpu010_freeze_pins_shipped_build_and_rechecks_provenance(self):
         # Synthetic workflow/API and tokenizer-probe fixtures, not real preflight.
         with tempfile.TemporaryDirectory() as temporary:

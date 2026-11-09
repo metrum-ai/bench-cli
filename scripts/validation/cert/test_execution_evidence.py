@@ -36,6 +36,14 @@ class ExecutionEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 evidence.report_rows(root)
 
+    def test_report_rejects_duplicate_record_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'results').mkdir()
+            (root / 'results/BC-GPU-001.json').write_text('{"result":"FAIL","result":"PASS"}')
+            with self.assertRaisesRegex(ValueError, 'duplicate'):
+                evidence.report_rows(root)
+
     def test_lane_pins_are_rechecked_and_missing_input_is_retained_on_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

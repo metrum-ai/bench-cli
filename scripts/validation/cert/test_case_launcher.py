@@ -13,6 +13,16 @@ from execution_evidence import digest
 
 
 class CaseLauncherTests(unittest.TestCase):
+    def test_direct_launcher_rejects_duplicate_manifest_keys_before_preflight(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'case.json'
+            path.write_text('{"candidate_sha":"a","candidate_sha":"b"}')
+            with patch('sys.argv', ['case_launcher.py', '--manifest', str(path)]), \
+                 patch.object(case_launcher, 'preflight') as preflight:
+                with self.assertRaisesRegex(ValueError, 'duplicate'):
+                    case_launcher.main()
+                preflight.assert_not_called()
+
     def test_pins_and_preflight_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -52,6 +62,12 @@ class CaseLauncherTests(unittest.TestCase):
                 self.assertEqual(case_launcher.preflight(guarded), ['BC-GPU-010'])
                 self.assertEqual(probe.call_count, 2)
                 probe.assert_any_call(binary.resolve(), str(binary))
+            sut.write_text('{"host_os":"Linux","host_os":"Other","memory_gb":128,"gpu":{"memory_gb":48}}')
+            invalid = copy.deepcopy(manifest)
+            invalid['sut'] = pin(sut)
+            with patch.object(case_launcher.subprocess, 'run'), patch('tokenizer_probe.probe'):
+                with self.assertRaisesRegex(ValueError, 'duplicate'):
+                    case_launcher.preflight(invalid)
             for field in ("host_os", "memory_gb"):
                 bad = {"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}
                 bad.pop(field)

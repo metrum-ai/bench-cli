@@ -223,11 +223,12 @@ def enrich(root, record):
 
 def report_rows(root):
     """Verify content hashes before deriving rows; never manufacture missing results."""
+    from manifest_tool import unique_object
     rows = []
     if (Path(root) / 'results/lane-error.json').exists():
         raise ValueError('lane error prevents acceptance of case records')
     for path in sorted((Path(root) / "results").glob("BC-*.json")):
-        record = json.loads(path.read_text())
+        record = json.loads(path.read_text(), object_pairs_hook=unique_object)
         if not re.fullmatch(r"[a-f0-9]{40}", record.get("candidate_sha", "")) or record.get("result") not in ("PASS", "FAIL"):
             raise ValueError("invalid result record")
         if record.get("ID") != path.stem or not re.fullmatch(r"BC-[A-Z]+-[0-9]{3}", path.stem):
