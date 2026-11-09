@@ -46,7 +46,8 @@ class AttemptTests(unittest.TestCase):
                         patch.object(stage0_attempt.stage0_cleanup, 'reconcile', return_value='clean'),
                         patch.object(stage0_attempt.stage0_docker, 'Docker'),
                         patch.object(stage0_attempt.stage0_device, 'probe', return_value={
-                            'name': 'NVIDIA H100', 'uuid': 'GPU-' + '1' * 32, 'driver': '550.1'})]
+                            'name': 'NVIDIA H100', 'uuid': 'GPU-' + '1' * 32, 'driver': '550.1'}),
+                        patch.object(stage0_attempt.stage0_settlement, 'successful_gpu001_create', return_value=True)]
         self.mocks = [p.start() for p in self.patches]
         for p in self.patches: self.addCleanup(p.stop)
 
@@ -106,6 +107,12 @@ class AttemptTests(unittest.TestCase):
         with patch.object(stage0_attempt, 'validate_dispatch'), self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
             self.run_attempt()
         self.assertEqual(self.mocks[4].call_count, 2)
+
+    def test_successful_exit_without_create_proof_still_reconciles_and_stops(self):
+        self.mocks[7].side_effect = ValueError('missing create proof')
+        with self.assertRaisesRegex(RuntimeError, 'settlement is unproven'): self.run_attempt()
+        self.mocks[4].assert_called_once()
+        self.assertFalse(self.mocks[4].call_args.kwargs['creation_closed'])
 
     def test_unreviewed_dispatch_never_launches(self):
         self.data['cases'][self.case]['command'].append('--extra')

@@ -94,8 +94,13 @@ class OCIProvenanceTests(unittest.TestCase):
         evidence = self.root / 'evidence'; evidence.mkdir()
         output = evidence / 'r4-image-runtime.json'
         (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
+        ident, owner = 'b' * 64, 'c' * 32
+        (evidence / 'container-id.txt').write_text(ident + '\n')
+        owner_file = evidence / 'server-container-owner.txt'
+        owner_file.write_text(owner + '\n'); owner_file.chmod(0o600)
         request = {'DeviceIDs': [uuid], 'Count': 0, 'Driver': '', 'Capabilities': [['gpu']]}
-        container = {**self.container, 'HostConfig': {'DeviceRequests': [request]}}
+        container = {**self.container, 'Id': ident, 'Config': {'Labels': {'metrum.cert.owner': owner}},
+                     'HostConfig': {'DeviceRequests': [request]}}
         def docker(command, **kwargs):
             if command[1] == 'exec':
                 return SimpleNamespace(stdout=f'NVIDIA H100, {uuid}, 550.1\n')
@@ -109,6 +114,8 @@ class OCIProvenanceTests(unittest.TestCase):
              patch.object(provenance.subprocess, 'run', side_effect=docker):
             receipt = provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
             self.assertEqual(receipt['gpu_uuid'], uuid)
+            self.assertEqual(receipt['container_id'], ident)
+            self.assertEqual(receipt['container_owner'], owner)
             self.assertEqual(receipt['gpu_visible'], {'name': 'NVIDIA H100', 'uuid': uuid, 'driver': '550.1'})
             output.unlink()
             (evidence / 'gpu.csv').write_text('NVIDIA RTX,550.1\n')
@@ -116,6 +123,11 @@ class OCIProvenanceTests(unittest.TestCase):
                 provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
             self.assertFalse(output.exists())
             (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
+            container['Id'] = 'd' * 64
+            with self.assertRaisesRegex(ValueError, 'container creation'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+            container['Id'] = ident
             request['DeviceIDs'] = ['0']
             with self.assertRaisesRegex(ValueError, 'container GPU request'):
                 provenance.runtime(provenance.pins.IMAGE, 'fixture', output)

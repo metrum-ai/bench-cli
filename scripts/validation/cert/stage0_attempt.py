@@ -21,6 +21,7 @@ import stage0_controller
 import stage0_device
 import stage0_docker
 import stage0_process
+import stage0_settlement
 
 HERE = Path(__file__).resolve().parent
 
@@ -129,13 +130,18 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
             errors.append('owned process survived launcher')
     except BaseException as exc:
         errors.append(type(exc).__name__)
-    # A killed/failed launcher may leave an in-flight Docker create even after
-    # its process exits. Until a structured create-settlement proof exists,
-    # only the known GPU-001 dispatch with an ordinary successful launcher
-    # can close creation. Still attempt
-    # cleanup, but never declare clean for an ambiguous or timed-out attempt.
-    creation_closed = (group_empty and pending is None and isinstance(outcome, stage0_process.ProcessOutcome)
-                       and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0)
+    # Never infer settled creation from exit or absent inventory alone. Only
+    # the exact GPU-001 dispatch with successful return, no owned processes,
+    # and an explicit matched create/inspect receipt can close creation. This
+    # remains conservative for every failed or interrupted launcher.
+    creation_closed = False
+    if (group_empty and pending is None and isinstance(outcome, stage0_process.ProcessOutcome)
+            and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0):
+        try:
+            creation_closed = stage0_settlement.successful_gpu001_create(
+                output, gpu_name=expected_gpu, gpu_uuid=forwarded['CUDA_VISIBLE_DEVICES']) is True
+        except BaseException as exc:
+            errors.append(type(exc).__name__)
     if not creation_closed:
         errors.append('container creation settlement is unproven')
     roles = ['server']

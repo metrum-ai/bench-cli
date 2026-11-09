@@ -127,9 +127,13 @@ class MilestoneTests(unittest.TestCase):
     def test_r4_image_and_gpu_identity_mismatch(self):
         evidence = self.case_root / 'evidence'
         (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
+        (evidence / 'container-id.txt').write_text('b' * 64 + '\n')
+        owner = evidence / 'server-container-owner.txt'
+        owner.write_text('c' * 32 + '\n'); owner.chmod(0o600)
         expected = {'image_index': 'sha256:' + '1' * 64, 'platform_manifest': 'sha256:' + '2' * 64,
                     'image_config': 'sha256:' + '3' * 64, 'platform': 'linux/amd64', 'container_verified': True,
                     'gpu_uuid': 'GPU-11111111-1111-1111-1111-111111111111',
+                    'container_id': 'b' * 64, 'container_owner': 'c' * 32,
                     'gpu_visible': {'name': 'NVIDIA H100', 'uuid': 'GPU-11111111-1111-1111-1111-111111111111', 'driver': '550.1'}}
         (evidence / 'r4-image-runtime.json').write_text(json.dumps(expected))
         kwargs = {'gpu_name': 'NVIDIA H100', 'gpu_uuid': expected['gpu_uuid'], 'index': expected['image_index'],

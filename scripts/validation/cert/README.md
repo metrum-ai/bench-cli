@@ -407,7 +407,7 @@ smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
 The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`,
-`stage0_gpu001_adapter.py`, `stage0_device.py`, `stage0_process.py`,
+`stage0_gpu001_adapter.py`, `stage0_device.py`, `stage0_settlement.py`, `stage0_process.py`,
 `stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
 `stage0_cleanup.py`, `stage0_docker.py`, `stage0_cgroup.py`,
 `stage0_cgroup_exec.py`, `stage0_watchdog_state.py` and `stage0_watchdog.py`
@@ -418,8 +418,10 @@ classification or case-adapter set, and no hard upper bound for every blocking
 cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
 COMPLETE/PASS; it rejects unsupported assigned cases before the first launch.
 The attempt helper currently permits only the exact GPU-001 G1 production
-dispatch; its successful-exit settlement assumption still needs independent
-review and real Docker race tests. Other cases lack a settlement basis.
+dispatch; even a successful exit requires a matched create ID and owned runtime
+receipt. This narrow settlement assumption still needs independent review and
+real Docker race tests. Failed or interrupted creates remain ambiguous; other
+cases lack a settlement basis.
 The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
 index) and probes the reviewed GPU name/UUID before launch and again after
 cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID

@@ -91,12 +91,23 @@ def runtime(image_ref, container, out):
     if container:
         import result_writer
         if result_writer.smoke_origin(Path(out).parent):
+            import stage0_cleanup
             import stage0_device
+            import stage0_settlement
+            owner = stage0_cleanup.read_owner(Path(out).parent.parent, 'server')
+            ident = stage0_settlement.container_id(Path(out).parent.parent)
+            if (observed_container.get('Id') != ident
+                    or not isinstance(observed_container.get('Config'), dict)
+                    or not isinstance(observed_container['Config'].get('Labels'), dict)
+                    or observed_container['Config']['Labels'].get('metrum.cert.owner') != owner):
+                raise ValueError('container creation or owner identity not confirmed')
             device = stage0_device.check_container_request(
                 observed_container, os.environ.get('CUDA_VISIBLE_DEVICES'))
             visible = subprocess.run(['docker', 'exec', container, 'nvidia-smi',
                                       '--query-gpu=name,uuid,driver_version', '--format=csv,noheader,nounits'],
                                      capture_output=True, text=True, timeout=30, check=True)
+            result['container_id'] = ident
+            result['container_owner'] = owner
             result['gpu_uuid'] = device
             result['gpu_visible'] = stage0_device.check_container_visible(visible.stdout, device)
             host_lines = (Path(out).parent / 'gpu.csv').read_text(encoding='utf-8').splitlines()
