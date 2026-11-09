@@ -62,6 +62,7 @@ def check_evidence(base, paths):
         p = (base / item).resolve()
         if not p.is_relative_to(base.resolve()) or not p.is_file():
             raise ValueError(f"missing or outside evidence directory: {item}")
+        reject_smoke_root(p.parent)
 
 
 class NonCertificationEvidence(ValueError):
@@ -73,8 +74,19 @@ def check_evidence_class(record):
         raise NonCertificationEvidence('non-certification evidence cannot enter certification intake or history')
 
 
+def reject_smoke_root(directory):
+    import result_writer
+    try:
+        marked = result_writer.classify_smoke(Path(directory).resolve(), {})
+    except (ValueError, OSError) as exc:
+        raise NonCertificationEvidence('invalid smoke root marker') from exc
+    if marked:
+        raise NonCertificationEvidence('marked smoke root cannot enter certification intake or history')
+
+
 def check_record(record, candidate, root, as_of):
     check_evidence_class(record)
+    reject_smoke_root(root)
     if record.get("candidate_sha") != candidate:
         raise ValueError("candidate SHA mismatch")
     for key in ("owner", "evidence_link"):
@@ -170,6 +182,7 @@ class CarryOver:
         return path
 
     def authorize(self, record, record_path):
+        reject_smoke_root(Path(record_path).resolve().parent)
         case, attempt = record.get("ID"), record.get("attempt")
         if case in MUST_RERUN:
             raise ValueError("case requires a target-candidate rerun")
@@ -205,9 +218,12 @@ class CarryOver:
             digest = proof.get("sha256")
             if not isinstance(digest, str) or not SHA256.fullmatch(digest):
                 raise ValueError("invalid carry-over proof hash")
-            if hashlib.sha256(self.within(proof.get("path")).read_bytes()).hexdigest() != digest:
+            proof_path = self.within(proof.get("path"))
+            reject_smoke_root(proof_path.parent)
+            if hashlib.sha256(proof_path.read_bytes()).hexdigest() != digest:
                 raise ValueError("carry-over proof hash mismatch")
         evidence_root = self.within(entry.get("evidence_root"), directory=True)
+        reject_smoke_root(evidence_root)
         self.used.add((case, attempt))
         return evidence_root
 
@@ -220,10 +236,12 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
              carry_over_manifest=None, execution_index=None, execution_index_sha256=None, selection_sha256=None):
     # A marked smoke directory is never a certification inventory source, even
     # when it contains no records. Abort before creating any sheet or report.
-    import result_writer
     for directory in (results, history):
-        if directory is not None and result_writer.classify_smoke(Path(directory).resolve(), {}):
-            raise NonCertificationEvidence('marked smoke root cannot enter certification intake or history')
+        if directory is not None:
+            reject_smoke_root(directory)
+    for source in (carry_over_manifest, execution_index):
+        if source is not None:
+            reject_smoke_root(Path(source).resolve().parent)
     rows = load_catalog(catalog)
     universe = {case for case, row in rows.items()
                 if (cadence in row.get("Cadence", "").split(";") if cadence
@@ -245,6 +263,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                                    selection_sha256, hashlib.sha256(Path(catalog).read_bytes()).hexdigest())
     for path in sorted(results.glob("*.json")):
         try:
+            reject_smoke_root(path.resolve().parent)
             with path.open(encoding="utf-8") as stream:
                 record = json.load(stream, object_pairs_hook=unique_object, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
             check_evidence_class(record)
@@ -266,6 +285,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
         else:
             for path in sorted(history.rglob("*.json")):
                 try:
+                    reject_smoke_root(path.resolve().parent)
                     with path.open(encoding="utf-8") as stream:
                         previous = json.load(stream, object_pairs_hook=unique_object,
                                              parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
@@ -312,6 +332,8 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
             if result == "N-A" and any(entry["result"] == "FAIL" for entry in histories[case]):
                 raise ValueError("a failed case cannot be reclassified N-A")
             note = (f"carried from {source} to {candidate}" if source != candidate else "")
+        except NonCertificationEvidence:
+            raise
         except (ValueError, TypeError, KeyError, OSError) as exc:
             result = "FAIL"
             note = str(exc)

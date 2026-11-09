@@ -114,6 +114,32 @@ class CarryOverTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertTrue(self.validate([{**entry, "disposition": {**entry["disposition"], **change}}])[1])
 
+    def test_marked_smoke_carry_evidence_and_proofs_abort_inventory(self):
+        import result_writer
+        _, entry = self.setup_record()
+        marker = self.evidence / result_writer.SMOKE_MARKER
+        marker.write_text(json.dumps({'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'a' * 64}))
+        with self.assertRaisesRegex(cert.NonCertificationEvidence, 'marked smoke root'):
+            self.validate([entry])
+        proof = self.evidence / 'proof.txt'
+        proof.write_text('synthetic proof')
+        entry['proofs'] = [{'path': 'case-evidence/proof.txt', 'sha256': hashlib.sha256(proof.read_bytes()).hexdigest()}]
+        with self.assertRaisesRegex(cert.NonCertificationEvidence, 'marked smoke root'):
+            self.validate([entry])
+
+    def test_marked_smoke_carry_history_aborts_inventory(self):
+        import result_writer
+        history = self.root / 'history'
+        history.mkdir()
+        path, entry = self.setup_record({**self.record, 'result': 'FAIL'})
+        path.rename(history / 'attempt-1.json')
+        self.setup_record({**self.record, 'candidate_sha': self.target, 'attempt': 2,
+                           'evidence_paths': ['case-evidence/raw.txt']})
+        (self.evidence / result_writer.SMOKE_MARKER).write_text(json.dumps(
+            {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'a' * 64}))
+        with self.assertRaisesRegex(cert.NonCertificationEvidence, 'marked smoke root'):
+            self.validate([entry], history=history)
+
     def test_every_must_rerun_case_rejected(self):
         for case in sorted(cert.MUST_RERUN):
             with self.subTest(case=case):

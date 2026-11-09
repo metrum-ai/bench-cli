@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Synthetic smoke-only classification controls; no smoke was executed."""
 import datetime as dt
+import hashlib
 import json
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import result_writer
+import selected_set
 import validate_results
 
 
@@ -76,6 +78,51 @@ class SmokeSeparationTests(unittest.TestCase):
         self.assertIn('marked smoke root', run.stderr)
         self.assertFalse(sheet.exists())
         self.assertFalse(report.exists())
+
+    def test_marked_root_rejected_for_selected_set_na_even_without_record_label(self):
+        results = self.attempt / 'results'
+        results.mkdir()
+        path = results / 'BC-GPU-001.json'
+        # Synthetic fixture, never a real smoke output or certification attempt.
+        record = {'ID': 'BC-GPU-001', 'candidate_sha': 'b' * 40, 'result': 'N-A',
+                  'approval': {'scope': 'BC-GPU-001'}}
+        path.write_text(json.dumps(record))
+        index = {'approved_na': [{'record': {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()},
+                                  'evidence_root': str(self.attempt), 'evidence': {}}]}
+        with self.assertRaisesRegex(validate_results.NonCertificationEvidence, 'marked smoke root'):
+            selected_set.approved_na_cases(index, {'BC-GPU-001'}, 'b' * 40)
+
+    def test_nested_smoke_evidence_and_history_abort_inventory(self):
+        catalog = self.root / 'catalog.csv'
+        catalog.write_text('ID,Tier,Test case,Cadence\nBC-GPU-001,PR,fixture,weekly\n')
+        results = self.root / 'cert-results'
+        results.mkdir()
+        raw = self.attempt / 'raw.txt'
+        raw.write_text('synthetic fixture')
+        record = {'ID': 'BC-GPU-001', 'candidate_sha': 'b' * 40, 'result': 'PASS', 'attempt': 1,
+                  'owner': 'fixture', 'evidence_link': 'synthetic', 'observed_values': {'n': 1},
+                  'thresholds': {'n': 1}, 'evidence_paths': ['smoke/attempt/raw.txt'],
+                  'start_utc': '2026-01-01T00:00:00Z', 'end_utc': '2026-01-01T00:01:00Z'}
+        (results / 'BC-GPU-001.json').write_text(json.dumps(record))
+        with self.assertRaisesRegex(validate_results.NonCertificationEvidence, 'marked smoke root'):
+            validate_results.validate(catalog, results, 'b' * 40, dt.datetime.now(dt.timezone.utc))
+        sheet, report = self.root / 'sheet.csv', self.root / 'report.md'
+        cmd = [sys.executable, str(Path(validate_results.__file__)), '--catalog', str(catalog),
+               '--results', str(results), '--candidate-sha', 'b' * 40, '--release', 'v1.9.0',
+               '--cadence', 'weekly', '--run-id', 'fixture', '--run-date-utc', '2026-11-01T00:00:00Z', '--branch', 'fixture',
+               '--compared-against', 'fixture', '--csv', str(sheet), '--markdown', str(report)]
+        run = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn('marked smoke root', run.stderr)
+        self.assertFalse(sheet.exists())
+        self.assertFalse(report.exists())
+        history = self.root / 'history'
+        nested = history / 'nested'
+        nested.mkdir(parents=True)
+        (nested / result_writer.SMOKE_MARKER).write_text(self.marker.read_text())
+        (nested / 'prior.json').write_text(json.dumps(self.record))
+        with self.assertRaisesRegex(validate_results.NonCertificationEvidence, 'marked smoke root'):
+            validate_results.validate(catalog, results, 'b' * 40, dt.datetime.now(dt.timezone.utc), history=history)
 
     def test_unimplemented_lane_fallback_labels_every_failure(self):
         binary = self.root / 'binary'
