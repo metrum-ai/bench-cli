@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
 """The selected-set boundary rejects omitted, unknown or wrong-lane cases."""
+import datetime as dt
 import json
 import tempfile
 import unittest
@@ -17,7 +18,7 @@ class SelectedSetStrictTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.catalog = self.root / 'catalog.csv'
-        self.catalog.write_text('ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\nBC-CPU-001,CPU,C\n')
+        self.catalog.write_text('ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\nBC-GPU-002,RC-GPU,G2\nBC-CPU-001,CPU,C\n')
         self.selection = self.root / 'selection.json'
         self.manifest = self.root / 'manifest.json'
         self.index = self.root / 'index.json'
@@ -53,6 +54,65 @@ class SelectedSetStrictTests(unittest.TestCase):
                 self.setup_files(selected)
                 with self.assertRaisesRegex(ValueError, error):
                     self.load()
+
+    def test_approved_na_is_validated_and_never_launched(self):
+        self.setup_files({'BC-GPU-001': ['core'], 'BC-GPU-002': ['core']})
+        na_root = self.root / 'na-root'
+        (na_root / 'results').mkdir(parents=True)
+        (na_root / 'evidence').mkdir()
+        evidence = na_root / 'evidence/approval.txt'
+        evidence.write_text('SYNTHETIC APPROVAL ONLY')
+        now = dt.datetime.now(dt.timezone.utc)
+        stamp = lambda value: value.isoformat().replace('+00:00', 'Z')
+        record = {'ID': 'BC-GPU-002', 'candidate_sha': 'a' * 40, 'result': 'N-A', 'owner': 'fixture',
+            'evidence_link': 'synthetic', 'evidence_paths': ['evidence/approval.txt'], 'case_start_utc': stamp(now),
+            'approval': {'reason': 'synthetic only', 'requester': 'requester', 'approver': 'approver',
+                         'scope': 'BC-GPU-002 rehearsal', 'approved_utc': stamp(now - dt.timedelta(minutes=1)),
+                         'expires_utc': stamp(now + dt.timedelta(hours=1))}}
+        record_path = na_root / 'results/BC-GPU-002.json'
+        record_path.write_text(json.dumps(record))
+        index = json.loads(self.index.read_text())
+        index['approved_na'] = [{'record': {'path': str(record_path), 'sha256': digest(record_path)},
+                                  'evidence_root': str(na_root), 'evidence': {'evidence/approval.txt': digest(evidence)}}]
+        def write_index():
+            self.index.write_text(json.dumps(index))
+        write_index()
+        with patch.object(selected_set.case_launcher, 'preflight') as preflight:
+            self.assertEqual([x[0] for x in self.load()], ['BC-GPU-001'])
+            self.assertEqual(preflight.call_count, 1)
+        # Wrong scope/candidate, expired and non-independent approvals are refused
+        # even when the submitter recomputes the record pin.
+        for change in ({'scope': 'different case'}, {'expires_utc': stamp(now - dt.timedelta(seconds=1))},
+                       {'approver': 'REQUESTER'}):
+            saved = dict(record['approval'])
+            record['approval'].update(change)
+            record_path.write_text(json.dumps(record))
+            index['approved_na'][0]['record']['sha256'] = digest(record_path)
+            write_index()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.load()
+            record['approval'] = saved
+        record['candidate_sha'] = 'b' * 40
+        record_path.write_text(json.dumps(record))
+        index['approved_na'][0]['record']['sha256'] = digest(record_path)
+        write_index()
+        with self.assertRaisesRegex(ValueError, 'candidate'):
+            self.load()
+        record['candidate_sha'] = 'a' * 40
+        record_path.write_text(json.dumps(record))
+        index['approved_na'][0]['record']['sha256'] = digest(record_path)
+        write_index()
+        evidence.write_text('TAMPERED')
+        with self.assertRaisesRegex(ValueError, 'evidence changed'):
+            self.load()
+        evidence.write_text('SYNTHETIC APPROVAL ONLY')
+        # Duplicate/executable entries for the N/A are never accepted.
+        duplicate = self.root / 'na-case.json'
+        duplicate.write_text(json.dumps({'candidate_sha': 'a' * 40, 'lane': 'G2', 'cases': {'BC-GPU-002': {}}}))
+        index['manifests'].append({'path': str(duplicate), 'sha256': digest(duplicate)})
+        write_index()
+        with patch.object(selected_set.case_launcher, 'preflight'), self.assertRaisesRegex(ValueError, 'not selected'):
+            self.load()
 
     def test_selection_is_recomputed_before_any_case_preflight(self):
         import select_cases

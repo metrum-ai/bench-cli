@@ -357,13 +357,19 @@ exactly true; diagnostic cell dictionaries do not count as case verdicts.
 No performance gate thresholds are changed.
 
 `selected_set.py --selection SELECTION --catalog CATALOG --index INDEX --preflight`
-is the complete-set preflight entry. Omit `--preflight` only for an authorized
-execution. The index contains `candidate_sha`, `selection_sha256`,
-`catalog_sha256`, and ordered `manifests` entries (`path`, `sha256`). Every case
-manifest must have exactly one case; the set must exactly equal the selected
-RC-GPU IDs, without missing/duplicate/extra IDs. All manifests are verified
-before any launch and rechecked at each execution boundary. The order in the
-index is the execution order, so dependencies must precede their barriers.
+is the selected RC-GPU preflight entry, not an all-tier dispatcher. Omit
+`--preflight` only for an authorized execution. The index contains `candidate_sha`,
+`selection_sha256`, `catalog_sha256`, and ordered `manifests` entries (`path`,
+`sha256`). Every executable case manifest must have exactly one case. Optional
+`approved_na` entries have a `record` pin, absolute `evidence_root`, and an
+`evidence` map of relative evidence paths to SHA-256. Each N/A must be selected,
+match the candidate and case, have independent unexpired approval scoped to that
+case, and retain all pinned evidence. N/As are reported as N/A, never launched;
+independent review must authenticate the approval. Executable manifests plus
+approved N/As must exactly cover selected RC-GPU IDs without duplicates or extras.
+All manifests are verified before any launch, and N/A pins are rechecked at each
+execution boundary. The order in the index is the execution order, so
+dependencies must precede their barriers.
 
 ### Remaining offline launch rehearsal work (#469)
 
