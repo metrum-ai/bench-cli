@@ -119,6 +119,13 @@ does not invoke its result validator or write a case record. It is not a network
 sandbox, real reasoning evidence or the complete selected-set rehearsal;
 independently enforce offline policy.
 
+`rehearse_g4_modality.py --manifest FROZEN_CASE.json` exercises GPU-011's
+actual LLM, VLM and two strategic product/proxy command cohorts against a
+synthetic local server, checks model/options and pinned VLM image bytes on the
+wire, and uses temporary outputs. It does not stop or launch model servers,
+invoke the GPU-011 validator or write a case record. It is not a network sandbox,
+real-model evidence or the complete selected-set rehearsal.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
