@@ -26,7 +26,9 @@ class IndividualReasoningTests(unittest.TestCase):
                     "--owner", "fixture", "--evidence-link", "fixture", "--port", "8000", "--proxy-port", "8001"]
             stack.enter_context(patch("sys.argv", argv))
             stack.enter_context(patch.dict(os.environ, {"CERT_CASE_ID": case}))
-            calls = stack.enter_context(patch.object(r_runner, "run_cell", return_value=("", "", 0, [])))
+            def fake_cell(args, label, *rest):
+                return "", "", 0, [f"evidence/{label}-requests.jsonl"]
+            calls = stack.enter_context(patch.object(r_runner, "run_cell", side_effect=fake_cell))
             write = stack.enter_context(patch.object(r_runner.result_writer, "write_record"))
             for name in ("truncation_cell", "adequate_cell", "safety_cell", "control_cell", "thinking_live_cell"):
                 kwargs = {"side_effect": ValueError("synthetic prerequisite failure")} if name == "truncation_cell" and failed_prerequisite else {"return_value": {"checked": True}}
@@ -50,6 +52,11 @@ class IndividualReasoningTests(unittest.TestCase):
         self.assertEqual(records[0]["observed_values"]["reasoning_cases_passed"], 3)
         self.assertEqual(records[0]["thresholds"]["gpu_class"], "NVIDIA H100")
         self.assertEqual(count, 11)  # six truncation + three adequate + two control cells
+        paths = records[0]['evidence_paths']
+        self.assertEqual(len(paths), len(set(paths)))
+        self.assertIn('evidence/r-128-default-requests.jsonl', paths)
+        self.assertIn('evidence/r-4096-candidate-requests.jsonl', paths)
+        self.assertIn('evidence/r-control-candidate-requests.jsonl', paths)
 
     def test_hardware_fails_for_wrong_class_or_failed_prerequisite(self):
         for gpu, failed in (("NVIDIA L40S", False), ("NVIDIA H1000", False),
