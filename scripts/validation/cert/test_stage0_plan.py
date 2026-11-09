@@ -27,7 +27,7 @@ class PlanTests(unittest.TestCase):
         self.manifest.write_text(json.dumps({'candidate_sha': self.candidate, 'cases': {self.case: {}}}))
         self.item = {'id': self.case, 'allowed_classes': ['COMPLETE'], 'cap_seconds': 150, 'grace_seconds': 30,
                      'manifest': {'path': str(self.manifest), 'sha256': digest(self.manifest)}, 'request_log': 'evidence/request.jsonl'}
-        self.plan = {'candidate_sha': self.candidate, 'execution_index_sha256': digest(self.index),
+        self.plan = {'candidate_sha': self.candidate, 'selected_plan_sha256': digest(self.index),
                      'selection_sha256': digest(self.selection), 'catalog_sha256': digest(self.catalog),
                      'boxes': [{'id': 'box-a', 'gpu': 'expected GPU', 'planned_seconds': 160,
                                 'hard_cap_seconds': 200, 'cases': [self.item]}]}
@@ -38,7 +38,7 @@ class PlanTests(unittest.TestCase):
         self.expectations.write_text(json.dumps(self.plan))
         with patch.object(stage0_plan.selected_set, 'load_set', return_value=self.entries) as load:
             result = stage0_plan.validate(self.expectations, digest(self.expectations), selection_path=self.selection,
-                catalog_path=self.catalog, index_path=self.index, approved_index_sha=digest(self.index))
+                catalog_path=self.catalog, selected_plan_path=self.index, approved_plan_sha=digest(self.index))
             self.assertEqual(load.call_args.kwargs['allow_pretrigger'], False)
             return result
 
@@ -61,11 +61,11 @@ class PlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exceed planned'): self.run_validate()
 
     def test_index_and_manifest_hash_mismatch_fail(self):
-        self.plan['execution_index_sha256'] = 'b' * 64
+        self.plan['selected_plan_sha256'] = 'b' * 64
         with self.assertRaisesRegex(ValueError, 'approved digest'): self.run_validate()
-        self.plan['execution_index_sha256'] = digest(self.index)
+        self.plan['selected_plan_sha256'] = digest(self.index)
         self.item['manifest']['sha256'] = 'b' * 64
-        with self.assertRaisesRegex(ValueError, 'approved execution index'): self.run_validate()
+        with self.assertRaisesRegex(ValueError, 'approved selected plan'): self.run_validate()
 
 
 if __name__ == '__main__': unittest.main()
