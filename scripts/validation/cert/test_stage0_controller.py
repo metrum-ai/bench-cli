@@ -20,6 +20,7 @@ class FakeAdapter:
         self.armed = True
         self.supported = True
         self.milestones = True
+        self.preview_boundary = True
         self.cleanup = True
         self.stop_verified = True
         self.outcome = {'terminal': 'COMPLETE', 'record_result': 'PASS'}
@@ -33,6 +34,7 @@ class FakeAdapter:
         if self.on_launch: self.on_launch()
         return self.outcome
     def verify_milestones(self, _case, _outcome): return self.milestones
+    def verify_preview_boundary(self, _case, _outcome): return self.preview_boundary
     def verify_cleanup(self, _case): return self.cleanup
     def stop_and_verify(self, box):
         self.stopped.append(box)
@@ -82,6 +84,36 @@ class ControllerTests(unittest.TestCase):
             self.run_box()
         self.assertEqual(self.adapter.launched, self.cases[:1])
         self.assertEqual(self.adapter.stopped, ['box-a'])
+
+    def prepare_preview_case(self):
+        old = self.cases[0]; new = 'BC-PERF-001'; self.cases = [new]
+        self.plan['boxes'][0]['cases'] = self.plan['boxes'][0]['cases'][:1]
+        entry = self.plan['boxes'][0]['cases'][0]; entry['id'] = new
+        entry['allowed_classes'] = ['PRE_CANDIDATE_CONTROLLED_STOP']
+        path = Path(entry['manifest']['path'])
+        path.write_text(json.dumps({'candidate_sha': self.candidate, 'cases': {new: {}}}))
+        entry['manifest']['sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.path.write_text(json.dumps(self.plan)); self.sha = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        self.assertNotEqual(old, new)
+
+    def test_preview_boundary_is_separate_and_cannot_claim_a_record(self):
+        self.prepare_preview_case()
+        self.adapter.outcome = {'terminal': 'PRE_CANDIDATE_CONTROLLED_STOP', 'record_result': None}
+        self.adapter.milestones = False  # preview does not claim record/writer coverage
+        result = self.run_box()
+        self.assertEqual(result['cases'], self.cases)
+        self.adapter.outcome['record_result'] = 'PASS'
+        with self.assertRaisesRegex(ValueError, 'disagree'): self.run_box()
+        self.adapter.outcome['record_result'] = None
+        self.adapter.preview_boundary = False
+        with self.assertRaisesRegex(ValueError, 'verify_preview_boundary'): self.run_box()
+        self.assertEqual(self.adapter.stopped, ['box-a', 'box-a'])
+
+    def test_preview_class_cannot_be_assigned_to_other_case(self):
+        self.plan['boxes'][0]['cases'][0]['allowed_classes'] = ['PRE_CANDIDATE_CONTROLLED_STOP']
+        self.path.write_text(json.dumps(self.plan)); self.sha = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'restricted to performance'): self.run_box()
+        self.assertFalse(self.adapter.launched)
 
     def test_unexpected_pass_stops_box(self):
         self.plan['boxes'][0]['cases'][0]['allowed_classes'] = ['INCOMPLETE_GRID_FAIL']

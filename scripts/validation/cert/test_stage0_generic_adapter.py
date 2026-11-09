@@ -91,6 +91,14 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(self.mocks[0].call_count, 3)
         self.assertEqual(self.mocks[5].call_count, 3)
 
+    def test_generic_adapter_does_not_accept_unimplemented_preview(self):
+        preview = self.case('BC-PERF-003', 'G7')
+        preview['allowed_classes'] = ['PRE_CANDIDATE_CONTROLLED_STOP']
+        self.items.append(preview); self.save_plan()
+        with self.assertRaisesRegex(ValueError, 'validate_box'): self.run_box()
+        self.mocks[0].assert_not_called()
+        self.stop.assert_called_once_with('box-a')
+
     def test_g7_full_completion_uses_common_milestones(self):
         self.items.append(self.case('BC-PERF-003', 'G7')); self.save_plan()
         self.assertEqual(self.run_box()['cases'][-1], 'BC-PERF-003')

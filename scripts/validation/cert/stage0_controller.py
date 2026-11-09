@@ -18,7 +18,8 @@ import manifest_tool
 
 CASE = re.compile(r'BC-[A-Z]+-[0-9]{3}\Z')
 SHA = re.compile(r'[a-f0-9]{64}\Z')
-CLASSES = frozenset({'COMPLETE', 'INCOMPLETE_GRID_FAIL'})
+CLASSES = frozenset({'COMPLETE', 'INCOMPLETE_GRID_FAIL', 'PRE_CANDIDATE_CONTROLLED_STOP'})
+PREVIEW_CASES = frozenset({'BC-PERF-001', 'BC-PERF-002', 'BC-TELEM-001', 'BC-PERF-003'})
 
 
 def pinned_expectations(path, expected):
@@ -63,6 +64,8 @@ def box_cases(expectations, box, required):
         if (not isinstance(classes, list) or not classes or any(not isinstance(x, str) for x in classes)
                 or len(classes) != len(set(classes)) or not set(classes) <= CLASSES):
             raise ValueError('invalid allowed terminal classes')
+        if 'PRE_CANDIDATE_CONTROLLED_STOP' in classes and case not in PREVIEW_CASES:
+            raise ValueError('pre-candidate stop is restricted to performance cases')
         cap, grace, manifest, request_log = (item['cap_seconds'], item['grace_seconds'],
                                              item['manifest'], item['request_log'])
         if type(cap) is not int or type(grace) is not int or not 0 < grace < cap:
@@ -137,10 +140,17 @@ def run_box(expectations_path, expected_sha256, box, required, adapter):
             terminal, result = outcome['terminal'], outcome['record_result']
             if terminal not in item['allowed_classes'] or terminal not in CLASSES:
                 raise ValueError('unexpected terminal class')
-            if (terminal == 'COMPLETE' and result != 'PASS') or (terminal == 'INCOMPLETE_GRID_FAIL' and result != 'FAIL'):
+            if ((terminal == 'COMPLETE' and result != 'PASS')
+                    or (terminal == 'INCOMPLETE_GRID_FAIL' and result != 'FAIL')
+                    or (terminal == 'PRE_CANDIDATE_CONTROLLED_STOP' and result is not None)):
                 raise ValueError('terminal class and record result disagree')
-            # A PASS must be explicitly covered by COMPLETE in this case's plan.
-            must('verify_milestones', item, outcome)
+            # A preview stop has a different evidence contract and is not a
+            # production record or runner/writer coverage. The adapter must
+            # explicitly verify its checkpoint, candidate fence and ack.
+            if terminal == 'PRE_CANDIDATE_CONTROLLED_STOP':
+                must('verify_preview_boundary', item, outcome)
+            else:
+                must('verify_milestones', item, outcome)
             must('verify_cleanup', item)
             pinned_manifest(item, candidate)
         frozen_cases()
