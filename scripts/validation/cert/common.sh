@@ -160,7 +160,14 @@ cert_on_exit() {
       fi
     fi
     if ((owned == 1)); then
-      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1 || {
+      # Non-W cases can have already hashed the startup snapshot in server.log.
+      # Preserve it and retain the final snapshot separately. W has no case
+      # result until its later manual sign-off, which binds the final log.
+      local log_name=server.log
+      if [[ -e "$CERT_OUT/evidence/server.log" && "${CERT_LANE:-}" != W ]]; then
+        log_name=server-teardown.log
+      fi
+      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/$log_name" 2>&1 || {
         [[ "${CERT_PERF_FINALIZE:-0}" != 1 && "${CERT_LANE:-}" != W ]] || rc=1
       }
       if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
@@ -170,6 +177,9 @@ cert_on_exit() {
         local remaining
         remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_CONTAINER_OWNER" --format '{{.ID}}')" || rc=1
         [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
+      fi
+      if [[ "$log_name" == server-teardown.log ]]; then
+        (cd "$CERT_OUT/evidence" && sha256sum server-teardown.log > server-teardown.sha256) || rc=1
       fi
     fi
   fi
