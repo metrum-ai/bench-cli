@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import execution_intake
 import select_cases
@@ -15,6 +16,9 @@ import validate_results as validator
 
 class ExecutionIntakeTests(unittest.TestCase):
     def setUp(self):
+        verifier = patch('harness_integrity.verify', return_value=[])
+        verifier.start()
+        self.addCleanup(verifier.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -37,7 +41,8 @@ class ExecutionIntakeTests(unittest.TestCase):
         self.tools = {name: {'path': '/synthetic/' + name, 'sha256': 'b' * 64}
                       for name in ('bash', 'env', 'python3')}
         self.manifest_path = self.proofs / 'manifest.json'
-        self.manifest = {'candidate_sha': self.sha, 'lane': 'G1', 'cases': {'BC-GPU-001': {}}, 'tools': self.tools}
+        self.manifest = {'candidate_sha': self.sha, 'lane': 'G1', 'cases': {'BC-GPU-001': {}},
+                         'tools': self.tools, 'harness_repo': '/synthetic', 'harness_closure': []}
         self.manifest_path.write_text(json.dumps(self.manifest))
         self.phases_path = self.proofs / 'phases.jsonl'
         self.phases_path.write_text('\n'.join(json.dumps({'case': 'BC-GPU-001', 'phase': phase, 'utc': utc})
@@ -118,6 +123,20 @@ class ExecutionIntakeTests(unittest.TestCase):
         self.index['entries'][0]['record_sha256'] = execution_intake.digest(self.record_path)
         self.write_index()
         self.assertTrue(any('lane' in error for error in self.validate()[1]))
+
+    def test_rehashed_manifest_with_wrong_harness_is_rejected(self):
+        self.manifest['harness_closure'] = [{'path': '/synthetic/evil.py', 'sha256': 'd' * 64}]
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        changed = execution_intake.digest(self.manifest_path)
+        self.plan['manifests'][0]['sha256'] = changed
+        self.plan_path.write_text(json.dumps(self.plan))
+        self.index['selected_plan']['sha256'] = execution_intake.digest(self.plan_path)
+        self.index['entries'][0]['manifest']['sha256'] = changed
+        self.record['input_hashes']['execution_manifest'] = changed
+        self.record_path.write_text(json.dumps(self.record))
+        self.index['entries'][0]['record_sha256'] = execution_intake.digest(self.record_path)
+        self.write_index()
+        self.assertTrue(any('harness closure' in error for error in self.validate()[1]))
 
     def test_manifest_must_be_in_frozen_plan(self):
         self.plan['manifests'][0]['sha256'] = 'c' * 64

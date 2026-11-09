@@ -14,6 +14,11 @@ from execution_evidence import digest
 
 
 class FreezeCaseTests(unittest.TestCase):
+    def setUp(self):
+        verifier = patch('harness_integrity.verify', return_value=[])
+        verifier.start()
+        self.addCleanup(verifier.stop)
+
     def test_ambiguous_selection_and_catalog_fail_before_freeze(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

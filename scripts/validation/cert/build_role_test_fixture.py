@@ -76,6 +76,8 @@ def bind(manifest, root, additional=None):
                   'origin': {'kind': 'local-cargo-validation'}}
     manifest['tokenizer_validation'] = validation
     manifest['measured_binaries'] = list(registry.values())
+    manifest['harness_repo'] = str(Path(__file__).resolve().parents[3])
+    manifest['harness_closure'] = []  # synthetic only; unit tests mock source verifier
     log = root / 'validation-only.log'
     log.write_text('SYNTHETIC UNIT FIXTURE; NOT BUILD EVIDENCE\n')
     receipt = {'_copyright': 'Copyright (c) 2026 Metrum AI, Inc.', 'candidate_sha': sha, 'version': '1.8.1',

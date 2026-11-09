@@ -102,6 +102,15 @@ class ExecutionIndex:
                 or not isinstance(expected_lane, str) or not expected_lane or manifest.get('lane') != expected_lane
                 or not isinstance(manifest.get('cases'), dict) or set(manifest['cases']) != {case}):
             raise ValueError('execution manifest candidate, case or lane mismatch')
+        # Recheck the candidate's source tree independently at intake. The
+        # evidence may come from another checkout, so compare relative names and
+        # SHA-256 rather than requiring identical execution-host absolute paths.
+        import harness_integrity
+        repo = Path(__file__).resolve().parents[3]
+        actual_closure = harness_integrity.verify(repo, self.candidate)
+        if (harness_integrity.relative_pins(manifest.get('harness_repo'), manifest.get('harness_closure'))
+                != harness_integrity.relative_pins(str(repo), actual_closure)):
+            raise ValueError('execution harness closure differs from candidate')
         parent = manifest.get('parent_structural_manifest')
         if parent is not None:
             if not isinstance(parent, dict) or not isinstance(parent.get('sha256'), str):

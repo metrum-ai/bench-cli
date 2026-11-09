@@ -4,6 +4,7 @@
 import datetime as dt
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -84,11 +85,39 @@ class ValidatorTests(unittest.TestCase):
     def test_result_and_periodic_sheet_headers_and_report(self):
         import csv
         import execution_intake
+        import harness_integrity
+        # Build a fresh local Git fixture, so the real subprocess validates its
+        # own source tree against a real candidate commit (not a mocked verifier).
+        source = Path(cert.__file__).resolve().parents[3]
+        repo = self.root / 'synthetic-repo'
+        repo.mkdir()
+        for name in harness_integrity.SCOPES:
+            src, dst = source / name, repo / name
+            if src.is_dir():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            elif src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        def git(*args):
+            return subprocess.run(['/usr/bin/git', '-C', str(repo), *args],
+                                  check=True, capture_output=True, text=True).stdout
+        git('init', '-q')
+        git('add', '.')
+        git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
+            'commit', '-qm', 'Synthetic test source')
+        self.sha = git('rev-parse', 'HEAD').strip()
+        self.record['candidate_sha'] = self.sha
+        selection = select_cases.make_selection(cert.load_catalog(self.catalog),
+            select_cases.catalog_hash(self.catalog), self.sha, .3, 3, [], [])
+        self.selection.write_text(json.dumps(selection), encoding='utf-8')
+        closure = harness_integrity.verify(repo, self.sha)
         proof_dir = self.root / 'proofs'
         proof_dir.mkdir()
         tools = {name: {'path': '/synthetic/' + name, 'sha256': 'b' * 64} for name in ('bash', 'env', 'python3')}
         manifest = proof_dir / 'manifest.json'
-        manifest.write_text(json.dumps({'candidate_sha': self.sha, 'lane': 'MOCK', 'cases': {'BC-CLI-001': {}}, 'tools': tools}))
+        manifest.write_text(json.dumps({'candidate_sha': self.sha, 'lane': 'MOCK', 'cases': {'BC-CLI-001': {}},
+                                        'tools': tools, 'harness_repo': str(repo), 'harness_closure': closure}))
         phases = proof_dir / 'phases.jsonl'
         phases.write_text('\n'.join(json.dumps({'case': 'BC-CLI-001', 'phase': phase, 'utc': utc})
             for phase, utc in (('inputs-ready', '2026-11-04T11:59:00Z'),
@@ -112,7 +141,7 @@ class ValidatorTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 dest = self.root / (mode + ".csv")
                 report = self.root / (mode + ".md")
-                args = [sys.executable, str(Path(cert.__file__)), "--catalog", str(self.catalog),
+                args = [sys.executable, str(repo / 'scripts/validation/cert/validate_results.py'), "--catalog", str(self.catalog),
                         "--results", str(self.results), "--candidate-sha", self.sha, "--release", "v1.8.0",
                         "--csv", str(dest), "--markdown", str(report)]
                 if mode == "weekly":

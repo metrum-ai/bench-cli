@@ -13,6 +13,21 @@ from execution_evidence import digest
 
 
 class CaseLauncherTests(unittest.TestCase):
+    def setUp(self):
+        verifier = patch('harness_integrity.verify', return_value=[])
+        verifier.start()
+        self.addCleanup(verifier.stop)
+
+    def test_missing_or_changed_candidate_harness_closure_fails_before_launch(self):
+        manifest = {'candidate_sha': 'a' * 40}
+        with patch.object(case_launcher.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'harness closure'):
+                case_launcher.preflight(manifest)
+            manifest['harness_closure'] = [{'path': '/fake', 'sha256': '0' * 64}]
+            with self.assertRaisesRegex(ValueError, 'harness closure'):
+                case_launcher.preflight(manifest)
+            run.assert_not_called()
+
     def test_direct_launcher_rejects_duplicate_manifest_keys_before_preflight(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'case.json'

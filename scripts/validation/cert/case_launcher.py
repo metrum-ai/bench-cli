@@ -23,10 +23,19 @@ def pinned(item, executable=False):
     return path.resolve()
 
 
+def check_harness(manifest):
+    import harness_integrity
+    repo = Path(__file__).resolve().parents[3]
+    actual = harness_integrity.verify(repo, manifest['candidate_sha'])
+    if manifest.get('harness_repo') != str(repo) or manifest.get('harness_closure') != actual:
+        raise ValueError('frozen harness closure differs from candidate checkout')
+
+
 def preflight(manifest):
     require_python()
     if not re.fullmatch(r"[a-f0-9]{40}", manifest.get("candidate_sha", "")):
         raise ValueError("candidate_sha must be a full commit")
+    check_harness(manifest)
     binary = pinned(manifest["candidate"], True)
     _, validation_binary = build_roles.check_manifest(manifest)
     import generated_inputs
@@ -153,6 +162,7 @@ def validate_execution_record(record, manifest_sha256, tools):
 
 
 def run_case(manifest_path, manifest, case):
+    check_harness(manifest)
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
         import gpu010_builds
@@ -210,6 +220,7 @@ def run_case(manifest_path, manifest, case):
         # if any registered binary, build provenance, lane or frozen input
         # changed while it ran; the error path retains a lane-error marker.
         build_roles.check_manifest(manifest)
+        check_harness(manifest)
         for item in manifest.get('inputs', []):
             pinned(item)
         target = out / "results" / (case + ".json")

@@ -97,6 +97,7 @@ class GeneratedInputTests(unittest.TestCase):
         manifest['cases']['BC-GPU-003'] = {'out': str(self.root / 'attempt'),
             'launcher': {'path': str(launcher), 'sha256': digest(launcher)}, 'command': [str(launcher)]}
         with patch.object(case_launcher.build_roles, 'check_manifest'), \
+             patch.object(case_launcher, 'check_harness'), \
              patch('runtime_inputs.prepare', side_effect=ValueError('runtime binding incomplete')), \
              patch('result_writer.write_record') as write, \
              patch.object(case_launcher.subprocess, 'Popen') as start, self.assertRaisesRegex(ValueError, 'runtime binding incomplete'):

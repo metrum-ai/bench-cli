@@ -20,6 +20,9 @@ from execution_evidence import digest
 
 class FreezeGeneratedTests(unittest.TestCase):
     def setUp(self):
+        verifier = patch('harness_integrity.verify', return_value=[])
+        verifier.start()
+        self.addCleanup(verifier.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

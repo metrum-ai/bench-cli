@@ -371,6 +371,16 @@ All manifests are verified before any launch, and N/A pins are rechecked at each
 execution boundary. The order in the index is the execution order, so
 dependencies must precede their barriers.
 
+The freezer and launcher compare the certification source tree, xtask sources
+and declared build configuration to the candidate commit and pin their bytes;
+they reject changed, missing, symlinked or untracked code in that scope. Final
+fresh-PASS intake independently checks the validator checkout against the same
+candidate and compares the manifest's relative source names and hashes. This
+is not a trusted-host or complete execution-closure attestation: Python startup
+and bytecode, Git and its dependencies, Cargo caches/configuration, third-party
+libraries, dynamic linkers and validator startup still require independent audit.
+A matching Git tree alone does not authenticate the selected candidate.
+
 ### Remaining offline launch rehearsal work (#469)
 
 The complete-set preflight and individual synthetic loopbacks are **not** a

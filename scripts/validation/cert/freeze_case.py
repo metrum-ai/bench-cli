@@ -96,6 +96,8 @@ def freeze(args):
         import case_input_checks
         case_input_checks.check(args.case, config, args.candidate)
     root = Path(__file__).parent
+    import harness_integrity
+    harness_closure = harness_integrity.verify(root.parents[2], selection['candidate_sha'])
     if args.command_json:
         if args.case not in ('BC-COMP-001', 'BC-OPS-001', 'BC-INTEG-001'):
             raise ValueError('custom commands are restricted to barrier/cleanup/signoff cases')
@@ -110,7 +112,8 @@ def freeze(args):
                    "--out", str(args.run_out.resolve())]
     inputs = {Path(path).resolve() for path in args.input}
     inputs.update({args.selection.resolve(), args.catalog.resolve(), args.lane_manifest.resolve(), args.baseline.resolve(),
-                   args.build_receipt.resolve(), args.tool_manifest.resolve(), Path(validation['path']).resolve()})
+                   args.sut.resolve(), args.tokenizer.resolve(), args.all_smi.resolve(), args.build_receipt.resolve(),
+                   args.tool_manifest.resolve(), Path(validation['path']).resolve()})
     inputs.update(Path(item['path']) for item in tools.values())
     inputs.update(Path(item['path']).resolve() for item in measured)
     inputs.add(args.build_receipt.resolve().parent / 'validation-only.log')
@@ -145,6 +148,7 @@ def freeze(args):
         collect_pins(r4_oci)
     # Freeze transitive harness sources, not only the top-level shell wrapper.
     inputs.update(harness_sources(root))
+    inputs.update(Path(item['path']) for item in harness_closure)
     if args.command_json:
         inputs.add(args.command_json.resolve())
     manifest = {"$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
@@ -152,6 +156,7 @@ def freeze(args):
                 "tokenizer_validation": validation, "measured_binaries": measured,
                 "build_receipt": pin(args.build_receipt), "lane_manifest": pin(args.lane_manifest),
                 "lane": lane, "tools": tools, "tool_manifest": pin(args.tool_manifest),
+                "harness_repo": str(root.parents[2].resolve()), "harness_closure": harness_closure,
                 "baseline": pin(args.baseline), "sut": pin(args.sut),
                 "tokenizer": {**pin(args.tokenizer), "revision": args.tokenizer_revision}, "all_smi": pin(args.all_smi),
                 "inputs": [pin(path) for path in sorted(inputs)],
