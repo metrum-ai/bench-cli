@@ -79,8 +79,9 @@ def rehearsal(manifest_path):
                    'LC_ALL': 'C.UTF-8', 'NO_PROXY': 'localhost,127.0.0.1', 'no_proxy': 'localhost,127.0.0.1',
                    'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'CARGO_NET_OFFLINE': 'true',
                    'CARGO_HOME': os.environ.get('CARGO_HOME', str(Path.home() / '.cargo'))}
-            if os.environ.get('RUSTUP_HOME'):
-                env['RUSTUP_HOME'] = os.environ['RUSTUP_HOME']
+            for name in ('RUSTUP_HOME', 'RUSTUP_TOOLCHAIN', 'CARGO_TARGET_DIR'):
+                if os.environ.get(name):
+                    env[name] = os.environ[name]
             fixtures = l1_runner.call(g6_schema_runner.fixture_command(), evidence / 'fixtures.txt',
                                       evidence / 'fixtures-error.txt', 1800, env=env)
             if fixtures:

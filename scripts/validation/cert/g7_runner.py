@@ -113,6 +113,7 @@ def main():
             if recorded.tzinfo is None or started.tzinfo is None or recorded >= started:
                 raise ValueError('G7 noise floor must predate the run')
             noise_copy = evidence / 'g7-noise-floor.json'
+            result_writer.require_input_origin(args.out, Path(floor['path']).resolve().parent)
             shutil.copyfile(floor['path'], noise_copy)
             if manifest_tool.sha256_file(noise_copy) != floor['sha256']:
                 raise ValueError('G7 noise floor changed before collection')
@@ -137,6 +138,9 @@ def main():
                                          versions["baseline_binary_sha256"], versions["candidate_binary_sha256"], noise)
         observed["execution_failures"] = failures
         passed = observed["result"] == "PASS" and not failures
+    except result_writer.NonCertificationEvidence as exc:
+        print(f'Input evidence rejected: {exc}', file=sys.stderr)
+        return 1
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         observed, passed = {"error": str(exc), "execution_failures": failures}, False
     comparison = evidence / "g7-comparison.json"

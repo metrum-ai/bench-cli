@@ -124,10 +124,13 @@ def preflight_label(manifest):
     return 'STRUCTURAL-PREFLIGHT-OK' if structural else 'PREFLIGHT-OK'
 
 
-def run_generator(command, directory):
+def run_generator(command, directory, tool_dir=None):
     """Owned CPU-only process group with no ambient credentials/proxy/exporters."""
-    env = {'PATH': os.defpath, 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8',
+    env = {'PATH': str(tool_dir) if tool_dir is not None else os.defpath, 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8',
            'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'NO_BANNER': '1'}
+    if tool_dir is not None:
+        command = [str(Path(tool_dir) / 'env'), '-i'] + [f'{key}={value}' for key, value in sorted(env.items())] + command
+        env = {}
     with (directory / 'generator.log').open('xb') as log:
         process = subprocess.Popen(command, cwd=directory, env=env, start_new_session=True,
                                    stdout=log, stderr=subprocess.STDOUT)
@@ -145,7 +148,7 @@ def run_generator(command, directory):
                     process.wait()
 
 
-def materialize(recipe, receipt_path, sha, root, expected_contract):
+def materialize(recipe, receipt_path, sha, root, expected_contract, tool_dir=None):
     """Generate twice in fresh directories and bind real hashes before launch.
 
     This function emits no success binding on any failure; both attempts/logs
@@ -163,7 +166,10 @@ def materialize(recipe, receipt_path, sha, root, expected_contract):
         directory.mkdir()
         command = argv(recipe, directory)
         (directory / 'command.json').write_text(json.dumps(command, indent=2) + '\n')
-        run_generator(command, directory)
+        if tool_dir is None:
+            run_generator(command, directory)
+        else:
+            run_generator(command, directory, tool_dir)
         validate(recipe, receipt_path, sha)
         pins = {}
         for filename in ('prompts.jsonl', 'selection-report.json'):

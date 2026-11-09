@@ -74,8 +74,46 @@ def request_clocks(root, paths):
             "last_request_utc": max(ends).isoformat() if ends else None}
 
 
+def bind_r4_evidence(root, record):
+    """Bind successful r4 results to verified platform and container receipts."""
+    import r4_image_provenance as provenance
+    versions = record.get('versions', {})
+    image = versions.get('server_image', versions.get('server_and_reference_image'))
+    if record.get('result') != 'PASS' or image != provenance.pins.IMAGE:
+        return record
+    names = ['evidence/r4-image-preflight.json', 'evidence/r4-image-runtime.json']
+    additional = {'BC-GPU-011': 'evidence/g4-modality-vlm-image-runtime.json',
+                  'BC-GPU-015': 'evidence/g5-endpoints-image-runtime.json',
+                  'BC-COMP-002': 'evidence/comp-reference-image-runtime.json'}
+    if record.get('ID') in additional:
+        names.append(additional[record['ID']])
+    config = None
+    for index, name in enumerate(names):
+        path = (root / name).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError('r4 image provenance receipt missing or unsafe')
+        data = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=provenance.unique)
+        actual = data.get('image_config') if isinstance(data, dict) else None
+        if (not isinstance(data, dict) or data.get('image_index') != provenance.INDEX
+                or data.get('platform_manifest') != provenance.AMD64 or data.get('platform') != 'linux/amd64'
+                or actual != provenance.CONFIG
+                or data.get('container_verified') is not (index != 0)):
+            raise ValueError('r4 image provenance receipt is invalid')
+        if config is not None and config != actual:
+            raise ValueError('r4 server image config identity changed')
+        config = actual
+    paths = list(record.get('evidence_paths', []))
+    for name in names:
+        if name not in paths:
+            paths.append(name)
+    return {**record, 'evidence_paths': paths,
+            'versions': {**versions, 'image_index': provenance.INDEX, 'platform_manifest': provenance.AMD64,
+                         'image_platform': 'linux/amd64', 'image_config': config}}
+
+
 def enrich(root, record):
     root = Path(root).resolve()
+    record = bind_r4_evidence(root, record)
     output = {}
     for item in record.get("evidence_paths", []):
         path = (root / item).resolve()
@@ -132,6 +170,18 @@ def enrich(root, record):
             if os.environ.get("CERT_CASE_ID") != record["ID"]:
                 raise ValueError("runner wrote a case outside the selected launcher")
             nested_pins(manifest, "execution")
+            if 'tools' in manifest:
+                try:
+                    import execution_policy
+                    tools = execution_policy.validate_case_tools(manifest['tools'], manifest['lane'])
+                    tool_dir = os.environ.get('CERT_TOOL_BIN')
+                    phase_root = os.environ.get('CERT_PHASE_ROOT')
+                    if not phase_root or not tool_dir or Path(tool_dir) != Path(phase_root) / 'tool-bin' or os.environ.get('PATH') != tool_dir:
+                        raise ValueError('record writer requires the pinned tool environment')
+                    execution_policy.verify(tools, tool_dir)
+                    record = {**record, 'versions': {**record.get('versions', {}), 'execution_tools': tools}}
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    integrity_errors.append(f'execution tools: {exc}')
             try:
                 import generated_inputs
                 generated_inputs.reject_orphan_runtime(manifest)
@@ -185,11 +235,12 @@ def enrich(root, record):
 
 def report_rows(root):
     """Verify content hashes before deriving rows; never manufacture missing results."""
+    from manifest_tool import unique_object
     rows = []
     if (Path(root) / 'results/lane-error.json').exists():
         raise ValueError('lane error prevents acceptance of case records')
     for path in sorted((Path(root) / "results").glob("BC-*.json")):
-        record = json.loads(path.read_text())
+        record = json.loads(path.read_text(), object_pairs_hook=unique_object)
         if not re.fullmatch(r"[a-f0-9]{40}", record.get("candidate_sha", "")) or record.get("result") not in ("PASS", "FAIL"):
             raise ValueError("invalid result record")
         if record.get("ID") != path.stem or not re.fullmatch(r"BC-[A-Z]+-[0-9]{3}", path.stem):

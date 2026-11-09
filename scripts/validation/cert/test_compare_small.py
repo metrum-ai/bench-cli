@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import compare_small
+import r4_model_pins as pins
 
 
 class SmallComparisonTests(unittest.TestCase):
@@ -21,8 +22,8 @@ class SmallComparisonTests(unittest.TestCase):
             for root, digest in ((self.a, self.base_sha), (self.b, self.candidate_sha)):
                 cell = root / workload / f"c{concurrency}"
                 cell.mkdir(parents=True)
-                meta = {"model": "Qwen/Qwen3-8B", "model_revision": "1" * 40,
-                        "image": "vllm/image@sha256:" + "2" * 64, "workload": workload,
+                meta = {"model": pins.SMALL_MODEL, "model_revision": pins.SMALL_REVISION,
+                        "image": pins.IMAGE, "workload": workload,
                         "prompt_sha256": "3" * 64, "concurrency": concurrency,
                         "max_tokens": 128 if workload == "W1" else 512, "seed": 42,
                         "temperature": 0, "thinking": False, "warmup_seconds": 30,

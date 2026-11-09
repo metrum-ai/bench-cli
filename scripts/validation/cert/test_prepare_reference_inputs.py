@@ -9,6 +9,7 @@ from pathlib import Path
 import comp_reference_runner
 import manifest_tool
 import prepare_reference_inputs
+import result_writer
 
 
 class ReferencePreparationTests(unittest.TestCase):
@@ -62,6 +63,20 @@ class ReferencePreparationTests(unittest.TestCase):
             config['reference_order']['sha256'] = manifest_tool.sha256_file(path)
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'cohorts'):
                 comp_reference_runner.reference_inputs(config)
+
+    def test_marked_source_never_enters_certification_inputs(self):
+        smoke = self.root / 'smoke'; smoke.mkdir()
+        (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+            {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'f' * 64}))
+        source = smoke / 'source.jsonl'; source.write_bytes(self.source.read_bytes())
+        out = self.root / 'cert-input'
+        with self.assertRaises(result_writer.NonCertificationEvidence):
+            prepare_reference_inputs.prepare(source, manifest_tool.sha256_file(source), out)
+        self.assertFalse(out.exists())
+        # Synthetic same-root preparation is still possible, as is using a
+        # frozen ordinary input for the isolated smoke preparation.
+        prepare_reference_inputs.prepare(source, manifest_tool.sha256_file(source), smoke / 'same')
+        prepare_reference_inputs.prepare(self.source, manifest_tool.sha256_file(self.source), smoke / 'frozen')
 
     def test_invalid_source_fails_before_creating_output(self):
         output = self.root / 'output'

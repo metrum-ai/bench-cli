@@ -8,6 +8,7 @@ import re
 import shutil
 from pathlib import Path
 import generated_inputs as generated
+import result_writer
 from execution_evidence import digest
 
 
@@ -35,7 +36,7 @@ def commands(cases, old_lane, new_lane):
     return result
 
 
-def prepare(parent_path, manifest, directory):
+def prepare(parent_path, manifest, directory, tool_dir=None):
     parent_path = Path(parent_path).resolve(strict=True)
     if json.loads(parent_path.read_text()) != manifest or 'generated_bindings' in manifest:
         raise ValueError('runtime preparation requires the unchanged structural manifest')
@@ -51,6 +52,8 @@ def prepare(parent_path, manifest, directory):
     if len(referenced) != len(set(referenced)) or set(referenced) != set(recipes):
         raise ValueError('runtime recipes must match every unique generated prompt reference')
     directory = Path(directory).resolve()
+    for source in [parent_path, Path(old_lane['path']), *(Path(item['path']) for item in manifest.get('inputs', []))]:
+        result_writer.require_input_origin(directory, source.resolve().parent)
     directory.mkdir(parents=True, exist_ok=False)
     bindings = {}
     extra = [parent_pin]
@@ -58,7 +61,7 @@ def prepare(parent_path, manifest, directory):
         recipe = entry['recipe']
         root = directory / recipe['id']
         binding = generated.materialize(recipe, manifest['build_receipt']['path'], manifest['candidate_sha'],
-                                        root, entry['structural']['recipe_sha256'])
+                                        root, entry['structural']['recipe_sha256'], tool_dir=tool_dir)
         bindings[recipe['id']] = pin(root / 'binding.json')
         extra.append(bindings[recipe['id']])
         for attempt in ('actual', 'rederived'):
@@ -76,6 +79,7 @@ def prepare(parent_path, manifest, directory):
             binding = json.loads(Path(bindings[source['generated_input']]['path']).read_text())
             source = binding['actual']['prompts.jsonl']
         generated.pin(source)
+        result_writer.require_input_origin(directory, Path(source['path']).resolve().parent)
         destination = target / (name + '.jsonl')
         shutil.copyfile(source['path'], destination)
         prompts[name] = pin(destination)

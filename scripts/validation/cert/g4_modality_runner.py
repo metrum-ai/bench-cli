@@ -96,9 +96,8 @@ def modality_inputs(config, candidate):
     prompt = pinned_file(config['prompt_sets'], 'vlm')
     image_prompts(prompt, image)
     vlm = config['vlm']
-    if (vlm.get('model') != 'Qwen/Qwen3-VL-8B-Thinking' or not manifest_tool.IMAGE.fullmatch(vlm.get('image', ''))
-            or not manifest_tool.REV.fullmatch(vlm.get('revision', ''))):
-        raise ValueError('pinned thinking-capable Qwen3-VL-8B model and image required')
+    import r4_model_pins
+    r4_model_pins.check(vlm, 'V')
     flags = vlm.get('server_flags')
     if not isinstance(flags, list) or '--no-enable-prefix-caching' not in flags or not any(
         flags[i:i+2] == ['--reasoning-parser', 'qwen3'] or flag == '--reasoning-parser=qwen3' for i, flag in enumerate(flags)):
@@ -152,6 +151,8 @@ def run(args, config):
         if not identifier or any(c not in '0123456789abcdef' for c in identifier):
             raise ValueError('real VLM server identity missing')
         (evidence / 'g4-modality-vlm-container-id.txt').write_text(identifier + '\n', encoding='utf-8')
+        import r4_image_provenance
+        r4_image_provenance.runtime(vlm['image'], identifier, evidence / 'g4-modality-vlm-image-runtime.json')
         deadline = time.monotonic() + 1800
         while time.monotonic() < deadline:
             try:

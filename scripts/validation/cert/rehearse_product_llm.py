@@ -61,7 +61,7 @@ def probe(binary, binary_sha, sut_path, sut_sha):
                        '--num-requests', '1', '--concurrency', '1', '--prompts', str(prompt), '--mode', 'chat',
                        '--model', model, '--data-log', str(data), '--max-tokens', '1', '--warmup-requests', '0',
                        '--request-timeout', '10', '--sut', str(sut_path), '--require-sut']
-            env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(root), 'NO_PROXY': '*', 'no_proxy': '*',
+            env = {'PATH': '', 'HOME': str(root), 'NO_PROXY': '*', 'no_proxy': '*',
                    'TOKENIZERS_PARALLELISM': 'false'}
             result = subprocess.run(command, capture_output=True, text=True, timeout=30, cwd=root, env=env)
             if result.returncode != 0 or not data.is_file():

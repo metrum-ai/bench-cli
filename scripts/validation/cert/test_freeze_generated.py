@@ -13,12 +13,16 @@ import case_launcher
 import freeze_case
 import generated_inputs as generated
 import runtime_inputs
+import r4_model_pins as pins
 from build_role_test_fixture import bind
 from execution_evidence import digest
 
 
 class FreezeGeneratedTests(unittest.TestCase):
     def setUp(self):
+        verifier = patch('harness_integrity.verify', return_value=[])
+        verifier.start()
+        self.addCleanup(verifier.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -41,34 +45,37 @@ class FreezeGeneratedTests(unittest.TestCase):
                   'generator_version': '1.8.1', 'seed': 42, 'config': {'count': 4, 'profile': 'chat-short'},
                   'dataset': runtime_inputs.pin(file('dataset.jsonl', 'SYNTHETIC DATASET')),
                   'template': runtime_inputs.pin(file('template.txt', 'SYNTHETIC TEMPLATE')),
-                  'tokenizer': {**runtime_inputs.pin(tokenizer), 'revision': 'b' * 40}}
+                  'tokenizer': {**runtime_inputs.pin(tokenizer), 'revision': pins.GENERAL_REVISION}}
         recipes = file('recipes.json', json.dumps({'recipes': [recipe]}))
         sut = file('sut.json', json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
-        catalog = file('catalog.csv', 'ID,Tier,Parallel group\nBC-GPU-011,RC-GPU,G4\n')
-        selection = file('selection.json', json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-011': ['core']}}))
+        import select_cases
+        import validate_results
+        catalog = file('catalog.csv', 'ID,Tier,Test case,Selection,Area,Parallel group\nBC-GPU-011,RC-GPU,fixture,core,GPU,G4\n')
+        selection = file('selection.json', json.dumps(select_cases.make_selection(
+            validate_results.load_catalog(catalog), digest(catalog), 'a' * 40, 0.1, 3, [], [])))
         image = file('synthetic-image.png', 'SYNTHETIC IMAGE')
         vlm_prompt = file('vlm-prompt.jsonl', json.dumps({'prompt': 'fixture', 'image_url': str(image)}) + '\n')
-        config = {'image': 'synthetic/image@sha256:' + '0' * 64, 'model': 'Qwen/Qwen3-8B',
-                  'revision': 'b' * 40, 'port': 19001, 'proxy_port': 19002,
+        config = {'image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
+                  'revision': pins.GENERAL_REVISION, 'port': 19001, 'proxy_port': 19002,
                   'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
                   'owner': 'fixture', 'evidence_link': 'fixture', 'tokenizer': runtime_inputs.pin(tokenizer),
                   'strategic_binary': registry['metrum-ai-bench-cli-strategic'],
                   'vlm_binary': registry['metrum-ai-bench-cli-vlm'], 'vlm_image': runtime_inputs.pin(image),
-                  'vlm': {'model': 'Qwen/Qwen3-VL-8B-Thinking', 'revision': 'b' * 40,
-                          'image': 'synthetic/image@sha256:' + '0' * 64,
+                  'vlm': {'model': pins.GENERAL_MODEL, 'revision': pins.GENERAL_REVISION,
+                          'image': pins.IMAGE,
                           'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching']},
                   'prompt_sets': {'default': {'generated_input': 'prompts'}, 'vlm': runtime_inputs.pin(vlm_prompt)}}
         lane = file('lane.json', json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(self.binary),
                                            'baseline_binary_sha256': digest(self.binary), 'lanes': {'G4': config}}))
-        self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
+        self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), tool_manifest=Path(fixture['tool_manifest']['path']), selection=selection, catalog=catalog,
             case='BC-GPU-011', lane_manifest=lane, candidate=self.binary, baseline=self.binary, sut=sut,
-            tokenizer=tokenizer, tokenizer_revision='b' * 40, all_smi=self.binary, input=[], command_json=None,
+            tokenizer=tokenizer, tokenizer_revision=pins.GENERAL_REVISION, all_smi=self.binary, input=[], command_json=None,
             generated_recipes=recipes, out=self.root / 'frozen.json', run_out=self.root / 'attempt')
         probe = patch('tokenizer_probe.probe')
         probe.start()
         self.addCleanup(probe.stop)
 
-    def generate(self, command, directory):
+    def generate(self, command, directory, tool_dir=None):
         (directory / 'prompts.jsonl').write_text('{"SYNTHETIC_PROMPT":true}\n')
         (directory / 'selection-report.json').write_text('{"SYNTHETIC_REPORT":true}\n')
         (directory / 'generator.log').write_text('SYNTHETIC; NO GENERATOR EXECUTED\n')
@@ -99,20 +106,49 @@ class FreezeGeneratedTests(unittest.TestCase):
         self.assertEqual(case_launcher.preflight(bound), ['BC-GPU-011'])
         self.assertEqual(generated.preflight_label(bound), 'PREFLIGHT-OK')
 
+    def test_preflight_revalidates_r4_lane_and_oci_descriptors(self):
+        import copy
+        frozen = freeze_case.freeze(self.args)
+        missing = copy.deepcopy(frozen)
+        del missing['r4_oci']
+        with self.assertRaisesRegex(ValueError, 'OCI.*required'):
+            case_launcher.preflight(missing)
+        bad = copy.deepcopy(frozen)
+        bad['r4_oci']['amd64']['sha256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            case_launcher.preflight(bad)
+        lane = json.loads(self.args.lane_manifest.read_text())
+        lane['lanes']['G4']['revision'] = 'f' * 40
+        self.args.lane_manifest.write_text(json.dumps(lane))
+        bad = copy.deepcopy(frozen)
+        bad['lane_manifest']['sha256'] = digest(self.args.lane_manifest)
+        with self.assertRaisesRegex(ValueError, 'r4 model'):
+            case_launcher.preflight(bad)
+
     def test_launch_binds_runtime_before_child_and_keeps_parent(self):
         frozen = freeze_case.freeze(self.args)
         original = self.args.out.read_bytes()
         def launch(command, **kwargs):
-            runtime_path = Path(kwargs['env']['CERT_INPUT_MANIFEST'])
+            self.assertEqual(kwargs['env'], {})
+            self.assertEqual(command[1], '-i')
+            assignments = dict(item.split('=', 1) for item in command[2:] if '=' in item and not item.startswith('/'))
+            runtime_path = Path(assignments['CERT_INPUT_MANIFEST'])
             self.assertNotEqual(runtime_path, self.args.out)
             bound = json.loads(runtime_path.read_text())
             runtime_inputs.verify(bound)
+            record['input_hashes'] = {'execution_manifest': digest(runtime_path)}
+            record['versions']['execution_tools'] = bound['tools']
             self.assertEqual(generated.preflight_label(bound), 'PREFLIGHT-OK')
             target = self.args.run_out / 'results/BC-GPU-011.json'
             target.parent.mkdir(parents=True)
             target.write_text('{"SYNTHETIC_RECORD_PLACEHOLDER":true}')
             return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
-        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS'}
+        import r4_image_provenance as provenance
+        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS',
+                  'versions': {'server_image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
+                               'model_revision': pins.GENERAL_REVISION, 'image_index': provenance.INDEX,
+                               'platform_manifest': provenance.AMD64, 'image_config': provenance.CONFIG,
+                               'image_platform': 'linux/amd64'}}
         with patch.object(generated, 'run_generator', side_effect=self.generate), \
              patch.object(case_launcher.subprocess, 'run'), \
              patch.object(case_launcher.subprocess, 'Popen', side_effect=launch) as start, \
@@ -120,6 +156,22 @@ class FreezeGeneratedTests(unittest.TestCase):
             case_launcher.run_case(self.args.out, frozen, 'BC-GPU-011')
         self.assertEqual(start.call_count, 1)
         self.assertEqual(self.args.out.read_bytes(), original)
+
+    def test_child_pass_without_execution_binding_writes_lane_error(self):
+        frozen = freeze_case.freeze(self.args)
+        def launch(command, **kwargs):
+            target = self.args.run_out / 'results/BC-GPU-011.json'
+            target.parent.mkdir(parents=True)
+            target.write_text('{"SYNTHETIC_RECORD_PLACEHOLDER":true}')
+            return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
+        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS'}
+        with patch.object(generated, 'run_generator', side_effect=self.generate), \
+             patch.object(case_launcher.subprocess, 'run'), \
+             patch.object(case_launcher.subprocess, 'Popen', side_effect=launch), \
+             patch('execution_evidence.report_rows', return_value=[record]), \
+             self.assertRaisesRegex(ValueError, 'executed manifest'):
+            case_launcher.run_case(self.args.out, frozen, 'BC-GPU-011')
+        self.assertTrue((self.args.run_out / 'results/lane-error.json').is_file())
 
     def test_orphan_runtime_entries_reject_preflight_label_and_direct_launch(self):
         import copy
@@ -195,7 +247,7 @@ class FreezeGeneratedTests(unittest.TestCase):
         recipe = recipes[0]
         self.args.generated_recipes = None
         sut = json.loads(self.args.sut.read_text())
-        sut['model'] = {'id': 'Qwen/Qwen3-8B', 'revision': 'b' * 40}
+        sut['model'] = {'id': pins.GENERAL_MODEL, 'revision': pins.GENERAL_REVISION}
         self.args.sut.write_text(json.dumps(sut))
         lane = json.loads(self.args.lane_manifest.read_text())
         cfg = lane['lanes']['G4']
@@ -219,7 +271,7 @@ class FreezeGeneratedTests(unittest.TestCase):
 
     def test_mismatch_stops_child_and_retains_typed_failure(self):
         frozen = freeze_case.freeze(self.args)
-        def changing(command, directory):
+        def changing(command, directory, tool_dir=None):
             self.generate(command, directory)
             (directory / 'prompts.jsonl').write_text(directory.name)
         with patch.object(generated, 'run_generator', side_effect=changing), \

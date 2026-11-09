@@ -11,16 +11,17 @@ from pathlib import Path
 
 import g4_modality_runner
 import manifest_tool
+import r4_model_pins
 import result_writer
 import v_checks
 
 
 def case_inputs(args, config):
     flags = config['server_flags']
-    if args.model != 'Qwen/Qwen3-VL-8B-Thinking' or '--no-enable-prefix-caching' not in flags or not any(
+    if args.model != r4_model_pins.GENERAL_MODEL or '--no-enable-prefix-caching' not in flags or not any(
         flags[i:i+2] == ['--reasoning-parser', 'qwen3'] or flag == '--reasoning-parser=qwen3'
         for i, flag in enumerate(flags)):
-        raise ValueError('case requires pinned Qwen3-VL-8B-Thinking with the qwen3 parser and no prefix cache')
+        raise ValueError('case requires pinned Qwen3.8-27B-FP8 with the qwen3 parser and no prefix cache')
     binary = g4_modality_runner.pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', args.candidate)
     image = g4_modality_runner.pinned_file(config, 'vlm_image')
     g4_modality_runner.image_prompts(args.prompt, image)

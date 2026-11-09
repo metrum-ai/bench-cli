@@ -10,6 +10,8 @@ import re
 import subprocess
 from pathlib import Path
 import build_roles
+import manifest_tool
+import result_writer
 from execution_evidence import digest, require_python, phase
 
 
@@ -22,32 +24,82 @@ def pinned(item, executable=False):
     return path.resolve()
 
 
+def check_harness(manifest):
+    import harness_integrity
+    repo = Path(__file__).resolve().parents[3]
+    actual = harness_integrity.verify(repo, manifest['candidate_sha'])
+    if manifest.get('harness_repo') != str(repo) or manifest.get('harness_closure') != actual:
+        raise ValueError('frozen harness closure differs from candidate checkout')
+
+
+def check_input_origins(manifest, output):
+    """Prevent marked smoke pins, including nested pins, entering cert execution."""
+    def visit(value):
+        if isinstance(value, dict):
+            if isinstance(value.get('path'), str) and isinstance(value.get('sha256'), str):
+                result_writer.require_input_origin(output, Path(value['path']).resolve().parent)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(manifest)
+
+
 def preflight(manifest):
     require_python()
     if not re.fullmatch(r"[a-f0-9]{40}", manifest.get("candidate_sha", "")):
         raise ValueError("candidate_sha must be a full commit")
+    check_harness(manifest)
+    cases = manifest.get('cases')
+    if not isinstance(cases, dict) or len(cases) != 1:
+        raise ValueError('frozen launcher requires exactly one selected case')
+    only_case = next(iter(cases))
+    entry = cases[only_case]
+    if not isinstance(entry, dict) or not isinstance(entry.get('out'), str) or not entry['out']:
+        raise ValueError('case requires an output directory')
+    check_input_origins(manifest, entry['out'])
     binary = pinned(manifest["candidate"], True)
     _, validation_binary = build_roles.check_manifest(manifest)
     import generated_inputs
     recipes = generated_inputs.structural_context(manifest)
-    if recipes is not None:
-        import manifest_tool
-        baseline = pinned(manifest['baseline'], True)
-        structural = {'structural_recipe_ids': set(recipes)}
-        if 'generated_bindings' in manifest:
+    lane = manifest.get('lane')
+    if not isinstance(lane, str) or not lane:
+        raise ValueError('frozen lane is required')
+    import execution_policy
+    tools = execution_policy.validate_case_tools(manifest['tools'], lane)
+    if tools != execution_policy.load_manifest(pinned(manifest['tool_manifest'])):
+        raise ValueError('frozen tools differ from pinned tool manifest')
+    lane_path = pinned(manifest['lane_manifest'])
+    baseline = pinned(manifest['baseline'], True)
+    if lane != 'CLEANUP':
+        structural = {'structural_recipe_ids': set(recipes)} if recipes is not None else {}
+        if recipes is not None and 'generated_bindings' in manifest:
             import runtime_inputs
             runtime_inputs.verify(manifest)
             structural = {}  # Original concrete/domain checks remain mandatory.
-        _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], manifest['lane'],
-            binary, baseline, '0', **structural)
-        if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
+        _, config = manifest_tool.load_manifest(lane_path, lane, binary, baseline, '0', case=only_case, **structural)
+        if manifest.get('tokenizer', {}).get('revision') != config['revision']:
+            raise ValueError('frozen tokenizer revision must match lane model revision')
+        import r4_model_pins
+        if config.get('image') == r4_model_pins.IMAGE:
+            import r4_image_provenance
+            oci = manifest.get('r4_oci')
+            if not isinstance(oci, dict) or set(oci) != {'index', 'amd64'}:
+                raise ValueError('frozen r4 OCI index and platform descriptors required')
+            index, child = pinned(oci['index']), pinned(oci['amd64'])
+            if r4_image_provenance.descriptor_chain(index, child) != r4_image_provenance.CONFIG:
+                raise ValueError('frozen r4 OCI config descriptor differs')
+        if recipes is not None and any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
             raise ValueError('generator tokenizer revision must match lane model revision')
     if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:
         import derived_inputs
         derived_inputs.validate(manifest)
-    subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
+    # Preflight is outside the lane's env -i boundary; do not leak parent
+    # credentials or loader overrides into even a version-only candidate run.
+    subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30, env={})
     sut_path = pinned(manifest["sut"])
-    sut = json.loads(sut_path.read_text())
+    sut = json.loads(sut_path.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if not isinstance(sut.get("host_os"), str) or not sut["host_os"].strip():
         raise ValueError("SUT host_os is required")
     for memory in (sut.get("memory_gb"), sut.get("gpu", {}).get("memory_gb")):
@@ -77,10 +129,10 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
+        execution_policy.validate_launcher(executable, tools)
     import case_input_checks
     targeted = set(cases) & case_input_checks.LANES.keys()
     if targeted:
-        import manifest_tool
         lane_path = pinned(manifest['lane_manifest'])
         lane_data = json.loads(lane_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
         for case in targeted:
@@ -97,7 +149,41 @@ def preflight(manifest):
     return list(cases)
 
 
+def validate_r4_record(manifest, case, record):
+    """Do not accept a PASS that omits or changes its frozen r4 serving identity."""
+    import r4_model_pins as pins
+    import r4_image_provenance as provenance
+    import manifest_tool
+    lane = manifest.get('lane')
+    if not lane or lane == 'CLEANUP':
+        return
+    data = json.loads(pinned(manifest['lane_manifest']).read_text(encoding='utf-8'),
+                      object_pairs_hook=manifest_tool.unique_object)
+    config = data['lanes'][lane]
+    if config.get('image') != pins.IMAGE:
+        return
+    versions = record.get('versions', {})
+    image = versions.get('server_image', versions.get('server_and_reference_image'))
+    if (image != config['image'] or versions.get('model') != config['model']
+            or versions.get('model_revision') != config['revision']
+            or versions.get('image_index') != provenance.INDEX
+            or versions.get('platform_manifest') != provenance.AMD64
+            or versions.get('image_config') != provenance.CONFIG
+            or versions.get('image_platform') != 'linux/amd64'):
+        raise ValueError(f'{case} result lacks matching r4 serving provenance')
+
+
+def validate_execution_record(record, manifest_sha256, tools):
+    inputs = record.get('input_hashes')
+    versions = record.get('versions')
+    if not isinstance(inputs, dict) or inputs.get('execution_manifest') != manifest_sha256:
+        raise ValueError('record does not bind the executed manifest')
+    if not isinstance(versions, dict) or versions.get('execution_tools') != tools:
+        raise ValueError('record does not bind the executed tools')
+
+
 def run_case(manifest_path, manifest, case):
+    check_harness(manifest)
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
         import gpu010_builds
@@ -110,34 +196,52 @@ def run_case(manifest_path, manifest, case):
         raise FileExistsError("refusing to reuse an existing attempt directory")
     lifecycle = out.with_name(out.name + "-lifecycle")
     lifecycle.mkdir(parents=True, exist_ok=False)
-    environment = {**os.environ, "CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
-                   "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
-                   "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
+    import execution_policy
+    tools = execution_policy.validate_case_tools(manifest['tools'], manifest['lane'])
+    if tools != execution_policy.load_manifest(pinned(manifest['tool_manifest'])):
+        raise ValueError('frozen tools differ from pinned tool manifest')
+    execution_policy.validate_launcher(pinned(entry['launcher'], True), tools)
+    environment = execution_policy.prepare(tools, lifecycle, os.environ)
+    environment.update({"CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
+                        "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
+                        "CERT_TOOL_BIN": str(lifecycle / 'tool-bin'),
+                        "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())})
     started = dt.datetime.now(dt.timezone.utc).isoformat()
     process = None
     def interrupted(signum, _frame):
         raise InterruptedError(f"launcher interrupted by signal {signum}")
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        if 'r4_oci' in manifest:
+            environment['CERT_R4_OCI_INDEX'] = str(pinned(manifest['r4_oci']['index']))
+            environment['CERT_R4_OCI_AMD64'] = str(pinned(manifest['r4_oci']['amd64']))
         import generated_inputs
         generated_inputs.reject_orphan_runtime(manifest)
         if 'generated_inputs' in manifest:
             import runtime_inputs
             if 'generated_bindings' not in manifest:
-                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated')
+                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated',
+                                                                 tool_dir=lifecycle / 'tool-bin')
             preflight(manifest)  # Verify actual bytes and all original concrete criteria.
             entry = manifest['cases'][case]
             environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
         if 'derived_inputs' not in manifest:
             phase(lifecycle, case, 'inputs-ready')  # L1's internal boundary emits this later.
-        process = subprocess.Popen(entry["command"], env=environment, start_new_session=True)
+        execution_manifest_hash = digest(manifest_path)
+        # No credentials are accepted in this launch profile: assignments are argv.
+        clean_command = [tools['env']['path'], '-i'] + [f'{key}={value}' for key, value in sorted(environment.items())] + entry['command']
+        process = subprocess.Popen(clean_command, env={}, start_new_session=True)
         code = process.wait()
+        execution_policy.verify(tools, lifecycle / 'tool-bin')
+        if digest(manifest_path) != execution_manifest_hash:
+            raise ValueError('executed manifest changed during case')
         if code:
             raise subprocess.CalledProcessError(code, entry["command"])
         # A child may have written a PASS already. Do not validate the record
         # if any registered binary, build provenance, lane or frozen input
         # changed while it ran; the error path retains a lane-error marker.
         build_roles.check_manifest(manifest)
+        check_harness(manifest)
         for item in manifest.get('inputs', []):
             pinned(item)
         target = out / "results" / (case + ".json")
@@ -149,6 +253,8 @@ def run_case(manifest_path, manifest, case):
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":
             raise ValueError("case failed; retained failure record is not certification")
+        validate_execution_record(records[0], execution_manifest_hash, tools)
+        validate_r4_record(manifest, case, records[0])
         if case == 'BC-GPU-010':
             import gpu010_builds
             gpu010_builds.validate_record(manifest, records[0], out)
@@ -170,9 +276,9 @@ def run_case(manifest_path, manifest, case):
             kind = "infra_interrupted" if isinstance(exc, InterruptedError) or getattr(exc, "returncode", 0) in (-2, -15, 130, 143) else "infra_failed"
             # Failure provenance uses the same frozen pins as the child, without
             # retaining any unrelated environment values in the record.
-            overrides = {key: environment[key] for key in ("CERT_INPUT_MANIFEST", "CERT_CASE_ID", "CERT_CANDIDATE")}
-            before = {key: os.environ.get(key) for key in overrides}
-            os.environ.update(overrides)
+            before = dict(os.environ)
+            os.environ.clear()
+            os.environ.update(environment)
             try:
                 result_writer.write_record(out, {
                     "ID": case, "candidate_sha": manifest["candidate_sha"], "result": "FAIL", "attempt": 1,
@@ -181,11 +287,8 @@ def run_case(manifest_path, manifest, case):
                     "evidence_paths": [], "gpu_class": None, "driver": None, "versions": {},
                     "reason": str(exc), "infra_history": [{"type": kind, "reason": str(exc)}]})
             finally:
-                for key, value in before.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
+                os.environ.clear()
+                os.environ.update(before)
         else:
             # A failing launcher/cleanup cannot be masked by a previously written PASS.
             try:
@@ -206,7 +309,7 @@ def main():
     parser.add_argument("--case", action="append")
     args = parser.parse_args()
     frozen = args.manifest.read_bytes()
-    manifest = json.loads(frozen)
+    manifest = json.loads(frozen, object_pairs_hook=manifest_tool.unique_object)
     cases = preflight(manifest)
     selected = args.case or cases
     if set(selected) - set(cases):

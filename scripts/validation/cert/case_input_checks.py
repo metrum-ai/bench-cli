@@ -8,10 +8,13 @@ assemble every runner argv, or parse every product SUT declaration.
 from pathlib import Path
 
 LANES = {'BC-GPU-003': 'G1', 'BC-COMP-002': 'D', 'BC-GPU-011': 'G4',
-         'BC-REASON-005': 'V', 'BC-GPU-013': 'G5', 'BC-GPU-015': 'G5'}
+         'BC-REASON-005': 'V', 'BC-GPU-013': 'G5', 'BC-GPU-014': 'G5', 'BC-GPU-015': 'G5'}
 
 
 def check(case, config, candidate):
+    if case in LANES:
+        import r4_model_pins
+        r4_model_pins.check(config, LANES[case], case)
     if case == 'BC-GPU-003':
         import g1_variants_runner
         g1_variants_runner.tool_prompt(config)

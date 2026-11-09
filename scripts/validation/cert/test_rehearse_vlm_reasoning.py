@@ -12,6 +12,7 @@ import freeze_case
 import manifest_tool
 import rehearse_live_modalities
 import rehearse_vlm_reasoning as rehearsal
+import r4_model_pins as r4
 
 
 class GuardTests(unittest.TestCase):
@@ -36,7 +37,7 @@ class LoopbackTests(unittest.TestCase):
             prompt = root / 'prompt.jsonl'
             prompt.write_text(''.join(json.dumps({'prompt': f'synthetic prompt {i}', 'image_url': str(image)}) + '\n' for i in range(7)))
             pin = lambda path: {'path': str(path), 'sha256': manifest_tool.sha256_file(path)}
-            config = {'model': 'Qwen/Qwen3-VL-8B-Thinking', 'prompt_sets': {'default': pin(prompt)},
+            config = {'model': r4.GENERAL_MODEL, 'prompt_sets': {'default': pin(prompt)},
                       'vlm_image': pin(image), 'vlm_binary': pin(vlm),
                       'server_flags': ['--no-enable-prefix-caching', '--reasoning-parser', 'qwen3']}
             lane = root / 'lane.json'

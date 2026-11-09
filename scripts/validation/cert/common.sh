@@ -85,6 +85,21 @@ cert_phase() {
   done
 }
 
+cert_r4_image_preflight() {
+  local image='vllm/vllm-openai@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e'
+  if [[ "$CERT_IMAGE" == "$image" ]]; then
+    python3 "$CERT_DIR/r4_image_provenance.py" --image "$CERT_IMAGE" --out "$CERT_OUT/evidence/r4-image-preflight.json"
+  fi
+}
+
+cert_r4_image_runtime() {
+  local image='vllm/vllm-openai@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e'
+  if [[ "$CERT_IMAGE" == "$image" ]]; then
+    python3 "$CERT_DIR/r4_image_provenance.py" --image "$CERT_IMAGE" \
+      --container "$CERT_CONTAINER" --out "$CERT_OUT/evidence/r4-image-runtime.json"
+  fi
+}
+
 cert_start_server() {
   local -a flags=() gpu_args=(--gpus "device=${CUDA_VISIBLE_DEVICES}") token_args=() cache_args=() owner_args=() offline_args=()
   [[ -z "${CERT_CONTAINER_OWNER:-}" ]] || owner_args=(--label "metrum.cert.owner=$CERT_CONTAINER_OWNER")
@@ -101,12 +116,15 @@ cert_start_server() {
     [[ -d "$CERT_HF_HUB_CACHE" ]] || { echo 'configured Hugging Face hub cache is missing' >&2; return 1; }
     cache_args=(--mount "type=bind,src=$(realpath "$CERT_HF_HUB_CACHE"),dst=/root/.cache/huggingface/hub" --env HF_HUB_OFFLINE=1)
   fi
+  # Verify the staged index-to-platform chain and local image before launch.
+  cert_r4_image_preflight
   # Arm cleanup before launch so an interrupted docker client cannot orphan the container.
   CERT_STARTED=1
   docker run -d --name "$CERT_CONTAINER" "${offline_args[@]}" "${owner_args[@]}" "${gpu_args[@]}" --ipc=host \
     --env CUDA_VISIBLE_DEVICES=0 "${token_args[@]}" "${cache_args[@]}" -p "127.0.0.1:${CERT_PORT}:8000" \
     "$CERT_IMAGE" --model "$CERT_MODEL" --revision "$CERT_REVISION" \
     --port 8000 "${flags[@]}" > "$CERT_OUT/evidence/container-id.txt"
+  cert_r4_image_runtime
   local attempt
   for ((attempt=0; attempt<900; attempt++)); do
     if curl --fail --silent --max-time 5 "http://localhost:${CERT_PORT}/v1/models" > "$CERT_OUT/evidence/models.json"; then

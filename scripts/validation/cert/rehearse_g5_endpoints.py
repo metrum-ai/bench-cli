@@ -36,7 +36,7 @@ def rehearsal(manifest_path):
     case_launcher.preflight(manifest)
     baseline = rehearse_live_modalities.parse_frozen_command(manifest, CASE, 'G5')
     candidate = Path(manifest['candidate']['path']).resolve(strict=True)
-    _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], 'G5', candidate, baseline, '0')
+    _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], 'G5', candidate, baseline, '0', case=CASE)
     g5_endpoints_runner.configuration(config)
     observed = {'survivor': [], 'victim': []}
 

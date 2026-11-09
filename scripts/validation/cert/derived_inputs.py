@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 import build_roles
 import generated_inputs as generated
+import manifest_tool
 from execution_evidence import digest
 
 
@@ -16,9 +17,9 @@ def expected(manifest):
     if set(manifest.get('cases', {})) != {'BC-LIVE-001'} or manifest.get('lane') != 'L1':
         raise ValueError('L1 derived selection requires its exact single-case contract')
     build_roles.check_manifest(manifest)
-    receipt = json.loads(Path(manifest['build_receipt']['path']).read_text())
+    receipt = json.loads(Path(manifest['build_receipt']['path']).read_text(), object_pairs_hook=manifest_tool.unique_object)
     generator = receipt['builds']['measured']['binaries']['metrum-ai-bench-cli-prompts']
-    cfg = json.loads(Path(manifest['lane_manifest']['path']).read_text())['lanes']['L1']
+    cfg = json.loads(Path(manifest['lane_manifest']['path']).read_text(), object_pairs_hook=manifest_tool.unique_object)['lanes']['L1']
     if manifest['tokenizer'].get('revision') != cfg.get('revision'):
         raise ValueError('L1 tokenizer revision must match the frozen model revision')
     template = cfg.get('template')
@@ -49,7 +50,7 @@ def validate(manifest):
 
 def resolved_recipe(manifest):
     contract = validate(manifest)['contract']
-    cfg = json.loads(Path(manifest['lane_manifest']['path']).read_text())['lanes']['L1']
+    cfg = json.loads(Path(manifest['lane_manifest']['path']).read_text(), object_pairs_hook=manifest_tool.unique_object)['lanes']['L1']
     dataset = cfg['prompt_sets']['default']
     generated.pin(dataset)  # Default runtime must already be concrete.
     recipe = {'id': 'l1-derived', 'kind': generated.KIND, 'dataset': dataset}
@@ -59,7 +60,7 @@ def resolved_recipe(manifest):
 
 
 def check_command(recipe, command_path, input_path):
-    command = json.loads(Path(command_path).read_text())
+    command = json.loads(Path(command_path).read_text(), object_pairs_hook=manifest_tool.unique_object)
     if Path(command['binary']).resolve() != Path(recipe['generator']['path']).resolve():
         raise ValueError('L1 generator is not the frozen shipped CPU CLI')
     values = command['argv']
@@ -81,8 +82,15 @@ def boundary(manifest, command_path, input_path, out):
     if input_path != case_out / 'evidence/l1/prompts.jsonl' or out != case_out / 'evidence/l1/input-binding':
         raise ValueError('L1 derived output must be inside its fresh case evidence')
     check_command(recipe, command_path, input_path)
+    tool_dir = None
+    if 'tools' in manifest:
+        import execution_policy
+        tool_dir = os.environ.get('CERT_TOOL_BIN')
+        if not tool_dir or os.environ.get('PATH') != tool_dir:
+            raise ValueError('L1 generator requires the pinned tool environment')
+        execution_policy.verify(manifest['tools'], tool_dir)
     status = generated.materialize(recipe, manifest['build_receipt']['path'], manifest['candidate_sha'],
-                                   out, generated.contract_hash(recipe))
+                                   out, generated.contract_hash(recipe), tool_dir=tool_dir)
     if digest(input_path) != status['actual']['prompts.jsonl']['sha256']:
         raise ValueError('L1 original selection differs from independent re-derivation; no measured request allowed')
     receipt = {'contract_sha256': manifest['derived_inputs']['contract_sha256'],
@@ -105,7 +113,7 @@ def verify(manifest, out):
         raise ValueError('L1 derived evidence belongs to a different case output')
     root = Path(out).resolve() / 'evidence/l1'
     receipt_path = root / 'input-binding/original-binding.json'
-    receipt = json.loads(receipt_path.read_text())
+    receipt = json.loads(receipt_path.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if receipt.get('contract_sha256') != manifest['derived_inputs']['contract_sha256']:
         raise ValueError('L1 derived receipt contract mismatch')
     expected_paths = {'input': root / 'prompts.jsonl', 'command': root / 'prompt-command.json',
@@ -115,7 +123,7 @@ def verify(manifest, out):
             raise ValueError('L1 derived receipt output path mismatch')
         generated.pin(receipt[key])
     check_command(recipe, expected_paths['command'], expected_paths['input'])
-    binding = json.loads(expected_paths['binding'].read_text())
+    binding = json.loads(expected_paths['binding'].read_text(), object_pairs_hook=manifest_tool.unique_object)
     if (binding.get('stage') != 'runtime-bound' or binding.get('candidate_sha') != manifest['candidate_sha']
             or binding.get('recipe_id') != recipe['id'] or binding.get('recipe_sha256') != generated.contract_hash(recipe)
             or type(binding.get('seed')) is not int or binding['seed'] != recipe['seed']):
@@ -128,7 +136,7 @@ def verify(manifest, out):
             if Path(item['path']).resolve() != directory / filename:
                 raise ValueError('L1 derived output outside owned generation directory')
             generated.pin(item)
-        if json.loads((directory / 'command.json').read_text()) != generated.argv(recipe, directory):
+        if json.loads((directory / 'command.json').read_text(), object_pairs_hook=manifest_tool.unique_object) != generated.argv(recipe, directory):
             raise ValueError('L1 re-derived command differs from frozen configuration')
         if not (directory / 'generator.log').is_file():
             raise ValueError('L1 derived generator log missing')
@@ -148,7 +156,7 @@ def main():
     try:
         if os.environ.get('CERT_CASE_ID') != 'BC-LIVE-001':
             raise ValueError('L1 derived hook requires the exact selected case environment')
-        boundary(json.loads(args.manifest.read_text()), args.command, args.input, args.out)
+        boundary(json.loads(args.manifest.read_text(), object_pairs_hook=manifest_tool.unique_object), args.command, args.input, args.out)
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
         parser.exit(1, f'derived input binding failed: {exc}\n')
 

@@ -153,6 +153,8 @@ def main():
         try:
             code, reference_trace = run_recorded(args, "reference", reference)
             result["reference_exit"] = code
+            import r4_image_provenance
+            r4_image_provenance.runtime(args.image, container, evidence / 'comp-reference-image-runtime.json')
         finally:
             cleanup = subprocess.run(["docker", "rm", "-f", container], capture_output=True, text=True, timeout=30)
             (evidence / "comp-reference-cleanup.txt").write_text(cleanup.stdout + cleanup.stderr)
