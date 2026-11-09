@@ -136,7 +136,7 @@ def rehearsal(manifest_path, case):
                    'CARGO_HOME': os.environ.get('CARGO_HOME', str(Path.home() / '.cargo')),
                    'CARGO_NET_OFFLINE': 'true', 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
                    'TOKENIZERS_PARALLELISM': 'false'}
-            for name in ('CARGO_HOME', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN'):
+            for name in ('CARGO_HOME', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN', 'CARGO_TARGET_DIR'):
                 if name in os.environ:
                     env[name] = os.environ[name]
             env.update(additions)

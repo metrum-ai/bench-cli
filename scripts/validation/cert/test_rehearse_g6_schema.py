@@ -52,9 +52,12 @@ class LoopbackTests(unittest.TestCase):
             with patch.object(rehearsal.case_launcher, 'preflight'), \
                  patch.object(rehearsal.manifest_tool, 'load_manifest', return_value=({}, config)):
                 rehearsal.rehearsal(frozen)
-                with patch.object(rehearsal.l1_runner, 'call', return_value=1):
+                target = str(root / 'offline-target')
+                with patch.dict(os.environ, {'CARGO_TARGET_DIR': target}), \
+                     patch.object(rehearsal.l1_runner, 'call', return_value=1) as call:
                     with self.assertRaisesRegex(ValueError, 'offline schema fixtures failed'):
                         rehearsal.rehearsal(frozen)
+                self.assertEqual(call.call_args.kwargs['env']['CARGO_TARGET_DIR'], target)
                 config['strategic_binary']['sha256'] = '0' * 64
                 with self.assertRaisesRegex(ValueError, 'strategic_binary pin differs'):
                     rehearsal.rehearsal(frozen)
