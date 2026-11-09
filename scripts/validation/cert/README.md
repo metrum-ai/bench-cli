@@ -132,6 +132,12 @@ server, checking the pinned model, thinking option and 512-token cap on the
 wire. It does not invoke the truncation validator or write a case record; it is
 not a network sandbox, real-model evidence or the complete selected-set rehearsal.
 
+`rehearse_g6_schema.py --manifest FROZEN_CASE.json` runs GPU-016's actual
+locked/offline schema fixtures plus its LLM and strategic product argv against a
+synthetic server. It fails when the executing host's Cargo cache is incomplete.
+It does not invoke the live schema result validator, write a case record, provide
+an OS network sandbox or replace the complete selected-set rehearsal.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
