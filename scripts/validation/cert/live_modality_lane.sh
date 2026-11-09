@@ -30,7 +30,6 @@ for flag in "${flags[@]}"; do
   [[ "$flag" != *[[:space:]]* ]] || { echo 'xtask server flags cannot contain whitespace' >&2; exit 1; }
   server_args+="${flag} "
 done
-CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 CACHE="$(realpath "$CERT_HF_HUB_CACHE")"
 [[ "$CACHE" != *:* && "$CACHE" != *$'\n'* ]] || { echo 'invalid hub cache path' >&2; exit 1; }
 export CARGO_NET_OFFLINE=true GPU_DEVICES="device=${CUDA_VISIBLE_DEVICES}" HF_HOME="$CACHE"

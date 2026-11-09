@@ -407,13 +407,15 @@ smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
 The initial `stage0_controller.py`, `stage0_process.py`,
-`stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py` and
-`stage0_watchdog.py` modules are **incomplete control primitives**, not a
-runnable Stage-0 controller. Their offline tests exercise per-box control flow,
+`stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
+`stage0_cleanup.py` and `stage0_watchdog.py` modules are **incomplete control
+primitives**, not a runnable Stage-0 controller. Their offline tests exercise per-box control flow,
 process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
 a fake-provider watchdog loop. They do not start an independent watchdog or
-provide a real provider adapter, implement all modality and performance evidence
-adapters, or establish owned-resource cleanup. A fake adapter or a returned
+provide real provider and Docker adapters, implement all modality and performance
+evidence adapters, or establish owned-resource cleanup. The lane owner receipts
+are persisted before container creation, but a controller must still inspect and
+reconcile them and track detached processes. A fake adapter or a returned
 control-flow summary is not an authenticated box barrier. Do not run Stage 0 or
 infer a certification result from these modules.
 

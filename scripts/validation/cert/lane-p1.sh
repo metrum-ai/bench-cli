@@ -16,8 +16,8 @@ cert_run python3 "$CERT_DIR/perf_all_smi.py" --manifest "$CERT_MANIFEST" --candi
 ALL_SMI="$(realpath "$(cert_manifest all_smi_binary_path)")"
 TELEMETRY="$(realpath "$(cert_manifest telemetry_config_path)")"
 [[ "$ALL_SMI" != *:* && "$ALL_SMI" != *$'\n'* ]] || { echo 'invalid all-smi binary path' >&2; exit 1; }
-CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 CERT_AUX_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+cert_track_owner auxiliary "$CERT_AUX_OWNER" || exit 1
 export PERF_OWNER="$CERT_AUX_OWNER"
 CERT_CONTAINER="cert-all-smi-${CERT_CONTAINER_OWNER}"
 CERT_STARTED=1

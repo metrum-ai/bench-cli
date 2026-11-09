@@ -55,6 +55,10 @@ cert_parse() {
   CERT_OUT="$(realpath "$CERT_OUT")"
   mkdir "$CERT_OUT/evidence" "$CERT_OUT/results"
   CERT_CONTAINER="cert-${CERT_LANE,,}-$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
+  CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+  # Make ownership discoverable before Docker can create anything. This is
+  # needed even if the lane is killed before it can write a container ID.
+  cert_track_owner server "$CERT_CONTAINER_OWNER" || return 1
   CERT_STARTED=0
   CERT_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   export CERT_SHA CERT_START_UTC CERT_MANIFEST CERT_CANDIDATE CERT_BASELINE CERT_LANE
@@ -68,6 +72,31 @@ cert_parse() {
   if [[ "$CERT_LANE" != L1 || -z "${CERT_INPUT_MANIFEST:-}" ]]; then
     cert_phase inputs-ready
   fi
+}
+
+cert_track_owner() {
+  local role=$1 owner=$2
+  [[ "$role" == server || "$role" == auxiliary ]] && [[ "$owner" =~ ^[0-9a-f]{32}$ ]] || {
+    echo 'invalid container ownership receipt' >&2; return 1;
+  }
+  python3 - "$CERT_OUT/evidence" "$role" "$owner" <<'PYOWNER'
+import os
+import sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+path = directory / (sys.argv[2] + '-container-owner.txt')
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, 'w', encoding='ascii') as stream:
+    stream.write(sys.argv[3] + '\n')
+    stream.flush()
+    os.fsync(stream.fileno())
+directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PYOWNER
 }
 
 cert_manifest() {
