@@ -38,6 +38,10 @@ def preflight(manifest):
     lane = manifest.get('lane')
     if not isinstance(lane, str) or not lane:
         raise ValueError('frozen lane is required')
+    import execution_policy
+    tools = execution_policy.validate_case_tools(manifest['tools'], lane)
+    if tools != execution_policy.load_manifest(pinned(manifest['tool_manifest'])):
+        raise ValueError('frozen tools differ from pinned tool manifest')
     lane_path = pinned(manifest['lane_manifest'])
     baseline = pinned(manifest['baseline'], True)
     if lane != 'CLEANUP':
@@ -95,6 +99,7 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
+        execution_policy.validate_launcher(executable, tools)
     import case_input_checks
     targeted = set(cases) & case_input_checks.LANES.keys()
     if targeted:
@@ -151,11 +156,16 @@ def run_case(manifest_path, manifest, case):
         raise FileExistsError("refusing to reuse an existing attempt directory")
     lifecycle = out.with_name(out.name + "-lifecycle")
     lifecycle.mkdir(parents=True, exist_ok=False)
-    environment = {**os.environ, "CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
-                   "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
-                   "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
-    environment.pop('CERT_R4_OCI_INDEX', None)
-    environment.pop('CERT_R4_OCI_AMD64', None)
+    import execution_policy
+    tools = execution_policy.validate_case_tools(manifest['tools'], manifest['lane'])
+    if tools != execution_policy.load_manifest(pinned(manifest['tool_manifest'])):
+        raise ValueError('frozen tools differ from pinned tool manifest')
+    execution_policy.validate_launcher(pinned(entry['launcher'], True), tools)
+    environment = execution_policy.prepare(tools, lifecycle, os.environ)
+    environment.update({"CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
+                        "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
+                        "CERT_TOOL_BIN": str(lifecycle / 'tool-bin'),
+                        "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())})
     started = dt.datetime.now(dt.timezone.utc).isoformat()
     process = None
     def interrupted(signum, _frame):
@@ -170,14 +180,18 @@ def run_case(manifest_path, manifest, case):
         if 'generated_inputs' in manifest:
             import runtime_inputs
             if 'generated_bindings' not in manifest:
-                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated')
+                manifest_path, manifest = runtime_inputs.prepare(manifest_path, manifest, lifecycle / 'generated',
+                                                                 tool_dir=lifecycle / 'tool-bin')
             preflight(manifest)  # Verify actual bytes and all original concrete criteria.
             entry = manifest['cases'][case]
             environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
         if 'derived_inputs' not in manifest:
             phase(lifecycle, case, 'inputs-ready')  # L1's internal boundary emits this later.
-        process = subprocess.Popen(entry["command"], env=environment, start_new_session=True)
+        # No credentials are accepted in this launch profile: assignments are argv.
+        clean_command = [tools['env']['path'], '-i'] + [f'{key}={value}' for key, value in sorted(environment.items())] + entry['command']
+        process = subprocess.Popen(clean_command, env={}, start_new_session=True)
         code = process.wait()
+        execution_policy.verify(tools, lifecycle / 'tool-bin')
         if code:
             raise subprocess.CalledProcessError(code, entry["command"])
         # A child may have written a PASS already. Do not validate the record
@@ -217,9 +231,9 @@ def run_case(manifest_path, manifest, case):
             kind = "infra_interrupted" if isinstance(exc, InterruptedError) or getattr(exc, "returncode", 0) in (-2, -15, 130, 143) else "infra_failed"
             # Failure provenance uses the same frozen pins as the child, without
             # retaining any unrelated environment values in the record.
-            overrides = {key: environment[key] for key in ("CERT_INPUT_MANIFEST", "CERT_CASE_ID", "CERT_CANDIDATE")}
-            before = {key: os.environ.get(key) for key in overrides}
-            os.environ.update(overrides)
+            before = dict(os.environ)
+            os.environ.clear()
+            os.environ.update(environment)
             try:
                 result_writer.write_record(out, {
                     "ID": case, "candidate_sha": manifest["candidate_sha"], "result": "FAIL", "attempt": 1,
@@ -228,11 +242,8 @@ def run_case(manifest_path, manifest, case):
                     "evidence_paths": [], "gpu_class": None, "driver": None, "versions": {},
                     "reason": str(exc), "infra_history": [{"type": kind, "reason": str(exc)}]})
             finally:
-                for key, value in before.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
+                os.environ.clear()
+                os.environ.update(before)
         else:
             # A failing launcher/cleanup cannot be masked by a previously written PASS.
             try:

@@ -189,6 +189,20 @@ becomes GPU case evidence or a request-phase measurement. Temporary files and
 the fixture server are cleaned up on success or failure. Preflight allocates
 no hardware or model-serving process.
 
+Each `freeze_case.py` invocation also requires `--tool-manifest FILE`: a JSON
+object mapping command names to `{ "path": ABSOLUTE_CANONICAL_PATH, "sha256":
+LOWERCASE_SHA256 }`. Pin the actual execution-host tools, including the
+required interpreter and lane tools. Tool pins must be native Linux ELF files,
+not shell-script shims; synthetic test manifests are not evidence.
+The frozen manifest binds both the tool manifest and each executable. The
+launcher creates a private pinned-tool PATH and uses the pinned `env -i` with
+an allowlist, then rechecks tool hashes and links after the child exits. Record
+provenance includes the absolute tool paths and hashes. This profile deliberately
+does not forward `HF_TOKEN`; stage needed inputs before execution. It is not an
+OS sandbox and does not attest dynamic libraries, Cargo caches or configuration,
+repository closure, host trust, or isolation from a malicious same-user process.
+Those remain part of the pre-qualification integrity audit.
+
 The manifest binds `candidate_sha`, role-tagged `candidate` and
 `tokenizer_validation` artifacts, the execution-time `build_receipt`, and the
 frozen `lane_manifest`. Build and log hashes are rechecked before launch.

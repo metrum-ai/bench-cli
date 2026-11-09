@@ -82,8 +82,15 @@ def boundary(manifest, command_path, input_path, out):
     if input_path != case_out / 'evidence/l1/prompts.jsonl' or out != case_out / 'evidence/l1/input-binding':
         raise ValueError('L1 derived output must be inside its fresh case evidence')
     check_command(recipe, command_path, input_path)
+    tool_dir = None
+    if 'tools' in manifest:
+        import execution_policy
+        tool_dir = os.environ.get('CERT_TOOL_BIN')
+        if not tool_dir or os.environ.get('PATH') != tool_dir:
+            raise ValueError('L1 generator requires the pinned tool environment')
+        execution_policy.verify(manifest['tools'], tool_dir)
     status = generated.materialize(recipe, manifest['build_receipt']['path'], manifest['candidate_sha'],
-                                   out, generated.contract_hash(recipe))
+                                   out, generated.contract_hash(recipe), tool_dir=tool_dir)
     if digest(input_path) != status['actual']['prompts.jsonl']['sha256']:
         raise ValueError('L1 original selection differs from independent re-derivation; no measured request allowed')
     receipt = {'contract_sha256': manifest['derived_inputs']['contract_sha256'],

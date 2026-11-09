@@ -170,6 +170,18 @@ def enrich(root, record):
             if os.environ.get("CERT_CASE_ID") != record["ID"]:
                 raise ValueError("runner wrote a case outside the selected launcher")
             nested_pins(manifest, "execution")
+            if 'tools' in manifest:
+                try:
+                    import execution_policy
+                    tools = execution_policy.validate_case_tools(manifest['tools'], manifest['lane'])
+                    tool_dir = os.environ.get('CERT_TOOL_BIN')
+                    phase_root = os.environ.get('CERT_PHASE_ROOT')
+                    if not phase_root or not tool_dir or Path(tool_dir) != Path(phase_root) / 'tool-bin' or os.environ.get('PATH') != tool_dir:
+                        raise ValueError('record writer requires the pinned tool environment')
+                    execution_policy.verify(tools, tool_dir)
+                    record = {**record, 'versions': {**record.get('versions', {}), 'execution_tools': tools}}
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    integrity_errors.append(f'execution tools: {exc}')
             try:
                 import generated_inputs
                 generated_inputs.reject_orphan_runtime(manifest)

@@ -124,7 +124,7 @@ class CaseLauncherTests(unittest.TestCase):
             launcher.chmod(0o755)
             def pin(path):
                 return {'path': str(path), 'sha256': digest(path)}
-            manifest = {'candidate_sha': 'a' * 40, 'candidate': pin(binary), 'sut': pin(binary),
+            manifest = {'candidate_sha': 'a' * 40, 'lane': 'G1', 'candidate': pin(binary), 'sut': pin(binary),
                         'all_smi': pin(binary), 'tokenizer': pin(binary),
                         'cases': {'BC-GPU-001': {'out': str(out), 'launcher': pin(launcher),
                                   'command': [str(launcher), '--out', str(out)]}}}
@@ -140,6 +140,47 @@ class CaseLauncherTests(unittest.TestCase):
             phases = (root / 'attempt-lifecycle/phases.jsonl').read_text().splitlines()
             self.assertNotIn('record-validated', [json.loads(line)['phase'] for line in phases])
 
+    def test_real_launch_uses_pinned_tools_not_shadowed_path(self):
+        import os
+        import shlex
+        import subprocess
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shadow = root / 'shadow'
+            shadow.mkdir()
+            marker = root / 'shadow-executed'
+            fake = shadow / 'python3'
+            fake.write_text('#!/bin/sh\necho shadow > ' + shlex.quote(str(marker)) + '\nexit 0\n')
+            fake.chmod(0o755)
+            out = root / 'attempt'
+            child_env = root / 'child-env.json'
+            launcher = root / 'launcher'
+            program = 'import json,os; print(json.dumps(dict(os.environ)))'
+            launcher.write_text('#!/usr/bin/env bash\npython3 -c ' + shlex.quote(program) +
+                                ' > ' + shlex.quote(str(child_env)) + '\nexit 7\n')
+            launcher.chmod(0o755)
+            def pin(path):
+                return {'path': str(path), 'sha256': digest(path)}
+            manifest = {'candidate_sha': 'a' * 40, 'lane': 'G1', 'candidate': pin(launcher),
+                        'sut': pin(launcher), 'all_smi': pin(launcher), 'tokenizer': pin(launcher),
+                        'cases': {'BC-GPU-001': {'out': str(out), 'launcher': pin(launcher),
+                                                 'command': [str(launcher)]}}}
+            bind(manifest, root)
+            frozen = root / 'frozen.json'
+            frozen.write_text(json.dumps(manifest))
+            inherited = {'PATH': str(shadow), 'PYTHONPATH': str(shadow), 'BASH_ENV': str(fake),
+                         'LD_PRELOAD': str(fake), 'CERT_UNREVIEWED': 'unsafe', 'HF_TOKEN': 'not-forwarded'}
+            with patch.dict(os.environ, inherited), self.assertRaises(subprocess.CalledProcessError):
+                case_launcher.run_case(frozen, manifest, 'BC-GPU-001')
+            self.assertFalse(marker.exists())
+            environment = json.loads(child_env.read_text())
+            for name in ('PYTHONPATH', 'BASH_ENV', 'LD_PRELOAD', 'CERT_UNREVIEWED', 'HF_TOKEN'):
+                self.assertNotIn(name, environment)
+            self.assertNotIn(str(shadow), environment['PATH'])
+            record = json.loads((out / 'results/BC-GPU-001.json').read_text())
+            self.assertEqual(record['versions']['execution_tools']['python3'], manifest['tools']['python3'])
+
     def test_failed_launch_writes_typed_record(self):
         import subprocess
         with tempfile.TemporaryDirectory() as temporary:
@@ -150,7 +191,7 @@ class CaseLauncherTests(unittest.TestCase):
             def pin():
                 return {"path": str(launcher), "sha256": digest(launcher)}
             out = root / "attempt"
-            manifest = {"candidate_sha": "a" * 40, "candidate": pin(), "sut": pin(), "all_smi": pin(),
+            manifest = {"candidate_sha": "a" * 40, "lane": "G1", "candidate": pin(), "sut": pin(), "all_smi": pin(),
                         "tokenizer": pin(), "cases": {"BC-GPU-001": {"out": str(out), "launcher": pin(),
                         "command": [str(launcher), "--out", str(out)]}}}
             bind(manifest, root)

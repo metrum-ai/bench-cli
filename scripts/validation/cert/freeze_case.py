@@ -82,6 +82,8 @@ def freeze(args):
         if len({item['recipe']['id'] for item in generated}) != len(generated):
             raise ValueError('duplicate generated recipe id')
     lane = row["Parallel group"]
+    import execution_policy
+    tools = execution_policy.validate_case_tools(execution_policy.load_manifest(args.tool_manifest), lane)
     config = None
     if generated and lane == 'CLEANUP':
         raise ValueError('cleanup cases cannot generate measured inputs')
@@ -108,7 +110,8 @@ def freeze(args):
                    "--out", str(args.run_out.resolve())]
     inputs = {Path(path).resolve() for path in args.input}
     inputs.update({args.selection.resolve(), args.catalog.resolve(), args.lane_manifest.resolve(), args.baseline.resolve(),
-                   args.build_receipt.resolve(), Path(validation['path']).resolve()})
+                   args.build_receipt.resolve(), args.tool_manifest.resolve(), Path(validation['path']).resolve()})
+    inputs.update(Path(item['path']) for item in tools.values())
     inputs.update(Path(item['path']).resolve() for item in measured)
     inputs.add(args.build_receipt.resolve().parent / 'validation-only.log')
     origin = measured[0]['origin']
@@ -148,7 +151,8 @@ def freeze(args):
                 "candidate_sha": selection["candidate_sha"], "candidate": matching[0],
                 "tokenizer_validation": validation, "measured_binaries": measured,
                 "build_receipt": pin(args.build_receipt), "lane_manifest": pin(args.lane_manifest),
-                "lane": lane, "baseline": pin(args.baseline), "sut": pin(args.sut),
+                "lane": lane, "tools": tools, "tool_manifest": pin(args.tool_manifest),
+                "baseline": pin(args.baseline), "sut": pin(args.sut),
                 "tokenizer": {**pin(args.tokenizer), "revision": args.tokenizer_revision}, "all_smi": pin(args.all_smi),
                 "inputs": [pin(path) for path in sorted(inputs)],
                 "cases": {args.case: {"launcher": pin(command[0]), "command": command, "out": str(args.run_out.resolve())}}}
@@ -168,7 +172,7 @@ def freeze(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("selection", "catalog", "lane-manifest", "candidate", "baseline", "sut", "tokenizer", "all-smi", "build-receipt", "out", "run-out"):
+    for name in ("selection", "catalog", "lane-manifest", "candidate", "baseline", "sut", "tokenizer", "all-smi", "build-receipt", "tool-manifest", "out", "run-out"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--case", required=True)
     parser.add_argument("--tokenizer-revision", required=True)

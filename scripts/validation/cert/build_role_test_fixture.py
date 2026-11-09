@@ -3,6 +3,7 @@
 """Synthetic workflow/build metadata for unit tests; NEVER certification evidence."""
 import io
 import json
+import sys
 import tarfile
 from pathlib import Path
 from execution_evidence import digest
@@ -40,6 +41,20 @@ def workflow_evidence(root, sha, version, binaries, run_id=19):
             'download_log': pretag.pin(root / 'download.log')}
 
 
+def tool_fixture(root):
+    # Unit-only pins, never an execution-host attestation.
+    import execution_policy
+    root = Path(root)
+    binaries = {name: Path('/bin/true').resolve() for name in execution_policy.CASE_TOOLS | {'cargo', 'rustc', 'git'}}
+    binaries.update(bash=Path('/bin/bash').resolve(), sh=Path('/bin/sh').resolve(),
+                    mkdir=Path('/bin/mkdir').resolve(), dirname=Path('/usr/bin/dirname').resolve(), env=Path('/usr/bin/env').resolve(),
+                    python3=Path(sys.executable).resolve())
+    tools = {name: {'path': str(path), 'sha256': digest(path)} for name, path in binaries.items()}
+    path = root / 'synthetic-tools.json'
+    path.write_text(json.dumps(tools))
+    return tools, path
+
+
 def bind(manifest, root, additional=None):
     root = Path(root)
     sha = manifest['candidate_sha']
@@ -70,6 +85,8 @@ def bind(manifest, root, additional=None):
     path = root / 'builds.json'
     path.write_text(json.dumps(receipt))
     manifest['build_receipt'] = pretag.pin(path)
+    manifest['tools'], tools_path = tool_fixture(root)
+    manifest['tool_manifest'] = pretag.pin(tools_path)
     lane = root / 'role-lane.json'
     lane.write_text(json.dumps({'lanes': {'synthetic': {'strategic_binary': measured}}}))
     manifest['lane_manifest'] = pretag.pin(lane)

@@ -35,7 +35,7 @@ def commands(cases, old_lane, new_lane):
     return result
 
 
-def prepare(parent_path, manifest, directory):
+def prepare(parent_path, manifest, directory, tool_dir=None):
     parent_path = Path(parent_path).resolve(strict=True)
     if json.loads(parent_path.read_text()) != manifest or 'generated_bindings' in manifest:
         raise ValueError('runtime preparation requires the unchanged structural manifest')
@@ -58,7 +58,7 @@ def prepare(parent_path, manifest, directory):
         recipe = entry['recipe']
         root = directory / recipe['id']
         binding = generated.materialize(recipe, manifest['build_receipt']['path'], manifest['candidate_sha'],
-                                        root, entry['structural']['recipe_sha256'])
+                                        root, entry['structural']['recipe_sha256'], tool_dir=tool_dir)
         bindings[recipe['id']] = pin(root / 'binding.json')
         extra.append(bindings[recipe['id']])
         for attempt in ('actual', 'rederived'):

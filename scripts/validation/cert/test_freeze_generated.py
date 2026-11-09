@@ -61,7 +61,7 @@ class FreezeGeneratedTests(unittest.TestCase):
                   'prompt_sets': {'default': {'generated_input': 'prompts'}, 'vlm': runtime_inputs.pin(vlm_prompt)}}
         lane = file('lane.json', json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(self.binary),
                                            'baseline_binary_sha256': digest(self.binary), 'lanes': {'G4': config}}))
-        self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
+        self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), tool_manifest=Path(fixture['tool_manifest']['path']), selection=selection, catalog=catalog,
             case='BC-GPU-011', lane_manifest=lane, candidate=self.binary, baseline=self.binary, sut=sut,
             tokenizer=tokenizer, tokenizer_revision=pins.GENERAL_REVISION, all_smi=self.binary, input=[], command_json=None,
             generated_recipes=recipes, out=self.root / 'frozen.json', run_out=self.root / 'attempt')
@@ -69,7 +69,7 @@ class FreezeGeneratedTests(unittest.TestCase):
         probe.start()
         self.addCleanup(probe.stop)
 
-    def generate(self, command, directory):
+    def generate(self, command, directory, tool_dir=None):
         (directory / 'prompts.jsonl').write_text('{"SYNTHETIC_PROMPT":true}\n')
         (directory / 'selection-report.json').write_text('{"SYNTHETIC_REPORT":true}\n')
         (directory / 'generator.log').write_text('SYNTHETIC; NO GENERATOR EXECUTED\n')
@@ -123,7 +123,10 @@ class FreezeGeneratedTests(unittest.TestCase):
         frozen = freeze_case.freeze(self.args)
         original = self.args.out.read_bytes()
         def launch(command, **kwargs):
-            runtime_path = Path(kwargs['env']['CERT_INPUT_MANIFEST'])
+            self.assertEqual(kwargs['env'], {})
+            self.assertEqual(command[1], '-i')
+            assignments = dict(item.split('=', 1) for item in command[2:] if '=' in item and not item.startswith('/'))
+            runtime_path = Path(assignments['CERT_INPUT_MANIFEST'])
             self.assertNotEqual(runtime_path, self.args.out)
             bound = json.loads(runtime_path.read_text())
             runtime_inputs.verify(bound)
@@ -244,7 +247,7 @@ class FreezeGeneratedTests(unittest.TestCase):
 
     def test_mismatch_stops_child_and_retains_typed_failure(self):
         frozen = freeze_case.freeze(self.args)
-        def changing(command, directory):
+        def changing(command, directory, tool_dir=None):
             self.generate(command, directory)
             (directory / 'prompts.jsonl').write_text(directory.name)
         with patch.object(generated, 'run_generator', side_effect=changing), \

@@ -47,7 +47,7 @@ class FreezeCaseTests(unittest.TestCase):
             config = {'revision': 'b' * 40, 'tokenizer': {'path': str(binary), 'sha256': digest(binary)}}
             lane.write_text(json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(binary),
                                        'baseline_binary_sha256': digest(binary), 'lanes': {'G4': config}}))
-            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
+            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), tool_manifest=Path(fixture['tool_manifest']['path']), selection=selection, catalog=catalog,
                 case='BC-GPU-010', lane_manifest=lane, candidate=binary, baseline=binary, sut=sut, tokenizer=binary,
                 tokenizer_revision='b' * 40, all_smi=binary, input=[], command_json=None,
                 out=root / 'frozen.json', run_out=root / 'run')
@@ -83,7 +83,7 @@ class FreezeCaseTests(unittest.TestCase):
             probe = patch('tokenizer_probe.probe')
             probe.start()
             self.addCleanup(probe.stop)
-            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,
+            args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), tool_manifest=Path(fixture['tool_manifest']['path']), selection=selection, catalog=catalog, case="BC-GPU-001", lane_manifest=lane,
                 candidate=binary, baseline=binary, sut=sut, tokenizer=binary, tokenizer_revision="b" * 40,
                 all_smi=binary, input=[], command_json=None, out=root / "frozen.json", run_out=root / "run")
             with patch.object(freeze_case.manifest_tool, "load_manifest", return_value=({}, {"revision": "b" * 40})) as validation:
