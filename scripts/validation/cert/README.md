@@ -381,6 +381,15 @@ and bytecode, Git and its dependencies, Cargo caches/configuration, third-party
 libraries, dynamic linkers and validator startup still require independent audit.
 A matching Git tree alone does not authenticate the selected candidate.
 
+A future Stage-0 smoke must use a dedicated root with a regular
+`.stage0-smoke-root.json` marker containing exactly `classification` set to
+`Stage-0 smoke, not certification` and `expectations_sha256` set to the reviewed
+expectations digest. The normal writer labels records beneath that root; the
+certification validator rejects labeled records. This is a defense against
+accidental mixing, not an authenticated boundary against record rewriting. No
+smoke controller or approved expectations are supplied by this marker alone:
+never submit smoke records to certification intake, history or the sheet.
+
 ### Remaining offline launch rehearsal work (#469)
 
 The complete-set preflight and individual synthetic loopbacks are **not** a

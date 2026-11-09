@@ -64,7 +64,17 @@ def check_evidence(base, paths):
             raise ValueError(f"missing or outside evidence directory: {item}")
 
 
+class NonCertificationEvidence(ValueError):
+    """Abort the inventory entirely; do not emit a certification report/sheet."""
+
+
+def check_evidence_class(record):
+    if record.get('evidence_class', 'certification') != 'certification' or 'stage0_expectations_sha256' in record:
+        raise NonCertificationEvidence('non-certification evidence cannot enter certification intake or history')
+
+
 def check_record(record, candidate, root, as_of):
+    check_evidence_class(record)
     if record.get("candidate_sha") != candidate:
         raise ValueError("candidate SHA mismatch")
     for key in ("owner", "evidence_link"):
@@ -208,6 +218,12 @@ class CarryOver:
 
 def validate(catalog, results, candidate, as_of, cadence=None, history=None, selection=None, include_post=False,
              carry_over_manifest=None, execution_index=None, execution_index_sha256=None, selection_sha256=None):
+    # A marked smoke directory is never a certification inventory source, even
+    # when it contains no records. Abort before creating any sheet or report.
+    import result_writer
+    for directory in (results, history):
+        if directory is not None and result_writer.classify_smoke(Path(directory).resolve(), {}):
+            raise NonCertificationEvidence('marked smoke root cannot enter certification intake or history')
     rows = load_catalog(catalog)
     universe = {case for case, row in rows.items()
                 if (cadence in row.get("Cadence", "").split(";") if cadence
@@ -231,6 +247,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
         try:
             with path.open(encoding="utf-8") as stream:
                 record = json.load(stream, object_pairs_hook=unique_object, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
+            check_evidence_class(record)
             case = record.get("ID")
             if case not in expected or path.name != f"{case}.json":
                 raise ValueError("unexpected ID or filename")
@@ -238,6 +255,8 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                 raise ValueError("duplicate ID")
             records[case] = record
             record_paths[case] = path
+        except NonCertificationEvidence:
+            raise
         except (ValueError, OSError, AttributeError) as exc:
             errors.append(f"{path.name}: {exc}")
     histories = {case: [] for case in expected}
@@ -250,6 +269,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                     with path.open(encoding="utf-8") as stream:
                         previous = json.load(stream, object_pairs_hook=unique_object,
                                              parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"invalid JSON number: {x}")))
+                    check_evidence_class(previous)
                     case = previous.get("ID")
                     attempt = previous.get("attempt")
                     if (case not in expected or not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1 or
@@ -260,6 +280,8 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                             raise ValueError("invalid history ID, SHA, result or attempt")
                         carry.authorize(previous, path)
                     histories[case].append(previous)
+                except NonCertificationEvidence:
+                    raise
                 except (ValueError, OSError, AttributeError) as exc:
                     errors.append(f"history {path.name}: {exc}")
     table = []

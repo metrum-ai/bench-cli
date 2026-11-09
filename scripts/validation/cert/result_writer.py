@@ -12,11 +12,44 @@ from execution_evidence import enrich, require_python
 
 CASE = re.compile(r"BC-[A-Z]+-[0-9]{3}\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+SMOKE_MARKER = '.stage0-smoke-root.json'
+SMOKE_CLASS = 'Stage-0 smoke, not certification'
+
+
+def classify_smoke(root, record):
+    """Permanently label records written beneath a marked smoke-only root."""
+    import manifest_tool
+    found = []
+    for directory in (root, *root.parents):
+        marker = directory / SMOKE_MARKER
+        if marker.is_symlink():
+            raise ValueError('smoke root marker cannot be a symlink')
+        if marker.exists():
+            if not marker.is_file():
+                raise ValueError('smoke root marker must be a file')
+            data = json.loads(marker.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+            if (not isinstance(data, dict) or set(data) != {'classification', 'expectations_sha256'}
+                    or data['classification'] != SMOKE_CLASS or not isinstance(data['expectations_sha256'], str)
+                    or not SHA256.fullmatch(data['expectations_sha256'])):
+                raise ValueError('invalid smoke root marker')
+            found.append(data)
+    if len(found) > 1:
+        raise ValueError('nested smoke roots are not permitted')
+    if found:
+        if 'evidence_class' in record or 'stage0_expectations_sha256' in record:
+            raise ValueError('smoke classification is controlled by its root marker')
+        return {**record, 'evidence_class': SMOKE_CLASS,
+                'stage0_expectations_sha256': found[0]['expectations_sha256']}
+    if record.get('evidence_class') == SMOKE_CLASS:
+        raise ValueError('smoke record requires a marked smoke root')
+    return record
 
 
 def write_record(root, record):
     require_python()
     root = Path(root).resolve()
+    record = classify_smoke(root, record)
     # The lane-level attempt number is supplied by the operator for an
     # unchanged rerun; never overwrite an earlier attempt directory.
     attempt = os.environ.get("CERT_ATTEMPT")
