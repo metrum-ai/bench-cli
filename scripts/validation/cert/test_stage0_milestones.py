@@ -129,7 +129,8 @@ class MilestoneTests(unittest.TestCase):
         (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
         expected = {'image_index': 'sha256:' + '1' * 64, 'platform_manifest': 'sha256:' + '2' * 64,
                     'image_config': 'sha256:' + '3' * 64, 'platform': 'linux/amd64', 'container_verified': True,
-                    'gpu_uuid': 'GPU-11111111-1111-1111-1111-111111111111'}
+                    'gpu_uuid': 'GPU-11111111-1111-1111-1111-111111111111',
+                    'gpu_visible': {'name': 'NVIDIA H100', 'uuid': 'GPU-11111111-1111-1111-1111-111111111111', 'driver': '550.1'}}
         (evidence / 'r4-image-runtime.json').write_text(json.dumps(expected))
         kwargs = {'gpu_name': 'NVIDIA H100', 'gpu_uuid': expected['gpu_uuid'], 'index': expected['image_index'],
                   'child': expected['platform_manifest'], 'config': expected['image_config']}

@@ -150,6 +150,7 @@ def check_r4_identity(case_root, *, gpu_name, gpu_uuid, index, child, config):
         raise ValueError('GPU identity or driver differs from the reviewed expectation')
     receipt = read_json(local_file(case_root, 'evidence/r4-image-runtime.json'))
     expected = {'image_index': index, 'platform_manifest': child, 'image_config': config,
-                'platform': 'linux/amd64', 'container_verified': True, 'gpu_uuid': gpu_uuid}
+                'platform': 'linux/amd64', 'container_verified': True, 'gpu_uuid': gpu_uuid,
+                'gpu_visible': {'name': gpu_name, 'uuid': gpu_uuid, 'driver': gpu[1].strip()}}
     if receipt != expected:
         raise ValueError('runtime container identity differs from the reviewed expectation')

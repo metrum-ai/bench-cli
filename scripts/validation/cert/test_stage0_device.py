@@ -53,6 +53,17 @@ class DeviceTests(unittest.TestCase):
                 stage0_device.check_container_request({'HostConfig': {'DeviceRequests': [replacement]}}, uuid)
         with self.assertRaises(ValueError): stage0_device.check_container_request({}, uuid)
 
+    def test_visible_container_gpu_must_be_one_exact_uuid(self):
+        uuid = 'GPU-11111111-1111-1111-1111-111111111111'
+        row = f'NVIDIA H100, {uuid}, 550.1\n'
+        self.assertEqual(stage0_device.check_container_visible(row, uuid)['name'], 'NVIDIA H100')
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            stage0_device.check_container_visible(row + row, uuid)
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            stage0_device.check_container_visible(row, 'GPU-22222222-2222-2222-2222-222222222222')
+        with self.assertRaisesRegex(ValueError, 'invalid'):
+            stage0_device.check_container_visible('x' * 4097, uuid)
+
     def test_changed_tool_or_expired_cap_fails(self):
         self.mocks[1].return_value = 'b' * 64
         with self.assertRaisesRegex(ValueError, 'tool changed'): self.probe()

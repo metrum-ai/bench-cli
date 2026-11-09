@@ -93,9 +93,12 @@ class OCIProvenanceTests(unittest.TestCase):
             'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'a' * 64}))
         evidence = self.root / 'evidence'; evidence.mkdir()
         output = evidence / 'r4-image-runtime.json'
+        (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
         request = {'DeviceIDs': [uuid], 'Count': 0, 'Driver': '', 'Capabilities': [['gpu']]}
         container = {**self.container, 'HostConfig': {'DeviceRequests': [request]}}
         def docker(command, **kwargs):
+            if command[1] == 'exec':
+                return SimpleNamespace(stdout=f'NVIDIA H100, {uuid}, 550.1\n')
             return SimpleNamespace(stdout=json.dumps([self.image if command[1:3] == ['image', 'inspect'] else container]))
         verify = provenance.verify
         def synthetic(index_path, child_path, image, container):
@@ -104,8 +107,15 @@ class OCIProvenanceTests(unittest.TestCase):
         env = {'CERT_R4_OCI_INDEX': str(index), 'CERT_R4_OCI_AMD64': str(self.child), 'CUDA_VISIBLE_DEVICES': uuid}
         with patch.dict('os.environ', env), patch.object(provenance, 'verify', side_effect=synthetic), \
              patch.object(provenance.subprocess, 'run', side_effect=docker):
-            self.assertEqual(provenance.runtime(provenance.pins.IMAGE, 'fixture', output)['gpu_uuid'], uuid)
+            receipt = provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertEqual(receipt['gpu_uuid'], uuid)
+            self.assertEqual(receipt['gpu_visible'], {'name': 'NVIDIA H100', 'uuid': uuid, 'driver': '550.1'})
             output.unlink()
+            (evidence / 'gpu.csv').write_text('NVIDIA RTX,550.1\n')
+            with self.assertRaisesRegex(ValueError, 'host GPU identity'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+            (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
             request['DeviceIDs'] = ['0']
             with self.assertRaisesRegex(ValueError, 'container GPU request'):
                 provenance.runtime(provenance.pins.IMAGE, 'fixture', output)

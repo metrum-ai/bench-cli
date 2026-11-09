@@ -29,6 +29,20 @@ def check_container_request(container, device):
     return device
 
 
+def check_container_visible(stdout, device):
+    """Validate an in-container GPU query; this relies on the trusted host/runtime."""
+    if not isinstance(stdout, str) or len(stdout) > 4096 or not isinstance(device, str) or not UUID.fullmatch(device):
+        raise ValueError('invalid container-visible GPU output')
+    lines = stdout.splitlines()
+    if len(lines) != 1:
+        raise ValueError('container must see exactly one GPU')
+    fields = [part.strip() for part in lines[0].split(',')]
+    if (len(fields) != 3 or not fields[0] or not UUID.fullmatch(fields[1])
+            or fields[1].lower() != device.lower() or not fields[2]):
+        raise ValueError('container-visible GPU identity differs from the probed GPU')
+    return {'name': fields[0], 'uuid': device, 'driver': fields[2]}
+
+
 def probe(tools, *, device, expected_name, deadline=None, clock=time.monotonic):
     if (not isinstance(device, str) or not UUID.fullmatch(device)
             or not isinstance(expected_name, str) or not expected_name.strip()):
