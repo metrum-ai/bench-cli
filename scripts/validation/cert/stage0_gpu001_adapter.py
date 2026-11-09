@@ -28,8 +28,17 @@ class Adapter:
         self.backstop_probe, self.stop_callback = backstop_probe, stop_and_verify
         self.completed = None
 
-    def validate_box(self, box, cases):
-        return (box == self.box and isinstance(cases, list) and bool(cases)
+    def validate_box(self, box, cases, expectations, expectations_sha256):
+        boxes = expectations.get('boxes', [])
+        matches = [item for item in boxes if isinstance(item, dict) and item.get('id') == box]
+        return (box == self.box and len(matches) == 1 and matches[0].get('gpu') == self.gpu
+                and matches[0].get('cgroup_root') == str(self.cgroup_root)
+                and expectations_sha256 == self.expectations_sha256
+                and expectations.get('candidate_sha') == self.candidate
+                and expectations.get('selection_sha256') == self.selection_sha256
+                and expectations.get('catalog_sha256') == self.catalog_sha256
+                and expectations.get('smoke_root') == str(self.smoke_root)
+                and isinstance(cases, list) and bool(cases)
                 and all(item['id'] == 'BC-GPU-001' and item['allowed_classes'] == ['COMPLETE'] for item in cases))
 
     def backstop_armed(self, box):

@@ -25,7 +25,10 @@ class AdapterTests(unittest.TestCase):
                      'manifest': {'path': str(self.manifest), 'sha256': hashlib.sha256(self.manifest.read_bytes()).hexdigest()},
                      'request_log': 'evidence/g1-clock-default-requests.jsonl'}
         self.plan = self.root / 'expectations.json'
-        self.plan.write_text(json.dumps({'candidate_sha': self.sha, 'boxes': [{'id': 'box-a', 'cases': [self.item]}]}))
+        self.plan_value = {'candidate_sha': self.sha, 'smoke_root': str(self.out.parent),
+                           'selection_sha256': 'c' * 64, 'catalog_sha256': 'd' * 64,
+                           'boxes': [{'id': 'box-a', 'gpu': 'NVIDIA H100', 'cgroup_root': '/cgroup', 'cases': [self.item]}]}
+        self.plan.write_text(json.dumps(self.plan_value))
         self.exp = hashlib.sha256(self.plan.read_bytes()).hexdigest()
         self.stop = MagicMock(return_value=True)
         self.adapter = stage0_gpu001_adapter.Adapter(box='box-a', gpu='NVIDIA H100', candidate=self.sha,
@@ -59,9 +62,15 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'wrong GPU'): self.run_box()
         self.stop.assert_called_once_with('box-a')
 
+    def test_box_identity_mismatch_never_launches(self):
+        self.adapter.gpu = 'NVIDIA RTX'
+        with self.assertRaisesRegex(ValueError, 'validate_box'): self.run_box()
+        self.mocks[0].assert_not_called()
+        self.stop.assert_called_once_with('box-a')
+
     def test_unsupported_terminal_or_case_never_launches(self):
         self.item['allowed_classes'] = ['INCOMPLETE_GRID_FAIL']
-        self.plan.write_text(json.dumps({'candidate_sha': self.sha, 'boxes': [{'id': 'box-a', 'cases': [self.item]}]}))
+        self.plan.write_text(json.dumps(self.plan_value))
         self.exp = hashlib.sha256(self.plan.read_bytes()).hexdigest()
         self.adapter.expectations_sha256 = self.exp
         with self.assertRaisesRegex(ValueError, 'validate_box'): self.run_box()

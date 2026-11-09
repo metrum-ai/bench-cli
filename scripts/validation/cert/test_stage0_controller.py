@@ -25,7 +25,7 @@ class FakeAdapter:
         self.outcome = {'terminal': 'COMPLETE', 'record_result': 'PASS'}
         self.on_launch = None
 
-    def validate_box(self, _box, _cases): return self.supported
+    def validate_box(self, _box, _cases, _expectations, _digest): return self.supported
     def backstop_armed(self, _box): return self.armed
     def preflight(self, _case): return True
     def launch(self, case):
