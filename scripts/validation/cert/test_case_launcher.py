@@ -68,6 +68,38 @@ class CaseLauncherTests(unittest.TestCase):
                 case_launcher.preflight(invalid)
 
 
+    def test_successful_child_with_mutated_binary_cannot_validate_pass(self):
+        import shlex
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / 'candidate'
+            binary.write_text('#!/bin/sh\nexit 0\n')
+            binary.chmod(0o755)
+            out = root / 'attempt'
+            launcher = root / 'launcher'
+            record = json.dumps({'ID': 'BC-GPU-001', 'candidate_sha': 'a' * 40, 'result': 'PASS'})
+            launcher.write_text('#!/bin/sh\nmkdir -p ' + shlex.quote(str(out / 'results')) + '\nprintf %s ' +
+                shlex.quote(record) + ' > ' + shlex.quote(str(out / 'results/BC-GPU-001.json')) +
+                '\nprintf changed >> ' + shlex.quote(str(binary)) + '\n')
+            launcher.chmod(0o755)
+            def pin(path):
+                return {'path': str(path), 'sha256': digest(path)}
+            manifest = {'candidate_sha': 'a' * 40, 'candidate': pin(binary), 'sut': pin(binary),
+                        'all_smi': pin(binary), 'tokenizer': pin(binary),
+                        'cases': {'BC-GPU-001': {'out': str(out), 'launcher': pin(launcher),
+                                  'command': [str(launcher), '--out', str(out)]}}}
+            bind(manifest, root)
+            frozen = root / 'frozen.json'
+            frozen.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+                case_launcher.run_case(frozen, manifest, 'BC-GPU-001')
+            self.assertTrue((out / 'results/lane-error.json').is_file())
+            from execution_evidence import report_rows
+            with self.assertRaisesRegex(ValueError, 'lane error prevents acceptance'):
+                report_rows(out)
+            phases = (root / 'attempt-lifecycle/phases.jsonl').read_text().splitlines()
+            self.assertNotIn('record-validated', [json.loads(line)['phase'] for line in phases])
+
     def test_failed_launch_writes_typed_record(self):
         import subprocess
         with tempfile.TemporaryDirectory() as temporary:

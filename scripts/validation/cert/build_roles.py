@@ -88,11 +88,40 @@ def check_manifest(manifest):
             or manifest.get('measured_binaries') != measured):
         raise ValueError('manifest build roles differ from execution-time receipt')
     reject_validation_use(manifest['cases'], validation)
+    check_live_xtask_binaries(manifest, json.loads(Path(receipt['path']).read_text())['builds']['measured']['binaries'])
     lane = manifest['lane_manifest']
     if digest(Path(lane['path'])) != lane['sha256']:
         raise ValueError('lane manifest hash mismatch')
     check_measured_config(json.loads(Path(lane['path']).read_text()), measured, validation)
     return primary, helper
+
+
+def check_live_xtask_binaries(manifest, binaries):
+    """Bind xtask's BENCH_BIN_DIR resolution to the exact registered paths."""
+    required = {'BC-LIVE-001': ('llm', 'prompts'), 'BC-LIVE-002': ('vlm',),
+                'BC-LIVE-003': ('asr',), 'BC-LIVE-004': ('imagegen',)}
+    candidate = Path(manifest['candidate']['path']).resolve(strict=True)
+    bin_dir = candidate.parent
+    if set(required) & set(manifest['cases']):
+        try:
+            if candidate != Path(binaries['metrum-ai-bench-cli-llm']['path']).resolve(strict=True):
+                raise ValueError('live candidate must be the registered LLM binary')
+        except (KeyError, OSError) as exc:
+            raise ValueError('live candidate LLM binary missing from registry') from exc
+    for case, suffixes in required.items():
+        if case not in manifest['cases']:
+            continue
+        for suffix in suffixes:
+            name = 'metrum-ai-bench-cli-' + suffix
+            try:
+                # xtask searches this directory first, then falls back to ambient
+                # locations. Reject fallback and a same-name unregistered copy.
+                actual = (bin_dir / name).resolve(strict=True)
+                expected = Path(binaries[name]['path']).resolve(strict=True)
+                if actual != expected or not actual.is_file() or not os.access(actual, os.X_OK):
+                    raise ValueError(f'{case} xtask binary {name} is not the registered artifact')
+            except (KeyError, OSError) as exc:
+                raise ValueError(f'{case} xtask binary {name} missing from registered artifact directory') from exc
 
 
 MEASURED_CLI_FIELDS = {'strategic_binary', 'vlm_binary', 'modality_binary', 'prompt_binary',

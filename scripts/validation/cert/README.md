@@ -74,13 +74,16 @@ alone does not prove that the product parser accepts the result. The narrow
 stand in for parsing other modalities or exercising the case runner. It uses
 only temporary outputs and an isolated disposable local server.
 
-`rehearse_live_modalities.py --manifest FROZEN_CASE.json --case BC-LIVE-002`
-(or BC-LIVE-003/004) is a partial CPU-only loopback check: it verifies the
+`rehearse_live_modalities.py --manifest FROZEN_CASE.json --case BC-LIVE-001`
+(or BC-LIVE-002/003/004) is a partial CPU-only loopback check: it verifies the
 frozen case entry argv and pinned harness, uses the same smoke/headline command
 assembly as the actual runner, invokes the frozen modality binary through
 `cargo --locked xtask`, and verifies the required-SUT summary and local request
-cohort. It creates temporary outputs and does not call a record writer. It does
-not exercise L1's derived-input binding, non-live cases, physical GPU behavior
+cohort. For L1 it checks xtask's actual selector argv against the frozen recipe
+and compares its output with an independent double generation. Since this uses
+temporary output paths, it does not call the production case-output boundary;
+the loopback requests precede the independent check and are never evidence.
+It does not call a record writer or exercise non-live cases, physical GPU behavior
 or the native offload gate, and is **not** the complete selected-set rehearsal.
 Its disposable loopback server is not an OS network sandbox; use independently
 enforced offline policy.
@@ -122,7 +125,13 @@ Secondary CLI pins must belong to the measured artifact registry; a validation
 binary (including renamed copies) cannot appear in measured argv/config.
 All four BC-GPU-010 cells use the same workflow-built shipped LLM binary with
 `otlp,tokenizer`. Its receipt, executable and workflow-origin evidence must be
-frozen as inputs; a separate variant is forbidden. Missing bindings fail closed
+frozen as inputs; a separate variant is forbidden. L1–L4 also require xtask's
+canonical `BENCH_BIN_DIR` binaries to resolve to the registered measured paths;
+ambient search fallback is not acceptable. After a case exits, the launcher
+rechecks the build, lane and frozen input pins before validating a record. A
+lane-error marker rejects the case in `report_rows` even if its runner already
+wrote PASS. These checks do not replace immutable execution environments or the
+pre-qualification integrity audit. Missing bindings fail closed
 before any cell issues a request. Validation-only executables or their copies
 cannot be substituted for the shipped binary.
 Every cell must pass unchanged criteria; no waiver, N/A or skipped fallback is

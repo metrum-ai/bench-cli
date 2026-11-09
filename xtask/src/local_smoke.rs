@@ -292,16 +292,14 @@ pub fn run(args: LocalSmokeArgs) -> Result<()> {
                     String::from_utf8_lossy(&prompt_output.stderr)
                 );
             }
-            // Certification binds this internally selected dataset before the
-            // measured CLI is invoked. Ordinary local-smoke behavior is unchanged.
+            // Record the exact selector command for offline inspection. The
+            // certification path binds these same bytes before measurement.
+            let command_path = out.join("prompt-command.json");
+            fs::write(
+                &command_path,
+                serde_json::to_vec_pretty(&json!({"binary": &prompt_bin, "argv": &prompt_args}))?,
+            )?;
             if let Some(manifest) = env::var_os("CERT_INPUT_MANIFEST") {
-                let command_path = out.join("prompt-command.json");
-                fs::write(
-                    &command_path,
-                    serde_json::to_vec_pretty(
-                        &json!({"binary": &prompt_bin, "argv": &prompt_args}),
-                    )?,
-                )?;
                 let status = Command::new("python3")
                     .arg(root.join("scripts/validation/cert/derived_inputs.py"))
                     .arg("--manifest")

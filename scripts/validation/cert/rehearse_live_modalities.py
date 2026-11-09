@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Exercise frozen L2/L3/L4 smoke argv and real product parsing on loopback.
+"""Exercise frozen L1/L2/L3/L4 smoke argv and real product parsing on loopback.
 
 This is a *partial* offline check, not the complete selected-case rehearsal,
 not a network sandbox, and never a GPU run or certification evidence. It
@@ -19,13 +19,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import case_launcher
+import derived_inputs
 import freeze_case
+import generated_inputs
+import l1_runner
 import live_modality_runner
 import manifest_tool
 
 ROOT = Path(__file__).resolve().parents[3]
-MODALITIES = {'BC-LIVE-002': ('L2', 'vlm'), 'BC-LIVE-003': ('L3', 'asr'),
-              'BC-LIVE-004': ('L4', 'imagegen')}
+MODALITIES = {'BC-LIVE-001': ('L1', 'llm'), 'BC-LIVE-002': ('L2', 'vlm'),
+              'BC-LIVE-003': ('L3', 'asr'), 'BC-LIVE-004': ('L4', 'imagegen')}
 # Valid tiny PNG; this is only a fake response for the CPU-only rehearsal.
 PNG = base64.b64encode((ROOT / 'test-data/vlm/shapes-512.png').read_bytes()).decode('ascii')
 
@@ -72,7 +75,7 @@ def rehearsal(manifest_path, case):
     candidate = Path(manifest['candidate']['path']).resolve(strict=True)
     _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], lane, candidate, baseline, '0')
     model = config['model']
-    expected_count = live_modality_runner.CASES[modality][1]
+    expected_count = 16 if modality == 'llm' else live_modality_runner.CASES[modality][1]
     observed = []
     sse = (b'data: {"choices":[{"index":0,"delta":{"content":"synthetic answer"}}]}\n\n'
            b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
@@ -98,7 +101,7 @@ def rehearsal(manifest_path, case):
             length = int(self.headers.get('Content-Length', '0'))
             self.rfile.read(length)
             observed.append(self.path)
-            if modality == 'vlm' and self.path == '/v1/chat/completions':
+            if modality in ('llm', 'vlm') and self.path == '/v1/chat/completions':
                 payload, content_type = sse, 'text/event-stream'
             elif modality == 'asr' and self.path == '/v1/audio/transcriptions':
                 payload, content_type = b'{"text":"synthetic transcription"}', 'application/json'
@@ -123,7 +126,12 @@ def rehearsal(manifest_path, case):
             root = Path(temp)
             args = SimpleNamespace(modality=modality, candidate=candidate, prompt=Path(config['prompt_sets']['default']['path']),
                                    sut=Path(config['sut']['path']), model=model, port=server.server_port)
-            command, headline, additions = live_modality_runner.smoke_invocations(args, root / 'output')
+            output = root / 'output'
+            if modality == 'llm':
+                command, additions = l1_runner.smoke_invocation(args, output)
+                headline = ['cargo', '--locked', 'xtask', 'assert-headline', 'llm', str(output / 'results.jsonl')]
+            else:
+                command, headline, additions = live_modality_runner.smoke_invocations(args, output)
             env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(root), 'NO_PROXY': '*', 'no_proxy': '*',
                    'CARGO_HOME': os.environ.get('CARGO_HOME', str(Path.home() / '.cargo')),
                    'CARGO_NET_OFFLINE': 'true', 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
@@ -136,7 +144,19 @@ def rehearsal(manifest_path, case):
                 result = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True, timeout=1800)
                 if result.returncode:
                     raise ValueError(f'live {modality} command failed (exit {result.returncode}): {result.stderr[-1000:]}')
-            data = root / 'output/results.jsonl'
+            if modality == 'llm':
+                # The real certification boundary also enforces the frozen case
+                # output path. This rehearsal uses temporary output instead: it
+                # does not spoof or invoke that boundary or publish records.
+                # Independently exercise its same recipe and argv checks here.
+                recipe = derived_inputs.resolved_recipe(manifest)
+                prompt_input = output / 'prompts.jsonl'
+                derived_inputs.check_command(recipe, output / 'prompt-command.json', prompt_input)
+                binding = generated_inputs.materialize(recipe, manifest['build_receipt']['path'],
+                    manifest['candidate_sha'], root / 'independent-derived', generated_inputs.contract_hash(recipe))
+                if manifest_tool.sha256_file(prompt_input) != binding['actual']['prompts.jsonl']['sha256']:
+                    raise ValueError('live L1 selector differs from frozen independent re-derivation')
+            data = output / 'results.jsonl'
             rows = [json.loads(line) for line in data.read_text(encoding='utf-8').splitlines() if line.strip()]
             requests = [row for row in rows if '.request.' in row.get('schema_version', '') and row.get('phase') == 'measure']
             summaries = [row for row in rows if '.summary.' in row.get('schema_version', '')]
