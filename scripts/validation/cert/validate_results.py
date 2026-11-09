@@ -207,7 +207,7 @@ class CarryOver:
 
 
 def validate(catalog, results, candidate, as_of, cadence=None, history=None, selection=None, include_post=False,
-             carry_over_manifest=None):
+             carry_over_manifest=None, execution_index=None, execution_index_sha256=None, selection_sha256=None):
     rows = load_catalog(catalog)
     universe = {case for case, row in rows.items()
                 if (cadence in row.get("Cadence", "").split(";") if cadence
@@ -220,6 +220,13 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
     errors = []
     carry = (CarryOver(carry_over_manifest, results.parent, candidate, as_of)
              if carry_over_manifest is not None else None)
+    execution = None
+    if execution_index is not None or execution_index_sha256 is not None:
+        if cadence is not None or selection is None or execution_index is None or not selection_sha256:
+            raise ValueError('execution index requires a release selection, path and hashes')
+        from execution_intake import ExecutionIndex
+        execution = ExecutionIndex(execution_index, execution_index_sha256, results.parent, candidate,
+                                   selection_sha256, hashlib.sha256(Path(catalog).read_bytes()).hexdigest())
     for path in sorted(results.glob("*.json")):
         try:
             with path.open(encoding="utf-8") as stream:
@@ -272,6 +279,10 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                 result = check_record(record, source, evidence_root, as_of)
             else:
                 result = check_record(record, candidate, results.parent, as_of)
+            if cadence is None and (selection is not None or rows[case]['Tier'] == 'RC-GPU') and result == 'PASS' and source == candidate:
+                if execution is None:
+                    raise ValueError('fresh PASS requires an approved execution index')
+                execution.authorize(record, record_paths[case], rows[case].get('Parallel group'))
             attempt = record.get("attempt", 1)
             old_attempts = [entry["attempt"] for entry in histories[case]]
             if sorted(old_attempts) != list(range(1, attempt)):
@@ -279,7 +290,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
             if result == "N-A" and any(entry["result"] == "FAIL" for entry in histories[case]):
                 raise ValueError("a failed case cannot be reclassified N-A")
             note = (f"carried from {source} to {candidate}" if source != candidate else "")
-        except (ValueError, TypeError, KeyError) as exc:
+        except (ValueError, TypeError, KeyError, OSError) as exc:
             result = "FAIL"
             note = str(exc)
             errors.append(f"{case}: {note}")
@@ -288,6 +299,8 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
                       "Record": record or {}, "History": sorted(histories[case], key=lambda x: x["attempt"])})
     if carry is not None:
         errors.extend(carry.unused_errors())
+    if execution is not None:
+        errors.extend(execution.unused_errors())
     return table, errors
 
 
@@ -391,6 +404,8 @@ def main():
     parser.add_argument("--history", type=Path)
     parser.add_argument("--carry-over-manifest", type=Path, help="reviewed opt-in carry-over manifest")
     parser.add_argument("--selection", type=Path, help="frozen selection.json (required for release)")
+    parser.add_argument("--execution-index", type=Path, help="reviewed final execution index for fresh PASS records")
+    parser.add_argument("--execution-index-sha256", help="independently approved execution index digest")
     parser.add_argument("--stage", choices=["pre-tag", "full"], default="pre-tag")
     parser.add_argument("--markdown", type=Path, default=Path("CERTIFICATION-REPORT.md"))
     parser.add_argument("--csv", type=Path)
@@ -416,7 +431,9 @@ def main():
         selection = load_selection(args.selection, args.catalog, load_catalog(args.catalog), args.candidate_sha) if args.selection else None
         table, errors = validate(args.catalog, args.results, args.candidate_sha,
                                  dt.datetime.now(dt.timezone.utc), args.cadence, args.history,
-                                 selection, args.stage == "full", args.carry_over_manifest)
+                                 selection, args.stage == "full", args.carry_over_manifest,
+                                 args.execution_index, args.execution_index_sha256,
+                                 hashlib.sha256(args.selection.read_bytes()).hexdigest() if args.selection else None)
         export_csv(args.csv or Path("periodic.csv" if args.cadence else "results.csv"), table, args)
         export_report(args.markdown, table, errors, args)
         for error in errors:

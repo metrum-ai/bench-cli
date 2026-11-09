@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import nightly_decision
 import select_cases as select
@@ -83,20 +84,26 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validator.load_selection(path, self.catalog, self.rows, 'b' * 40)
 
-    def test_qualification_and_post_stages(self):
+    @patch('execution_intake.ExecutionIndex')
+    def test_qualification_and_post_stages(self, index_type):
+        # Selection coverage uses a synthetic index; real proof validation has
+        # independent tests in test_execution_intake.py.
+        index_type.return_value.unused_errors.return_value = []
         selection = self.build()
         now = dt.datetime(2026, 2, 1, tzinfo=dt.timezone.utc)
-        table, errors = validator.validate(self.catalog, self.results, self.sha, now, selection=selection)
+        index = {'execution_index': self.root / 'synthetic-index', 'execution_index_sha256': 'c' * 64,
+                 'selection_sha256': 'd' * 64}
+        table, errors = validator.validate(self.catalog, self.results, self.sha, now, selection=selection, **index)
         self.assertTrue(errors)
         for case in selection['selected']:
             if not case.startswith('BC-POST'):
                 (self.results / f'{case}.json').write_text(json.dumps(self.record(case)))
-        table, errors = validator.validate(self.catalog, self.results, self.sha, now, selection=selection)
+        table, errors = validator.validate(self.catalog, self.results, self.sha, now, selection=selection, **index)
         self.assertFalse(errors)
         self.assertEqual(4, sum(row['Result'] == 'NOT-SELECTED' for row in table))
-        self.assertTrue(validator.validate(self.catalog, self.results, self.sha, now, selection=selection, include_post=True)[1])
+        self.assertTrue(validator.validate(self.catalog, self.results, self.sha, now, selection=selection, include_post=True, **index)[1])
         (self.results / 'BC-POST-001.json').write_text(json.dumps(self.record('BC-POST-001')))
-        self.assertFalse(validator.validate(self.catalog, self.results, self.sha, now, selection=selection, include_post=True)[1])
+        self.assertFalse(validator.validate(self.catalog, self.results, self.sha, now, selection=selection, include_post=True, **index)[1])
 
     def test_history_csv_is_newest_first_and_requires_unique_release(self):
         p = self.root / 'history.csv'

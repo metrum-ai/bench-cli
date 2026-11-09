@@ -540,8 +540,24 @@ requires all selected PR, RC and RC-GPU rows and produces `results.csv` and
 python3 scripts/validation/cert/validate_results.py \
   --catalog docs/RELEASE_CERTIFICATION_CATALOG.csv \
   --results RESULTS/results --candidate-sha FULL_COMMIT_SHA --release v1.8.0 \
-  --selection selection.json
+  --selection selection.json --execution-index execution-index.json \
+  --execution-index-sha256 INDEPENDENTLY_APPROVED_SHA256
 ```
+
+Fresh selected PASS records in release mode require a reviewed execution index.
+The index binds `candidate_sha`, `selection_sha256`, `catalog_sha256`, a
+`selected_plan` pin, and an `entries` array. Each entry contains `ID`, the
+original `record_sha256`, and relative `manifest` and `phases` pins (each a
+`path`/`sha256` object); runtime-generated manifests additionally require a
+`structural_manifest` pin. The selected plan is the frozen case index with
+matching candidate, selection and catalog hashes. Copy proof files byte-for-byte
+under the results parent, and independently review the final index digest before
+passing it. An index cannot substitute for the actual selected-set rehearsal:
+the producer for an all-tier selected-set index, late-bound barriers, generated
+input re-verification at intake and full harness-to-candidate closure are not
+complete. Hashes do not authenticate a forged bundle or replace host trust and
+an independent integrity audit. Approved N/As are checked separately; they do not
+need a fabricated execution entry.
 
 For a periodic run, pass `--cadence weekly --run-id ID --run-date-utc ISO_UTC
 --branch main --compared-against VERSION`; the CSV defaults to `periodic.csv`.
