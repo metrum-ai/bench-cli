@@ -408,12 +408,15 @@ never submit smoke records to certification intake, history or the sheet.
 
 The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_process.py`,
 `stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
-`stage0_cleanup.py`, `stage0_docker.py` and `stage0_watchdog.py` modules are
-**incomplete control primitives**, not a runnable Stage-0 controller. Their offline tests exercise per-box control flow,
+`stage0_cleanup.py`, `stage0_docker.py`, `stage0_watchdog_state.py` and
+`stage0_watchdog.py` modules are **incomplete control primitives**, not a
+runnable Stage-0 controller. Their offline tests exercise per-box control flow,
 process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
 a fake-provider watchdog loop. They do not start an independent watchdog or
 provide a deployed provider watchdog, implement all modality and performance
-evidence adapters, or establish owned-resource cleanup. The lane owner receipts
+evidence adapters, or establish owned-resource cleanup. Watchdog state receipts
+alone do not establish independent deployment, liveness or a settled provider
+create. The lane owner receipts
 are persisted before container creation, and a pinned Docker adapter is tested
 only with fake commands; a controller must still wire it to those receipts and
 track detached processes. The plan preflight uses the production selected-set checks and requires each
