@@ -74,6 +74,17 @@ alone does not prove that the product parser accepts the result. The narrow
 stand in for parsing other modalities or exercising the case runner. It uses
 only temporary outputs and an isolated disposable local server.
 
+`rehearse_live_modalities.py --manifest FROZEN_CASE.json --case BC-LIVE-002`
+(or BC-LIVE-003/004) is a partial CPU-only loopback check: it verifies the
+frozen case entry argv and pinned harness, uses the same smoke/headline command
+assembly as the actual runner, invokes the frozen modality binary through
+`cargo --locked xtask`, and verifies the required-SUT summary and local request
+cohort. It creates temporary outputs and does not call a record writer. It does
+not exercise L1's derived-input binding, non-live cases, physical GPU behavior
+or the native offload gate, and is **not** the complete selected-set rehearsal.
+Its disposable loopback server is not an OS network sandbox; use independently
+enforced offline policy.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates

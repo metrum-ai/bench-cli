@@ -17,6 +17,26 @@ ROOT = Path(__file__).resolve().parents[3]
 CASES = {'vlm': ('BC-LIVE-002', 8), 'asr': ('BC-LIVE-003', 6), 'imagegen': ('BC-LIVE-004', 4)}
 
 
+def smoke_invocations(args, directory):
+    """Assemble the actual live modality smoke/headline argv and env additions."""
+    _, count = CASES[args.modality]
+    data = directory / 'results.jsonl'
+    artifact_dir = directory / 'artifacts'
+    additions = {'CARGO_NET_OFFLINE': 'true', 'BENCH_BIN_DIR': str(args.candidate.parent), 'MIN_SUCCESS_RATIO': '1.0'}
+    if args.modality == 'imagegen':
+        prompt = args.prompt.read_text(encoding='utf-8').strip()
+        if not prompt or len(prompt) > 4096 or '\x00' in prompt:
+            raise ValueError('invalid pinned image-generation prompt')
+        additions['IMAGEGEN_PROMPT'] = prompt
+    command = ['cargo', '--locked', 'xtask', 'local-smoke', args.modality, '--url', f'http://localhost:{args.port}',
+               '--model', args.model, '--sut', str(args.sut), '--out', str(directory), '--num-requests', str(count),
+               '--concurrency', '2', '--warmup', '0', '--seed', '42', '--root', str(ROOT)]
+    headline = ['cargo', '--locked', 'xtask', 'assert-headline', args.modality, str(data)]
+    if args.modality == 'imagegen':
+        headline += ['--artifact-dir', str(artifact_dir)]
+    return command, headline, additions
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--modality', choices=CASES, required=True)
@@ -34,22 +54,13 @@ def main():
     stdout, stderr = evidence / 'live-smoke-stdout.txt', evidence / 'live-smoke-stderr.txt'
     headline_out, headline_err = evidence / 'live-headline-stdout.txt', evidence / 'live-headline-stderr.txt'
     env = os.environ.copy()
-    env.update({'CARGO_NET_OFFLINE': 'true', 'BENCH_BIN_DIR': str(args.candidate.parent), 'MIN_SUCCESS_RATIO': '1.0'})
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes'][{'vlm': 'L2', 'asr': 'L3', 'imagegen': 'L4'}[args.modality]]
         modality_binary = args.candidate.parent / ('metrum-ai-bench-cli-' + args.modality)
         if manifest_tool.sha256_file(modality_binary) != config['modality_binary']['sha256']:
             raise ValueError('candidate modality binary changed after preflight')
-        if args.modality == 'imagegen':
-            prompt = args.prompt.read_text(encoding='utf-8').strip()
-            if not prompt or len(prompt) > 4096 or '\x00' in prompt:
-                raise ValueError('invalid pinned image-generation prompt')
-            env['IMAGEGEN_PROMPT'] = prompt
-        command = ['cargo', '--locked', 'xtask', 'local-smoke', args.modality, '--url', f'http://localhost:{args.port}',
-                   '--model', args.model, '--sut', str(args.sut), '--out', str(directory), '--num-requests', str(count),
-                   '--concurrency', '2', '--warmup', '0', '--seed', '42', '--root', str(ROOT)]
-        headline = ['cargo', '--locked', 'xtask', 'assert-headline', args.modality, str(data)]
-        if args.modality == 'imagegen': headline += ['--artifact-dir', str(artifact_dir)]
+        command, headline, additions = smoke_invocations(args, directory)
+        env.update(additions)
         (evidence / 'live-commands.json').write_text(json.dumps({'smoke': command, 'headline': headline,
             'prompt_sha256': manifest_tool.sha256_file(args.prompt), 'num_requests': count}, indent=2) + '\n', encoding='utf-8')
         smoke = l1_runner.call(command, stdout, stderr, 1800, env=env)
