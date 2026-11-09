@@ -55,12 +55,16 @@ def validate(expectations_path, expectations_sha, *, selection_path, catalog_pat
         raise ValueError('box plan missing')
     ids, assigned, outputs = set(), {}, set()
     for box in boxes:
-        if not isinstance(box, dict) or set(box) != {'id', 'gpu', 'planned_seconds', 'hard_cap_seconds', 'cases'}:
+        if not isinstance(box, dict) or set(box) != {'id', 'gpu', 'cgroup_root', 'planned_seconds', 'hard_cap_seconds', 'cases'}:
             raise ValueError('invalid box expectation')
         ident, gpu = box['id'], box['gpu']
         if not isinstance(ident, str) or not ident or ident in ids or not isinstance(gpu, str) or not gpu:
             raise ValueError('duplicate or invalid box identity')
         ids.add(ident)
+        cgroup_root = box['cgroup_root']
+        if (not isinstance(cgroup_root, str) or not Path(cgroup_root).is_absolute()
+                or '..' in Path(cgroup_root).parts or str(Path(cgroup_root)) != cgroup_root):
+            raise ValueError('box needs a canonical delegated cgroup path')
         planned, cap = box['planned_seconds'], box['hard_cap_seconds']
         if type(planned) is not int or type(cap) is not int or planned <= 0 or cap * 4 != planned * 5:
             raise ValueError('box hard cap must be exactly 1.25 times planned duration')
@@ -85,7 +89,8 @@ def validate(expectations_path, expectations_sha, *, selection_path, catalog_pat
                 raise ValueError('case output must be an absolute smoke path')
             output = Path(name)
             lifecycle = output.with_name(output.name + '-lifecycle')
-            paths = (output, lifecycle)
+            control = output.with_name(output.name + '-stage0-control')
+            paths = (output, lifecycle, control)
             if (output.resolve() != output or output == smoke_root or not output.is_relative_to(smoke_root)
                     or any(path.is_symlink() or path.resolve() != path or path.exists() for path in paths)
                     or any(path == other or path.is_relative_to(other) or other.is_relative_to(path)

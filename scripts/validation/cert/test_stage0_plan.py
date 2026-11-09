@@ -33,7 +33,7 @@ class PlanTests(unittest.TestCase):
         self.plan = {'candidate_sha': self.candidate, 'smoke_root': str(self.smoke_root),
                      'selected_plan_sha256': digest(self.index),
                      'selection_sha256': digest(self.selection), 'catalog_sha256': digest(self.catalog),
-                     'boxes': [{'id': 'box-a', 'gpu': 'expected GPU', 'planned_seconds': 160,
+                     'boxes': [{'id': 'box-a', 'gpu': 'expected GPU', 'cgroup_root': '/sys/fs/cgroup/stage0', 'planned_seconds': 160,
                                 'hard_cap_seconds': 200, 'cases': [self.item]}]}
         self.expectations = self.root / 'expectations.json'
         self.entries = [(self.case, self.manifest, {}, digest(self.manifest))]

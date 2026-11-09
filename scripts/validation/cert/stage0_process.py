@@ -40,7 +40,7 @@ def run_bounded(argv, *, cwd, env, stdout, stderr, cap_seconds, grace_seconds, p
             or len(pass_fds) != len(set(pass_fds))):
         raise ValueError('invalid inherited descriptor list')
     started = time.monotonic()
-    process = subprocess.Popen(argv, cwd=Path(cwd), env=env, stdout=stdout, stderr=stderr,
+    process = subprocess.Popen(argv, cwd=Path(cwd), env=env, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
                                start_new_session=True, pass_fds=pass_fds)
     def remaining(deadline):
         return max(0.0, deadline - time.monotonic())
