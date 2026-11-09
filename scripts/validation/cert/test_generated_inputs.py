@@ -89,7 +89,13 @@ class GeneratedInputTests(unittest.TestCase):
         self.assertEqual(generated.preflight_label({}), 'PREFLIGHT-OK')
         import case_launcher
         manifest['candidate'] = self.recipe['generator']  # Mocked role guard; no executable runs.
-        manifest['cases']['BC-GPU-003'] = {'out': str(self.root / 'attempt'), 'command': ['synthetic-no-execution']}
+        from build_role_test_fixture import tool_fixture
+        manifest['tools'], tool_path = tool_fixture(self.root)
+        manifest['tool_manifest'] = {'path': str(tool_path), 'sha256': digest(tool_path)}
+        manifest['lane'] = 'G1'
+        launcher = Path('/bin/true').resolve()
+        manifest['cases']['BC-GPU-003'] = {'out': str(self.root / 'attempt'),
+            'launcher': {'path': str(launcher), 'sha256': digest(launcher)}, 'command': [str(launcher)]}
         with patch.object(case_launcher.build_roles, 'check_manifest'), \
              patch('runtime_inputs.prepare', side_effect=ValueError('runtime binding incomplete')), \
              patch('result_writer.write_record') as write, \
