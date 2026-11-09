@@ -39,6 +39,22 @@ def configuration(config):
     return ports
 
 
+def endpoints_yaml(proxy_port, second_proxy):
+    """Construct the same two-endpoint configuration used for the real case."""
+    return (f'- name: survivor\n  url: http://localhost:{proxy_port}/v1/chat/completions\n  api_key: dummy\n'
+            f'- name: victim\n  url: http://localhost:{second_proxy}/v1/chat/completions\n  api_key: dummy\n')
+
+
+def benchmark_command(args, endpoints, data, evidence):
+    """Assemble the real multi-endpoint product invocation."""
+    return [str(args.candidate), '--endpoints-file', str(endpoints), '--load-balancer', 'round-robin',
+            '--scenario', 'g5-endpoints', '--num-requests', '64', '--concurrency', '2', '--prompts', str(args.prompt),
+            '--mode', 'chat', '--streaming', '--model', args.model, '--data-log', str(data), '--max-tokens', '128',
+            '--temperature', '0', '--seed', '42', '--warmup-requests', '0', '--request-timeout', '60', '--fail-on-error',
+            '--debug-log', str(evidence / 'g5-endpoints-debug.log'), '--error-log', str(evidence / 'g5-endpoints-error.log'),
+            '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}']
+
+
 def rows_so_far(path):
     try:
         lines = path.read_text(encoding='utf-8').splitlines()
@@ -105,15 +121,9 @@ def run(args, config):
             proxies.append((proxy, err))
             g6_counter_runner.wait_for_proxy(listen, proxy)
         endpoints = evidence / 'g5-endpoints.yaml'
-        endpoints.write_text(f'- name: survivor\n  url: http://localhost:{proxy_port}/v1/chat/completions\n  api_key: dummy\n'
-                             f'- name: victim\n  url: http://localhost:{second_proxy}/v1/chat/completions\n  api_key: dummy\n', encoding='utf-8')
+        endpoints.write_text(endpoints_yaml(proxy_port, second_proxy), encoding='utf-8')
         data = evidence / 'g5-endpoints-requests.jsonl'
-        command = [str(args.candidate), '--endpoints-file', str(endpoints), '--load-balancer', 'round-robin',
-                   '--scenario', 'g5-endpoints', '--num-requests', '64', '--concurrency', '2', '--prompts', str(args.prompt),
-                   '--mode', 'chat', '--streaming', '--model', args.model, '--data-log', str(data), '--max-tokens', '128',
-                   '--temperature', '0', '--seed', '42', '--warmup-requests', '0', '--request-timeout', '60', '--fail-on-error',
-                   '--debug-log', str(evidence / 'g5-endpoints-debug.log'), '--error-log', str(evidence / 'g5-endpoints-error.log'),
-                   '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":false}}']
+        command = benchmark_command(args, endpoints, data, evidence)
         (evidence / 'g5-endpoints-command.json').write_text(json.dumps(command, indent=2) + '\n', encoding='utf-8')
         with (evidence / 'g5-endpoints-stdout.txt').open('wb') as out, (evidence / 'g5-endpoints-stderr.txt').open('wb') as err:
             client = subprocess.Popen(command, stdout=out, stderr=err, cwd=ROOT, start_new_session=True)

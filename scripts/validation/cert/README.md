@@ -103,6 +103,14 @@ restart a server, invoke the validator or write a case record; it is not real
 server evidence or the complete selected-set rehearsal. Its fixture is not an OS
 network sandbox; independently enforce offline policy.
 
+`rehearse_g5_endpoints.py --manifest FROZEN_CASE.json` exercises the GPU-015
+four-port configuration check and actual endpoint-file/product argv against two
+synthetic local servers with two trace proxies. It verifies successful measured
+requests reach both endpoints, but does not kill a server, invoke the validator
+or write a case record. Temporary loopback ports replace the frozen ports after
+checking them; it is not an OS network sandbox, real failover evidence or the
+complete selected-set rehearsal. Independently enforce offline policy.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
