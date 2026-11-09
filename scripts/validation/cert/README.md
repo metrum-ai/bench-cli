@@ -51,6 +51,34 @@ monotonic clock). It appends those observed UTC values, not finalization time;
 missing clocks remain null. Per-case launch validation appends record validation.
 Never substitute runner start/end for actual first/last request times.
 
+For VLM cases whose runner requires absolute image paths, prepare a new pinned
+prompt file before freezing, using `prepare_vlm_input.py --source SOURCE
+--source-sha256 SHA --image IMAGE --image-sha256 SHA --root REPOSITORY_ROOT
+--out NEW_JSONL`. It rejects remote, mismatched, multiple and ambiguous images,
+never overwrites a file, and prints the new path/hash for the lane manifest.
+Freeze the original source and image as inputs too; the prepared JSONL is an
+ordinary frozen input consumed unchanged by the runner. This is input preparation,
+not an offline launch rehearsal or certification evidence.
+
+For product `--require-sut` consumers, `prepare_product_sut.py --inventory
+OBSERVED.json --inventory-sha256 SHA --lane-manifest LANE.json --lane-sha256 SHA
+--lane L1 --out NEW_SUT.json` produces a separate product-schema declaration from
+exactly one observed GPU inventory and the pinned lane. Its fields distinguish
+observed inventory from declared server/model; fractional GiB is rounded down.
+Pin the original inventory and lane, and pin the generated declaration as the
+lane SUT. Do not use synthetic inventory as live evidence. Input preparation
+alone does not prove that the product parser accepts the result. The narrow
+`rehearse_product_llm.py --binary FROZEN_LLM --binary-sha256 SHA --sut NEW_SUT.json
+--sut-sha256 SHA` loopback probe checks the actual pinned LLM binary's
+`--require-sut` parser and resulting summary against the SUT identity; it cannot
+stand in for parsing other modalities or exercising the case runner. It uses
+only temporary outputs and an isolated disposable local server.
+
+Freeze now also calls the actual runner's input checks for selected known cases
+(GPU-003/011/013/015, REASON-005, COMP-002). These are early checks only, not
+complete runner argv or SUT parsing and **not** the complete offline rehearsal
+required before rental; missing selected-case coverage remains a blocker.
+
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
 and content pin, all-smi executable pin, every input pin and each launcher pin.

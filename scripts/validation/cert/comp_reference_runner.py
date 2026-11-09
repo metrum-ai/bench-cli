@@ -66,6 +66,35 @@ def run_recorded(args, name, command):
     return code, trace
 
 
+def reference_inputs(config):
+    """Validate and assemble the exact pinned comparison inputs before launch."""
+    cap = 1024
+    prompts = pinned_file(config['prompt_sets']['reference'], 'reference prompts')
+    sharegpt = pinned_file(config['prompt_sets']['reference_sharegpt'], 'reference ShareGPT dataset')
+    if config.get('comparison_cap') != cap:
+        raise ValueError('frozen reference comparison cap differs')
+    order_path = pinned_file(config['reference_order'], 'reference order')
+    order = [json.loads(line) for line in order_path.read_text(encoding='utf-8').splitlines() if line.strip()]
+    dataset = [json.loads(line) for line in prompts.read_text(encoding='utf-8').splitlines() if line.strip()]
+    sharegpt_rows = json.loads(sharegpt.read_text(encoding='utf-8'))
+    if len(dataset) != 64 or len(order) != 64 or not isinstance(sharegpt_rows, list) or len(sharegpt_rows) != 64:
+        raise ValueError('64 frozen reference prompts and slots required')
+    for index, (slot, item) in enumerate(zip(order, dataset)):
+        prompt = item.get('prompt')
+        turns = sharegpt_rows[index].get('conversations', [])
+        if not isinstance(turns, list) or len(turns) != 2 or turns[0].get('value') != prompt or turns[1].get('value') != 'placeholder':
+            raise ValueError('reference dataset does not reproduce the frozen prompt sequence')
+        if not isinstance(prompt, str) or slot.get('seq') != index or slot.get('prompt_index') != index:
+            raise ValueError('reference order does not match frozen prompt IDs')
+        digest = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+        if slot.get('prompt_sha256_16') != digest[:16] or slot.get('prompt_bytes') != len(prompt.encode('utf-8')):
+            raise ValueError('frozen prompt fingerprint or length differs')
+        slot['prompt_sha256'] = digest
+    if len({slot['prompt_sha256'] for slot in order}) != 64:
+        raise ValueError('reference prompt IDs must be distinct')
+    return prompts, sharegpt, order_path, order
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("out", "candidate", "baseline", "manifest"):
@@ -84,29 +113,7 @@ def main():
     cap = 1024  # Frozen prospectively for the ShareGPT loader's 2048-token limit.
     try:
         config = json.loads(args.manifest.read_text(encoding="utf-8"))["lanes"]["D"]
-        prompts = pinned_file(config["prompt_sets"]["reference"], "reference prompts")
-        sharegpt = pinned_file(config["prompt_sets"]["reference_sharegpt"], "reference ShareGPT dataset")
-        if config.get("comparison_cap") != cap:
-            raise ValueError("frozen reference comparison cap differs")
-        order_path = pinned_file(config["reference_order"], "reference order")
-        order = [json.loads(line) for line in order_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        dataset = [json.loads(line) for line in prompts.read_text(encoding="utf-8").splitlines() if line.strip()]
-        sharegpt_rows = json.loads(sharegpt.read_text(encoding="utf-8"))
-        if len(dataset) != 64 or len(order) != 64 or not isinstance(sharegpt_rows, list) or len(sharegpt_rows) != 64:
-            raise ValueError("64 frozen reference prompts and slots required")
-        for index, (slot, item) in enumerate(zip(order, dataset)):
-            prompt = item.get("prompt")
-            turns = sharegpt_rows[index].get("conversations", [])
-            if not isinstance(turns, list) or len(turns) != 2 or turns[0].get("value") != prompt or turns[1].get("value") != "placeholder":
-                raise ValueError("reference dataset does not reproduce the frozen prompt sequence")
-            if not isinstance(prompt, str) or slot.get("seq") != index or slot.get("prompt_index") != index:
-                raise ValueError("reference order does not match frozen prompt IDs")
-            digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-            if slot.get("prompt_sha256_16") != digest[:16] or slot.get("prompt_bytes") != len(prompt.encode("utf-8")):
-                raise ValueError("frozen prompt fingerprint or length differs")
-            slot["prompt_sha256"] = digest
-        if len({slot["prompt_sha256"] for slot in order}) != 64:
-            raise ValueError("reference prompt IDs must be distinct")
+        prompts, sharegpt, order_path, order = reference_inputs(config)
         cache = os.environ.get("CERT_HF_HUB_CACHE", "")
         if not cache or not Path(cache).is_dir():
             raise ValueError("pinned offline tokenizer cache is required")

@@ -77,6 +77,15 @@ def preflight(manifest):
         executable = pinned(entry["launcher"], True)
         if Path(command[0]).resolve() != executable:
             raise ValueError("case command does not match pinned launcher")
+    import case_input_checks
+    targeted = set(cases) & case_input_checks.LANES.keys()
+    if targeted:
+        import manifest_tool
+        lane_path = pinned(manifest['lane_manifest'])
+        lane_data = json.loads(lane_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        for case in targeted:
+            config = lane_data['lanes'][case_input_checks.LANES[case]]
+            case_input_checks.check(case, config, binary)
     from tokenizer_probe import probe
     probe(validation_binary, tokenizer['path'])
     if 'BC-GPU-010' in cases:

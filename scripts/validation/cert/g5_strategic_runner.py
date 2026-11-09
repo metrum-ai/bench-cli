@@ -35,10 +35,8 @@ def main():
     proxy = client = None
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['G5']
-        pinned = config['strategic_binary']
-        strategic = Path(pinned['path']).resolve(strict=True)
-        if strategic != args.candidate.resolve().parent / 'metrum-ai-bench-cli-strategic' or not os.access(strategic, os.X_OK) or manifest_tool.sha256_file(strategic) != pinned['sha256']:
-            raise ValueError('strategic binary must be pinned beside candidate')
+        import g4_modality_runner
+        strategic = g4_modality_runner.pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', args.candidate)
         container = (evidence / 'container-id.txt').read_text(encoding='utf-8').strip()
         if not container or any(c not in '0123456789abcdef' for c in container):
             raise ValueError('owned real server identity missing')

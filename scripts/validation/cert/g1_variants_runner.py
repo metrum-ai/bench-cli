@@ -52,6 +52,20 @@ def run_cell(args, label, prompt, body, reorder):
     return data.read_text(encoding='utf-8'), trace.read_text(encoding='utf-8'), code
 
 
+def tool_prompt(config):
+    """Validate the same pinned tool input and server flags used by the runner."""
+    flags = config['server_flags']
+    if '--enable-auto-tool-choice' not in flags or not any(
+        flags[i:i+2] == ['--tool-call-parser', 'hermes'] or flag == '--tool-call-parser=hermes'
+        for i, flag in enumerate(flags)):
+        raise ValueError('G1 requires pinned hermes tool parser and auto tool choice')
+    tool = config['prompt_sets']['tool']
+    prompt = Path(tool['path']).resolve(strict=True)
+    if not prompt.is_file() or manifest_tool.sha256_file(prompt) != tool['sha256']:
+        raise ValueError('tool prompt pin mismatch')
+    return prompt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('out', 'candidate', 'baseline', 'manifest', 'prompt'):
@@ -67,15 +81,7 @@ def main():
     cells, errors = {}, []
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['G1']
-        flags = config['server_flags']
-        if '--enable-auto-tool-choice' not in flags or not any(
-            flags[i:i+2] == ['--tool-call-parser', 'hermes'] or flag == '--tool-call-parser=hermes'
-            for i, flag in enumerate(flags)):
-            raise ValueError('G1 requires pinned hermes tool parser and auto tool choice')
-        tool = config['prompt_sets']['tool']
-        prompt_tool = Path(tool['path']).resolve(strict=True)
-        if manifest_tool.sha256_file(prompt_tool) != tool['sha256']:
-            raise ValueError('tool prompt pin mismatch')
+        prompt_tool = tool_prompt(config)
         modes = [
             ('reasoning', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, None, 'reasoning'),
             ('answer-only', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}}, None, 'answer_only'),

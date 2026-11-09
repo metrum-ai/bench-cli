@@ -82,10 +82,10 @@ def strategic(args, binary, label, model, prompt, kind):
             'csv': csv_path.read_text(encoding='utf-8'), 'telemetry': ndjson.read_text(encoding='utf-8'), 'trace': trace}
 
 
-def run(args, config):
-    evidence = args.out / 'evidence'
-    strategic_bin = pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', args.candidate)
-    vlm_bin = pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', args.candidate)
+def modality_inputs(config, candidate):
+    """Validate and assemble the pinned modality inputs used by this runner."""
+    strategic_bin = pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', candidate)
+    vlm_bin = pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', candidate)
     image = pinned_file(config, 'vlm_image')
     prompt = pinned_file(config['prompt_sets'], 'vlm')
     image_prompts(prompt, image)
@@ -99,6 +99,12 @@ def run(args, config):
         raise ValueError('pinned compatible qwen3 parser and disabled prefix caching required')
     if any(not isinstance(flag, str) or flag.split('=', 1)[0] in manifest_tool.FORBIDDEN for flag in flags):
         raise ValueError('invalid VLM server flags')
+    return strategic_bin, vlm_bin, image, prompt, vlm, flags
+
+
+def run(args, config):
+    evidence = args.out / 'evidence'
+    strategic_bin, vlm_bin, image, prompt, vlm, flags = modality_inputs(config, args.candidate)
     models = json.loads((evidence / 'models.json').read_text(encoding='utf-8'))
     if not any(row.get('id') == args.model for row in models.get('data', [])):
         raise ValueError('first server did not serve the pinned LLM model')

@@ -87,6 +87,8 @@ def freeze(args):
         if args.tokenizer_revision != config["revision"]:
             raise ValueError("tokenizer revision must match the frozen model revision")
         check_case_tokenizer(args.case, config, args.tokenizer)
+        import case_input_checks
+        case_input_checks.check(args.case, config, args.candidate)
     root = Path(__file__).parent
     if args.command_json:
         if args.case not in ('BC-COMP-001', 'BC-OPS-001', 'BC-INTEG-001'):

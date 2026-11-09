@@ -28,9 +28,13 @@ class FreezeGeneratedTests(unittest.TestCase):
             return path
         self.binary = file('shipped', '#!/bin/sh\n# SYNTHETIC SHIPPED\nexit 0\n')
         self.generator = file('prompts', '#!/bin/sh\n# SYNTHETIC CPU GENERATOR\nexit 0\n')
-        for path in (self.binary, self.generator): path.chmod(0o755)
+        strategic = file('metrum-ai-bench-cli-strategic', '#!/bin/sh\n# SYNTHETIC STRATEGIC\nexit 0\n')
+        vlm = file('metrum-ai-bench-cli-vlm', '#!/bin/sh\n# SYNTHETIC VLM\nexit 0\n')
+        for path in (self.binary, self.generator, strategic, vlm): path.chmod(0o755)
         fixture = bind({'candidate_sha': 'a' * 40, 'candidate': {'path': str(self.binary), 'sha256': digest(self.binary)}},
-                       self.root, additional={'metrum-ai-bench-cli-prompts': self.generator})
+                       self.root, additional={'metrum-ai-bench-cli-prompts': self.generator,
+                                              'metrum-ai-bench-cli-strategic': strategic,
+                                              'metrum-ai-bench-cli-vlm': vlm})
         registry = json.loads(Path(fixture['build_receipt']['path']).read_text())['builds']['measured']['binaries']
         tokenizer = file('tokenizer.json', '{"SYNTHETIC":true}')
         recipe = {'id': 'prompts', 'kind': generated.KIND, 'generator': registry['metrum-ai-bench-cli-prompts'],
@@ -42,11 +46,18 @@ class FreezeGeneratedTests(unittest.TestCase):
         sut = file('sut.json', json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
         catalog = file('catalog.csv', 'ID,Tier,Parallel group\nBC-GPU-011,RC-GPU,G4\n')
         selection = file('selection.json', json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-011': ['core']}}))
+        image = file('synthetic-image.png', 'SYNTHETIC IMAGE')
+        vlm_prompt = file('vlm-prompt.jsonl', json.dumps({'prompt': 'fixture', 'image_url': str(image)}) + '\n')
         config = {'image': 'synthetic/image@sha256:' + '0' * 64, 'model': 'Qwen/Qwen3-8B',
                   'revision': 'b' * 40, 'port': 19001, 'proxy_port': 19002,
                   'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
                   'owner': 'fixture', 'evidence_link': 'fixture', 'tokenizer': runtime_inputs.pin(tokenizer),
-                  'prompt_sets': {'default': {'generated_input': 'prompts'}}}
+                  'strategic_binary': registry['metrum-ai-bench-cli-strategic'],
+                  'vlm_binary': registry['metrum-ai-bench-cli-vlm'], 'vlm_image': runtime_inputs.pin(image),
+                  'vlm': {'model': 'Qwen/Qwen3-VL-8B-Thinking', 'revision': 'b' * 40,
+                          'image': 'synthetic/image@sha256:' + '0' * 64,
+                          'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching']},
+                  'prompt_sets': {'default': {'generated_input': 'prompts'}, 'vlm': runtime_inputs.pin(vlm_prompt)}}
         lane = file('lane.json', json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(self.binary),
                                            'baseline_binary_sha256': digest(self.binary), 'lanes': {'G4': config}}))
         self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
@@ -61,6 +72,14 @@ class FreezeGeneratedTests(unittest.TestCase):
         (directory / 'prompts.jsonl').write_text('{"SYNTHETIC_PROMPT":true}\n')
         (directory / 'selection-report.json').write_text('{"SYNTHETIC_REPORT":true}\n')
         (directory / 'generator.log').write_text('SYNTHETIC; NO GENERATOR EXECUTED\n')
+
+    def test_missing_case_specific_input_fails_before_freeze(self):
+        lane = json.loads(self.args.lane_manifest.read_text())
+        del lane['lanes']['G4']['strategic_binary']
+        self.args.lane_manifest.write_text(json.dumps(lane))
+        with self.assertRaises(KeyError):
+            freeze_case.freeze(self.args)
+        self.assertFalse(self.args.out.exists())
 
     def test_freezer_structural_then_original_concrete_preflight(self):
         import selected_set
