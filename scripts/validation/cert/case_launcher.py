@@ -30,18 +30,35 @@ def preflight(manifest):
     _, validation_binary = build_roles.check_manifest(manifest)
     import generated_inputs
     recipes = generated_inputs.structural_context(manifest)
-    if recipes is not None:
+    cases = manifest.get('cases')
+    if not isinstance(cases, dict) or len(cases) != 1:
+        raise ValueError('frozen launcher requires exactly one selected case')
+    only_case = next(iter(cases))
+    lane = manifest.get('lane')
+    if not isinstance(lane, str) or not lane:
+        raise ValueError('frozen lane is required')
+    lane_path = pinned(manifest['lane_manifest'])
+    baseline = pinned(manifest['baseline'], True)
+    if lane != 'CLEANUP':
         import manifest_tool
-        baseline = pinned(manifest['baseline'], True)
-        structural = {'structural_recipe_ids': set(recipes)}
-        if 'generated_bindings' in manifest:
+        structural = {'structural_recipe_ids': set(recipes)} if recipes is not None else {}
+        if recipes is not None and 'generated_bindings' in manifest:
             import runtime_inputs
             runtime_inputs.verify(manifest)
             structural = {}  # Original concrete/domain checks remain mandatory.
-        only_case = next(iter(manifest['cases'])) if len(manifest['cases']) == 1 else None
-        _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], manifest['lane'],
-            binary, baseline, '0', case=only_case, **structural)
-        if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
+        _, config = manifest_tool.load_manifest(lane_path, lane, binary, baseline, '0', case=only_case, **structural)
+        if manifest.get('tokenizer', {}).get('revision') != config['revision']:
+            raise ValueError('frozen tokenizer revision must match lane model revision')
+        import r4_model_pins
+        if config.get('image') == r4_model_pins.IMAGE:
+            import r4_image_provenance
+            oci = manifest.get('r4_oci')
+            if not isinstance(oci, dict) or set(oci) != {'index', 'amd64'}:
+                raise ValueError('frozen r4 OCI index and platform descriptors required')
+            index, child = pinned(oci['index']), pinned(oci['amd64'])
+            if r4_image_provenance.descriptor_chain(index, child) != r4_image_provenance.CONFIG:
+                raise ValueError('frozen r4 OCI config descriptor differs')
+        if recipes is not None and any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
             raise ValueError('generator tokenizer revision must match lane model revision')
     if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:
         import derived_inputs
@@ -98,6 +115,30 @@ def preflight(manifest):
     return list(cases)
 
 
+def validate_r4_record(manifest, case, record):
+    """Do not accept a PASS that omits or changes its frozen r4 serving identity."""
+    import r4_model_pins as pins
+    import r4_image_provenance as provenance
+    import manifest_tool
+    lane = manifest.get('lane')
+    if not lane or lane == 'CLEANUP':
+        return
+    data = json.loads(pinned(manifest['lane_manifest']).read_text(encoding='utf-8'),
+                      object_pairs_hook=manifest_tool.unique_object)
+    config = data['lanes'][lane]
+    if config.get('image') != pins.IMAGE:
+        return
+    versions = record.get('versions', {})
+    image = versions.get('server_image', versions.get('server_and_reference_image'))
+    if (image != config['image'] or versions.get('model') != config['model']
+            or versions.get('model_revision') != config['revision']
+            or versions.get('image_index') != provenance.INDEX
+            or versions.get('platform_manifest') != provenance.AMD64
+            or versions.get('image_config') != provenance.CONFIG
+            or versions.get('image_platform') != 'linux/amd64'):
+        raise ValueError(f'{case} result lacks matching r4 serving provenance')
+
+
 def run_case(manifest_path, manifest, case):
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
@@ -114,12 +155,17 @@ def run_case(manifest_path, manifest, case):
     environment = {**os.environ, "CERT_INPUT_MANIFEST": str(Path(manifest_path).resolve()),
                    "CERT_CASE_ID": case, "CERT_PHASE_ROOT": str(lifecycle),
                    "CERT_CANDIDATE": str(Path(manifest["candidate"]["path"]).resolve())}
+    environment.pop('CERT_R4_OCI_INDEX', None)
+    environment.pop('CERT_R4_OCI_AMD64', None)
     started = dt.datetime.now(dt.timezone.utc).isoformat()
     process = None
     def interrupted(signum, _frame):
         raise InterruptedError(f"launcher interrupted by signal {signum}")
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        if 'r4_oci' in manifest:
+            environment['CERT_R4_OCI_INDEX'] = str(pinned(manifest['r4_oci']['index']))
+            environment['CERT_R4_OCI_AMD64'] = str(pinned(manifest['r4_oci']['amd64']))
         import generated_inputs
         generated_inputs.reject_orphan_runtime(manifest)
         if 'generated_inputs' in manifest:
@@ -150,6 +196,7 @@ def run_case(manifest_path, manifest, case):
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":
             raise ValueError("case failed; retained failure record is not certification")
+        validate_r4_record(manifest, case, records[0])
         if case == 'BC-GPU-010':
             import gpu010_builds
             gpu010_builds.validate_record(manifest, records[0], out)

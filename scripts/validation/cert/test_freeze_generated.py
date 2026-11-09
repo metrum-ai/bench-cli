@@ -100,6 +100,25 @@ class FreezeGeneratedTests(unittest.TestCase):
         self.assertEqual(case_launcher.preflight(bound), ['BC-GPU-011'])
         self.assertEqual(generated.preflight_label(bound), 'PREFLIGHT-OK')
 
+    def test_preflight_revalidates_r4_lane_and_oci_descriptors(self):
+        import copy
+        frozen = freeze_case.freeze(self.args)
+        missing = copy.deepcopy(frozen)
+        del missing['r4_oci']
+        with self.assertRaisesRegex(ValueError, 'OCI.*required'):
+            case_launcher.preflight(missing)
+        bad = copy.deepcopy(frozen)
+        bad['r4_oci']['amd64']['sha256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            case_launcher.preflight(bad)
+        lane = json.loads(self.args.lane_manifest.read_text())
+        lane['lanes']['G4']['revision'] = 'f' * 40
+        self.args.lane_manifest.write_text(json.dumps(lane))
+        bad = copy.deepcopy(frozen)
+        bad['lane_manifest']['sha256'] = digest(self.args.lane_manifest)
+        with self.assertRaisesRegex(ValueError, 'r4 model'):
+            case_launcher.preflight(bad)
+
     def test_launch_binds_runtime_before_child_and_keeps_parent(self):
         frozen = freeze_case.freeze(self.args)
         original = self.args.out.read_bytes()
@@ -113,7 +132,12 @@ class FreezeGeneratedTests(unittest.TestCase):
             target.parent.mkdir(parents=True)
             target.write_text('{"SYNTHETIC_RECORD_PLACEHOLDER":true}')
             return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
-        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS'}
+        import r4_image_provenance as provenance
+        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS',
+                  'versions': {'server_image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
+                               'model_revision': pins.GENERAL_REVISION, 'image_index': provenance.INDEX,
+                               'platform_manifest': provenance.AMD64, 'image_config': provenance.CONFIG,
+                               'image_platform': 'linux/amd64'}}
         with patch.object(generated, 'run_generator', side_effect=self.generate), \
              patch.object(case_launcher.subprocess, 'run'), \
              patch.object(case_launcher.subprocess, 'Popen', side_effect=launch) as start, \

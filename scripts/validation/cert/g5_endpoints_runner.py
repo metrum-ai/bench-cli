@@ -98,6 +98,8 @@ def run(args, config):
         if not second or any(c not in '0123456789abcdef' for c in second):
             raise ValueError('second real server identity missing')
         (evidence / 'g5-endpoints-container-id.txt').write_text(second + '\n', encoding='utf-8')
+        import r4_image_provenance
+        r4_image_provenance.runtime(args.image, second, evidence / 'g5-endpoints-image-runtime.json')
         deadline = time.monotonic() + 1800
         while time.monotonic() < deadline:
             try:

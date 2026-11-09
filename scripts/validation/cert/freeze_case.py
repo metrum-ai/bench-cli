@@ -79,6 +79,7 @@ def freeze(args):
         if len({item['recipe']['id'] for item in generated}) != len(generated):
             raise ValueError('duplicate generated recipe id')
     lane = row["Parallel group"]
+    config = None
     if generated and lane == 'CLEANUP':
         raise ValueError('cleanup cases cannot generate measured inputs')
     if lane != "CLEANUP":
@@ -126,6 +127,16 @@ def freeze(args):
     if generated:
         inputs.add(recipe_file.resolve())
         collect_pins(generated)
+    import r4_model_pins
+    r4_oci = None
+    if config is not None and config.get('image') == r4_model_pins.IMAGE:
+        import r4_image_provenance
+        oci = root / 'fixtures' / 'r4-oci'
+        index, child = oci / 'index.json', oci / 'amd64.json'
+        if r4_image_provenance.descriptor_chain(index, child) != r4_image_provenance.CONFIG:
+            raise ValueError('r4 OCI config descriptor differs')
+        r4_oci = {'index': pin(index), 'amd64': pin(child)}
+        collect_pins(r4_oci)
     # Freeze transitive harness sources, not only the top-level shell wrapper.
     inputs.update(harness_sources(root))
     if args.command_json:
@@ -134,15 +145,16 @@ def freeze(args):
                 "candidate_sha": selection["candidate_sha"], "candidate": matching[0],
                 "tokenizer_validation": validation, "measured_binaries": measured,
                 "build_receipt": pin(args.build_receipt), "lane_manifest": pin(args.lane_manifest),
-                "sut": pin(args.sut),
+                "lane": lane, "baseline": pin(args.baseline), "sut": pin(args.sut),
                 "tokenizer": {**pin(args.tokenizer), "revision": args.tokenizer_revision}, "all_smi": pin(args.all_smi),
                 "inputs": [pin(path) for path in sorted(inputs)],
                 "cases": {args.case: {"launcher": pin(command[0]), "command": command, "out": str(args.run_out.resolve())}}}
     if generated:
-        manifest.update(generated_inputs=generated, lane=lane, baseline=pin(args.baseline))
+        manifest.update(generated_inputs=generated)
+    if r4_oci is not None:
+        manifest['r4_oci'] = r4_oci
     if lane == 'L1':
         import derived_inputs
-        manifest.update(lane=lane, baseline=pin(args.baseline))
         manifest['derived_inputs'] = derived_inputs.declaration(manifest)
     case_launcher.preflight(manifest)
     with args.out.open("x", encoding="utf-8") as stream:

@@ -151,6 +151,8 @@ def run(args, config):
         if not identifier or any(c not in '0123456789abcdef' for c in identifier):
             raise ValueError('real VLM server identity missing')
         (evidence / 'g4-modality-vlm-container-id.txt').write_text(identifier + '\n', encoding='utf-8')
+        import r4_image_provenance
+        r4_image_provenance.runtime(vlm['image'], identifier, evidence / 'g4-modality-vlm-image-runtime.json')
         deadline = time.monotonic() + 1800
         while time.monotonic() < deadline:
             try:

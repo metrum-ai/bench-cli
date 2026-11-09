@@ -23,6 +23,15 @@ weekly job additionally checks the actual published archives against their tag.
 
 ## Execution-time records and freeze checks
 
+For catalog r4 image-backed lanes, the freezer pins the tracked OCI index and
+linux/amd64 child descriptor bytes into each execution manifest. Offline
+preflight rechecks both digests, platform selection and the child config digest.
+Before serving, the runner checks the local image configuration against the
+child descriptor; after starting each r4 container it checks the container
+image identity and records index, child, platform and config digests. Missing,
+changed or ambiguous descriptor/runtime evidence fails closed. These checks do
+not establish physical cache-tier activity or replace the integrity audit.
+
 The harness requires Python 3.12 or newer. The shared result writer atomically
 publishes a case record, evidence SHA256 hashes, candidate identity, typed
 infrastructure history and conservative carry-over eligibility. The shared lane

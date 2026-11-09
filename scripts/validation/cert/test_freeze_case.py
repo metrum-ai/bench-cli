@@ -73,7 +73,8 @@ class FreezeCaseTests(unittest.TestCase):
                 all_smi=binary, input=[], command_json=None, out=root / "frozen.json", run_out=root / "run")
             with patch.object(freeze_case.manifest_tool, "load_manifest", return_value=({}, {"revision": "b" * 40})) as validation:
                 frozen = freeze_case.freeze(args)
-                validation.assert_called_once()
+                # Freeze validates once, then launcher preflight independently rechecks.
+                self.assertEqual(validation.call_count, 2)
                 self.assertIn("--out", frozen["cases"][args.case]["command"])
                 self.assertGreater(len(frozen["inputs"]), 10)
                 with self.assertRaises(FileExistsError):
@@ -92,15 +93,17 @@ class FreezeCaseTests(unittest.TestCase):
             entries = [{"path": str(args.out), "sha256": digest(args.out)}]
             data = {"candidate_sha": "a" * 40, "selection_sha256": digest(selection), "catalog_sha256": digest(catalog), "manifests": entries}
             index.write_text(json.dumps(data))
-            self.assertEqual(selected_set.load_set(selection, catalog, index)[0][0], args.case)
+            with patch.object(freeze_case.manifest_tool, 'load_manifest', return_value=({}, {'revision': 'b' * 40})):
+                self.assertEqual(selected_set.load_set(selection, catalog, index)[0][0], args.case)
             data["manifests"] = []
             index.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError, "missing"):
                 selected_set.load_set(selection, catalog, index)
             data["manifests"] = entries + entries
             index.write_text(json.dumps(data))
-            with self.assertRaisesRegex(ValueError, "duplicate"):
-                selected_set.load_set(selection, catalog, index)
+            with patch.object(freeze_case.manifest_tool, 'load_manifest', return_value=({}, {'revision': 'b' * 40})):
+                with self.assertRaisesRegex(ValueError, "duplicate"):
+                    selected_set.load_set(selection, catalog, index)
             data["manifests"] = entries
             index.write_text(json.dumps(data))
             args.out.write_text("modified")

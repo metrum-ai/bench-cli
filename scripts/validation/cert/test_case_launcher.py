@@ -23,7 +23,13 @@ class CaseLauncherTests(unittest.TestCase):
             sut.write_text(json.dumps({"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}))
             def pin(path):
                 return {"path": str(path), "sha256": digest(path)}
-            manifest = {"candidate_sha": "a" * 40, "candidate": pin(binary), "sut": pin(sut),
+            lane_manifest = root / 'lane.json'
+            lane_manifest.write_text('{}')
+            loader = patch('manifest_tool.load_manifest', return_value=({}, {'revision': 'b' * 40}))
+            loader.start()
+            self.addCleanup(loader.stop)
+            manifest = {"candidate_sha": "a" * 40, "candidate": pin(binary), "baseline": pin(binary),
+                        "lane": "G1", "lane_manifest": pin(lane_manifest), "sut": pin(sut),
                         "all_smi": pin(binary), "tokenizer": {**pin(binary), "revision": "b" * 40},
                         "cases": {"BC-GPU-001": {"launcher": pin(binary), "out": str(root / "attempt"),
                                                     "command": [str(binary), "--out", str(root / "attempt")]}}}
@@ -67,6 +73,24 @@ class CaseLauncherTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "revision"):
                 case_launcher.preflight(invalid)
 
+
+    def test_r4_result_identity_is_mandatory(self):
+        import r4_model_pins as pins
+        import r4_image_provenance as provenance
+        with tempfile.TemporaryDirectory() as temporary:
+            lane = Path(temporary) / 'lane.json'
+            config = {'image': pins.IMAGE, 'model': pins.GENERAL_MODEL, 'revision': pins.GENERAL_REVISION}
+            lane.write_text(json.dumps({'lanes': {'G1': config}}))
+            manifest = {'lane': 'G1', 'lane_manifest': {'path': str(lane), 'sha256': digest(lane)}}
+            versions = {'server_image': pins.IMAGE, 'model': pins.GENERAL_MODEL, 'model_revision': pins.GENERAL_REVISION,
+                        'image_index': provenance.INDEX, 'platform_manifest': provenance.AMD64,
+                        'image_config': provenance.CONFIG, 'image_platform': 'linux/amd64'}
+            case_launcher.validate_r4_record(manifest, 'BC-GPU-001', {'versions': versions})
+            for key in versions:
+                bad = dict(versions)
+                del bad[key]
+                with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'serving provenance'):
+                    case_launcher.validate_r4_record(manifest, 'BC-GPU-001', {'versions': bad})
 
     def test_successful_child_with_mutated_binary_cannot_validate_pass(self):
         import shlex
