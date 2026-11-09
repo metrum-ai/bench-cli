@@ -91,11 +91,11 @@ def rehearsal(manifest_path):
                 proxy = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=err, env=env)
                 try:
                     g6_counter_runner.wait_for_proxy(proxy_port, proxy)
-                    code = l1_runner.call(command, evidence / 'stdout.json', evidence / 'stderr.txt', 900, env=env)
+                    code = l1_runner.call(command, evidence / 'stdout.json', evidence / 'stderr.txt', 900, env=env, cwd=root)
                     if code or len(observed) != 8 or not csv_path.is_file() or not trace.is_file():
                         raise ValueError(f'GPU-013 strategic command failed: exit={code}, requests={len(observed)}')
                     failure_dir.mkdir()
-                    failure = l1_runner.call(failure_command, evidence / 'failure.json', evidence / 'failure.txt', 900, env=env)
+                    failure = l1_runner.call(failure_command, evidence / 'failure.json', evidence / 'failure.txt', 900, env=env, cwd=root)
                     if failure == 0 or len(observed) != 9:
                         raise ValueError('GPU-013 expected export failure did not exercise a product request')
                     if any(request.get('chat_template_kwargs') != {'enable_thinking': False} for request in observed):

@@ -47,7 +47,7 @@ def image_prompts(prompt, image):
             raise ValueError('VLM image must be the pinned local file; remote inputs are forbidden')
 
 
-def run_proxy(args, label, command, image=False, env=None):
+def run_proxy(args, label, command, image=False, env=None, cwd=None):
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
@@ -57,7 +57,7 @@ def run_proxy(args, label, command, image=False, env=None):
         proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=perr, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env)
+            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env, cwd=cwd)
             if code != 0:
                 raise ValueError(f'{label} exited {code}')
             g7_runner.wait_for_trace(trace)
@@ -80,10 +80,10 @@ def strategic_command(args, binary, label, model, prompt, kind):
     return command, csv_path, ndjson
 
 
-def strategic(args, binary, label, model, prompt, kind, env=None):
+def strategic(args, binary, label, model, prompt, kind, env=None, cwd=None):
     evidence = args.out / 'evidence'
     command, csv_path, ndjson = strategic_command(args, binary, label, model, prompt, kind)
-    trace = run_proxy(args, label, command, image=(kind == 'vlm'), env=env)
+    trace = run_proxy(args, label, command, image=(kind == 'vlm'), env=env, cwd=cwd)
     return {'summary': (evidence / f'{label}-stdout.txt').read_text(encoding='utf-8'),
             'csv': csv_path.read_text(encoding='utf-8'), 'telemetry': ndjson.read_text(encoding='utf-8'), 'trace': trace}
 

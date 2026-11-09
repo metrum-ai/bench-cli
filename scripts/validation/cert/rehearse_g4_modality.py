@@ -82,13 +82,13 @@ def rehearsal(manifest_path):
             data, trace, code, _ = r_runner.run_cell(args, 'g4-modality-llm', candidate, 4, 4096, True,
                 ['--slo', 'e2e=600', '--ndjson', str(llm_ndjson)], concurrency=1, env=env)
             check_product(data, trace, code, 4)
-            g4_modality_runner.strategic(args, strategic, 'g4-modality-llm-strategic', args.model, args.prompt, 'chat', env=env)
+            g4_modality_runner.strategic(args, strategic, 'g4-modality-llm-strategic', args.model, args.prompt, 'chat', env=env, cwd=root)
             data_path = evidence / 'g4-modality-vlm-requests.jsonl'
             telemetry = evidence / 'g4-modality-vlm-telemetry.jsonl'
             command = g4_modality_runner.vlm_command(args, vlm_bin, vlm_prompt, vlm['model'], data_path, telemetry)
             trace = g4_modality_runner.run_proxy(args, 'g4-modality-vlm', command, image=True, env=env)
             check_product(data_path.read_text(encoding='utf-8'), trace, 0, 4)
-            g4_modality_runner.strategic(args, strategic, 'g4-modality-vlm-strategic', vlm['model'], vlm_prompt, 'vlm', env=env)
+            g4_modality_runner.strategic(args, strategic, 'g4-modality-vlm-strategic', vlm['model'], vlm_prompt, 'vlm', env=env, cwd=root)
             if len(observed) != 16:
                 raise ValueError('GPU-011 loopback did not forward all four product cohorts')
             for index, request in enumerate(observed):

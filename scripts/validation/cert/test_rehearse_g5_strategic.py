@@ -49,9 +49,12 @@ class LoopbackTests(unittest.TestCase):
                         'inputs': [pin(path) for path in pins], 'cases': {case: {'command': command, 'out': str(output)}}}
             frozen = root / 'frozen.json'
             frozen.write_text(json.dumps(manifest))
+            default_report = rehearse_live_modalities.ROOT / 'metrum-ai-bench-cli-report.html'
+            before = default_report.read_bytes() if default_report.exists() else None
             with patch.object(rehearsal.case_launcher, 'preflight'), \
                  patch.object(rehearsal.manifest_tool, 'load_manifest', return_value=({}, config)):
                 rehearsal.rehearsal(frozen)
+                self.assertEqual(default_report.read_bytes() if default_report.exists() else None, before)
                 config['strategic_binary']['sha256'] = '0' * 64
                 with self.assertRaisesRegex(ValueError, 'strategic_binary pin differs'):
                     rehearsal.rehearsal(frozen)

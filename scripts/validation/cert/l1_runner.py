@@ -41,9 +41,9 @@ def evaluate(data, process_exit, assert_exit):
     return passed, observed
 
 
-def call(command, stdout, stderr, timeout, env=None):
+def call(command, stdout, stderr, timeout, env=None, cwd=None):
     try:
-        process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        process = subprocess.Popen(command, cwd=ROOT if cwd is None else cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    env=env, start_new_session=True)
     except OSError as exc:
         stdout.write_bytes(b"")
