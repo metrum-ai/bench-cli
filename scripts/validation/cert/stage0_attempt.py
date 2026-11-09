@@ -25,6 +25,22 @@ import stage0_process
 HERE = Path(__file__).resolve().parent
 
 
+def validate_dispatch(manifest, case):
+    """Restrict the successful-exit settlement assumption to the known G1 dispatch."""
+    try:
+        if case != 'BC-GPU-001' or manifest['lane'] != 'G1' or manifest['harness_repo'] != str(HERE.parents[2]):
+            raise ValueError('unsupported smoke dispatch')
+        entry = manifest['cases'][case]
+        launcher = str(HERE / 'case_entry.sh')
+        command = [launcher, '--case', case, '--lane', 'g1',
+                   '--candidate', manifest['candidate']['path'], '--baseline', manifest['baseline']['path'],
+                   '--manifest', manifest['lane_manifest']['path'], '--out', entry['out']]
+        if entry['launcher']['path'] != launcher or entry['command'] != command:
+            raise ValueError('unsupported smoke dispatch')
+    except (KeyError, TypeError) as exc:
+        raise ValueError('unsupported smoke dispatch') from exc
+
+
 def _receipt(path, value):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as stream:
@@ -68,6 +84,7 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
     if type(cap) is not int or type(grace) is not int or not 0 < grace < cap:
         raise ValueError('invalid case time cap')
     deadline = started + cap
+    validate_dispatch(manifest, case)
     case_launcher.preflight(manifest)
     device = stage0_device.probe(manifest['tools'], device=forwarded['CUDA_VISIBLE_DEVICES'],
                                  expected_name=expected_gpu, deadline=deadline, clock=clock)
@@ -114,7 +131,8 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
         errors.append(type(exc).__name__)
     # A killed/failed launcher may leave an in-flight Docker create even after
     # its process exits. Until a structured create-settlement proof exists,
-    # only an ordinary successful launcher can close creation. Still attempt
+    # only the known GPU-001 dispatch with an ordinary successful launcher
+    # can close creation. Still attempt
     # cleanup, but never declare clean for an ambiguous or timed-out attempt.
     creation_closed = (group_empty and pending is None and isinstance(outcome, stage0_process.ProcessOutcome)
                        and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0)

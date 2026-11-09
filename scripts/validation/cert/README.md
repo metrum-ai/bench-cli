@@ -417,6 +417,9 @@ tests but no live execution, no independently verified backstop, no complete
 classification or case-adapter set, and no hard upper bound for every blocking
 cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
 COMPLETE/PASS; it rejects unsupported assigned cases before the first launch.
+The attempt helper currently permits only the exact GPU-001 G1 production
+dispatch; its successful-exit settlement assumption still needs independent
+review and real Docker race tests. Other cases lack a settlement basis.
 The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
 index) and probes the reviewed GPU name/UUID before launch and again after
 cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID

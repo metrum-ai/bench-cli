@@ -22,9 +22,16 @@ class AttemptTests(unittest.TestCase):
         (self.smoke / '.stage0-smoke-root.json').write_text(json.dumps({
             'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': self.exp}))
         self.manifest = self.root / 'manifest.json'
-        self.manifest.write_text(json.dumps({'candidate_sha': self.sha, 'cases': {self.case: {'out': str(self.smoke / 'attempt')}},
+        entrypoint = str(stage0_attempt.HERE / 'case_entry.sh')
+        output = str(self.smoke / 'attempt')
+        self.data = {'candidate_sha': self.sha, 'lane': 'G1', 'harness_repo': str(stage0_attempt.HERE.parents[2]),
+            'candidate': {'path': '/candidate'}, 'baseline': {'path': '/baseline'}, 'lane_manifest': {'path': '/lane'},
+            'cases': {self.case: {'out': output, 'launcher': {'path': entrypoint},
+                'command': [entrypoint, '--case', self.case, '--lane', 'g1', '--candidate', '/candidate',
+                            '--baseline', '/baseline', '--manifest', '/lane', '--out', output]}},
             'tools': {'python3': {'path': '/usr/bin/python3', 'sha256': 'c' * 64},
-                      'docker': {'path': '/usr/bin/docker', 'sha256': 'd' * 64}}}))
+                      'docker': {'path': '/usr/bin/docker', 'sha256': 'd' * 64}}}
+        self.manifest.write_text(json.dumps(self.data))
         self.item = {'id': self.case, 'manifest': {'path': str(self.manifest),
                      'sha256': hashlib.sha256(self.manifest.read_bytes()).hexdigest()},
                      'cap_seconds': 150, 'grace_seconds': 30}
@@ -96,9 +103,17 @@ class AttemptTests(unittest.TestCase):
         self.item['id'] = self.case
         self.item['manifest']['sha256'] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
         self.mocks[4].side_effect = [ValueError('bad server'), 'clean']
-        with self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
+        with patch.object(stage0_attempt, 'validate_dispatch'), self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
             self.run_attempt()
         self.assertEqual(self.mocks[4].call_count, 2)
+
+    def test_unreviewed_dispatch_never_launches(self):
+        self.data['cases'][self.case]['command'].append('--extra')
+        self.manifest.write_text(json.dumps(self.data))
+        self.item['manifest']['sha256'] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'unsupported smoke dispatch'): self.run_attempt()
+        self.mocks[2].assert_not_called()
+        self.group.close_if_empty.assert_not_called()
 
     def test_malformed_launcher_outcome_does_not_skip_container_cleanup(self):
         self.mocks[2].return_value = object()
