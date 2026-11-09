@@ -4,6 +4,10 @@
 
 ## Unreleased (v1.9.0)
 
+- Update the v1.9.0 certification catalog to r4 following the maintainer decision
+  to use official Qwen3.8-27B in place of Qwen3-8B and Qwen3-4B.
+  Preserve the previous-release BC-PERF-001 gate configuration unchanged.
+
 - Enable the `tokenizer` feature by default for crate builds and explicitly in
   release binaries. Source builds can opt out with `--no-default-features`; those
   builds cannot perform pinned local tokenizer/chat-template validation.
