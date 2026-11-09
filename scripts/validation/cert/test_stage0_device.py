@@ -36,6 +36,10 @@ class DeviceTests(unittest.TestCase):
         self.result.stdout += self.result.stdout
         with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe()
         with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe(device='0,1')
+        self.result.stdout = b'NVIDIA H100, GPU-11111111-1111-1111-1111-111111111111, 550.1\n'
+        with self.assertRaisesRegex(ValueError, 'approved box'):
+            self.probe(device='GPU-22222222-2222-2222-2222-222222222222')
+        with self.assertRaisesRegex(ValueError, 'exactly one'): self.probe(device='GPU-11111111')
 
     def test_changed_tool_or_expired_cap_fails(self):
         self.mocks[1].return_value = 'b' * 64
