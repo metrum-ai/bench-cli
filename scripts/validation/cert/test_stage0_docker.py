@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
 """No-Docker tests for the pinned local command adapter."""
 import hashlib
 import subprocess
