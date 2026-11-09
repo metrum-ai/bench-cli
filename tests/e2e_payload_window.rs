@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! E2E (#242): the request window starts after the request body is built.
-//! A large image (4096x4096 PNG) or audio file is sent to dummy-model-server
-//! in strict mode, and each measured latency is compared with a reference
-//! POST of the same payload to the same server, timed by this test. Client
-//! side body work (base64 data URLs, JSON serialization, multipart assembly)
-//! done inside the window would push the tool's latency well above the
-//! reference. Skipped when `go` is missing (CI sets
+//! A large image (4096x4096 PNG) or audio file is sent to a local fixture,
+//! and each measured latency is compared with a reference POST of the same
+//! payload to the same server. The VLM case uses a controlled HTTP sink and
+//! validates every full JSON body and image after timing; the other cases use
+//! dummy-model-server in strict mode. Client body work (base64 data URLs,
+//! JSON serialization, multipart assembly) inside the window pushes latency
+//! above the reference. Dummy-server cases require Go (CI sets
 //! `METRUM_BENCH_REQUIRE_DUMMY=1`). Metrum AI.
 //!
 //! The vlm and strategic vlm tests fail on 7b4686d (before #242): JSON
@@ -23,6 +24,7 @@
 //! request windows, samples, thresholds, or assertions.
 
 mod common;
+mod payload_window_server;
 
 use base64::Engine;
 use common::{request_records, sine_wav, skip, spawn_dummy, Dummy};
@@ -186,13 +188,12 @@ fn write_vlm_prompts(dir: &Path) -> std::path::PathBuf {
     prompts
 }
 
-fn vlm_reference(dummy: &Dummy) -> f64 {
+fn vlm_reference_at(url: &str) -> f64 {
     let body = vlm_body(large_png());
     let client = client();
-    let url = dummy.url("/v1/chat/completions");
     reference_latency(|| {
         client
-            .post(&url)
+            .post(url)
             .bearer_auth("dummy")
             .header("Content-Type", "application/json")
             .body(body.clone())
@@ -201,20 +202,21 @@ fn vlm_reference(dummy: &Dummy) -> f64 {
     })
 }
 
+fn vlm_reference(dummy: &Dummy) -> f64 {
+    vlm_reference_at(&dummy.url("/v1/chat/completions"))
+}
+
 #[test]
 fn vlm_request_window_excludes_body_encoding() {
-    let Some(dummy) = dummy() else {
-        skip("go dummy-model-server not available");
-        return;
-    };
     let _timing = timing_lock();
+    let server = payload_window_server::PayloadServer::start(MAX_BODY);
     let dir = tempfile::tempdir().expect("tmpdir");
     let prompts = write_vlm_prompts(dir.path());
     let data_log = dir.path().join("vlm.jsonl");
     run(
         Command::new(env!("CARGO_BIN_EXE_metrum-ai-bench-cli-vlm")).args([
             "--url",
-            &dummy.url("/v1/chat/completions"),
+            &server.url(),
             "--api-key",
             "dummy",
             "--scenario",
@@ -246,7 +248,10 @@ fn vlm_request_window_excludes_body_encoding() {
             record["latency_s"].as_f64().expect("latency_s")
         })
         .collect();
-    let reference = vlm_reference(&dummy);
+    let reference = vlm_reference_at(&server.url());
+    // Validate exact captured JSON/image bytes after measurement, keeping CPU
+    // image/JSON decoding out of the tool/reference network windows.
+    server.validate(large_png(), 2 * (REQUESTS + 1));
     assert_window_excludes_body("vlm", latencies, reference);
 }
 
