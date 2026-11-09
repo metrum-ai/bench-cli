@@ -41,7 +41,7 @@ class Adapter:
     def launch(self, item):
         self.completed = None
         outcome = stage0_attempt.run(item, candidate=self.candidate, expectations_sha256=self.expectations_sha256,
-            smoke_root=self.smoke_root, cgroup_root=self.cgroup_root, forwarded=self.forwarded)
+            smoke_root=self.smoke_root, cgroup_root=self.cgroup_root, expected_gpu=self.gpu, forwarded=self.forwarded)
         if outcome.timed_out or outcome.returncode != 0:
             raise ValueError('unsupported launcher outcome')
         manifest = stage0_controller.pinned_manifest(item, self.candidate)

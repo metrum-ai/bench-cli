@@ -37,13 +37,16 @@ class AttemptTests(unittest.TestCase):
                         patch.object(stage0_attempt.stage0_process, 'run_bounded', return_value=self.outcome),
                         patch.object(stage0_attempt.stage0_cleanup, 'read_owner', return_value='f' * 32),
                         patch.object(stage0_attempt.stage0_cleanup, 'reconcile', return_value='clean'),
-                        patch.object(stage0_attempt.stage0_docker, 'Docker')]
+                        patch.object(stage0_attempt.stage0_docker, 'Docker'),
+                        patch.object(stage0_attempt.stage0_device, 'probe', return_value={
+                            'name': 'NVIDIA H100', 'uuid': 'GPU-' + '1' * 32, 'driver': '550.1'})]
         self.mocks = [p.start() for p in self.patches]
         for p in self.patches: self.addCleanup(p.stop)
 
     def run_attempt(self, **overrides):
         args = {'candidate': self.sha, 'expectations_sha256': self.exp, 'smoke_root': self.smoke,
-                'cgroup_root': '/approved/cgroup', 'forwarded': {'CUDA_VISIBLE_DEVICES': '0'}}
+                'cgroup_root': '/approved/cgroup', 'expected_gpu': 'NVIDIA H100',
+                'forwarded': {'CUDA_VISIBLE_DEVICES': '0'}}
         args.update(overrides)
         return stage0_attempt.run(self.item, **args)
 
@@ -96,6 +99,22 @@ class AttemptTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
             self.run_attempt()
         self.assertEqual(self.mocks[4].call_count, 2)
+
+    def test_malformed_launcher_outcome_does_not_skip_container_cleanup(self):
+        self.mocks[2].return_value = object()
+        with self.assertRaisesRegex(RuntimeError, 'settlement is unproven'):
+            self.run_attempt()
+        self.assertFalse(self.mocks[4].call_args.kwargs['creation_closed'])
+
+    def test_wrong_gpu_refuses_launch_and_changed_gpu_stops(self):
+        self.mocks[6].side_effect = ValueError('wrong GPU')
+        with self.assertRaisesRegex(ValueError, 'wrong GPU'): self.run_attempt()
+        self.mocks[2].assert_not_called()
+        before = {'name': 'NVIDIA H100', 'uuid': 'GPU-' + '1' * 32, 'driver': '550.1'}
+        self.mocks[6].side_effect = [before, {**before, 'uuid': 'GPU-' + '2' * 32}]
+        with self.assertRaisesRegex(RuntimeError, 'cleanup was not verified'):
+            self.run_attempt()
+        self.mocks[4].assert_called_once()
 
     def test_unapproved_environment_rejected_before_launch(self):
         with self.assertRaisesRegex(ValueError, 'environment'):

@@ -18,6 +18,7 @@ import result_writer
 import stage0_cgroup
 import stage0_cleanup
 import stage0_controller
+import stage0_device
 import stage0_docker
 import stage0_process
 
@@ -34,7 +35,7 @@ def _receipt(path, value):
     finally: os.close(dfd)
 
 
-def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwarded,
+def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expected_gpu, forwarded,
         clock=time.monotonic, pause=time.sleep):
     """Launch the real frozen case with a bounded cgroup and reconcile its resources.
 
@@ -68,6 +69,8 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
         raise ValueError('invalid case time cap')
     deadline = started + cap
     case_launcher.preflight(manifest)
+    device = stage0_device.probe(manifest['tools'], device=forwarded['CUDA_VISIBLE_DEVICES'],
+                                 expected_name=expected_gpu, deadline=deadline, clock=clock)
     control.mkdir(mode=0o700)
     parent_fd = os.open(control.parent, os.O_RDONLY | os.O_DIRECTORY)
     try: os.fsync(parent_fd)
@@ -81,6 +84,7 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
     pending, outcome = None, None
     try:
         _receipt(control / 'cgroup.json', {'parent': str(Path(cgroup_root)), 'name': group.name})
+        _receipt(control / 'gpu-before.json', device)
         # Reserve the declared cleanup grace after the launcher has stopped.
         process_cap = deadline - grace - clock()
         signal_grace = min(5.0, process_cap / 2)
@@ -112,8 +116,8 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
     # its process exits. Until a structured create-settlement proof exists,
     # only an ordinary successful launcher can close creation. Still attempt
     # cleanup, but never declare clean for an ambiguous or timed-out attempt.
-    creation_closed = (group_empty and pending is None and outcome is not None
-                       and not outcome.timed_out and outcome.returncode == 0)
+    creation_closed = (group_empty and pending is None and isinstance(outcome, stage0_process.ProcessOutcome)
+                       and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0)
     if not creation_closed:
         errors.append('container creation settlement is unproven')
     roles = ['server']
@@ -135,6 +139,11 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
         if result_writer.smoke_origin(root) != origin:
             raise ValueError('smoke root changed during attempt')
         stage0_controller.pinned_manifest(item, candidate)
+        after = stage0_device.probe(manifest['tools'], device=forwarded['CUDA_VISIBLE_DEVICES'],
+                                    expected_name=expected_gpu, deadline=deadline, clock=clock)
+        if after != device:
+            raise ValueError('GPU identity changed during attempt')
+        _receipt(control / 'gpu-after.json', after)
     except BaseException as exc:
         errors.append(type(exc).__name__)
     if errors:
