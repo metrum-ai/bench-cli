@@ -2,7 +2,7 @@
 
 # Changelog
 
-## Unreleased (v1.9.0)
+## [1.9.0] - TBD-at-tag
 
 - Add source-pinned vLLM 0.33 APC, external-cache and offload metric profiles.
   Preserve Unknown for incompatible revisions or missing evidence; connector
@@ -99,8 +99,6 @@
   `pairs_over_threshold_truncated: bool`; existing function signatures remain
   unchanged. Stored pairs now use deterministic measured/token-lexicographic
   order. Pair-list length alone must not determine pass/fail.
-
-## Unreleased
 
 - Metrum AI: cancel superseded PR workflows while preserving active and queued
   non-PR evidence with unique run-ID groups, including the self-hosted job.
