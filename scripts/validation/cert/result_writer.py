@@ -76,6 +76,16 @@ def require_same_evidence_origin(destination, source, record=None):
             raise NonCertificationEvidence('smoke predecessor classification mismatch')
 
 
+def require_input_origin(destination, source):
+    """Frozen cert inputs may feed smoke; smoke inputs cannot feed certification."""
+    try:
+        dst, src = smoke_origin(destination), smoke_origin(source)
+    except (ValueError, OSError) as exc:
+        raise NonCertificationEvidence('invalid input evidence origin') from exc
+    if src is not None and dst != src:
+        raise NonCertificationEvidence('input crosses smoke evidence roots')
+
+
 def reject_smoke_root(directory):
     try:
         marked = classify_smoke(Path(directory).resolve(), {})

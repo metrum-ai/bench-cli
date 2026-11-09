@@ -14,10 +14,12 @@ from pathlib import Path
 
 import comp_reference_runner
 import manifest_tool
+import result_writer
 
 
 def prepare(source, source_sha, output_dir):
     source = Path(source).resolve(strict=True)
+    result_writer.require_input_origin(output_dir, source.parent)
     raw = source.read_bytes()
     if not re.fullmatch(r'[a-f0-9]{64}', source_sha) or hashlib.sha256(raw).hexdigest() != source_sha:
         raise ValueError('reference source hash mismatch')

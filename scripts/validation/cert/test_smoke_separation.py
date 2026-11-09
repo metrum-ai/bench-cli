@@ -143,6 +143,16 @@ class SmokeSeparationTests(unittest.TestCase):
             self.assertEqual(record['evidence_class'], result_writer.SMOKE_CLASS)
             self.assertEqual(record['stage0_expectations_sha256'], 'a' * 64)
 
+    def test_frozen_input_origin_allows_cert_to_smoke_but_not_reverse(self):
+        result_writer.require_input_origin(self.attempt, self.root)
+        result_writer.require_input_origin(self.attempt, self.smoke)
+        with self.assertRaisesRegex(result_writer.NonCertificationEvidence, 'crosses smoke'):
+            result_writer.require_input_origin(self.root, self.attempt)
+        other = self.root / 'other'; other.mkdir()
+        (other / result_writer.SMOKE_MARKER).write_text(self.marker.read_text())
+        with self.assertRaisesRegex(result_writer.NonCertificationEvidence, 'crosses smoke'):
+            result_writer.require_input_origin(other, self.attempt)
+
     def test_invalid_or_nested_markers_and_unmarked_smoke_fail_closed(self):
         self.marker.write_text('{"classification":"invalid"}')
         with self.assertRaisesRegex(ValueError, 'invalid smoke root'):

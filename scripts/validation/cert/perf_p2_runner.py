@@ -10,6 +10,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import result_writer
 
 import l1_runner
 import manifest_tool
@@ -47,6 +48,7 @@ def main():
             if recorded.tzinfo is None or start.tzinfo is None or recorded >= start or not str(noise.get('evidence_link', '')).strip():
                 raise ValueError('noise floor must have prior timestamp and independently reviewable evidence')
             noise_copy = evidence / 'p2-noise-floor.json'
+            result_writer.require_input_origin(args.out, Path(noise['path']).resolve().parent)
             shutil.copyfile(noise['path'], noise_copy)
             if manifest_tool.sha256_file(noise_copy) != noise['sha256']:
                 raise ValueError('noise floor changed before collection')
@@ -102,6 +104,9 @@ def main():
         passed = code == 0 and value.get('verdict') == 'PASS' and observed['independent_legacy']['result'] == 'PASS'
         if not passed:
             observed['error'] = f'legacy-cohort performance gates did not pass (exit {code})'
+    except result_writer.NonCertificationEvidence as exc:
+        print(f'Input evidence rejected: {exc}', file=sys.stderr)
+        return 1
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
         observed['error'] = str(exc)
     output = evidence / 'p2-observed.json'

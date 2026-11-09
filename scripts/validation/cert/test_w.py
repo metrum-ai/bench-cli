@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import manifest_tool
+import result_writer
 import w_checks
 import w_finalize
 
@@ -76,6 +77,18 @@ class ContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / 'evidence').mkdir(); (root / 'results').mkdir()
             with self.assertRaises(OSError): w_finalize.finalize(root, root / 'missing')
+            self.assertFalse((root / 'results/BC-INTEG-001.json').exists())
+
+    def test_smoke_signoff_cannot_be_copied_into_certification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); (root / 'evidence').mkdir(); (root / 'results').mkdir()
+            smoke = root / 'smoke'; smoke.mkdir()
+            (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+                {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'f' * 64}))
+            signoff = smoke / 'signoff.json'; signoff.write_text('{}')
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                w_finalize.finalize(root, signoff)
+            self.assertFalse((root / 'evidence/w-platform-signoff.json').exists())
             self.assertFalse((root / 'results/BC-INTEG-001.json').exists())
 
     def test_signoff_binds_evidence_and_never_overwrites(self):
