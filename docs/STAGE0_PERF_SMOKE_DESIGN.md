@@ -41,4 +41,6 @@ exporter and model server when applicable.
   reserved exit. Test changed manifests, missing evidence, writer fallback,
   unexpected PASS and failed cleanup.
 - Review feasible case caps after including server startup, collection and
-  cleanup. BC-PERF-003 uses a separate runner and is not covered by this design.
+  cleanup. BC-PERF-003 uses a separate runner and is not covered by this design;
+  its first baseline cell also requests a 30-second warmup and 180-second
+  measurement before the candidate cell begins.
