@@ -406,13 +406,14 @@ accidental mixing, not an authenticated boundary against record rewriting. No
 smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
-The initial `stage0_process.py`, `stage0_milestones.py` and
-`stage0_backstop.py` modules are **incomplete control primitives**, not a
-runnable Stage-0 controller. Their offline tests exercise process signalling,
-limited r4/LLM milestone checks and fake-provider teardown decisions only.
-They do not start an independent provider watchdog, implement all modality and
-performance evidence adapters, or establish owned-resource cleanup. Do not
-run Stage 0 or infer a box barrier from these modules.
+The initial `stage0_process.py`, `stage0_milestones.py`,
+`stage0_backstop.py` and `stage0_watchdog.py` modules are **incomplete control
+primitives**, not a runnable Stage-0 controller. Their offline tests exercise
+process signalling, limited r4/LLM milestone checks and a fake-provider
+watchdog loop only. They do not start an independent watchdog or provide a real
+provider adapter, implement all modality and performance evidence adapters, or
+establish owned-resource cleanup. Do not run Stage 0 or infer a box barrier from
+these modules.
 
 ### Remaining offline launch rehearsal work (#469)
 
