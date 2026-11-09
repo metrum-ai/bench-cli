@@ -329,6 +329,18 @@ RC-GPU IDs, without missing/duplicate/extra IDs. All manifests are verified
 before any launch and rechecked at each execution boundary. The order in the
 index is the execution order, so dependencies must precede their barriers.
 
+### Remaining offline launch rehearsal work (#469)
+
+The complete-set preflight and individual synthetic loopbacks are **not** a
+complete offline launch rehearsal. Before rental, every selected case, including
+the live-validation case, needs fail-closed dispatch exercising its actual runner
+input assembly and relevant argument/SUT parsers against frozen manifests.
+Unknown or missing handlers must fail. L1's production derived-input/output
+boundary, COMP-002's reference parser, the remaining selected cases, frozen
+input-plan wiring and execution-host schema-cache provisioning are outstanding.
+The native CPU-offload validation plan and integrity audit are separate required
+work. Loopbacks are not physical-tier evidence or an OS network sandbox.
+
 BC-COMP-001, BC-OPS-001 and externally signed BC-INTEG-001 require an explicit
 pinned command via `freeze_case.py --command-json`: they are respectively a
 post-measurement barrier, external resource cleanup and externally reviewed
