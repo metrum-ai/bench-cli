@@ -47,7 +47,7 @@ def prepare(source, source_sha, output_dir):
         for seq, prompt in enumerate(prompts):
             encoded = prompt.encode('utf-8')
             slot = {'seq': seq, 'prompt_index': seq, 'prompt_sha256_16': hashlib.sha256(encoded).hexdigest()[:16],
-                    'prompt_bytes': len(encoded)}
+                    'prompt_bytes': len(encoded), 'cohort': seq}
             stream.write(json.dumps(slot, separators=(',', ':')) + '\n')
     def pin(path):
         return {'path': str(path.resolve()), 'sha256': manifest_tool.sha256_file(path)}

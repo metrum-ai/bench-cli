@@ -34,7 +34,10 @@ class ReferencePreparationTests(unittest.TestCase):
             self.assertEqual(len(order), 64)
             self.assertEqual(json.loads(prompts.read_text().splitlines()[0])['prompt'], self.rows[0]['prompt'])
             self.assertEqual(json.loads(sharegpt.read_text())[0]['conversations'][0]['value'], self.rows[0]['prompt'])
-            self.assertEqual(json.loads(order_path.read_text().splitlines()[0])['prompt_bytes'], len(self.rows[0]['prompt'].encode()))
+            first = json.loads(order_path.read_text().splitlines()[0])
+            self.assertEqual(first['prompt_bytes'], len(self.rows[0]['prompt'].encode()))
+            self.assertEqual(first['cohort'], 0)
+            self.assertEqual(json.loads(order_path.read_text().splitlines()[-1])['cohort'], 63)
             receipts.append(receipt)
         for key in ('reference', 'reference_sharegpt'):
             self.assertEqual(receipts[0]['comparison_config']['prompt_sets'][key]['sha256'],
@@ -43,6 +46,22 @@ class ReferencePreparationTests(unittest.TestCase):
                          receipts[1]['comparison_config']['reference_order']['sha256'])
         with self.assertRaises(FileExistsError):
             prepare_reference_inputs.prepare(self.source, sha, self.root / 'one')
+
+    def test_rejects_missing_or_incorrect_cohort_before_freeze(self):
+        receipt_pin = prepare_reference_inputs.prepare(self.source, manifest_tool.sha256_file(self.source), self.root / 'valid')
+        config = json.loads(Path(receipt_pin['path']).read_text())['comparison_config']
+        path = Path(config['reference_order']['path'])
+        original = [json.loads(line) for line in path.read_text().splitlines()]
+        for value in (None, True, 99):
+            rows = [dict(row) for row in original]
+            if value is None:
+                del rows[1]['cohort']
+            else:
+                rows[1]['cohort'] = value
+            path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            config['reference_order']['sha256'] = manifest_tool.sha256_file(path)
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'cohorts'):
+                comp_reference_runner.reference_inputs(config)
 
     def test_invalid_source_fails_before_creating_output(self):
         output = self.root / 'output'

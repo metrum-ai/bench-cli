@@ -34,7 +34,7 @@ def pinned_file(value, label):
     return path
 
 
-def run_recorded(args, name, command):
+def run_recorded(args, name, command, env=None):
     evidence = args.out / "evidence"
     trace = evidence / f"comp-{name}-trace.jsonl"
     proxy_err = evidence / f"comp-{name}-proxy-error.txt"
@@ -42,10 +42,10 @@ def run_recorded(args, name, command):
         proxy = subprocess.Popen([sys.executable, str(Path(__file__).with_name("trace_proxy.py")),
                                   "--listen-port", str(args.proxy_port), "--upstream-port", str(args.port),
                                   "--out", str(trace), "--record-request-identity"], stdout=subprocess.DEVNULL,
-                                 stderr=err, cwd=ROOT)
+                                 stderr=err, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f"comp-{name}-stdout.txt", evidence / f"comp-{name}-stderr.txt", 3600)
+            code = l1_runner.call(command, evidence / f"comp-{name}-stdout.txt", evidence / f"comp-{name}-stderr.txt", 3600, env=env)
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 try:
@@ -74,9 +74,9 @@ def reference_inputs(config):
     if config.get('comparison_cap') != cap:
         raise ValueError('frozen reference comparison cap differs')
     order_path = pinned_file(config['reference_order'], 'reference order')
-    order = [json.loads(line) for line in order_path.read_text(encoding='utf-8').splitlines() if line.strip()]
-    dataset = [json.loads(line) for line in prompts.read_text(encoding='utf-8').splitlines() if line.strip()]
-    sharegpt_rows = json.loads(sharegpt.read_text(encoding='utf-8'))
+    order = [json.loads(line, object_pairs_hook=manifest_tool.unique_object) for line in order_path.read_text(encoding='utf-8').splitlines() if line.strip()]
+    dataset = [json.loads(line, object_pairs_hook=manifest_tool.unique_object) for line in prompts.read_text(encoding='utf-8').splitlines() if line.strip()]
+    sharegpt_rows = json.loads(sharegpt.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
     if len(dataset) != 64 or len(order) != 64 or not isinstance(sharegpt_rows, list) or len(sharegpt_rows) != 64:
         raise ValueError('64 frozen reference prompts and slots required')
     for index, (slot, item) in enumerate(zip(order, dataset)):
@@ -84,8 +84,9 @@ def reference_inputs(config):
         turns = sharegpt_rows[index].get('conversations', [])
         if not isinstance(turns, list) or len(turns) != 2 or turns[0].get('value') != prompt or turns[1].get('value') != 'placeholder':
             raise ValueError('reference dataset does not reproduce the frozen prompt sequence')
-        if not isinstance(prompt, str) or slot.get('seq') != index or slot.get('prompt_index') != index:
-            raise ValueError('reference order does not match frozen prompt IDs')
+        if (not isinstance(prompt, str) or any(type(slot.get(key)) is not int or slot[key] != index
+                                              for key in ('seq', 'prompt_index', 'cohort'))):
+            raise ValueError('reference order does not match frozen prompt IDs and concurrency-one cohorts')
         digest = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
         if slot.get('prompt_sha256_16') != digest[:16] or slot.get('prompt_bytes') != len(prompt.encode('utf-8')):
             raise ValueError('frozen prompt fingerprint or length differs')
@@ -93,6 +94,36 @@ def reference_inputs(config):
     if len({slot['prompt_sha256'] for slot in order}) != 64:
         raise ValueError('reference prompt IDs must be distinct')
     return prompts, sharegpt, order_path, order
+
+
+def invocations(args, prompts, sharegpt, order_path, cache, container, evidence):
+    """Assemble the actual candidate/reference commands from pinned inputs."""
+    cap = 1024
+    if not cache or not Path(cache).is_dir():
+        raise ValueError('pinned offline tokenizer cache is required')
+    tokenizer = f"/root/.cache/huggingface/hub/models--{args.model.replace('/', '--')}/snapshots/{args.revision}"
+    if not (Path(cache) / f"models--{args.model.replace('/', '--')}" / 'snapshots' / args.revision).is_dir():
+        raise ValueError('pinned tokenizer snapshot is missing')
+    candidate_data = evidence / 'comp-candidate-requests.jsonl'
+    candidate = [str(args.candidate), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions',
+                 '--api-key', 'dummy', '--scenario', 'comp-reference-candidate', '--num-requests', '64',
+                 '--concurrency', '1', '--prompts', str(prompts), '--prompt-sequence', str(order_path),
+                 '--mode', 'chat', '--streaming', '--model', args.model, '--data-log', str(candidate_data),
+                 '--max-tokens', str(cap), '--temperature', '0', '--seed', '42', '--request-timeout', '21600',
+                 '--extra-body-json', '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}']
+    reference = ['docker', 'run', '--name', container, '--pull', 'never', '--network', 'host',
+                 '--env', 'HF_HUB_OFFLINE=1', '--env', 'TRANSFORMERS_OFFLINE=1', '--env', 'OPENAI_API_KEY=dummy',
+                 '--mount', f'type=bind,src={Path(cache).resolve()},dst=/root/.cache/huggingface/hub,readonly',
+                 '--mount', f'type=bind,src={sharegpt},dst=/inputs/prompts.json,readonly',
+                 '--mount', f'type=bind,src={evidence},dst=/evidence', '--entrypoint', 'vllm', args.image,
+                 'bench', 'serve', '--backend', 'openai-chat', '--base-url', f'http://localhost:{args.proxy_port}',
+                 '--endpoint', '/v1/chat/completions', '--model', args.model, '--tokenizer', tokenizer,
+                 '--dataset-name', 'sharegpt', '--dataset-path', '/inputs/prompts.json',
+                 '--disable-shuffle', '--no-oversample', '--sharegpt-output-len', str(cap), '--num-prompts', '64',
+                 '--max-concurrency', '1', '--temperature', '0', '--seed', '42', '--num-warmups', '0',
+                 '--extra-body', '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}', '--disable-tqdm',
+                 '--save-result', '--save-detailed', '--result-dir', '/evidence', '--result-filename', 'comp-reference-result.json']
+    return candidate, reference, candidate_data
 
 
 def main():
@@ -115,30 +146,7 @@ def main():
         config = json.loads(args.manifest.read_text(encoding="utf-8"))["lanes"]["D"]
         prompts, sharegpt, order_path, order = reference_inputs(config)
         cache = os.environ.get("CERT_HF_HUB_CACHE", "")
-        if not cache or not Path(cache).is_dir():
-            raise ValueError("pinned offline tokenizer cache is required")
-        tokenizer = f"/root/.cache/huggingface/hub/models--{args.model.replace('/', '--')}/snapshots/{args.revision}"
-        if not (Path(cache) / f"models--{args.model.replace('/', '--')}" / "snapshots" / args.revision).is_dir():
-            raise ValueError("pinned tokenizer snapshot is missing")
-        candidate_data = evidence / "comp-candidate-requests.jsonl"
-        candidate = [str(args.candidate), "--url", f"http://localhost:{args.proxy_port}/v1/chat/completions",
-                     "--api-key", "dummy", "--scenario", "comp-reference-candidate", "--num-requests", "64",
-                     "--concurrency", "1", "--prompts", str(prompts), "--prompt-sequence", str(order_path),
-                     "--mode", "chat", "--streaming", "--model", args.model, "--data-log", str(candidate_data),
-                     "--max-tokens", str(cap), "--temperature", "0", "--seed", "42", "--request-timeout", "21600",
-                     "--extra-body-json", '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}']
-        reference = ["docker", "run", "--name", container, "--pull", "never", "--network", "host",
-                     "--env", "HF_HUB_OFFLINE=1", "--env", "TRANSFORMERS_OFFLINE=1", "--env", "OPENAI_API_KEY=dummy",
-                     "--mount", f"type=bind,src={Path(cache).resolve()},dst=/root/.cache/huggingface/hub,readonly",
-                     "--mount", f"type=bind,src={sharegpt},dst=/inputs/prompts.json,readonly",
-                     "--mount", f"type=bind,src={evidence},dst=/evidence", "--entrypoint", "vllm", args.image,
-                     "bench", "serve", "--backend", "openai-chat", "--base-url", f"http://localhost:{args.proxy_port}",
-                     "--endpoint", "/v1/chat/completions", "--model", args.model, "--tokenizer", tokenizer,
-                     "--dataset-name", "sharegpt", "--dataset-path", "/inputs/prompts.json",
-                     "--disable-shuffle", "--no-oversample", "--sharegpt-output-len", str(cap), "--num-prompts", "64",
-                     "--max-concurrency", "1", "--temperature", "0", "--seed", "42", "--num-warmups", "0",
-                     "--extra-body", '{"seed":42,"chat_template_kwargs":{"enable_thinking":true}}', "--disable-tqdm",
-                     "--save-result", "--save-detailed", "--result-dir", "/evidence", "--result-filename", "comp-reference-result.json"]
+        candidate, reference, candidate_data = invocations(args, prompts, sharegpt, order_path, cache, container, evidence)
         (evidence / "comp-commands.json").write_text(json.dumps({"candidate": candidate, "reference": reference}, indent=2) + "\n")
         code, candidate_trace = run_recorded(args, "candidate", candidate)
         result["candidate_exit"] = code

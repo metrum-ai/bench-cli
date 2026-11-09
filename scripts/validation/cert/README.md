@@ -141,8 +141,16 @@ an OS network sandbox or replace the complete selected-set rehearsal.
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates
-them with the real runner's input checks and emits a pinned receipt. Freeze the
-source, receipt and all three outputs; this preparation does not run the case.
+them with the real runner's input checks and emits a pinned receipt. The order
+rows include the product parser's required concurrency-one `cohort`; regenerate
+any earlier order file that lacks it before freezing. Freeze the source, receipt
+and all three outputs; this preparation does not run the case.
+`rehearse_comp_candidate.py --manifest FROZEN_CASE.json --tokenizer-cache CACHE`
+checks the frozen tokenizer snapshot and executes the actual candidate-side argv
+and prompt order against synthetic loopback. It assembles the reference command
+but does **not** execute the vLLM reference parser or container, invoke the
+comparison validator, or write a case record; it is not a complete rehearsal or
+an OS network sandbox.
 
 Before going offline for BC-GPU-016, run `scripts/validation/cert/prepare_schema_cache.sh`
 with the intended Cargo home and toolchain. It runs `cargo fetch --locked` followed

@@ -68,7 +68,7 @@ class CaseInputChecksTests(unittest.TestCase):
             sharegpt.append({'conversations': [{'value': text}, {'value': 'placeholder'}]})
             order.append({'seq': index, 'prompt_index': index,
                           'prompt_sha256_16': hashlib.sha256(text.encode()).hexdigest()[:16],
-                          'prompt_bytes': len(text.encode())})
+                          'prompt_bytes': len(text.encode()), 'cohort': index})
         prompt, dataset, slots = self.root / 'reference.jsonl', self.root / 'sharegpt.json', self.root / 'order.jsonl'
         prompt.write_text(''.join(json.dumps(row) + '\n' for row in prompts))
         dataset.write_text(json.dumps(sharegpt))
