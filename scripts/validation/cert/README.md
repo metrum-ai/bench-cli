@@ -147,7 +147,13 @@ record. The launcher rejects reused attempt directories. On failure or an
 interrupt it stops its owned process group and preserves a typed FAIL with null
 unknown counts if the case did not publish a record. Existing records are never
 overwritten: a separate failure sentinel prevents an earlier PASS from masking
-a launcher/cleanup failure. A sibling `OUT-lifecycle` directory retains append-only
+a launcher/cleanup failure. Once a non-W case may have recorded its startup
+`evidence/server.log`, cleanup preserves that file and writes the final container
+snapshot to `evidence/server-teardown.log`, with a separate
+`evidence/server-teardown.sha256`. The checksum is an independent sidecar, not
+an output hash in a case record already written before cleanup; retain both for
+review. W has no result until external sign-off, which binds its final
+`server.log` after cleanup. A sibling `OUT-lifecycle` directory retains append-only
 input-ready and record-validated observations. External provisioning events must
 still be supplied by the operator at their actual source. Launch one case with `--case ID`, or omit `--case` for the whole selected
 set. Pins are rechecked before each launch; no shell evaluation is performed.
