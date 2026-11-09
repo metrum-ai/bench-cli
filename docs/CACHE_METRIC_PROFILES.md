@@ -17,6 +17,7 @@ synthetic, source-derived exposition, not captured live engine pages.
 | vLLM APC | `aa4022dc8176db8f769f93445d845f8755f9b4ca` | Native prefix hit/query **token** counters; utilization gauge uses 1=100%. |
 | vLLM external | same revision | Separate connector hit/query token counters, never silently summed with native counters. |
 | vLLM offload | same revision | Flat directional byte counters, cumulative transfer time in **seconds** and allocation-failure **events**. Deprecated transfer-type aggregates are deliberately excluded, not summed or aliased. |
+| vLLM 4ba APC, external, offload | `4ba787ec9959e566d3b587a796dff07673324da5` | Separate exact-revision slices of the same metric families and units. See the revision-specific caveats below; these profiles do not imply tier attribution. |
 | SGLang | `188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a` | Cached-token counter retains device/host/storage/total source labels; hit-rate gauge is not a phase counter. |
 | LMCache | `34f8a409e3631eff51d0b6fff67ca9c68f123377` | Requested/hit/stored tokens differ from remote byte counters and retrieve-request counts. Stored tokens include evicted tokens: not resident occupancy. Separate reported cache/storage byte gauges, eviction-operation events, evicted keys and failed-eviction **candidate counts** retain their units. A failed selection can count up to 64 candidates, not one failed call. |
 | Dynamo KVBM | `fa9852014950ed0aea74e56e1de441fc6de15307` | Directional transfer **blocks**, matched tokens and sliding-window hit-rate gauges are distinct. Object read/write failure counters also count **blocks**, not requests. No block-to-byte conversion. |
@@ -26,6 +27,16 @@ Dynamo's pinned recipe explicitly requires **Dynamo <=1.6.x**; later releases
 no longer ship KVBM. The legacy source slice is not a claim that current Dynamo
 releases expose these metrics. No release aliases have been validated. Supplying a source revision is an **operator declaration**, not an
 independent observation of the executable version or deployed tier.
+
+## vLLM source revision 4ba787ec
+
+The following source references are pinned to commit `4ba787ec9959e566d3b587a796dff07673324da5`, the source revision reported by the v0.33.0 image's configuration. An image label is a publisher claim, not independent build provenance.
+
+- [`loggers.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/v1/metrics/loggers.py) declares local and connector prefix queries and hits in tokens and increments them from separate scheduler statistics. [`kv_cache_manager.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/v1/core/kv_cache_manager.py) records local queries and hits for eligible lookups. [`stats.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/v1/metrics/stats.py) keeps preempted request statistics separate from the counters used by the logger. The utilization gauge reports the engine's cache usage ratio; it is not physical allocation proof.
+- [`scheduler.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/v1/core/sched/scheduler.py) counts local lookup statistics at admission and connector queries/hits from its planned external matches. The connector counts are admission/acceptance observations, not independent evidence of a completed transfer or a specific physical medium. Cache-read opt-out and scheduling behavior differ from the older revision, so counts need not be comparable across versions or workloads.
+- [`offloading/metrics.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/distributed/kv_transfer/kv_connector/v1/offloading/metrics.py) defines flat directional load/store byte and time counters, synchronous lookup duration and failed store-allocation events. [`offloading/worker.py`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/distributed/kv_transfer/kv_connector/v1/offloading/worker.py) records completed successful transfer size/time only when both are supplied; a failed job asserts. These aggregates neither identify a request nor establish a physical CPU-tier hit. The corresponding definition and logger files are byte-identical to the older profile revision, but worker failure handling, cache-lookup opt-outs and CPU-manager store-threshold accounting differ. Deprecated transfer-type aggregates are not accepted as aliases.
+
+Each supported source slice is selected explicitly; wrong, absent or abbreviated revisions remain Unknown. Unlisted metrics are not assigned semantics. A missing or malformed required family remains Unknown rather than zero.
 
 ## Conservative probe behavior
 
@@ -89,7 +100,7 @@ source-reference descriptors, not assertions that a server exported them.
 Operator-declared source compatibility is separately `not_declared`,
 `matches_reference` or `unsupported`; a match does not verify the executable.
 Release aliases remain empty, legacy Dynamo's restriction remains explicit,
-and the TRT-LLM slice records explicit semantic qualifiers. Complete-profile support, physical-tier validation,
+and the TRT-LLM and `4ba787ec` vLLM slices record explicit semantic qualifiers. Complete-profile support, physical-tier validation,
 phase-delta validation, complete-distribution validation and quantile
 reconstruction are explicitly false in this prototype.
 
@@ -99,7 +110,8 @@ Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optiona
 `--cache-metrics-source-revision`. Endpoint and profile must be selected together;
 a supplied revision must be a full source SHA. Missing/unsupported revisions
 preserve Unknown sample values rather than guessing executable compatibility.
-Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`, `sglang`, `lmcache`
+Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`,
+`vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `lmcache`,
 legacy `dynamo-kvbm` and `trt-llm`. These are selections, not backend autodetection.
 
 Discovery performs one unauthenticated GET before measurement. It sends no
