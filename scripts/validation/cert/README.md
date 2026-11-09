@@ -23,6 +23,12 @@ weekly job additionally checks the actual published archives against their tag.
 
 ## Execution-time records and freeze checks
 
+The complete selected-set gate is a **loopback offline rehearsal (no netns isolation)**:
+it must use each selected executable case's frozen launch path and candidate
+binaries, loopback stand-ins, record writers and validator intake. Approved N/As
+remain N/As, not simulated executions. The partial probes below are not that gate. They provide no OS-enforced network isolation and no GPU or
+physical-tier evidence.
+
 For catalog r4 image-backed lanes, the freezer pins the tracked OCI index and
 linux/amd64 child descriptor bytes into each execution manifest. Offline
 preflight rechecks both digests, platform selection and the child config digest.
@@ -94,8 +100,7 @@ temporary output paths, it does not call the production case-output boundary;
 the loopback requests precede the independent check and are never evidence.
 It does not call a record writer or exercise non-live cases, physical GPU behavior
 or the native offload gate, and is **not** the complete selected-set rehearsal.
-Its disposable loopback server is not an OS network sandbox; use independently
-enforced offline policy.
+Its disposable loopback server is not an OS network sandbox.
 
 `rehearse_g1_variants.py --manifest FROZEN_CASE.json` is a partial GPU-003
 check: it validates the frozen G1 inputs and actual runner's tool prompt, then
@@ -103,14 +108,14 @@ runs all six real product/proxy command variants against a synthetic loopback
 server using disposable output. It checks each product request and forwarded
 variant fields, but does not run the GPU-003 validator or write a case record.
 Its loopback fixture is not an OS network sandbox, real-model evidence, or the
-complete selected-set rehearsal. Independently enforce offline policy.
+complete selected-set rehearsal.
 
 `rehearse_g5_strategic.py --manifest FROZEN_CASE.json` exercises the GPU-013
 strategic benchmark and intentional export-failure argv with the pinned product
 binary, real trace proxy and synthetic loopback responses. It does not kill or
 restart a server, invoke the validator or write a case record; it is not real
 server evidence or the complete selected-set rehearsal. Its fixture is not an OS
-network sandbox; independently enforce offline policy.
+network sandbox.
 
 `rehearse_g5_endpoints.py --manifest FROZEN_CASE.json` exercises the GPU-015
 four-port configuration check and actual endpoint-file/product argv against two
@@ -118,15 +123,14 @@ synthetic local servers with two trace proxies. It verifies successful measured
 requests reach both endpoints, but does not kill a server, invoke the validator
 or write a case record. Temporary loopback ports replace the frozen ports after
 checking them; it is not an OS network sandbox, real failover evidence or the
-complete selected-set rehearsal. Independently enforce offline policy.
+complete selected-set rehearsal.
 
 `rehearse_vlm_reasoning.py --manifest FROZEN_CASE.json` exercises the actual
 REASON-005 VLM product/proxy argv against a synthetic local server, verifies
 seven completed product requests and compares the wire-embedded image bytes
 with the frozen image pin. It checks the actual runner's input validation but
 does not invoke its result validator or write a case record. It is not a network
-sandbox, real reasoning evidence or the complete selected-set rehearsal;
-independently enforce offline policy.
+sandbox, real reasoning evidence or the complete selected-set rehearsal.
 
 `rehearse_g4_modality.py --manifest FROZEN_CASE.json` exercises GPU-011's
 actual LLM, VLM and two strategic product/proxy command cohorts against a
