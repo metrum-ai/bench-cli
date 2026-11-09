@@ -91,6 +91,49 @@ class G3ChecksTests(unittest.TestCase):
             trace.write_text("\n".join(map(json.dumps, stream)))
             self.assertFalse(g3_runner.ready_to_interrupt("error-last", trace, data))
 
+    def test_median_interrupt_waits_for_the_measured_eligible_population(self):
+        with tempfile.TemporaryDirectory() as temp:
+            trace, data = Path(temp) / 'trace', Path(temp) / 'data'
+            trace.write_text(json.dumps({'request': 9, 'kind': 'chunk'}) + '\n')
+            answer = {'schema_version': 'test.request.v5', 'phase': 'measure',
+                      'answer_completed': True, 'error': None, 'latency_s': 2}
+            trunc = {'schema_version': 'test.request.v5', 'phase': 'measure',
+                     'answer_completed': False, 'outcome': 'reasoning_truncated'}
+
+            def ready(rows):
+                data.write_text('\n'.join(map(json.dumps, rows)))
+                return g3_runner.ready_to_interrupt('error-last', trace, data, median_slo=True)
+
+            self.assertFalse(ready([answer, trunc]))
+            self.assertFalse(ready([answer, {**answer, 'phase': 'warmup', 'latency_s': 3}, trunc]))
+            self.assertFalse(ready([answer, {**answer, 'error': {'kind': 'failure'}, 'latency_s': 3}, trunc]))
+            for invalid in (2, 0, -1, float('nan'), float('inf'), None, True, '3'):
+                with self.subTest(invalid=invalid):
+                    self.assertFalse(ready([answer, {**answer, 'latency_s': invalid}, trunc]))
+            self.assertFalse(ready([answer, {**answer, 'latency_s': 3}]))
+            for _ in range(100):
+                self.assertTrue(ready([answer, {**answer, 'latency_s': 3}, trunc]))
+            trace.write_text('\n'.join(map(json.dumps, [{'request': 9, 'kind': 'chunk'},
+                                                       {'request': 9, 'kind': 'complete'}])))
+            self.assertFalse(ready([answer, {**answer, 'latency_s': 3}, trunc]))
+
+    def test_error_last_retains_independent_window_and_median_verdict(self):
+        data, trace = self.fixture()
+        rows = [json.loads(line) for line in data.splitlines()]
+        events = [json.loads(line) for line in trace.splitlines()]
+        rows[3]['latency_s'] = 2.8  # failing request ends after both answers
+        summary = rows[-1]
+        summary.update({'window_seconds': 4, 'requests_per_second': 3 / 4,
+                        'answered_requests_per_second': 2 / 4,
+                        'config': {'modality': {'cert_e2e_median_slo': True}}})
+        summary['goodput']['requests_per_second'] = 1 / 4
+        next(e for e in events if e['request'] == 3 and e['kind'] == 'error')['monotonic_ns'] = 14_000_000_000
+        data = '\n'.join(map(json.dumps, rows))
+        trace = '\n'.join(map(json.dumps, events))
+        for _ in range(25):
+            self.assertEqual('error-last', g3_checks.verify_window(data, trace, 'error-last')['order'])
+            self.assertEqual(2.5, g3_checks.verify_goodput_median(data, trace)['e2e_slo_s'])
+
     def test_goodput_and_unauthorized_incomplete_usage(self):
         data, trace = self.fixture()
         self.assertEqual(1, g3_checks.verify_goodput(data, trace, 2.5)["answered_pass"])
