@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import manifest_tool
+import r4_model_pins as pins
 
 
 class StructuralManifestTests(unittest.TestCase):
@@ -15,8 +16,8 @@ class StructuralManifestTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.file = self.root / 'lane.json'
         binary = manifest_tool.sha256_file('/bin/true')
-        self.config = {'image': 'synthetic/image@sha256:' + '0' * 64, 'model': 'Qwen/Qwen3-8B',
-                       'revision': 'b' * 40, 'port': 19001, 'proxy_port': 19002,
+        self.config = {'image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
+                       'revision': pins.GENERAL_REVISION, 'port': 19001, 'proxy_port': 19002,
                        'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
                        'owner': 'fixture', 'evidence_link': 'fixture',
                        'prompt_sets': {'default': {'generated_input': 'prompts'}}}
@@ -54,7 +55,7 @@ class StructuralManifestTests(unittest.TestCase):
             self.load({'prompts'})
         self.config['server_flags'].append('--no-enable-prefix-caching')
         self.config['model'] = 'synthetic/other-model'
-        with self.assertRaisesRegex(ValueError, 'pinned Qwen3-8B'):
+        with self.assertRaisesRegex(ValueError, 'r4 model'):
             self.load({'prompts'})
 
 

@@ -83,7 +83,7 @@ def freeze(args):
         raise ValueError('cleanup cases cannot generate measured inputs')
     if lane != "CLEANUP":
         structural = {'structural_recipe_ids': {item['recipe']['id'] for item in generated}} if generated else {}
-        _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0", **structural)
+        _, config = manifest_tool.load_manifest(args.lane_manifest, lane, args.candidate, args.baseline, "0", case=args.case, **structural)
         if args.tokenizer_revision != config["revision"]:
             raise ValueError("tokenizer revision must match the frozen model revision")
         check_case_tokenizer(args.case, config, args.tokenizer)

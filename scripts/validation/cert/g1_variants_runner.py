@@ -63,9 +63,9 @@ def tool_prompt(config):
     """Validate the same pinned tool input and server flags used by the runner."""
     flags = config['server_flags']
     if '--enable-auto-tool-choice' not in flags or not any(
-        flags[i:i+2] == ['--tool-call-parser', 'hermes'] or flag == '--tool-call-parser=hermes'
+        flags[i:i+2] == ['--tool-call-parser', 'qwen3_coder'] or flag == '--tool-call-parser=qwen3_coder'
         for i, flag in enumerate(flags)):
-        raise ValueError('G1 requires pinned hermes tool parser and auto tool choice')
+        raise ValueError('G1 requires pinned qwen3_coder tool parser and auto tool choice')
     tool = config['prompt_sets']['tool']
     prompt = Path(tool['path']).resolve(strict=True)
     if not prompt.is_file() or manifest_tool.sha256_file(prompt) != tool['sha256']:

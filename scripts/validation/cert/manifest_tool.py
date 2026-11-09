@@ -36,7 +36,7 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids=None):
+def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids=None, case=None):
     if not LANE.fullmatch(lane):
         raise ValueError("invalid lane")
     if not isinstance(gpu, str) or not GPU.fullmatch(gpu):
@@ -94,8 +94,8 @@ def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids
         raise ValueError('unused structural generator recipe')
     if symbolic and lane in ('L2', 'L3'):
         raise ValueError('tracked modality fixtures cannot be replaced by generated prompt sets')
-    if lane in ("L1", "R", "D", "W", "G1", "G2", "G3", "G4", "G5", "G6", "G7") and config["model"] != "Qwen/Qwen3-8B":
-        raise ValueError("this lane requires the pinned Qwen3-8B model")
+    import r4_model_pins
+    r4_model_pins.check(config, lane, case)
     if lane in ("P1", "P2"):
         from perf_baseline import verify as verify_perf_baseline
         expected_model, expected_revision = {
@@ -198,12 +198,12 @@ def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids
                 raise ValueError("G7 noise floor requires a pinned file and prior independently reviewable evidence")
     if lane in ("L2", "L3", "L4"):
         modality, expected_model = {
-            "L2": ("vlm", "Qwen/Qwen3-VL-8B-Instruct"),
+            "L2": ("vlm", r4_model_pins.GENERAL_MODEL),
             "L3": ("asr", "openai/whisper-large-v3-turbo"),
             "L4": ("imagegen", "Tongyi-MAI/Z-Image-Turbo"),
         }[lane]
         if config["model"] != expected_model or "default" not in prompt_sets:
-            raise ValueError(f"{lane} requires its fixed sub-10B model and default input")
+            raise ValueError(f"{lane} requires its fixed model and default input")
         for key in ("modality_binary", "sut"):
             item = config.get(key)
             if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not SHA.fullmatch(str(item.get("sha256", ""))):
@@ -234,8 +234,8 @@ def load_manifest(path, lane, candidate, baseline, gpu, *, structural_recipe_ids
             if not isinstance(config.get(key), str) or not config[key].strip():
                 raise ValueError(f"{lane} requires {key}")
     if lane == "V":
-        if config["model"] != "Qwen/Qwen3-VL-8B-Thinking":
-            raise ValueError("V requires the pinned thinking-capable Qwen3-VL-8B model")
+        if config["model"] != r4_model_pins.GENERAL_MODEL:
+            raise ValueError("V requires the r4 vision-capable model")
         for key in ("vlm_binary", "vlm_image"):
             item = config.get(key)
             if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not SHA.fullmatch(str(item.get("sha256", ""))):
@@ -298,7 +298,7 @@ def main():
     args = parser.parse_args()
     try:
         data, config = load_manifest(args.manifest, args.lane, args.candidate, args.baseline,
-                                     os.environ.get("CUDA_VISIBLE_DEVICES"))
+                                     os.environ.get("CUDA_VISIBLE_DEVICES"), case=os.environ.get("CERT_CASE_ID"))
         if args.field == "candidate_sha":
             value = data[args.field]
         elif args.field == "prompt_default":

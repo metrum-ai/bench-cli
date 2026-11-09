@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Independent legacy-population comparison for the new 8B A/B grid.
+"""Independent legacy-population comparison for the r4 small-model A/B grid.
 
 This does not alter the existing 27B gates. Missing or incomparable evidence is
 FAIL; it cannot establish that the inputs/noise floors were frozen in advance.
@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import g6_checks
+import r4_model_pins as pins
 
 POINTS = tuple((w, c) for w in ("W1", "W2") for c in (1, 8, 32))
 MATCHING_META = ("model", "model_revision", "image", "workload", "prompt_sha256", "concurrency",
@@ -43,7 +44,8 @@ def _send_times(rows):
 def point(meta, data, trace, binary_sha):
     if not re.fullmatch(r"[0-9a-f]{64}", binary_sha) or meta.get("binary_sha256") != binary_sha or meta.get("thinking") is not False or meta.get("temperature") != 0 or meta.get("seed") != 42 or meta.get("warmup_seconds") != 30 or meta.get("measure_seconds") != 180:
         raise ValueError("run settings or executable pin differ from frozen grid")
-    if meta.get("model") != "Qwen/Qwen3-8B" or not re.fullmatch(r"[0-9a-f]{40}", str(meta.get("model_revision", ""))) or not re.search(r"@sha256:[0-9a-f]{64}$", str(meta.get("image", ""))) or not re.fullmatch(r"[0-9a-f]{64}", str(meta.get("prompt_sha256", ""))):
+    if (meta.get("model") != pins.SMALL_MODEL or meta.get("model_revision") != pins.SMALL_REVISION
+            or meta.get("image") != pins.IMAGE or not re.fullmatch(r"[0-9a-f]{64}", str(meta.get("prompt_sha256", "")))):
         raise ValueError("model, server, revision or prompt pin missing")
     if meta.get("max_tokens") != {"W1": 128, "W2": 512}.get(meta.get("workload")):
         raise ValueError("workload output cap does not match frozen grid")

@@ -34,7 +34,7 @@ def rehearsal(manifest_path):
     case_launcher.preflight(manifest)
     baseline = rehearse_live_modalities.parse_frozen_command(manifest, CASE, 'G5')
     candidate = Path(manifest['candidate']['path']).resolve(strict=True)
-    _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], 'G5', candidate, baseline, '0')
+    _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], 'G5', candidate, baseline, '0', case=CASE)
     strategic = g4_modality_runner.pinned_file(config, 'strategic_binary', 'metrum-ai-bench-cli-strategic', candidate)
     observed = []
 

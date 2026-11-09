@@ -38,8 +38,9 @@ def preflight(manifest):
             import runtime_inputs
             runtime_inputs.verify(manifest)
             structural = {}  # Original concrete/domain checks remain mandatory.
+        only_case = next(iter(manifest['cases'])) if len(manifest['cases']) == 1 else None
         _, config = manifest_tool.load_manifest(manifest['lane_manifest']['path'], manifest['lane'],
-            binary, baseline, '0', **structural)
+            binary, baseline, '0', case=only_case, **structural)
         if any(recipe['tokenizer']['revision'] != config['revision'] for recipe in recipes.values()):
             raise ValueError('generator tokenizer revision must match lane model revision')
     if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:

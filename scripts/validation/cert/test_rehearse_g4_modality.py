@@ -12,6 +12,7 @@ import freeze_case
 import manifest_tool
 import rehearse_g4_modality as rehearsal
 import rehearse_live_modalities
+import r4_model_pins as r4
 
 
 class GuardTests(unittest.TestCase):
@@ -40,8 +41,8 @@ class LoopbackTests(unittest.TestCase):
             pin = lambda path: {'path': str(path), 'sha256': manifest_tool.sha256_file(path)}
             config = {'model': 'synthetic/model', 'prompt_sets': {'default': pin(prompt), 'vlm': pin(vlm_prompt)},
                       'vlm_image': pin(image), 'vlm_binary': pin(vlm), 'strategic_binary': pin(strategic),
-                      'vlm': {'model': 'Qwen/Qwen3-VL-8B-Thinking', 'image': 'vllm/vllm-openai@sha256:' + 'b' * 64,
-                              'revision': 'a' * 40, 'server_flags': ['--no-enable-prefix-caching', '--reasoning-parser', 'qwen3']}}
+                      'vlm': {'model': r4.GENERAL_MODEL, 'image': r4.IMAGE,
+                              'revision': r4.GENERAL_REVISION, 'server_flags': ['--no-enable-prefix-caching', '--reasoning-parser', 'qwen3']}}
             lane = root / 'lane.json'
             lane.write_text(json.dumps({'lanes': {'G4': config}}))
             output = root / 'case-output'

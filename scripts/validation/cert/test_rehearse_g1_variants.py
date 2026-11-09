@@ -36,7 +36,7 @@ class LoopbackTests(unittest.TestCase):
             for path in (prompt, tool):
                 path.write_text(''.join(json.dumps({'prompt': f'synthetic prompt {i}'}) + '\n' for i in range(4)))
             pin = lambda path: {'path': str(path), 'sha256': manifest_tool.sha256_file(path)}
-            config = {'model': 'synthetic/model', 'server_flags': ['--enable-auto-tool-choice', '--tool-call-parser', 'hermes'],
+            config = {'model': 'synthetic/model', 'server_flags': ['--enable-auto-tool-choice', '--tool-call-parser', 'qwen3_coder'],
                       'prompt_sets': {'default': pin(prompt), 'tool': pin(tool)}}
             lane = root / 'lane.json'
             lane.write_text(json.dumps({'lanes': {'G1': config}}))

@@ -96,9 +96,8 @@ def modality_inputs(config, candidate):
     prompt = pinned_file(config['prompt_sets'], 'vlm')
     image_prompts(prompt, image)
     vlm = config['vlm']
-    if (vlm.get('model') != 'Qwen/Qwen3-VL-8B-Thinking' or not manifest_tool.IMAGE.fullmatch(vlm.get('image', ''))
-            or not manifest_tool.REV.fullmatch(vlm.get('revision', ''))):
-        raise ValueError('pinned thinking-capable Qwen3-VL-8B model and image required')
+    import r4_model_pins
+    r4_model_pins.check(vlm, 'V')
     flags = vlm.get('server_flags')
     if not isinstance(flags, list) or '--no-enable-prefix-caching' not in flags or not any(
         flags[i:i+2] == ['--reasoning-parser', 'qwen3'] or flag == '--reasoning-parser=qwen3' for i, flag in enumerate(flags)):

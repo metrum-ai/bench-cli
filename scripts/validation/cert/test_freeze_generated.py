@@ -13,6 +13,7 @@ import case_launcher
 import freeze_case
 import generated_inputs as generated
 import runtime_inputs
+import r4_model_pins as pins
 from build_role_test_fixture import bind
 from execution_evidence import digest
 
@@ -41,28 +42,28 @@ class FreezeGeneratedTests(unittest.TestCase):
                   'generator_version': '1.8.1', 'seed': 42, 'config': {'count': 4, 'profile': 'chat-short'},
                   'dataset': runtime_inputs.pin(file('dataset.jsonl', 'SYNTHETIC DATASET')),
                   'template': runtime_inputs.pin(file('template.txt', 'SYNTHETIC TEMPLATE')),
-                  'tokenizer': {**runtime_inputs.pin(tokenizer), 'revision': 'b' * 40}}
+                  'tokenizer': {**runtime_inputs.pin(tokenizer), 'revision': pins.GENERAL_REVISION}}
         recipes = file('recipes.json', json.dumps({'recipes': [recipe]}))
         sut = file('sut.json', json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
         catalog = file('catalog.csv', 'ID,Tier,Parallel group\nBC-GPU-011,RC-GPU,G4\n')
         selection = file('selection.json', json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-011': ['core']}}))
         image = file('synthetic-image.png', 'SYNTHETIC IMAGE')
         vlm_prompt = file('vlm-prompt.jsonl', json.dumps({'prompt': 'fixture', 'image_url': str(image)}) + '\n')
-        config = {'image': 'synthetic/image@sha256:' + '0' * 64, 'model': 'Qwen/Qwen3-8B',
-                  'revision': 'b' * 40, 'port': 19001, 'proxy_port': 19002,
+        config = {'image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
+                  'revision': pins.GENERAL_REVISION, 'port': 19001, 'proxy_port': 19002,
                   'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
                   'owner': 'fixture', 'evidence_link': 'fixture', 'tokenizer': runtime_inputs.pin(tokenizer),
                   'strategic_binary': registry['metrum-ai-bench-cli-strategic'],
                   'vlm_binary': registry['metrum-ai-bench-cli-vlm'], 'vlm_image': runtime_inputs.pin(image),
-                  'vlm': {'model': 'Qwen/Qwen3-VL-8B-Thinking', 'revision': 'b' * 40,
-                          'image': 'synthetic/image@sha256:' + '0' * 64,
+                  'vlm': {'model': pins.GENERAL_MODEL, 'revision': pins.GENERAL_REVISION,
+                          'image': pins.IMAGE,
                           'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching']},
                   'prompt_sets': {'default': {'generated_input': 'prompts'}, 'vlm': runtime_inputs.pin(vlm_prompt)}}
         lane = file('lane.json', json.dumps({'candidate_sha': 'a' * 40, 'candidate_binary_sha256': digest(self.binary),
                                            'baseline_binary_sha256': digest(self.binary), 'lanes': {'G4': config}}))
         self.args = SimpleNamespace(build_receipt=Path(fixture['build_receipt']['path']), selection=selection, catalog=catalog,
             case='BC-GPU-011', lane_manifest=lane, candidate=self.binary, baseline=self.binary, sut=sut,
-            tokenizer=tokenizer, tokenizer_revision='b' * 40, all_smi=self.binary, input=[], command_json=None,
+            tokenizer=tokenizer, tokenizer_revision=pins.GENERAL_REVISION, all_smi=self.binary, input=[], command_json=None,
             generated_recipes=recipes, out=self.root / 'frozen.json', run_out=self.root / 'attempt')
         probe = patch('tokenizer_probe.probe')
         probe.start()
@@ -195,7 +196,7 @@ class FreezeGeneratedTests(unittest.TestCase):
         recipe = recipes[0]
         self.args.generated_recipes = None
         sut = json.loads(self.args.sut.read_text())
-        sut['model'] = {'id': 'Qwen/Qwen3-8B', 'revision': 'b' * 40}
+        sut['model'] = {'id': pins.GENERAL_MODEL, 'revision': pins.GENERAL_REVISION}
         self.args.sut.write_text(json.dumps(sut))
         lane = json.loads(self.args.lane_manifest.read_text())
         cfg = lane['lanes']['G4']
