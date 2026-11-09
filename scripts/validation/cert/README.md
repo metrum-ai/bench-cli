@@ -88,6 +88,14 @@ or the native offload gate, and is **not** the complete selected-set rehearsal.
 Its disposable loopback server is not an OS network sandbox; use independently
 enforced offline policy.
 
+`rehearse_g1_variants.py --manifest FROZEN_CASE.json` is a partial GPU-003
+check: it validates the frozen G1 inputs and actual runner's tool prompt, then
+runs all six real product/proxy command variants against a synthetic loopback
+server using disposable output. It checks each product request and forwarded
+variant fields, but does not run the GPU-003 validator or write a case record.
+Its loopback fixture is not an OS network sandbox, real-model evidence, or the
+complete selected-set rehearsal. Independently enforce offline policy.
+
 For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
 --source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
 ShareGPT and order inputs from exactly 64 distinct source prompts, validates

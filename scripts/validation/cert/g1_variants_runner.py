@@ -22,7 +22,8 @@ TOOL = {'type': 'function', 'function': {'name': 'get_weather',
         'parameters': {'type': 'object', 'properties': {'city': {'type': 'string'}}, 'required': ['city']}}}
 
 
-def run_cell(args, label, prompt, body, reorder):
+def cell_commands(args, label, prompt, body, reorder):
+    """Assemble the exact product and proxy argv used by each live cell."""
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     data = evidence / f'{label}-requests.jsonl'
@@ -36,12 +37,18 @@ def run_cell(args, label, prompt, body, reorder):
                '--error-log', str(evidence / f'{label}-error.log')]
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
                  '--upstream-port', str(args.port), '--out', str(trace), *(['--reorder', reorder] if reorder else [])]
+    return command, proxy_cmd, data, trace
+
+
+def run_cell(args, label, prompt, body, reorder, env=None):
+    evidence = args.out / 'evidence'
+    command, proxy_cmd, data, trace = cell_commands(args, label, prompt, body, reorder)
     (evidence / f'{label}-command.json').write_text(json.dumps({'command': command, 'proxy': proxy_cmd}, indent=2) + '\n', encoding='utf-8')
     with (evidence / f'{label}-proxy-error.txt').open('wb') as proxy_err:
-        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=proxy_err, cwd=ROOT)
+        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=proxy_err, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800)
+            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env)
             if code == 0:
                 g7_runner.wait_for_trace(trace)
         finally:
@@ -71,6 +78,20 @@ def tool_prompt(config):
     return prompt
 
 
+def modes(args, config):
+    """Select the same pinned prompt and all six production cell variants."""
+    prompt_tool = tool_prompt(config)
+    return [
+        ('reasoning', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, None, 'reasoning'),
+        ('answer-only', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}}, None, 'answer_only'),
+        ('tool', prompt_tool, {'chat_template_kwargs': {'enable_thinking': False}, 'tools': [TOOL],
+                               'tool_choice': {'type': 'function', 'function': {'name': 'get_weather'}}}, None, 'tool'),
+        ('multiple', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}, 'n': 2}, 'unselected-first', 'unselected_before_selected'),
+        ('answer-first', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'answer-first', 'answer_before_reasoning'),
+        ('same-event', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'same-event', 'same_event'),
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('out', 'candidate', 'baseline', 'manifest', 'prompt'):
@@ -86,17 +107,7 @@ def main():
     cells, errors = {}, []
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['G1']
-        prompt_tool = tool_prompt(config)
-        modes = [
-            ('reasoning', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, None, 'reasoning'),
-            ('answer-only', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}}, None, 'answer_only'),
-            ('tool', prompt_tool, {'chat_template_kwargs': {'enable_thinking': False}, 'tools': [TOOL],
-                                   'tool_choice': {'type': 'function', 'function': {'name': 'get_weather'}}}, None, 'tool'),
-            ('multiple', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}, 'n': 2}, 'unselected-first', 'unselected_before_selected'),
-            ('answer-first', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'answer-first', 'answer_before_reasoning'),
-            ('same-event', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'same-event', 'same_event'),
-        ]
-        for label, prompt, body, reorder, required in modes:
+        for label, prompt, body, reorder, required in modes(args, config):
             try:
                 data, trace, code = run_cell(args, 'g1-variants-' + label, prompt, body, reorder)
                 cells[label] = g1_variants_checks.evaluate(data, trace, code, reorder, required)

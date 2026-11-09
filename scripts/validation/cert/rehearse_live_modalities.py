@@ -33,10 +33,10 @@ MODALITIES = {'BC-LIVE-001': ('L1', 'llm'), 'BC-LIVE-002': ('L2', 'vlm'),
 PNG = base64.b64encode((ROOT / 'test-data/vlm/shapes-512.png').read_bytes()).decode('ascii')
 
 
-def parse_frozen_command(manifest, case):
+def parse_frozen_command(manifest, case, expected_lane=None):
     entry = manifest['cases'][case]
     argv = entry['command']
-    lane, _ = MODALITIES[case]
+    lane = expected_lane or MODALITIES[case][0]
     expected = ['--case', case, '--lane', lane.lower()]
     if (Path(argv[0]).resolve() != Path(__file__).with_name('case_entry.sh').resolve()
             or argv[1:5] != expected or len(argv) != 13):
