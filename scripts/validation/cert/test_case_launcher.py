@@ -174,6 +174,45 @@ class CaseLauncherTests(unittest.TestCase):
             phases = (root / 'attempt-lifecycle/phases.jsonl').read_text().splitlines()
             self.assertNotIn('record-validated', [json.loads(line)['phase'] for line in phases])
 
+    def test_smoke_pass_launcher_is_locally_inspected_not_certified(self):
+        from unittest.mock import MagicMock
+        import execution_evidence
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); smoke = root / 'smoke'; smoke.mkdir()
+            (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+                {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'd' * 64}))
+            out = smoke / 'attempt'; launcher = root / 'launcher'
+            launcher.write_text('#!/bin/sh\nexit 0\n'); launcher.chmod(0o755)
+            def pin(path): return {'path': str(path), 'sha256': digest(path)}
+            manifest = {'candidate_sha': 'a' * 40, 'lane': 'G1', 'candidate': pin(launcher), 'baseline': pin(launcher),
+                        'sut': pin(launcher), 'all_smi': pin(launcher), 'tokenizer': pin(launcher),
+                        'cases': {'BC-GPU-001': {'out': str(out), 'launcher': pin(launcher),
+                                                 'command': [str(launcher)]}}}
+            bind(manifest, root)
+            frozen = root / 'frozen.json'; frozen.write_text(json.dumps(manifest))
+            def launch(*_args, **_kwargs):
+                (out / 'results').mkdir(parents=True); (out / 'evidence').mkdir()
+                evidence = out / 'evidence/request.jsonl'; evidence.write_text('{}\n')
+                record = {'ID': 'BC-GPU-001', 'candidate_sha': 'a' * 40, 'result': 'PASS',
+                          'evidence_class': result_writer.SMOKE_CLASS, 'stage0_expectations_sha256': 'd' * 64,
+                          'owner': 'test', 'evidence_link': 'test', 'observed_values': {'sample': 1},
+                          'thresholds': {'sample': 1}, 'attempt': 1, 'start_utc': '2026-01-01T00:00:00Z',
+                          'end_utc': '2026-01-01T00:00:01Z', 'infra_history': [],
+                          'input_hashes': {'execution_manifest': digest(frozen)},
+                          'versions': {'execution_tools': manifest['tools']},
+                          'evidence_paths': ['evidence/request.jsonl'],
+                          'output_hashes': {'evidence/request.jsonl': digest(evidence)}}
+                (out / 'results/BC-GPU-001.json').write_text(json.dumps(record))
+                process = MagicMock(); process.wait.return_value = 0; return process
+            with patch.object(case_launcher.subprocess, 'Popen', side_effect=launch), \
+                 patch.object(case_launcher, 'validate_r4_record'):
+                case_launcher.run_case(frozen, manifest, 'BC-GPU-001')
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                execution_evidence.report_rows(out)
+            phases = (smoke / 'attempt-lifecycle/phases.jsonl').read_text()
+            self.assertIn('record-validated', phases)
+            self.assertFalse((out / 'results/lane-error.json').exists())
+
     def test_record_must_bind_manifest_and_tools(self):
         import copy
         tools = {'python3': {'path': '/fixture/python3', 'sha256': 'b' * 64}}

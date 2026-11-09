@@ -109,6 +109,7 @@ def main():
                 "manifest_sha256": manifest_tool.sha256_file(args.manifest)}
     common_files = ["evidence/gpu.csv", "evidence/server.log", "evidence/binary-hashes.txt"]
     outcomes = {}
+    hardware_prerequisite_files = []
 
     def record(case_id, callback, thresholds):
         target = os.environ.get("CERT_CASE_ID")
@@ -128,6 +129,8 @@ def main():
                        "owner": args.owner, "evidence_link": args.evidence_link, "gpu_class": gpu_line[0].strip(),
                        "driver": gpu_line[1].strip() if len(gpu_line) > 1 else "", "versions": versions,
                        "observed_values": observed, "thresholds": thresholds, "evidence_paths": files}
+        if case_id in prerequisites and passed:
+            hardware_prerequisite_files.extend(files)
         if case_dispatch.selected(case_id):
             result_writer.write_record(args.out, record_data)
         outcomes[case_id] = passed
@@ -174,6 +177,9 @@ def main():
         if (not re.match(r"^NVIDIA H100(?:\s|$)", gpu_line[0].strip())
                 or not all(outcomes.get(case, False) for case in ("BC-REASON-001", "BC-REASON-002", "BC-REASON-003"))):
             raise ValueError("second-class case requires NVIDIA H100 and all three reasoning cases PASS")
+        # Bind the actual same-invocation reasoning requests to the hardware
+        # record, rather than relying on outcomes from separate case runs.
+        _files.extend(path for path in dict.fromkeys(hardware_prerequisite_files) if path not in _files)
         return {"gpu_class": gpu_line[0].strip(), "reasoning_cases_passed": 3}
 
     record("BC-HW-001", hardware, {"gpu_class": "NVIDIA H100", "reasoning_cases_passed": 3})

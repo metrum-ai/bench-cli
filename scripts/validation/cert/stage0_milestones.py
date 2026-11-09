@@ -43,6 +43,46 @@ def local_file(root, name):
     return current
 
 
+def smoke_launcher_record(case_root, *, case, candidate, manifest_sha256):
+    """Inspect one marked smoke PASS locally, never accepting it into cert intake."""
+    root = Path(case_root).resolve(strict=True)
+    origin = result_writer.smoke_origin(root)
+    if origin is None or not CASE.fullmatch(case) or not re.fullmatch(r'[a-f0-9]{40}', candidate):
+        raise ValueError('marked smoke root and valid case identity required')
+    records = list((root / 'results').glob('*.json'))
+    if len(records) != 1 or records[0].name != case + '.json':
+        raise ValueError('unexpected smoke result inventory')
+    record = read_json(local_file(root, f'results/{case}.json'))
+    if (record.get('ID') != case or record.get('candidate_sha') != candidate or record.get('result') != 'PASS'
+            or record.get('evidence_class') != result_writer.SMOKE_CLASS
+            or record.get('stage0_expectations_sha256') != origin[1]['expectations_sha256']
+            or record.get('infra_history') or record.get('input_integrity_errors')
+            or not isinstance(record.get('input_hashes'), dict)
+            or record['input_hashes'].get('execution_manifest') != manifest_sha256):
+        raise ValueError('smoke launcher record provenance mismatch')
+    if (not isinstance(record.get('owner'), str) or not record['owner'].strip()
+            or not isinstance(record.get('evidence_link'), str) or not record['evidence_link'].strip()
+            or not isinstance(record.get('observed_values'), dict) or not record['observed_values']
+            or not isinstance(record.get('thresholds'), dict) or not record['thresholds']
+            or type(record.get('attempt')) is not int or record['attempt'] < 1):
+        raise ValueError('smoke launcher record is incomplete')
+    try:
+        start = dt.datetime.fromisoformat(record['start_utc'].replace('Z', '+00:00'))
+        end = dt.datetime.fromisoformat(record['end_utc'].replace('Z', '+00:00'))
+        if start.tzinfo is None or end.tzinfo is None or end < start or end > dt.datetime.now(dt.timezone.utc):
+            raise ValueError('invalid smoke record times')
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError('invalid smoke record times') from exc
+    paths, hashes = record.get('evidence_paths'), record.get('output_hashes')
+    if (not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths)
+            or len(set(paths)) != len(paths) or not isinstance(hashes, dict) or set(paths) != set(hashes)):
+        raise ValueError('smoke launcher record lacks complete evidence hashes')
+    for name in paths:
+        if not isinstance(hashes[name], str) or not SHA.fullmatch(hashes[name]) or hashes[name] != execution_evidence.digest(local_file(root, name)):
+            raise ValueError('smoke launcher evidence hash differs')
+    return record
+
+
 def check_record(case_root, *, case, candidate, expectations_sha256, manifest_sha256, request_path):
     """Verify a marked production record and one bound successful request.
 
@@ -70,11 +110,15 @@ def check_record(case_root, *, case, candidate, expectations_sha256, manifest_sh
         raise ValueError('infrastructure fallback is not runner/writer coverage')
     paths = record.get('evidence_paths')
     hashes = record.get('output_hashes')
-    if not isinstance(paths, list) or request_path not in paths:
+    if (not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths)
+            or len(set(paths)) != len(paths) or request_path not in paths):
         raise ValueError('request log is not listed in the writer evidence')
+    if not isinstance(hashes, dict) or set(hashes) != set(paths):
+        raise ValueError('writer evidence hashes are incomplete')
+    for name in paths:
+        if not isinstance(hashes[name], str) or not SHA.fullmatch(hashes[name]) or hashes[name] != execution_evidence.digest(local_file(root, name)):
+            raise ValueError('writer evidence output hash differs')
     evidence = local_file(root, request_path)
-    if not isinstance(hashes, dict) or hashes.get(request_path) != execution_evidence.digest(evidence):
-        raise ValueError('request log is not bound by the writer output hash')
     completed = False
     with evidence.open(encoding='utf-8') as stream:
         for line in stream:
@@ -142,6 +186,22 @@ def check_readiness(lifecycle_root, case):
     if not any(isinstance(e, dict) and e.get('case') == case and e.get('phase') == 'server-ready'
                and isinstance(e.get('utc'), str) and e['utc'] for e in events):
         raise ValueError('missing production server-ready phase')
+
+
+def check_server_evidence(case_root, *, model, record):
+    """Verify the common server's bound startup log and ready models response."""
+    if not isinstance(model, str) or not model:
+        raise ValueError('approved model is required')
+    name = 'evidence/server.log'
+    if name not in record.get('evidence_paths', []):
+        raise ValueError('startup server log is not bound by the writer')
+    log = local_file(case_root, name)
+    if log.stat().st_size == 0:
+        raise ValueError('startup server log is empty')
+    data = read_json(local_file(case_root, 'evidence/models.json'))
+    entries = data.get('data')
+    if not isinstance(entries, list) or not any(isinstance(entry, dict) and entry.get('id') == model for entry in entries):
+        raise ValueError('ready server does not report the approved model')
 
 
 def check_r4_identity(case_root, *, gpu_name, gpu_uuid, index, child, config):

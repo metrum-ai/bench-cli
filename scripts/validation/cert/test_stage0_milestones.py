@@ -60,6 +60,24 @@ class MilestoneTests(unittest.TestCase):
         reject.assert_called_once()
         self.assertEqual(list((self.case_root / 'results').iterdir()), [self.case_root / 'results' / (self.case + '.json')])
 
+    def test_launcher_inspects_smoke_pass_without_accepting_into_cert(self):
+        import execution_evidence
+        self.record.update({'result': 'PASS', 'owner': 'test', 'evidence_link': 'test',
+                            'observed_values': {'samples': 1}, 'thresholds': {'samples': 1}, 'attempt': 1,
+                            'start_utc': '2026-01-01T00:00:00Z', 'end_utc': '2026-01-01T00:00:01Z',
+                            'infra_history': []})
+        self.save_record()
+        with self.assertRaises(result_writer.NonCertificationEvidence):
+            execution_evidence.report_rows(self.case_root)
+        record = checks.smoke_launcher_record(self.case_root, case=self.case, candidate=self.sha,
+                                              manifest_sha256=self.manifest)
+        self.assertEqual(record['result'], 'PASS')
+        self.request.write_text('tampered\n')
+        with self.assertRaisesRegex(ValueError, 'evidence hash'):
+            checks.smoke_launcher_record(self.case_root, case=self.case, candidate=self.sha,
+                                         manifest_sha256=self.manifest)
+        self.assertEqual(self.record['evidence_class'], result_writer.SMOKE_CLASS)
+
     def test_execution_index_rejects_marked_root_without_submission(self):
         with tempfile.TemporaryDirectory() as tmp:
             index = Path(tmp) / 'control.json'
@@ -114,6 +132,22 @@ class MilestoneTests(unittest.TestCase):
         self.record['stage0_expectations_sha256'] = 'e' * 64
         self.save_record()
         with self.assertRaisesRegex(ValueError, 'not bound'):
+            self.check()
+
+    def test_common_server_evidence_requires_bound_log_and_matching_model(self):
+        evidence = self.case_root / 'evidence'
+        log = evidence / 'server.log'; log.write_text('server started\n')
+        models = evidence / 'models.json'; models.write_text(json.dumps({'data': [{'id': 'model-a'}]}))
+        with self.assertRaisesRegex(ValueError, 'not bound'):
+            checks.check_server_evidence(self.case_root, model='model-a', record=self.record)
+        self.record['evidence_paths'].append('evidence/server.log')
+        self.record['output_hashes']['evidence/server.log'] = self.hash(log)
+        self.save_record(); record = self.check()
+        checks.check_server_evidence(self.case_root, model='model-a', record=record)
+        with self.assertRaisesRegex(ValueError, 'approved model'):
+            checks.check_server_evidence(self.case_root, model='model-b', record=record)
+        log.write_text('changed\n')
+        with self.assertRaisesRegex(ValueError, 'output hash'):
             self.check()
 
     def test_server_ready_must_match_case(self):

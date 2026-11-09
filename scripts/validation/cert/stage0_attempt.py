@@ -19,27 +19,12 @@ import stage0_cgroup
 import stage0_cleanup
 import stage0_controller
 import stage0_device
+import stage0_dispatch
 import stage0_docker
 import stage0_process
 import stage0_settlement
 
 HERE = Path(__file__).resolve().parent
-
-
-def validate_dispatch(manifest, case):
-    """Restrict the successful-exit settlement assumption to the known G1 dispatch."""
-    try:
-        if case != 'BC-GPU-001' or manifest['lane'] != 'G1' or manifest['harness_repo'] != str(HERE.parents[2]):
-            raise ValueError('unsupported smoke dispatch')
-        entry = manifest['cases'][case]
-        launcher = str(HERE / 'case_entry.sh')
-        command = [launcher, '--case', case, '--lane', 'g1',
-                   '--candidate', manifest['candidate']['path'], '--baseline', manifest['baseline']['path'],
-                   '--manifest', manifest['lane_manifest']['path'], '--out', entry['out']]
-        if entry['launcher']['path'] != launcher or entry['command'] != command:
-            raise ValueError('unsupported smoke dispatch')
-    except (KeyError, TypeError) as exc:
-        raise ValueError('unsupported smoke dispatch') from exc
 
 
 def _receipt(path, value):
@@ -85,7 +70,7 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
     if type(cap) is not int or type(grace) is not int or not 0 < grace < cap:
         raise ValueError('invalid case time cap')
     deadline = started + cap
-    validate_dispatch(manifest, case)
+    stage0_dispatch.validate(manifest, case)
     case_launcher.preflight(manifest)
     device = stage0_device.probe(manifest['tools'], device=forwarded['CUDA_VISIBLE_DEVICES'],
                                  expected_name=expected_gpu, deadline=deadline, clock=clock)
@@ -131,15 +116,15 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
     except BaseException as exc:
         errors.append(type(exc).__name__)
     # Never infer settled creation from exit or absent inventory alone. Only
-    # the exact GPU-001 dispatch with successful return, no owned processes,
+    # an exact supported common-server dispatch with successful return, no owned processes,
     # and an explicit matched create/inspect receipt can close creation. This
     # remains conservative for every failed or interrupted launcher.
     creation_closed = False
     if (group_empty and pending is None and isinstance(outcome, stage0_process.ProcessOutcome)
             and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0):
         try:
-            creation_closed = stage0_settlement.successful_gpu001_create(
-                output, gpu_name=expected_gpu, gpu_uuid=forwarded['CUDA_VISIBLE_DEVICES']) is True
+            creation_closed = stage0_settlement.successful_create(
+                output, case=case, gpu_name=expected_gpu, gpu_uuid=forwarded['CUDA_VISIBLE_DEVICES']) is True
         except BaseException as exc:
             errors.append(type(exc).__name__)
     if not creation_closed:
