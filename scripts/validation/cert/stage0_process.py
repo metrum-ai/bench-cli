@@ -23,7 +23,7 @@ class ProcessOutcome:
     escalated: bool
 
 
-def run_bounded(argv, *, cwd, env, stdout, stderr, cap_seconds, grace_seconds):
+def run_bounded(argv, *, cwd, env, stdout, stderr, cap_seconds, grace_seconds, pass_fds=()):
     """Run argv until the run deadline, then TERM and, after grace, KILL.
 
     The hard wall cap includes cleanup grace. The caller must validate all
@@ -36,8 +36,12 @@ def run_bounded(argv, *, cwd, env, stdout, stderr, cap_seconds, grace_seconds):
         raise ValueError('invalid bounded process configuration')
     if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
         raise ValueError('bounded process environment must be explicit strings')
+    if (not isinstance(pass_fds, tuple) or any(type(fd) is not int or fd < 3 for fd in pass_fds)
+            or len(pass_fds) != len(set(pass_fds))):
+        raise ValueError('invalid inherited descriptor list')
     started = time.monotonic()
-    process = subprocess.Popen(argv, cwd=Path(cwd), env=env, stdout=stdout, stderr=stderr, start_new_session=True)
+    process = subprocess.Popen(argv, cwd=Path(cwd), env=env, stdout=stdout, stderr=stderr,
+                               start_new_session=True, pass_fds=pass_fds)
     def remaining(deadline):
         return max(0.0, deadline - time.monotonic())
     term_at, kill_at = started + cap_seconds - grace_seconds, started + cap_seconds
