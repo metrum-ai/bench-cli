@@ -15,7 +15,7 @@ def container_id(root):
     return data[:-1].decode('ascii')
 
 
-def successful_create(root, *, gpu_name, gpu_uuid):
+def successful_create(root, *, case, gpu_name, gpu_uuid):
     """Require the successful CLI ID and matching owner/image/GPU inspect receipt.
 
     Only meaningful for a supported exact single-server dispatch after an
@@ -23,6 +23,17 @@ def successful_create(root, *, gpu_name, gpu_uuid):
     """
     import r4_image_provenance as r4
     import stage0_milestones
+    if case == 'BC-LIVE-002':
+        # xtask prints the successful docker-run ID before its readiness line;
+        # container-id.txt itself comes from a later inspect in this lane.
+        path = stage0_milestones.local_file(root, 'evidence/serve-stdout.txt')
+        with path.open('rb') as stream:
+            raw = stream.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError('modality create response is too large')
+        ids = re.findall(rb'(?m)^[0-9a-f]{64}$', raw)
+        if ids != [container_id(root).encode('ascii')]:
+            raise ValueError('modality create response does not match container')
     stage0_milestones.check_r4_identity(root, gpu_name=gpu_name, gpu_uuid=gpu_uuid,
                                         index=r4.INDEX, child=r4.AMD64, config=r4.CONFIG)
     return True

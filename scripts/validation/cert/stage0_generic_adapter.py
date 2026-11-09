@@ -79,6 +79,20 @@ class Adapter:
         self.completed = (item['id'], output)
         return {'terminal': 'COMPLETE', 'record_result': 'PASS'}
 
+    def executed_manifest_sha(self, item, output):
+        original = stage0_controller.pinned_manifest(item, self.candidate)
+        if 'generated_inputs' not in original:
+            return item['manifest']['sha256']
+        import runtime_inputs
+        lifecycle = output.with_name(output.name + '-lifecycle')
+        path = stage0_milestones.local_file(lifecycle, 'generated/case.json')
+        runtime = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        parent = runtime.get('parent_structural_manifest')
+        if parent != item['manifest'] or runtime.get('candidate_sha') != self.candidate:
+            raise ValueError('runtime generated inputs differ from the approved structural manifest')
+        runtime_inputs.verify(runtime)
+        return execution_evidence.digest(path)
+
     def verify_milestones(self, item, outcome):
         if self.completed is None or self.completed[0] != item['id'] or outcome != {'terminal': 'COMPLETE', 'record_result': 'PASS'}:
             return False
@@ -87,7 +101,7 @@ class Adapter:
                                              index=r4.INDEX, child=r4.AMD64, config=r4.CONFIG)
         stage0_milestones.check_readiness(output.with_name(output.name + '-lifecycle'), item['id'])
         record = stage0_milestones.check_record(output, case=item['id'], candidate=self.candidate,
-            expectations_sha256=self.expectations_sha256, manifest_sha256=item['manifest']['sha256'],
+            expectations_sha256=self.expectations_sha256, manifest_sha256=self.executed_manifest_sha(item, output),
             request_path=item['request_log'])
         if record.get('result') != 'PASS':
             return False

@@ -14,7 +14,6 @@ OVERRIDES = {
     'BC-TELEM-001': 'P1 performance/exporter',
     'BC-PERF-002': 'P2 performance',
     'BC-PERF-003': 'G7 full-grid performance',
-    'BC-LIVE-002': 'L2 multimodal server',
     'BC-LIVE-003': 'L3 speech server',
     'BC-LIVE-004': 'L4 image generation server',
     'BC-GPU-011': 'G4 additional VLM server',
@@ -36,7 +35,7 @@ def validate(manifest, case):
         if len(rows) != 1 or rows[0]['Tier'] != 'RC-GPU':
             raise ValueError('case is not uniquely selected from the GPU catalog')
         lane = rows[0]['Parallel group']
-        if lane not in {'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'L1', 'R', 'D', 'V'}:
+        if lane not in {'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'L1', 'L2', 'R', 'D', 'V'}:
             raise ValueError('unimplemented common-server lane')
         if manifest['lane'] != lane or manifest['harness_repo'] != str(REPO):
             raise ValueError('dispatch does not match the candidate catalog')

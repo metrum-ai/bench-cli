@@ -82,10 +82,32 @@ class AdapterTests(unittest.TestCase):
         for mock in self.mocks: self.assertEqual(mock.call_count, 2)
         self.stop.assert_not_called()
 
+    def test_l2_modality_uses_generic_milestones(self):
+        self.items.append(self.case('BC-LIVE-002', 'L2')); self.save_plan()
+        result = self.run_box()
+        self.assertEqual(result['cases'][-1], 'BC-LIVE-002')
+        self.assertEqual(self.mocks[0].call_count, 3)
+        self.assertEqual(self.mocks[5].call_count, 3)
+
     def test_wrong_gpu_stops_before_next_case(self):
         self.mocks[1].side_effect = ValueError('wrong GPU')
         with self.assertRaisesRegex(ValueError, 'wrong GPU'): self.run_box()
         self.mocks[0].assert_called_once(); self.stop.assert_called_once_with('box-a')
+
+    def test_runtime_generated_manifest_must_bind_approved_parent(self):
+        item = self.items[0]; manifest_path = Path(item['manifest']['path'])
+        manifest = json.loads(manifest_path.read_text()); manifest['generated_inputs'] = [{'fixture': True}]
+        manifest_path.write_text(json.dumps(manifest)); item['manifest']['sha256'] = digest(manifest_path)
+        output = Path(manifest['cases'][item['id']]['out'])
+        generated = output.with_name(output.name + '-lifecycle') / 'generated'; generated.mkdir(parents=True)
+        runtime = {'candidate_sha': self.sha, 'parent_structural_manifest': dict(item['manifest'])}
+        path = generated / 'case.json'; path.write_text(json.dumps(runtime))
+        with patch('runtime_inputs.verify') as verify:
+            self.assertEqual(self.adapter.executed_manifest_sha(item, output), digest(path))
+            verify.assert_called_once_with(runtime)
+            runtime['parent_structural_manifest']['sha256'] = 'e' * 64; path.write_text(json.dumps(runtime))
+            with self.assertRaisesRegex(ValueError, 'approved structural'):
+                self.adapter.executed_manifest_sha(item, output)
 
     def test_box_identity_mismatch_never_launches(self):
         self.adapter.gpu = 'NVIDIA RTX'

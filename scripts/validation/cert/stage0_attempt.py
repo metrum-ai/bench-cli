@@ -124,7 +124,7 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, expect
             and outcome.timed_out is False and type(outcome.returncode) is int and outcome.returncode == 0):
         try:
             creation_closed = stage0_settlement.successful_create(
-                output, gpu_name=expected_gpu, gpu_uuid=forwarded['CUDA_VISIBLE_DEVICES']) is True
+                output, case=case, gpu_name=expected_gpu, gpu_uuid=forwarded['CUDA_VISIBLE_DEVICES']) is True
         except BaseException as exc:
             errors.append(type(exc).__name__)
     if not creation_closed:

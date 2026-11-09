@@ -424,8 +424,11 @@ receipt. Failed or interrupted creates remain ambiguous. The adapter and
 settlement assumptions have fake-based tests only; they still need independent
 review, live execution, a verified backstop and bounded cleanup.
 
-Required overrides (not implemented) are P1/P2/telemetry performance and
-exporter layouts; G7 full-grid performance; L2/L3/L4 modality servers; G4's
+L2 uses a small modality-launch hook: it binds the selected GPU and output path,
+records the readiness phase, and matches the create response to the inspected
+container; its live behavior remains untested. Required overrides (not
+implemented) are P1/P2/telemetry performance and exporter layouts; G7
+full-grid performance; L3/L4 modality servers; G4's
 additional VLM server; G5's additional endpoint server; the COMP-002 reference
 container; and trigger-bound COMP-001/OPS-001 or external INTEG-001 flows.
 These cannot silently fall back to the common adapter.

@@ -247,8 +247,16 @@ def run_case(manifest_path, manifest, case):
         target = out / "results" / (case + ".json")
         if not target.is_file():
             raise ValueError("case exited without an execution record")
-        from execution_evidence import report_rows
-        records = report_rows(out)
+        if result_writer.smoke_origin(out) is not None:
+            # Smoke records must never be accepted by certification report_rows.
+            # Inspect locally here; the controller separately checks request,
+            # readiness, cleanup and actual certification-intake rejection.
+            import stage0_milestones
+            records = [stage0_milestones.smoke_launcher_record(
+                out, case=case, candidate=manifest['candidate_sha'], manifest_sha256=execution_manifest_hash)]
+        else:
+            from execution_evidence import report_rows
+            records = report_rows(out)
         if len(records) != 1 or records[0]["ID"] != case or records[0]["candidate_sha"] != manifest["candidate_sha"]:
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":

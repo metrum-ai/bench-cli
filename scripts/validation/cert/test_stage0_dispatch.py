@@ -20,7 +20,7 @@ class DispatchTests(unittest.TestCase):
     def test_common_catalog_lanes(self):
         for case, lane in [('BC-GPU-001', 'G1'), ('BC-GPU-004', 'G2'), ('BC-GPU-008', 'G3'),
                            ('BC-GPU-010', 'G4'), ('BC-GPU-013', 'G5'), ('BC-COMP-003', 'G6'),
-                           ('BC-LIVE-001', 'L1'), ('BC-REASON-001', 'R'), ('BC-REASON-006', 'D'),
+                           ('BC-LIVE-001', 'L1'), ('BC-LIVE-002', 'L2'), ('BC-REASON-001', 'R'), ('BC-REASON-006', 'D'),
                            ('BC-REASON-005', 'V')]:
             with self.subTest(case=case): self.assertEqual(dispatch.validate(self.manifest(case, lane), case), lane)
 

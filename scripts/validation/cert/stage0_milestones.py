@@ -43,6 +43,46 @@ def local_file(root, name):
     return current
 
 
+def smoke_launcher_record(case_root, *, case, candidate, manifest_sha256):
+    """Inspect one marked smoke PASS locally, never accepting it into cert intake."""
+    root = Path(case_root).resolve(strict=True)
+    origin = result_writer.smoke_origin(root)
+    if origin is None or not CASE.fullmatch(case) or not re.fullmatch(r'[a-f0-9]{40}', candidate):
+        raise ValueError('marked smoke root and valid case identity required')
+    records = list((root / 'results').glob('*.json'))
+    if len(records) != 1 or records[0].name != case + '.json':
+        raise ValueError('unexpected smoke result inventory')
+    record = read_json(local_file(root, f'results/{case}.json'))
+    if (record.get('ID') != case or record.get('candidate_sha') != candidate or record.get('result') != 'PASS'
+            or record.get('evidence_class') != result_writer.SMOKE_CLASS
+            or record.get('stage0_expectations_sha256') != origin[1]['expectations_sha256']
+            or record.get('infra_history') or record.get('input_integrity_errors')
+            or not isinstance(record.get('input_hashes'), dict)
+            or record['input_hashes'].get('execution_manifest') != manifest_sha256):
+        raise ValueError('smoke launcher record provenance mismatch')
+    if (not isinstance(record.get('owner'), str) or not record['owner'].strip()
+            or not isinstance(record.get('evidence_link'), str) or not record['evidence_link'].strip()
+            or not isinstance(record.get('observed_values'), dict) or not record['observed_values']
+            or not isinstance(record.get('thresholds'), dict) or not record['thresholds']
+            or type(record.get('attempt')) is not int or record['attempt'] < 1):
+        raise ValueError('smoke launcher record is incomplete')
+    try:
+        start = dt.datetime.fromisoformat(record['start_utc'].replace('Z', '+00:00'))
+        end = dt.datetime.fromisoformat(record['end_utc'].replace('Z', '+00:00'))
+        if start.tzinfo is None or end.tzinfo is None or end < start or end > dt.datetime.now(dt.timezone.utc):
+            raise ValueError('invalid smoke record times')
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError('invalid smoke record times') from exc
+    paths, hashes = record.get('evidence_paths'), record.get('output_hashes')
+    if (not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths)
+            or len(set(paths)) != len(paths) or not isinstance(hashes, dict) or set(paths) != set(hashes)):
+        raise ValueError('smoke launcher record lacks complete evidence hashes')
+    for name in paths:
+        if not isinstance(hashes[name], str) or not SHA.fullmatch(hashes[name]) or hashes[name] != execution_evidence.digest(local_file(root, name)):
+            raise ValueError('smoke launcher evidence hash differs')
+    return record
+
+
 def check_record(case_root, *, case, candidate, expectations_sha256, manifest_sha256, request_path):
     """Verify a marked production record and one bound successful request.
 

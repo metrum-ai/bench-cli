@@ -60,6 +60,24 @@ class MilestoneTests(unittest.TestCase):
         reject.assert_called_once()
         self.assertEqual(list((self.case_root / 'results').iterdir()), [self.case_root / 'results' / (self.case + '.json')])
 
+    def test_launcher_inspects_smoke_pass_without_accepting_into_cert(self):
+        import execution_evidence
+        self.record.update({'result': 'PASS', 'owner': 'test', 'evidence_link': 'test',
+                            'observed_values': {'samples': 1}, 'thresholds': {'samples': 1}, 'attempt': 1,
+                            'start_utc': '2026-01-01T00:00:00Z', 'end_utc': '2026-01-01T00:00:01Z',
+                            'infra_history': []})
+        self.save_record()
+        with self.assertRaises(result_writer.NonCertificationEvidence):
+            execution_evidence.report_rows(self.case_root)
+        record = checks.smoke_launcher_record(self.case_root, case=self.case, candidate=self.sha,
+                                              manifest_sha256=self.manifest)
+        self.assertEqual(record['result'], 'PASS')
+        self.request.write_text('tampered\n')
+        with self.assertRaisesRegex(ValueError, 'evidence hash'):
+            checks.smoke_launcher_record(self.case_root, case=self.case, candidate=self.sha,
+                                         manifest_sha256=self.manifest)
+        self.assertEqual(self.record['evidence_class'], result_writer.SMOKE_CLASS)
+
     def test_execution_index_rejects_marked_root_without_submission(self):
         with tempfile.TemporaryDirectory() as tmp:
             index = Path(tmp) / 'control.json'

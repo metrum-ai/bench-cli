@@ -26,12 +26,22 @@ class SettlementTests(unittest.TestCase):
         self.path = self.evidence / 'r4-image-runtime.json'; self.path.write_text(json.dumps(self.receipt))
 
     def check(self):
-        return stage0_settlement.successful_create(self.root, gpu_name='NVIDIA H100', gpu_uuid=self.uuid)
+        return stage0_settlement.successful_create(self.root, case='BC-GPU-001', gpu_name='NVIDIA H100', gpu_uuid=self.uuid)
 
     def test_matching_create_and_inspect(self):
         self.assertTrue(self.check())
         self.receipt['container_id'] = 'c' * 64; self.path.write_text(json.dumps(self.receipt))
         with self.assertRaisesRegex(ValueError, 'runtime container identity'): self.check()
+
+    def test_modality_create_response_must_match_inspected_id(self):
+        output = self.evidence / 'serve-stdout.txt'
+        output.write_text('a' * 64 + '\nready server\n')
+        self.assertTrue(stage0_settlement.successful_create(self.root, case='BC-LIVE-002',
+                                                             gpu_name='NVIDIA H100', gpu_uuid=self.uuid))
+        output.write_text('b' * 64 + '\nready server\n')
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            stage0_settlement.successful_create(self.root, case='BC-LIVE-002',
+                                                 gpu_name='NVIDIA H100', gpu_uuid=self.uuid)
 
     def test_missing_or_noncanonical_response_is_not_settled(self):
         for data in ('', 'a' * 12 + '\n', 'a' * 64, 'a' * 64 + '\nextra'):
