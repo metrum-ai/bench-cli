@@ -87,6 +87,12 @@ class LiveLoopbackTests(unittest.TestCase):
                     with patch.object(rehearsal.case_launcher, 'preflight'), \
                          patch.object(rehearsal.manifest_tool, 'load_manifest', return_value=({}, config)):
                         rehearsal.rehearsal(path, case)
+                        if case == 'BC-LIVE-002':
+                            malformed = json.loads(sut.read_text())
+                            malformed['gpu']['name'] = malformed['gpu'].pop('model')
+                            sut.write_text(json.dumps(malformed))
+                            with self.assertRaisesRegex(ValueError, 'live vlm command failed'):
+                                rehearsal.rehearsal(path, case)
                     self.assertFalse(out.exists(), 'rehearsal must not write the frozen case output')
 
 
