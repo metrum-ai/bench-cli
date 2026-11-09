@@ -406,6 +406,48 @@ accidental mixing, not an authenticated boundary against record rewriting. No
 smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
+The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`,
+`stage0_gpu001_adapter.py`, `stage0_device.py`, `stage0_settlement.py`, `stage0_process.py`,
+`stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
+`stage0_cleanup.py`, `stage0_docker.py`, `stage0_cgroup.py`,
+`stage0_cgroup_exec.py`, `stage0_watchdog_state.py` and `stage0_watchdog.py`
+modules are **incomplete control primitives**, not a runnable Stage-0 controller.
+The attempt helper and a narrow GPU-001 adapter have fake-based orchestration
+tests but no live execution, no independently verified backstop, no complete
+classification or case-adapter set, and no hard upper bound for every blocking
+cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
+COMPLETE/PASS; it rejects unsupported assigned cases before the first launch.
+The attempt helper currently permits only the exact GPU-001 G1 production
+dispatch; even a successful exit requires a matched create ID and owned runtime
+receipt. This narrow settlement assumption still needs independent review and
+real Docker race tests. Failed or interrupted creates remain ambiguous; other
+cases lack a settlement basis.
+The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
+index) and probes the reviewed GPU name/UUID before launch and again after
+cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID
+and compares an in-container GPU query to the host before readiness. These
+checks rely on the host and runtime; fake probes do not attest a live host. Their offline tests exercise per-box control flow,
+process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
+a fake-provider watchdog loop. They do not start an independent watchdog or
+provide a deployed provider watchdog, implement all modality and performance
+evidence adapters, or establish owned-resource cleanup. Watchdog state receipts
+alone do not establish independent deployment, liveness or a settled provider
+create. The lane owner receipts
+are persisted before container creation, and a pinned Docker adapter is tested
+only with fake commands; a controller must still wire it to those receipts and
+track detached processes. The cgroup primitives have fake-file and join-wrapper
+tests only; they are not wired into a controller or verified on a delegated
+kernel cgroup, and they provide no network namespace or hostile-child sandbox.
+The plan preflight uses the production selected-set checks and requires each
+manifest output to be a fresh path below the expectations-bound smoke marker.
+It therefore needs a separately frozen smoke-output manifest plan; never reuse a
+certification-output plan as smoke. Its tests mock selected-set integration and
+do not constitute supervisor approval. The isolated smoke
+checks exercise both the production record-level and execution-index root guards;
+they do not establish that a complete execution index would otherwise pass. A fake adapter or a
+returned control-flow summary is not an authenticated box barrier. Do not run Stage 0 or
+infer a certification result from these modules.
+
 ### Remaining offline launch rehearsal work (#469)
 
 The selected-set preflight and individual synthetic loopbacks are **not** a

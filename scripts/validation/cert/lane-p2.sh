@@ -11,6 +11,7 @@ rc=0; cert_parse P2 "$@" || rc=$?
 [[ $rc == 0 ]] || exit "$rc"
 : "${CERT_HF_HUB_CACHE:?P2 requires a prepopulated offline model hub cache}"
 CERT_AUX_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+cert_track_owner auxiliary "$CERT_AUX_OWNER" || exit 1
 export PERF_OWNER="$CERT_AUX_OWNER"
 cert_run python3 "$CERT_DIR/perf_p2_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \
   --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" --sha "$CERT_SHA" --model "$CERT_MODEL" \

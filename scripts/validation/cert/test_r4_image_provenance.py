@@ -85,6 +85,54 @@ class OCIProvenanceTests(unittest.TestCase):
             provenance.runtime(provenance.pins.IMAGE, 'fixture-container', output)
         self.assertFalse(output.exists())
 
+    def test_smoke_runtime_checks_container_gpu_before_receipt(self):
+        import result_writer
+        index, index_digest = self.index([self.entry])
+        uuid = 'GPU-11111111-1111-1111-1111-111111111111'
+        (self.root / result_writer.SMOKE_MARKER).write_text(json.dumps({
+            'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'a' * 64}))
+        evidence = self.root / 'evidence'; evidence.mkdir()
+        output = evidence / 'r4-image-runtime.json'
+        (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
+        ident, owner = 'b' * 64, 'c' * 32
+        (evidence / 'container-id.txt').write_text(ident + '\n')
+        owner_file = evidence / 'server-container-owner.txt'
+        owner_file.write_text(owner + '\n'); owner_file.chmod(0o600)
+        request = {'DeviceIDs': [uuid], 'Count': 0, 'Driver': '', 'Capabilities': [['gpu']]}
+        container = {**self.container, 'Id': ident, 'Config': {'Labels': {'metrum.cert.owner': owner}},
+                     'HostConfig': {'DeviceRequests': [request]}}
+        def docker(command, **kwargs):
+            if command[1] == 'exec':
+                return SimpleNamespace(stdout=f'NVIDIA H100, {uuid}, 550.1\n')
+            return SimpleNamespace(stdout=json.dumps([self.image if command[1:3] == ['image', 'inspect'] else container]))
+        verify = provenance.verify
+        def synthetic(index_path, child_path, image, container):
+            return verify(index_path, child_path, image, container,
+                          index_digest=index_digest, child_digest=self.child_digest)
+        env = {'CERT_R4_OCI_INDEX': str(index), 'CERT_R4_OCI_AMD64': str(self.child), 'CUDA_VISIBLE_DEVICES': uuid}
+        with patch.dict('os.environ', env), patch.object(provenance, 'verify', side_effect=synthetic), \
+             patch.object(provenance.subprocess, 'run', side_effect=docker):
+            receipt = provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertEqual(receipt['gpu_uuid'], uuid)
+            self.assertEqual(receipt['container_id'], ident)
+            self.assertEqual(receipt['container_owner'], owner)
+            self.assertEqual(receipt['gpu_visible'], {'name': 'NVIDIA H100', 'uuid': uuid, 'driver': '550.1'})
+            output.unlink()
+            (evidence / 'gpu.csv').write_text('NVIDIA RTX,550.1\n')
+            with self.assertRaisesRegex(ValueError, 'host GPU identity'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+            (evidence / 'gpu.csv').write_text('NVIDIA H100,550.1\n')
+            container['Id'] = 'd' * 64
+            with self.assertRaisesRegex(ValueError, 'container creation'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+            container['Id'] = ident
+            request['DeviceIDs'] = ['0']
+            with self.assertRaisesRegex(ValueError, 'container GPU request'):
+                provenance.runtime(provenance.pins.IMAGE, 'fixture', output)
+            self.assertFalse(output.exists())
+
     def test_successful_records_require_bound_runtime_receipts(self):
         import execution_evidence
         evidence = self.root / 'evidence'

@@ -13,6 +13,26 @@ HERE = Path(__file__).resolve().parent
 
 
 class CleanupTests(unittest.TestCase):
+    def test_owner_receipt_is_exclusive_and_rejects_bad_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); (root / 'evidence').mkdir()
+            env = {**os.environ, 'CERT_HOME': str(HERE), 'OUT': str(root)}
+            base = 'source "$CERT_HOME/common.sh"; CERT_OUT="$OUT"; '
+            token = 'a' * 32
+            def run(command):
+                return subprocess.run(['bash', '-c', base + command], env=env,
+                                      capture_output=True, text=True, timeout=10)
+            self.assertEqual(run(f'cert_track_owner server {token}').returncode, 0)
+            receipt = root / 'evidence/server-container-owner.txt'
+            self.assertEqual(receipt.read_text(), token + '\n')
+            self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
+            self.assertNotEqual(run(f'cert_track_owner server {"b" * 32}').returncode, 0)
+            self.assertEqual(receipt.read_text(), token + '\n')
+            self.assertNotEqual(run('cert_track_owner auxiliary bad').returncode, 0)
+            self.assertNotEqual(run(f'cert_track_owner other {token}').returncode, 0)
+            (root / 'evidence/auxiliary-container-owner.txt').symlink_to(receipt)
+            self.assertNotEqual(run(f'cert_track_owner auxiliary {token}').returncode, 0)
+
     def run_cleanup(self, actual):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / 'evidence').mkdir(); (root / 'results').mkdir()
