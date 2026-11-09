@@ -23,11 +23,13 @@ weekly job additionally checks the actual published archives against their tag.
 
 ## Execution-time records and freeze checks
 
-The complete selected-set gate is a **loopback offline rehearsal (no netns isolation)**:
-it must use each selected executable case's frozen launch path and candidate
-binaries, loopback stand-ins, record writers and validator intake. Approved N/As
-remain N/As, not simulated executions. The partial probes below are not that gate. They provide no OS-enforced network isolation and no GPU or
-physical-tier evidence.
+The pre-rental RC-GPU gate is a **loopback offline rehearsal (no netns isolation)**:
+it exercises the selected RC-GPU cases' non-Docker launch paths using frozen inputs,
+candidate binaries and loopback stand-ins. Docker-dependent steps are deferred to
+GPU-session smoke, not counted as passes. Non-GPU cases run directly in certification;
+post-tag and future-dependent inputs are frozen at their trigger points. Approved N/As
+remain N/As, not simulated executions. The partial probes below are not the complete
+gate. They provide no OS-enforced network isolation or physical-tier evidence.
 
 For catalog r4 image-backed lanes, the freezer pins the tracked OCI index and
 linux/amd64 child descriptor bytes into each execution manifest. Offline
@@ -370,6 +372,18 @@ approved N/As must exactly cover selected RC-GPU IDs without duplicates or extra
 All manifests are verified before any launch, and N/A pins are rechecked at each
 execution boundary. The order in the index is the execution order, so
 dependencies must precede their barriers.
+
+For inputs that do not yet exist, an index may explicitly list `deferred_at_trigger`
+entries, each with exactly `case` and sorted `after` fields. Only `BC-COMP-001`
+(after both `BC-PERF-001` and `BC-PERF-002`) and `BC-OPS-001` (after every other
+selected executable RC-GPU case) may be declared. Use `--pretrigger` explicitly;
+without it, deferred declarations are rejected. The command preflights or executes
+only the static subset, reports each deferral, and exits 3 even when that subset
+succeeds: it is **not** a completed selected set. At each actual trigger, validate
+and bind the real same-run predecessor outputs before freezing and executing the
+remaining case. Declarations alone do not prove predecessor success, authorize a
+PASS, or satisfy final intake. Final validation still requires every selected case,
+its complete execution index and the separately approved index digest.
 
 The freezer and launcher compare the certification source tree, xtask sources
 and declared build configuration to the candidate commit and pin their bytes;

@@ -114,6 +114,46 @@ class SelectedSetStrictTests(unittest.TestCase):
         with patch.object(selected_set.case_launcher, 'preflight'), self.assertRaisesRegex(ValueError, 'not selected'):
             self.load()
 
+    def test_explicit_trigger_deferral_is_an_incomplete_subset(self):
+        self.catalog.write_text('ID,Tier,Parallel group\n'
+            'BC-GPU-001,RC-GPU,G1\nBC-PERF-001,RC-GPU,P1\nBC-PERF-002,RC-GPU,P2\n'
+            'BC-COMP-001,RC-GPU,P1\nBC-OPS-001,RC-GPU,CLEANUP\n')
+        selected = {case: ['core'] for case in ('BC-GPU-001', 'BC-PERF-001', 'BC-PERF-002', 'BC-COMP-001', 'BC-OPS-001')}
+        self.setup_files(selected)
+        index = json.loads(self.index.read_text())
+        for case, lane in (('BC-PERF-001', 'P1'), ('BC-PERF-002', 'P2')):
+            path = self.root / (case + '.json')
+            path.write_text(json.dumps({'candidate_sha': 'a' * 40, 'lane': lane, 'cases': {case: {}}}))
+            index['manifests'].append({'path': str(path), 'sha256': digest(path)})
+        index['deferred_at_trigger'] = [
+            {'case': 'BC-COMP-001', 'after': ['BC-PERF-001', 'BC-PERF-002']},
+            {'case': 'BC-OPS-001', 'after': ['BC-COMP-001', 'BC-GPU-001', 'BC-PERF-001', 'BC-PERF-002']},
+        ]
+        self.index.write_text(json.dumps(index))
+        with patch('validate_results.load_catalog', return_value={}), patch('validate_results.load_selection'), \
+             patch.object(selected_set.case_launcher, 'preflight') as preflight:
+            with self.assertRaisesRegex(ValueError, 'explicit pretrigger'):
+                selected_set.load_set(self.selection, self.catalog, self.index)
+            entries = selected_set.load_set(self.selection, self.catalog, self.index, allow_pretrigger=True)
+            self.assertEqual([entry[0] for entry in entries], ['BC-GPU-001', 'BC-PERF-001', 'BC-PERF-002'])
+            self.assertEqual(preflight.call_count, 3)
+            argv = ['selected_set', '--selection', str(self.selection), '--catalog', str(self.catalog),
+                    '--index', str(self.index), '--pretrigger']
+            with patch('sys.argv', argv), patch.object(selected_set.case_launcher, 'run_case') as run:
+                self.assertEqual(selected_set.main(), 3)  # explicitly incomplete, not success
+                self.assertEqual(run.call_count, 3)
+        # No declaration can silently remove an ordinary case or alter dependencies.
+        for invalid in ([{'case': 'BC-GPU-001', 'after': []}],
+                        [{'case': 'BC-COMP-001', 'after': ['BC-PERF-001']}],
+                        [index['deferred_at_trigger'][0], index['deferred_at_trigger'][0]],
+                        [{'case': 'BC-OPS-001', 'after': ['BC-PERF-001', 'BC-PERF-002']}],
+                        [{'case': [], 'after': []}]):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                selected_set.trigger_deferred_cases({'deferred_at_trigger': invalid}, set(selected), set(), True)
+        with self.assertRaisesRegex(ValueError, 'both selected performance predecessors'):
+            selected_set.trigger_deferred_cases({'deferred_at_trigger': [index['deferred_at_trigger'][0]]},
+                                                {'BC-COMP-001', 'BC-PERF-001'}, set(), True)
+
     def test_selection_is_recomputed_before_any_case_preflight(self):
         import select_cases
         import validate_results

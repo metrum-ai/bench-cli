@@ -49,7 +49,36 @@ def approved_na_cases(index, selected_gpu, candidate):
     return cases
 
 
-def load_set(selection_path, catalog_path, index_path):
+def trigger_deferred_cases(index, required, approved_na, allow_pretrigger):
+    """Validate explicit same-run trigger declarations; never imply completion."""
+    entries = index.get('deferred_at_trigger', [])
+    if not isinstance(entries, list):
+        raise ValueError('deferred_at_trigger must be a list')
+    if entries and not allow_pretrigger:
+        raise ValueError('trigger-deferred cases require explicit pretrigger mode')
+    deferred = set()
+    for item in entries:
+        if not isinstance(item, dict) or set(item) != {'case', 'after'}:
+            raise ValueError('invalid trigger-deferred declaration')
+        case, after = item['case'], item['after']
+        if (not isinstance(case, str) or case not in {'BC-COMP-001', 'BC-OPS-001'}
+                or case not in required or case in deferred or case in approved_na):
+            raise ValueError('invalid, duplicate or N/A trigger-deferred case')
+        if case == 'BC-COMP-001':
+            predecessors = {'BC-PERF-001', 'BC-PERF-002'}
+            if not predecessors <= required - approved_na:
+                raise ValueError('COMP-001 requires both selected performance predecessors')
+        else:
+            predecessors = required - approved_na - {'BC-OPS-001'}
+        if not isinstance(after, list) or after != sorted(predecessors):
+            raise ValueError(f'{case} trigger predecessors do not match the selected plan')
+        deferred.add(case)
+    if allow_pretrigger and not deferred:
+        raise ValueError('pretrigger mode requires a trigger-deferred case')
+    return deferred
+
+
+def load_set(selection_path, catalog_path, index_path, allow_pretrigger=False):
     require_python()
     selection = json.loads(Path(selection_path).read_text(), object_pairs_hook=manifest_tool.unique_object)
     if selection.get("catalog_sha256") != digest(catalog_path):
@@ -79,7 +108,9 @@ def load_set(selection_path, catalog_path, index_path):
     rows_for_policy = validate_results.load_catalog(Path(catalog_path))
     validate_results.load_selection(Path(selection_path), Path(catalog_path), rows_for_policy,
                                     selection['candidate_sha'])
-    required -= approved_na_cases(index, required, selection['candidate_sha'])
+    approved_na = approved_na_cases(index, required, selection['candidate_sha'])
+    deferred = trigger_deferred_cases(index, required, approved_na, allow_pretrigger)
+    required -= approved_na | deferred
     entries = []
     seen = set()
     for item in index["manifests"]:
@@ -107,10 +138,12 @@ def main():
     for name in ("selection", "catalog", "index"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--pretrigger", action="store_true",
+                        help="explicitly preflight or execute the incomplete pre-trigger subset")
     args = parser.parse_args()
     try:
         index_hash = digest(args.index)
-        entries = load_set(args.selection, args.catalog, args.index)
+        entries = load_set(args.selection, args.catalog, args.index, allow_pretrigger=args.pretrigger)
         index = json.loads(args.index.read_text(), object_pairs_hook=manifest_tool.unique_object)
         selection = json.loads(args.selection.read_text(), object_pairs_hook=manifest_tool.unique_object)
         def check_frozen_set():
@@ -120,6 +153,9 @@ def main():
             return approved_na_cases(index, set(selection['selected']), selection['candidate_sha'])
         for case in sorted(check_frozen_set()):
             print(f'N-A-RECORD-VALIDATED {case}')
+        deferred = index.get('deferred_at_trigger', [])
+        for item in deferred:
+            print(f'TRIGGER-DEFERRED {item["case"]}: after {", ".join(item["after"])}')
         for case, path, manifest, expected in entries:
             check_frozen_set()
             if args.preflight:
@@ -131,9 +167,12 @@ def main():
             case_launcher.preflight(manifest)
             case_launcher.run_case(path, manifest, case)
         check_frozen_set()
+        if deferred:
+            print('PRETRIGGER-INCOMPLETE: freeze and execute trigger-bound cases before final intake')
+            return 3
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
         parser.exit(1, f"selected GPU set failed: {exc}\n")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
