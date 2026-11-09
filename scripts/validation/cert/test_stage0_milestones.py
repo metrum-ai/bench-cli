@@ -60,6 +60,29 @@ class MilestoneTests(unittest.TestCase):
         reject.assert_called_once()
         self.assertEqual(list((self.case_root / 'results').iterdir()), [self.case_root / 'results' / (self.case + '.json')])
 
+    def test_execution_index_rejects_marked_root_without_submission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            index = Path(tmp) / 'control.json'
+            index.write_text('{}')
+            kwargs = {'index_path': index, 'index_sha256': self.hash(index), 'candidate': self.sha,
+                      'selection_sha256': 'd' * 64, 'catalog_sha256': 'e' * 64,
+                      'expectations_sha256': self.exp}
+            with patch.object(checks.execution_intake, 'ExecutionIndex',
+                              wraps=checks.execution_intake.ExecutionIndex) as intake:
+                checks.check_execution_intake_rejection(self.case_root, **kwargs)
+            intake.assert_called_once()
+            self.assertEqual(index.read_text(), '{}')
+            self.assertEqual(list((self.case_root / 'results').iterdir()), [self.case_root / 'results' / (self.case + '.json')])
+            with patch.object(checks.execution_intake, 'ExecutionIndex', return_value=object()):
+                with self.assertRaisesRegex(ValueError, 'did not reject'):
+                    checks.check_execution_intake_rejection(self.case_root, **kwargs)
+            with patch.object(checks.execution_intake, 'ExecutionIndex', side_effect=ValueError('unrelated failure')):
+                with self.assertRaisesRegex(ValueError, 'unrelated failure'):
+                    checks.check_execution_intake_rejection(self.case_root, **kwargs)
+            index.write_text('changed')
+            with self.assertRaisesRegex(ValueError, 'control index'):
+                checks.check_execution_intake_rejection(self.case_root, **kwargs)
+
     def test_rejects_unbound_or_changed_request(self):
         self.write_request({**self.row, 'outcome': 'error'})
         with self.assertRaisesRegex(ValueError, 'output hash'):

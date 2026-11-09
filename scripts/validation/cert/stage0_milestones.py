@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 import execution_evidence
+import execution_intake
 import manifest_tool
 import result_writer
 import validate_results
@@ -100,6 +101,38 @@ def check_record(case_root, *, case, candidate, expectations_sha256, manifest_sh
     else:
         raise ValueError('isolated production intake did not reject smoke evidence')
     return record
+
+
+def check_execution_intake_rejection(case_root, *, index_path, index_sha256, candidate,
+                                     selection_sha256, catalog_sha256, expectations_sha256):
+    """Exercise the production execution-index smoke-root guard in isolation.
+
+    The control index is a scratch file outside the smoke tree, not a real
+    certification submission. This check does not show that a full index or
+    selected-set inventory would otherwise be accepted.
+    """
+    if (not isinstance(candidate, str) or not re.fullmatch(r'[a-f0-9]{40}', candidate)
+            or any(not isinstance(x, str) or not SHA.fullmatch(x) for x in
+                   (index_sha256, selection_sha256, catalog_sha256, expectations_sha256))):
+        raise ValueError('invalid isolated intake inputs')
+    root = Path(case_root).resolve(strict=True)
+    origin = result_writer.smoke_origin(root)
+    if origin is None or origin[1]['expectations_sha256'] != expectations_sha256:
+        raise ValueError('unapproved smoke root')
+    index = Path(index_path)
+    if (index.is_symlink() or not index.is_file() or result_writer.smoke_origin(index.resolve().parent) is not None
+            or execution_evidence.digest(index) != index_sha256):
+        raise ValueError('control index must be pinned outside the smoke root')
+    try:
+        execution_intake.ExecutionIndex(index, index_sha256, root, candidate, selection_sha256, catalog_sha256)
+    except result_writer.NonCertificationEvidence:
+        origin = result_writer.smoke_origin(root)
+        if (origin is None or origin[1]['expectations_sha256'] != expectations_sha256
+                or result_writer.smoke_origin(index.resolve().parent) is not None
+                or execution_evidence.digest(index) != index_sha256):
+            raise ValueError('isolated intake inputs changed during rejection check')
+        return
+    raise ValueError('isolated production execution intake did not reject the smoke root')
 
 
 def check_readiness(lifecycle_root, case):

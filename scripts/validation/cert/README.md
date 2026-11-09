@@ -417,7 +417,9 @@ evidence adapters, or establish owned-resource cleanup. The lane owner receipts
 are persisted before container creation, and a pinned Docker adapter is tested
 only with fake commands; a controller must still wire it to those receipts and
 track detached processes. The plan preflight uses the production selected-set checks, but its tests mock
-that integration and do not constitute supervisor approval. A fake adapter or a
+that integration and do not constitute supervisor approval. The isolated smoke
+checks exercise both the production record-level and execution-index root guards;
+they do not establish that a complete execution index would otherwise pass. A fake adapter or a
 returned control-flow summary is not an authenticated box barrier. Do not run Stage 0 or
 infer a certification result from these modules.
 
