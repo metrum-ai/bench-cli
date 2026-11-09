@@ -406,14 +406,17 @@ accidental mixing, not an authenticated boundary against record rewriting. No
 smoke controller or approved expectations are supplied by this marker alone:
 never submit smoke records to certification intake, history or the sheet.
 
-The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`, `stage0_process.py`,
+The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`,
+`stage0_gpu001_adapter.py`, `stage0_process.py`,
 `stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
 `stage0_cleanup.py`, `stage0_docker.py`, `stage0_cgroup.py`,
 `stage0_cgroup_exec.py`, `stage0_watchdog_state.py` and `stage0_watchdog.py`
 modules are **incomplete control primitives**, not a runnable Stage-0 controller.
-The attempt helper has fake-based orchestration tests but no live execution,
-no independently verified backstop, no complete classification or milestone
-adapter, and no hard upper bound for every blocking cleanup operation. Their offline tests exercise per-box control flow,
+The attempt helper and a narrow GPU-001 adapter have fake-based orchestration
+tests but no live execution, no independently verified backstop, no complete
+classification or case-adapter set, and no hard upper bound for every blocking
+cleanup operation. The GPU-001 adapter permits only an explicitly predeclared
+COMPLETE/PASS; it rejects unsupported assigned cases before the first launch. Their offline tests exercise per-box control flow,
 process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
 a fake-provider watchdog loop. They do not start an independent watchdog or
 provide a deployed provider watchdog, implement all modality and performance

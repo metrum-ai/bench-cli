@@ -121,6 +121,9 @@ def run_box(expectations_path, expected_sha256, box, required, adapter):
             previous[sig] = signal.signal(sig, interrupted)
         cases = frozen_cases()
         candidate = pinned_expectations(expectations_path, expected_sha256)['candidate_sha']
+        # Refuse an entire box before the first case if any assigned case lacks
+        # an implemented and approved runtime adapter.
+        must('validate_box', box, cases)
         must('backstop_armed', box)
         for item in cases:
             frozen_cases()  # detect changes before every case

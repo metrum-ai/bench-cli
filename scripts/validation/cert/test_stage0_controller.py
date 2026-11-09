@@ -18,12 +18,14 @@ class FakeAdapter:
         self.launched = []
         self.stopped = []
         self.armed = True
+        self.supported = True
         self.milestones = True
         self.cleanup = True
         self.stop_verified = True
         self.outcome = {'terminal': 'COMPLETE', 'record_result': 'PASS'}
         self.on_launch = None
 
+    def validate_box(self, _box, _cases): return self.supported
     def backstop_armed(self, _box): return self.armed
     def preflight(self, _case): return True
     def launch(self, case):
@@ -66,6 +68,13 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.adapter.launched, self.cases)
         self.assertEqual(summary['cases'], self.cases)
         self.assertFalse(self.adapter.stopped)
+
+    def test_missing_adapter_stops_before_first_case(self):
+        self.adapter.supported = False
+        with self.assertRaisesRegex(ValueError, 'validate_box'):
+            self.run_box()
+        self.assertFalse(self.adapter.launched)
+        self.assertEqual(self.adapter.stopped, ['box-a'])
 
     def test_missing_milestone_stops_box_before_next_case(self):
         self.adapter.milestones = False
