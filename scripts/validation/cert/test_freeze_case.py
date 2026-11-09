@@ -70,12 +70,13 @@ class FreezeCaseTests(unittest.TestCase):
             binary.chmod(0o755)
             sut = root / "sut.json"
             sut.write_text(json.dumps({"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}))
+            import select_cases
+            import validate_results
             selection = root / "selection.json"
-            selection.write_text(json.dumps({"candidate_sha": "a" * 40, "selected": {"BC-GPU-001": ["core"]}}))
             catalog = root / "catalog.csv"
-            catalog.write_text("ID,Tier,Parallel group\nBC-GPU-001,RC-GPU,G1\n")
-            selection.write_text(json.dumps({"candidate_sha": "a" * 40, "catalog_sha256": digest(catalog),
-                                             "selected": {"BC-GPU-001": ["core"]}}))
+            catalog.write_text("ID,Tier,Test case,Selection,Area,Parallel group\nBC-GPU-001,RC-GPU,fixture,core,GPU,G1\n")
+            selection.write_text(json.dumps(select_cases.make_selection(
+                validate_results.load_catalog(catalog), digest(catalog), 'a' * 40, 0.1, 3, [], [])))
             lane = root / "lane.json"
             lane.write_text(json.dumps({"candidate_sha": "a" * 40, "candidate_binary_sha256": digest(binary), "baseline_binary_sha256": digest(binary)}))
             fixture = bind({'candidate_sha': 'a' * 40,

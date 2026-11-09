@@ -45,8 +45,11 @@ class FreezeGeneratedTests(unittest.TestCase):
                   'tokenizer': {**runtime_inputs.pin(tokenizer), 'revision': pins.GENERAL_REVISION}}
         recipes = file('recipes.json', json.dumps({'recipes': [recipe]}))
         sut = file('sut.json', json.dumps({'host_os': 'Linux', 'memory_gb': 128, 'gpu': {'memory_gb': 48}}))
-        catalog = file('catalog.csv', 'ID,Tier,Parallel group\nBC-GPU-011,RC-GPU,G4\n')
-        selection = file('selection.json', json.dumps({'candidate_sha': 'a' * 40, 'catalog_sha256': digest(catalog), 'selected': {'BC-GPU-011': ['core']}}))
+        import select_cases
+        import validate_results
+        catalog = file('catalog.csv', 'ID,Tier,Test case,Selection,Area,Parallel group\nBC-GPU-011,RC-GPU,fixture,core,GPU,G4\n')
+        selection = file('selection.json', json.dumps(select_cases.make_selection(
+            validate_results.load_catalog(catalog), digest(catalog), 'a' * 40, 0.1, 3, [], [])))
         image = file('synthetic-image.png', 'SYNTHETIC IMAGE')
         vlm_prompt = file('vlm-prompt.jsonl', json.dumps({'prompt': 'fixture', 'image_url': str(image)}) + '\n')
         config = {'image': pins.IMAGE, 'model': pins.GENERAL_MODEL,
