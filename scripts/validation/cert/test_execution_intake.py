@@ -189,6 +189,40 @@ class ExecutionIntakeTests(unittest.TestCase):
         self.write_index()
         self.assertTrue(any('path' in e for e in self.validate()[1]))
 
+    def test_builder_uses_actual_staged_records_and_production_intake(self):
+        import build_execution_index
+        mapping = self.root / 'proof-map.json'
+        mapping.write_text(json.dumps({'BC-GPU-001': {'manifest': 'proofs/manifest.json',
+                                                     'phases': 'proofs/phases.jsonl'}}))
+        out = self.root / 'built-index.json'
+        result = build_execution_index.build(self.catalog, self.selection_path, self.results,
+            'proofs/selected-plan.json', mapping, self.sha, out, as_of=self.now)
+        self.assertEqual(result, execution_intake.digest(out))
+        self.assertEqual(json.loads(out.read_text()), self.index)
+        with self.assertRaises(FileExistsError):
+            build_execution_index.build(self.catalog, self.selection_path, self.results,
+                'proofs/selected-plan.json', mapping, self.sha, out, as_of=self.now)
+
+    def test_builder_rejects_missing_or_forged_proofs_before_output(self):
+        import build_execution_index
+        mapping = self.root / 'proof-map.json'
+        out = self.root / 'built-index.json'
+        for data in ({}, {'BC-GPU-001': {'manifest': '../outside', 'phases': 'proofs/phases.jsonl'}},
+                     {'BC-GPU-001': {'manifest': 'proofs/manifest.json', 'phases': 'proofs/phases.jsonl'},
+                      'BC-INTEG-001': {'manifest': 'proofs/manifest.json', 'phases': 'proofs/phases.jsonl'}}):
+            with self.subTest(data=data):
+                mapping.write_text(json.dumps(data))
+                with self.assertRaises(ValueError):
+                    build_execution_index.build(self.catalog, self.selection_path, self.results,
+                        'proofs/selected-plan.json', mapping, self.sha, out, as_of=self.now)
+                self.assertFalse(out.exists())
+        mapping.write_text(json.dumps({'BC-GPU-001': {'manifest': 'proofs/manifest.json', 'phases': 'proofs/phases.jsonl'}}))
+        self.phases_path.write_text('')
+        with self.assertRaisesRegex(ValueError, 'production intake rejected'):
+            build_execution_index.build(self.catalog, self.selection_path, self.results,
+                'proofs/selected-plan.json', mapping, self.sha, out, as_of=self.now)
+        self.assertFalse(out.exists())
+
     def test_expired_na_is_not_laundered_by_valid_index(self):
         self.na['approval']['expires_utc'] = '2026-11-08T13:00:00Z'
         (self.results / 'BC-INTEG-001.json').write_text(json.dumps(self.na))

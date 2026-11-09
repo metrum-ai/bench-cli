@@ -552,12 +552,15 @@ original `record_sha256`, and relative `manifest` and `phases` pins (each a
 `structural_manifest` pin. The selected plan is the frozen case index with
 matching candidate, selection and catalog hashes. Copy proof files byte-for-byte
 under the results parent, and independently review the final index digest before
-passing it. An index cannot substitute for the actual selected-set rehearsal:
-the producer for an all-tier selected-set index, late-bound barriers, generated
-input re-verification at intake and full harness-to-candidate closure are not
-complete. Hashes do not authenticate a forged bundle or replace host trust and
-an independent integrity audit. Approved N/As are checked separately; they do not
-need a fabricated execution entry.
+passing it. `build_execution_index.py` can build the final index from already
+staged, unchanged records and a per-case proof map, and it runs production
+intake before writing the index. It does not run cases or independently attest
+its inputs. An index cannot substitute for the actual selected-set rehearsal:
+the all-tier selected plan, late-bound barriers, generated input re-verification
+at intake and full harness-to-candidate closure are not complete. Hashes do not
+authenticate a forged bundle or replace host trust and an independent integrity
+audit. Approved N/As are checked separately; they do not need a fabricated
+execution entry.
 
 For a periodic run, pass `--cadence weekly --run-id ID --run-date-utc ISO_UTC
 --branch main --compared-against VERSION`; the CSV defaults to `periodic.csv`.
