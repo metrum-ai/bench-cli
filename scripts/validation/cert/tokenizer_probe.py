@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU-only frozen-CLI tokenizer probe; never emits GPU case records."""
 import json
-import os
 import subprocess
 import tempfile
 import threading
@@ -54,7 +53,7 @@ def probe(binary, tokenizer):
                        '--streaming', '--model', 'offline-fixture', '--data-log', str(data), '--max-tokens', '8',
                        '--warmup-requests', '0', '--request-timeout', '10', '--tokenizer', str(tokenizer)]
             # No inherited API credentials, exporter settings, proxy or Hub cache.
-            environment = {'PATH': os.environ.get('PATH', ''), 'HOME': str(root),
+            environment = {'PATH': '', 'HOME': str(root),
                            'NO_PROXY': '*', 'no_proxy': '*', 'TOKENIZERS_PARALLELISM': 'false'}
             result = subprocess.run(command, capture_output=True, text=True, timeout=30, cwd=root, env=environment)
             if result.returncode != 0 or not data.is_file():

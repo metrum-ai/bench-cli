@@ -42,7 +42,7 @@ class CaseLauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             binary = root / "binary"
-            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.write_text('#!/bin/sh\n[ "${CERT_UNTRUSTED_ENV+x}" != x ] || exit 42\nexit 0\n')
             binary.chmod(0o755)
             sut = root / "sut.json"
             sut.write_text(json.dumps({"host_os": "Linux", "memory_gb": 128, "gpu": {"memory_gb": 48}}))
@@ -62,6 +62,10 @@ class CaseLauncherTests(unittest.TestCase):
             with patch.object(case_launcher.subprocess, "run") as run, patch('tokenizer_probe.probe'):
                 self.assertEqual(case_launcher.preflight(manifest), ["BC-GPU-001"])
                 run.assert_called_once()
+                self.assertEqual(run.call_args.kwargs['env'], {})
+            # A real preflight subprocess must not inherit this sentinel either.
+            with patch.dict('os.environ', {'CERT_UNTRUSTED_ENV': 'sentinel'}), patch('tokenizer_probe.probe'):
+                self.assertEqual(case_launcher.preflight(manifest), ['BC-GPU-001'])
             guarded = copy.deepcopy(manifest)
             guarded["cases"] = {"BC-GPU-010": manifest["cases"]["BC-GPU-001"]}
             with patch.object(case_launcher.subprocess, "run"), patch("tokenizer_probe.probe", side_effect=ValueError("missing tokenizer capability")) as probe:

@@ -76,7 +76,9 @@ def preflight(manifest):
     if 'BC-LIVE-001' in manifest['cases'] or 'derived_inputs' in manifest:
         import derived_inputs
         derived_inputs.validate(manifest)
-    subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30)
+    # Preflight is outside the lane's env -i boundary; do not leak parent
+    # credentials or loader overrides into even a version-only candidate run.
+    subprocess.run([str(binary), "--version"], check=True, capture_output=True, timeout=30, env={})
     sut_path = pinned(manifest["sut"])
     sut = json.loads(sut_path.read_text(), object_pairs_hook=manifest_tool.unique_object)
     if not isinstance(sut.get("host_os"), str) or not sut["host_os"].strip():
