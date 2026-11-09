@@ -31,7 +31,7 @@ def events(path):
         return []
 
 
-def ready_to_interrupt(order, trace, data):
+def ready_to_interrupt(order, trace, data, *, median_slo=False):
     stream = events(trace)
     started = {e.get("request") for e in stream if e.get("kind") == "chunk"}
     finished = {e.get("request") for e in stream if e.get("kind") in ("complete", "error")}
@@ -40,6 +40,15 @@ def ready_to_interrupt(order, trace, data):
     if order == "error-first":
         return not finished
     rows = [r for r in events(data) if ".request." in r.get("schema_version", "")]
+    if median_slo:
+        # Match the measured population and exact requirement used by the
+        # independent median validator. Never interrupt a stream early merely
+        # because a single answer (or a non-measured row) appeared.
+        rows = [r for r in rows if r.get("phase") == "measure"]
+        try:
+            g3_checks.median_answered_values(rows)
+        except ValueError:
+            return False
     return any(r.get("answer_completed") is True and r.get("error") is None for r in rows) and any(
         r.get("outcome") == "reasoning_truncated" for r in rows)
 
@@ -91,7 +100,7 @@ def run_cell(args, order, label="g3", extra_flags=(), concurrency=4, count=16, m
             if order != "control":
                 deadline = time.monotonic() + 900
                 while time.monotonic() < deadline and client.poll() is None:
-                    if ready_to_interrupt(order, trace, data):
+                    if ready_to_interrupt(order, trace, data, median_slo=median_slo):
                         break
                     time.sleep(.05)
                 else:
