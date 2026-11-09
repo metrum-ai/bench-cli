@@ -5,6 +5,7 @@
 import argparse
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import time
@@ -170,11 +171,12 @@ def main():
     record("BC-REASON-004", live, {"requests": 16, "reasoning_streams_min": 1, "usage_coverage": 1.0})
 
     def hardware(_files):
-        if "L40S" not in gpu_line[0] or not all(outcomes.get(case, False) for case in ("BC-REASON-001", "BC-REASON-002", "BC-REASON-003")):
-            raise ValueError("second-class case requires L40S and all three reasoning cases PASS")
+        if (not re.match(r"^NVIDIA H100(?:\s|$)", gpu_line[0].strip())
+                or not all(outcomes.get(case, False) for case in ("BC-REASON-001", "BC-REASON-002", "BC-REASON-003"))):
+            raise ValueError("second-class case requires NVIDIA H100 and all three reasoning cases PASS")
         return {"gpu_class": gpu_line[0].strip(), "reasoning_cases_passed": 3}
 
-    record("BC-HW-001", hardware, {"gpu_class": "L40S", "reasoning_cases_passed": 3})
+    record("BC-HW-001", hardware, {"gpu_class": "NVIDIA H100", "reasoning_cases_passed": 3})
     return 0 if outcomes and all(outcomes.values()) else 1
 
 
