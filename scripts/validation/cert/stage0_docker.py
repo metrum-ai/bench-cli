@@ -7,9 +7,11 @@ Inventory/removal only, no create. Reconciliation must first bind its owner to a
 actual pre-create receipt. This adapter alone does not prove process cleanup.
 """
 import hashlib
+import math
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 OWNER = re.compile(r'[0-9a-f]{32}\Z')
@@ -18,7 +20,7 @@ SHA = re.compile(r'[0-9a-f]{64}\Z')
 
 
 class Docker:
-    def __init__(self, pin, home, *, owner, invoke=subprocess.run):
+    def __init__(self, pin, home, *, owner, deadline=None, clock=time.monotonic, invoke=subprocess.run):
         if not isinstance(pin, dict) or set(pin) != {'path', 'sha256'}:
             raise ValueError('Docker executable pin is required')
         if (not isinstance(pin['path'], str) or not Path(pin['path']).is_absolute()
@@ -26,6 +28,9 @@ class Docker:
             raise ValueError('invalid Docker executable pin')
         if not isinstance(owner, str) or not OWNER.fullmatch(owner):
             raise ValueError('invalid owner')
+        if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+            raise ValueError('invalid cleanup deadline')
+        self.deadline, self.clock = deadline, clock
         self.owner = owner
         self.pin = dict(pin)
         self.home = Path(home).resolve(strict=True)
@@ -58,10 +63,22 @@ class Docker:
                 or self.config.stat().st_uid != os.geteuid() or self.config.stat().st_mode & 0o077
                 or any(self.config.iterdir())):
             raise ValueError('private Docker config changed')
+        def checked_clock():
+            value = self.clock()
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError('invalid cleanup clock')
+            return value
+        timeout = 15.0
+        if self.deadline is not None:
+            timeout = min(timeout, self.deadline - checked_clock())
+            if timeout <= 0:
+                raise ValueError('Docker cleanup deadline elapsed')
         result = self.invoke([self.pin['path'], '--host', 'unix:///var/run/docker.sock', *args],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             env={'PATH': '/nonexistent', 'HOME': str(self.home), 'DOCKER_CONFIG': str(self.config)},
-            timeout=15, check=False)
+            timeout=timeout, check=False)
+        if self.deadline is not None and checked_clock() > self.deadline:
+            raise ValueError('Docker cleanup deadline elapsed')
         if result.returncode != 0 or not isinstance(result.stdout, bytes) or len(result.stdout) > 65536:
             raise ValueError('Docker operation failed or output invalid')
         try:

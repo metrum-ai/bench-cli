@@ -66,6 +66,18 @@ class DockerTests(unittest.TestCase):
         self.assertFalse(alive[0])
         self.assertEqual(sum('rm' in call for call in calls), 1)
 
+    def test_cleanup_deadline_bounds_subprocess_and_fails_closed(self):
+        self.docker.config.rmdir()
+        now = [10.0]
+        docker = Docker(self.pin, self.tmp.name, owner=OWNER, deadline=12.0,
+                        clock=lambda: now[0], invoke=self.docker.invoke)
+        self.output = b''
+        self.assertEqual(docker.inventory(OWNER), [])
+        self.assertEqual(self.calls[-1][1]['timeout'], 2.0)
+        now[0] = 12.0
+        with self.assertRaisesRegex(ValueError, 'deadline elapsed'): docker.inventory(OWNER)
+        self.assertEqual(len(self.calls), 1)
+
     def test_changed_pin_or_config_fails_before_subprocess(self):
         self.docker.pin['sha256'] = '0' * 64
         with self.assertRaisesRegex(ValueError, 'changed'): self.docker.inventory(OWNER)

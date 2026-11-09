@@ -64,11 +64,20 @@ class AttemptTests(unittest.TestCase):
         self.group.kill.assert_called_once()
         self.mocks[4].assert_called_once()
 
-    def test_interruption_is_rethrown_after_cleanup(self):
+    def test_interruption_fails_closed_after_cleanup_attempt(self):
         self.mocks[2].side_effect = InterruptedError('stop')
-        with self.assertRaises(InterruptedError): self.run_attempt()
+        with self.assertRaisesRegex(RuntimeError, 'settlement is unproven') as raised:
+            self.run_attempt()
+        self.assertIsInstance(raised.exception.__cause__, InterruptedError)
         self.group.close_if_empty.assert_called_once()
         self.mocks[4].assert_called_once()
+        self.assertFalse(self.mocks[4].call_args.kwargs['creation_closed'])
+
+    def test_timeout_never_assumes_docker_creation_has_settled(self):
+        self.mocks[2].return_value = stage0_process.ProcessOutcome(-15, True, False)
+        with self.assertRaisesRegex(RuntimeError, 'settlement is unproven'):
+            self.run_attempt()
+        self.assertFalse(self.mocks[4].call_args.kwargs['creation_closed'])
 
     def test_cleanup_uncertainty_never_returns_success(self):
         self.mocks[4].return_value = 'leak_removed'

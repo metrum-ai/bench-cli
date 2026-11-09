@@ -69,6 +69,9 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
     deadline = started + cap
     case_launcher.preflight(manifest)
     control.mkdir(mode=0o700)
+    parent_fd = os.open(control.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try: os.fsync(parent_fd)
+    finally: os.close(parent_fd)
     home = control / 'home'; home.mkdir(mode=0o700)
     env = dict(forwarded)
     env.update({'PATH': '/nonexistent', 'HOME': str(home), 'PYTHONNOUSERSITE': '1',
@@ -105,8 +108,14 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
             errors.append('owned process survived launcher')
     except BaseException as exc:
         errors.append(type(exc).__name__)
-    # Continue container reconciliation even if process cleanup failed. Do not
-    # declare absence final while an owned process might still create one.
+    # A killed/failed launcher may leave an in-flight Docker create even after
+    # its process exits. Until a structured create-settlement proof exists,
+    # only an ordinary successful launcher can close creation. Still attempt
+    # cleanup, but never declare clean for an ambiguous or timed-out attempt.
+    creation_closed = (group_empty and pending is None and outcome is not None
+                       and not outcome.timed_out and outcome.returncode == 0)
+    if not creation_closed:
+        errors.append('container creation settlement is unproven')
     roles = ['server']
     if case in {'BC-PERF-001', 'BC-PERF-002', 'BC-TELEM-001'}:
         roles.append('auxiliary')
@@ -114,8 +123,9 @@ def run(item, *, candidate, expectations_sha256, smoke_root, cgroup_root, forwar
         try:
             owner = stage0_cleanup.read_owner(output, role)
             docker_home = control / ('docker-' + role); docker_home.mkdir(mode=0o700)
-            adapter = stage0_docker.Docker(manifest['tools']['docker'], docker_home, owner=owner)
-            if stage0_cleanup.reconcile(owner, adapter, creation_closed=group_empty) != 'clean':
+            adapter = stage0_docker.Docker(manifest['tools']['docker'], docker_home, owner=owner,
+                                           deadline=deadline, clock=clock)
+            if stage0_cleanup.reconcile(owner, adapter, creation_closed=creation_closed) != 'clean':
                 errors.append('owned container survived launcher')
             if clock() > deadline:
                 errors.append('case cleanup exceeded its cap')
