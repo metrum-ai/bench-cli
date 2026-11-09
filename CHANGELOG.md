@@ -4,6 +4,10 @@
 
 ## Unreleased (v1.9.0)
 
+- Add source-pinned vLLM 0.33 APC, external-cache and offload metric profiles.
+  Preserve Unknown for incompatible revisions or missing evidence; connector
+  counters do not establish physical cache-tier participation (#484).
+
 - Update the v1.9.0 certification catalog to r4 following the maintainer decision
   to use official Qwen3.8-27B in place of Qwen3-8B and Qwen3-4B.
   Preserve the previous-release BC-PERF-001 gate configuration unchanged.

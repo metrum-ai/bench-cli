@@ -71,7 +71,17 @@ Options:
       --cache-metrics-profile <CACHE_METRICS_PROFILE>
           Explicit source-pinned native profile; not backend autodetection
 
-          [possible values: vllm-apc, vllm-external, vllm-offload, sglang, lmcache, dynamo-kvbm, trt-llm]
+          Possible values:
+          - vllm-apc
+          - vllm-external
+          - vllm-offload
+          - vllm4ba-apc:      vLLM source revision 4ba787ec, as identified by the v0.33.0 image
+          - vllm4ba-external
+          - vllm4ba-offload
+          - sglang
+          - lmcache
+          - dynamo-kvbm
+          - trt-llm
 
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
@@ -1294,7 +1304,17 @@ Options:
       --cache-metrics-profile <CACHE_METRICS_PROFILE>
           Explicit source-pinned native profile; not backend autodetection
 
-          [possible values: vllm-apc, vllm-external, vllm-offload, sglang, lmcache, dynamo-kvbm, trt-llm]
+          Possible values:
+          - vllm-apc
+          - vllm-external
+          - vllm-offload
+          - vllm4ba-apc:      vLLM source revision 4ba787ec, as identified by the v0.33.0 image
+          - vllm4ba-external
+          - vllm4ba-offload
+          - sglang
+          - lmcache
+          - dynamo-kvbm
+          - trt-llm
 
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
