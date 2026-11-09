@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import result_writer
 import stage0_plan
 
 
@@ -23,11 +24,14 @@ class PlanTests(unittest.TestCase):
         self.catalog = self.root / 'catalog.csv'; self.catalog.write_text('fixture')
         self.index = self.root / 'index.json'; self.index.write_text(json.dumps({'candidate_sha': self.candidate, 'deferred_at_trigger': []}))
         self.case = 'BC-GPU-001'
+        self.smoke_root = self.root / 'smoke'; self.smoke_root.mkdir()
         self.manifest = self.root / 'manifest.json'
-        self.manifest.write_text(json.dumps({'candidate_sha': self.candidate, 'cases': {self.case: {}}}))
+        self.manifest.write_text(json.dumps({'candidate_sha': self.candidate,
+                                            'cases': {self.case: {'out': str(self.smoke_root / self.case)}}}))
         self.item = {'id': self.case, 'allowed_classes': ['COMPLETE'], 'cap_seconds': 150, 'grace_seconds': 30,
                      'manifest': {'path': str(self.manifest), 'sha256': digest(self.manifest)}, 'request_log': 'evidence/request.jsonl'}
-        self.plan = {'candidate_sha': self.candidate, 'selected_plan_sha256': digest(self.index),
+        self.plan = {'candidate_sha': self.candidate, 'smoke_root': str(self.smoke_root),
+                     'selected_plan_sha256': digest(self.index),
                      'selection_sha256': digest(self.selection), 'catalog_sha256': digest(self.catalog),
                      'boxes': [{'id': 'box-a', 'gpu': 'expected GPU', 'planned_seconds': 160,
                                 'hard_cap_seconds': 200, 'cases': [self.item]}]}
@@ -36,6 +40,8 @@ class PlanTests(unittest.TestCase):
 
     def run_validate(self):
         self.expectations.write_text(json.dumps(self.plan))
+        (self.smoke_root / '.stage0-smoke-root.json').write_text(json.dumps({
+            'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': digest(self.expectations)}))
         with patch.object(stage0_plan.selected_set, 'load_set', return_value=self.entries) as load:
             result = stage0_plan.validate(self.expectations, digest(self.expectations), selection_path=self.selection,
                 catalog_path=self.catalog, selected_plan_path=self.index, approved_plan_sha=digest(self.index))
@@ -52,6 +58,20 @@ class PlanTests(unittest.TestCase):
         box = self.plan['boxes'][0].copy(); box['id'] = 'box-b'
         self.plan['boxes'].append(box)
         with self.assertRaisesRegex(ValueError, 'more than one box'): self.run_validate()
+
+    def test_missing_marker_or_cert_output_never_allowed(self):
+        self.run_validate()
+        marker = self.smoke_root / '.stage0-smoke-root.json'
+        marker.unlink()
+        with patch.object(stage0_plan.selected_set, 'load_set', return_value=self.entries):
+            with self.assertRaisesRegex(ValueError, 'not bound'):
+                stage0_plan.validate(self.expectations, digest(self.expectations), selection_path=self.selection,
+                    catalog_path=self.catalog, selected_plan_path=self.index, approved_plan_sha=digest(self.index))
+        self.manifest.write_text(json.dumps({'candidate_sha': self.candidate,
+                                            'cases': {self.case: {'out': str(self.root / 'cert-output')}}}))
+        self.item['manifest']['sha256'] = digest(self.manifest)
+        self.entries = [(self.case, self.manifest, {}, digest(self.manifest))]
+        with self.assertRaisesRegex(ValueError, 'outside smoke root'): self.run_validate()
 
     def test_hard_cap_and_case_budget_fail_closed(self):
         self.plan['boxes'][0]['hard_cap_seconds'] = 201
