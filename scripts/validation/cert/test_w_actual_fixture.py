@@ -74,6 +74,10 @@ class WActualFixture(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); ev = root / 'evidence'; ev.mkdir(); (root / 'results').mkdir()
             (ev / 'gpu.csv').write_text('NVIDIA H100, fixture-driver\n'); (ev / 'binary-hashes.txt').write_text('fixture')
+            # Collection hashes these files. Explicit placeholders exercise only
+            # the fixture, not image inspection or real serving provenance.
+            for name in ('r4-image-preflight.json', 'r4-image-runtime.json'):
+                (ev / name).write_text(json.dumps({'synthetic_fixture_only': True}))
             (ev / 'models.json').write_text(json.dumps({'data': [{'id': 'Qwen/Qwen3-8B'}]}))
             binary = Path(os.environ['CERT_TEST_LLM_BIN']).resolve(); prompt = root / 'prompt.jsonl'; prompt.write_text('{"prompt":"hello"}\n')
             wrapper = root / 'wrapper'; wrapper.write_text(WRAPPER); wrapper.chmod(0o755)
