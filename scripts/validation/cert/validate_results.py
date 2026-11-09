@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from result_writer import NonCertificationEvidence, reject_smoke_root
 
 REQUIRED_TIERS = {"PR", "RC", "RC-GPU"}
 ID = re.compile(r"BC-[A-Z]+-[0-9]{3}\Z")
@@ -65,23 +66,9 @@ def check_evidence(base, paths):
         reject_smoke_root(p.parent)
 
 
-class NonCertificationEvidence(ValueError):
-    """Abort the inventory entirely; do not emit a certification report/sheet."""
-
-
 def check_evidence_class(record):
     if record.get('evidence_class', 'certification') != 'certification' or 'stage0_expectations_sha256' in record:
         raise NonCertificationEvidence('non-certification evidence cannot enter certification intake or history')
-
-
-def reject_smoke_root(directory):
-    import result_writer
-    try:
-        marked = result_writer.classify_smoke(Path(directory).resolve(), {})
-    except (ValueError, OSError) as exc:
-        raise NonCertificationEvidence('invalid smoke root marker') from exc
-    if marked:
-        raise NonCertificationEvidence('marked smoke root cannot enter certification intake or history')
 
 
 def check_record(record, candidate, root, as_of):

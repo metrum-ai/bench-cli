@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import manifest_tool
+from result_writer import reject_smoke_root
 
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 ID = re.compile(r'BC-[A-Z]+-[0-9]{3}\Z')
@@ -32,6 +33,8 @@ def read_json(path):
 
 class ExecutionIndex:
     def __init__(self, path, expected_hash, root, candidate, selection_hash, catalog_hash):
+        reject_smoke_root(Path(path).resolve().parent)
+        reject_smoke_root(root)
         if not isinstance(expected_hash, str) or not SHA256.fullmatch(expected_hash):
             raise ValueError('independently approved execution-index SHA-256 is required')
         if digest(path) != expected_hash:
@@ -85,6 +88,7 @@ class ExecutionIndex:
                 raise ValueError('execution proof traverses a symlink')
         if not path.resolve().is_relative_to(self.root) or not path.is_file():
             raise ValueError('execution proof is missing or outside evidence root')
+        reject_smoke_root(path.resolve().parent)
         if digest(path) != expected:
             raise ValueError('execution proof hash mismatch')
         return path

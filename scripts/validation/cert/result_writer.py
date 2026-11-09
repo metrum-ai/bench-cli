@@ -17,6 +17,10 @@ SMOKE_MARKER = '.stage0-smoke-root.json'
 SMOKE_CLASS = 'Stage-0 smoke, not certification'
 
 
+class NonCertificationEvidence(ValueError):
+    """Abort the inventory entirely; do not emit a certification report/sheet."""
+
+
 def classify_smoke(root, record):
     """Permanently label records written beneath a marked smoke-only root."""
     import manifest_tool
@@ -44,6 +48,15 @@ def classify_smoke(root, record):
     if record.get('evidence_class') == SMOKE_CLASS:
         raise ValueError('smoke record requires a marked smoke root')
     return record
+
+
+def reject_smoke_root(directory):
+    try:
+        marked = classify_smoke(Path(directory).resolve(), {})
+    except (ValueError, OSError) as exc:
+        raise NonCertificationEvidence('invalid smoke root marker') from exc
+    if marked:
+        raise NonCertificationEvidence('marked smoke root cannot enter certification intake or history')
 
 
 def write_record(root, record):

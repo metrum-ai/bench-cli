@@ -4,6 +4,8 @@
 import copy
 import datetime as dt
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -103,6 +105,38 @@ class ExecutionIntakeTests(unittest.TestCase):
                 path.write_bytes(before + b' ')
                 self.assertTrue(self.validate()[1])
                 path.write_bytes(before)
+
+    def test_marked_nested_index_proofs_abort_without_report(self):
+        import result_writer
+        self.assertIs(validator.NonCertificationEvidence, result_writer.NonCertificationEvidence)
+        smoke = self.proofs / 'synthetic-smoke'
+        smoke.mkdir()
+        (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+            {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'f' * 64}))
+        phases = smoke / 'phases.jsonl'
+        phases.write_bytes(self.phases_path.read_bytes())
+        self.index['entries'][0]['phases'] = {'path': 'proofs/synthetic-smoke/phases.jsonl',
+                                             'sha256': execution_intake.digest(phases)}
+        self.write_index()
+        with self.assertRaisesRegex(validator.NonCertificationEvidence, 'marked smoke root'):
+            self.validate()
+        # Exercise the real CLI with a synthetic marked plan, not an actual smoke record.
+        plan = smoke / 'selected-plan.json'
+        plan.write_bytes(self.plan_path.read_bytes())
+        self.index['selected_plan'] = {'path': 'proofs/synthetic-smoke/selected-plan.json',
+                                       'sha256': execution_intake.digest(plan)}
+        self.write_index()
+        sheet, report = self.root / 'sheet.csv', self.root / 'report.md'
+        cmd = [sys.executable, str(Path(validator.__file__)), '--catalog', str(self.catalog),
+               '--results', str(self.results), '--candidate-sha', self.sha, '--release', 'v1.9.0',
+               '--selection', str(self.selection_path), '--execution-index', str(self.index_path),
+               '--execution-index-sha256', execution_intake.digest(self.index_path),
+               '--csv', str(sheet), '--markdown', str(report)]
+        run = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn('marked smoke root', run.stderr)
+        self.assertFalse(sheet.exists())
+        self.assertFalse(report.exists())
 
     def test_fresh_non_gpu_selected_pass_also_requires_index(self):
         self.catalog.write_text(self.catalog.read_text().replace('BC-GPU-001,RC-GPU,', 'BC-GPU-001,RC,'))
