@@ -408,13 +408,14 @@ never submit smoke records to certification intake, history or the sheet.
 
 ### Remaining offline launch rehearsal work (#469)
 
-The complete-set preflight and individual synthetic loopbacks are **not** a
-complete offline launch rehearsal. Before rental, every selected case, including
-the live-validation case, needs fail-closed dispatch exercising its actual runner
-input assembly and relevant argument/SUT parsers against frozen manifests.
-Unknown or missing handlers must fail. L1's production derived-input/output
-boundary, COMP-002's reference parser, the remaining selected cases, frozen
-input-plan wiring and execution-host schema-cache provisioning are outstanding.
+The selected-set preflight and individual synthetic loopbacks are **not** a
+complete offline launch rehearsal. Before rental, exercise the non-Docker
+portions of every selected executable RC-GPU case using its actual runner input
+assembly and relevant argument/SUT parsers against frozen manifests. Unknown or
+missing handlers must fail. L1's production derived-input/output boundary, the
+remaining selected cases, frozen input-plan wiring and execution-host schema-cache
+provisioning are outstanding. Docker-dependent steps, including the actual
+COMP-002 reference container and parser, are deferred to GPU-session smoke.
 The native CPU-offload validation plan and integrity audit are separate required
 work. Loopbacks are not physical-tier evidence or an OS network sandbox.
 
