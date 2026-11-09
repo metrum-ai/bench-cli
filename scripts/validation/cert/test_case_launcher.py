@@ -140,6 +140,46 @@ class CaseLauncherTests(unittest.TestCase):
             phases = (root / 'attempt-lifecycle/phases.jsonl').read_text().splitlines()
             self.assertNotIn('record-validated', [json.loads(line)['phase'] for line in phases])
 
+    def test_record_must_bind_manifest_and_tools(self):
+        import copy
+        tools = {'python3': {'path': '/fixture/python3', 'sha256': 'b' * 64}}
+        record = {'input_hashes': {'execution_manifest': 'a' * 64},
+                  'versions': {'execution_tools': tools}}
+        case_launcher.validate_execution_record(record, 'a' * 64, tools)
+        for field in ('input_hashes', 'versions'):
+            for bad in (None, {}, 'invalid'):
+                changed = copy.deepcopy(record)
+                changed[field] = bad
+                with self.subTest(field=field, bad=bad), self.assertRaises(ValueError):
+                    case_launcher.validate_execution_record(changed, 'a' * 64, tools)
+        with self.assertRaisesRegex(ValueError, 'manifest'):
+            case_launcher.validate_execution_record(record, 'c' * 64, tools)
+        with self.assertRaisesRegex(ValueError, 'tools'):
+            case_launcher.validate_execution_record(record, 'a' * 64, {})
+
+    def test_changed_execution_manifest_cannot_accept_child_pass(self):
+        import shlex
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            out = root / 'attempt'
+            frozen = root / 'frozen.json'
+            launcher = root / 'launcher'
+            launcher.write_text('#!/bin/sh\nmkdir -p ' + shlex.quote(str(out / 'results')) +
+                '\nprintf "{}" > ' + shlex.quote(str(out / 'results/BC-GPU-001.json')) +
+                '\nprintf changed >> ' + shlex.quote(str(frozen)) + '\n')
+            launcher.chmod(0o755)
+            def pin(path):
+                return {'path': str(path), 'sha256': digest(path)}
+            manifest = {'candidate_sha': 'a' * 40, 'lane': 'G1', 'candidate': pin(launcher),
+                        'sut': pin(launcher), 'all_smi': pin(launcher), 'tokenizer': pin(launcher),
+                        'cases': {'BC-GPU-001': {'out': str(out), 'launcher': pin(launcher),
+                                                 'command': [str(launcher)]}}}
+            bind(manifest, root)
+            frozen.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'executed manifest changed'):
+                case_launcher.run_case(frozen, manifest, 'BC-GPU-001')
+            self.assertTrue((out / 'results/lane-error.json').is_file())
+
     def test_real_launch_uses_pinned_tools_not_shadowed_path(self):
         import os
         import shlex

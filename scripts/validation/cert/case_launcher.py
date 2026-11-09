@@ -143,6 +143,15 @@ def validate_r4_record(manifest, case, record):
         raise ValueError(f'{case} result lacks matching r4 serving provenance')
 
 
+def validate_execution_record(record, manifest_sha256, tools):
+    inputs = record.get('input_hashes')
+    versions = record.get('versions')
+    if not isinstance(inputs, dict) or inputs.get('execution_manifest') != manifest_sha256:
+        raise ValueError('record does not bind the executed manifest')
+    if not isinstance(versions, dict) or versions.get('execution_tools') != tools:
+        raise ValueError('record does not bind the executed tools')
+
+
 def run_case(manifest_path, manifest, case):
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':
@@ -187,11 +196,14 @@ def run_case(manifest_path, manifest, case):
             environment['CERT_INPUT_MANIFEST'] = str(Path(manifest_path).resolve())
         if 'derived_inputs' not in manifest:
             phase(lifecycle, case, 'inputs-ready')  # L1's internal boundary emits this later.
+        execution_manifest_hash = digest(manifest_path)
         # No credentials are accepted in this launch profile: assignments are argv.
         clean_command = [tools['env']['path'], '-i'] + [f'{key}={value}' for key, value in sorted(environment.items())] + entry['command']
         process = subprocess.Popen(clean_command, env={}, start_new_session=True)
         code = process.wait()
         execution_policy.verify(tools, lifecycle / 'tool-bin')
+        if digest(manifest_path) != execution_manifest_hash:
+            raise ValueError('executed manifest changed during case')
         if code:
             raise subprocess.CalledProcessError(code, entry["command"])
         # A child may have written a PASS already. Do not validate the record
@@ -209,6 +221,7 @@ def run_case(manifest_path, manifest, case):
             raise ValueError("case returned unexpected records")
         if records[0]["result"] != "PASS":
             raise ValueError("case failed; retained failure record is not certification")
+        validate_execution_record(records[0], execution_manifest_hash, tools)
         validate_r4_record(manifest, case, records[0])
         if case == 'BC-GPU-010':
             import gpu010_builds

@@ -130,6 +130,8 @@ class FreezeGeneratedTests(unittest.TestCase):
             self.assertNotEqual(runtime_path, self.args.out)
             bound = json.loads(runtime_path.read_text())
             runtime_inputs.verify(bound)
+            record['input_hashes'] = {'execution_manifest': digest(runtime_path)}
+            record['versions']['execution_tools'] = bound['tools']
             self.assertEqual(generated.preflight_label(bound), 'PREFLIGHT-OK')
             target = self.args.run_out / 'results/BC-GPU-011.json'
             target.parent.mkdir(parents=True)
@@ -148,6 +150,22 @@ class FreezeGeneratedTests(unittest.TestCase):
             case_launcher.run_case(self.args.out, frozen, 'BC-GPU-011')
         self.assertEqual(start.call_count, 1)
         self.assertEqual(self.args.out.read_bytes(), original)
+
+    def test_child_pass_without_execution_binding_writes_lane_error(self):
+        frozen = freeze_case.freeze(self.args)
+        def launch(command, **kwargs):
+            target = self.args.run_out / 'results/BC-GPU-011.json'
+            target.parent.mkdir(parents=True)
+            target.write_text('{"SYNTHETIC_RECORD_PLACEHOLDER":true}')
+            return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
+        record = {'ID': 'BC-GPU-011', 'candidate_sha': 'a' * 40, 'result': 'PASS'}
+        with patch.object(generated, 'run_generator', side_effect=self.generate), \
+             patch.object(case_launcher.subprocess, 'run'), \
+             patch.object(case_launcher.subprocess, 'Popen', side_effect=launch), \
+             patch('execution_evidence.report_rows', return_value=[record]), \
+             self.assertRaisesRegex(ValueError, 'executed manifest'):
+            case_launcher.run_case(self.args.out, frozen, 'BC-GPU-011')
+        self.assertTrue((self.args.run_out / 'results/lane-error.json').is_file())
 
     def test_orphan_runtime_entries_reject_preflight_label_and_direct_launch(self):
         import copy
