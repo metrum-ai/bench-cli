@@ -94,6 +94,43 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.state.cleaned_count, 0)
         self.assertEqual(self.provider.deletions, ['owned-id'])
 
+    def test_stop_state_failure_fails_safe_to_deletion(self):
+        def broken_stop(): raise OSError('not logged')
+        self.state.stop_requested = broken_stop
+        watch(self.scope, self.provider, self.state, clock=self.clock, pause=self.pause, interval=1)
+        self.assertEqual(self.provider.deletions, ['owned-id'])
+        self.assertLess(self.now, self.scope.deadline_epoch)
+        self.assertTrue(self.state.errors)
+        self.assertEqual(self.state.cleaned_count, 1)
+
+    def test_state_and_error_recorder_failure_retries_without_false_clean(self):
+        self.state.stop = True
+        calls = [0]
+        def closed():
+            calls[0] += 1
+            if calls[0] < 3: raise OSError('not logged')
+            return True
+        def broken_error(_): raise OSError('reporting unavailable')
+        self.state.creation_closed = closed
+        self.state.error = broken_error
+        watch(self.scope, self.provider, self.state, clock=self.clock, pause=self.pause, interval=1)
+        self.assertGreaterEqual(calls[0], 5)  # failed reads, delete, two absent inventories
+        self.assertEqual(self.provider.deletions, ['owned-id'])
+        self.assertEqual(self.state.cleaned_count, 1)
+
+    def test_failed_clean_receipt_requires_two_new_absent_observations(self):
+        self.state.stop = True
+        count = [0]
+        def cleaned(_scope):
+            count[0] += 1
+            if count[0] == 1: raise OSError('receipt failed')
+            self.state.cleaned_count += 1
+        self.state.cleaned = cleaned
+        watch(self.scope, self.provider, self.state, clock=self.clock, pause=self.pause, interval=1)
+        self.assertEqual(count[0], 2)
+        self.assertGreaterEqual(self.provider.inventories, 6)  # arm, delete, four absent
+        self.assertEqual(self.state.cleaned_count, 1)
+
     def test_collision_blocks_arm(self):
         self.provider.resources = [{'name': self.scope.name, 'id': 'other-id'}]
         with self.assertRaisesRegex(ValueError, 'already exists'):

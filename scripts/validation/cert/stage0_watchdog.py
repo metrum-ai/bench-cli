@@ -24,10 +24,25 @@ def watch(scope, provider, state, *, clock=time.time, pause=time.sleep, interval
         raise ValueError('invalid watchdog interval')
     stage0_backstop.check_available(scope, provider.inventory, clock())
     state.armed(scope)
+    def report(exc):
+        try:
+            # Report only a bounded type, never provider response bodies/tokens.
+            state.error(type(exc).__name__)
+        except Exception:
+            # Lost reporting must not kill monitoring or be mistaken for clean.
+            pass
+
     absent = 0
     while True:
         now = clock()
-        stop = state.stop_requested()
+        try:
+            stop = state.stop_requested()
+            if type(stop) is not bool:
+                raise ValueError('invalid stop state')
+        except Exception as exc:
+            # Unknown controller state requires a stop, not more execution.
+            report(exc)
+            stop = True
         if now < scope.deadline_epoch and not stop:
             pause(min(interval, max(0.0, scope.deadline_epoch - now)))
             continue
@@ -39,8 +54,8 @@ def watch(scope, provider, state, *, clock=time.time, pause=time.sleep, interval
             if absent >= 2:
                 state.cleaned(scope)
                 return
-        except (OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
+            # Never declare clean if state, provider, or receipt persistence failed.
             absent = 0
-            # Report only a bounded type, never provider response bodies/tokens.
-            state.error(type(exc).__name__)
+            report(exc)
         pause(interval)
