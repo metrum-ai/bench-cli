@@ -59,6 +59,15 @@ def validate(data):
             or flags[flags.index('--max-num-seqs')+1] != '256'):
         raise ValueError('H100 requires --max-num-seqs 256')
     names = [p['name'] for p in data['phases']]
+    if data['case'] == 'BC-KV-008':
+        for phase in data['phases']:
+            requests = phase['expected_requests']
+            if (phase.get('reset_prefix_cache') is not True or not any(r['warmup'] for r in requests)
+                    or not any(not r['warmup'] for r in requests)):
+                raise ValueError('each session stage requires reset, dedicated warmup and measured requests')
+            first = next(i for i, r in enumerate(requests) if not r['warmup'])
+            if any(r['warmup'] for r in requests[first:]):
+                raise ValueError('session warmup must finish before measured requests')
     expected = {'BC-KV-001': ['cold', 'warm', 'unique'],
                 'BC-KV-002': ['cold', 'populate', 'pressure', 'rehit'],
                 'BC-KV-009': ['cold', 'populate', 'warm', 'pressure', 'rehit', 'control']}
@@ -89,9 +98,19 @@ def server(data):
     if data['case'] in ('BC-KV-002', 'BC-KV-009'):
         import kv_r5_eviction_observer as observer
         options = observer.server_options()
+    if data['case'] in ('BC-KV-002', 'BC-KV-008', 'BC-KV-009'):
         env = ['--env', 'VLLM_SERVER_DEV_MODE=1']
     return [*env, IMAGE, '--model', '/model', '--served-model-name', MODEL,
             '--host', '0.0.0.0', '--port', '8000', *options, *data['server_flags']]
+
+
+def proxy_args(data, phase):
+    if data['case'] != 'BC-KV-008':
+        return []
+    first = next(i for i, row in enumerate(phase['expected_requests']) if not row['warmup'])+1
+    prior = sum(len(p['expected_requests']) for p in data['phases'][:data['phases'].index(phase)])
+    return ['--session-first-measured', str(first), '--session-completed-before', str(prior+first-1),
+            '--session-model', data['served_model']]
 
 
 def preflight(instance):
@@ -209,9 +228,12 @@ def evaluate(data, phases):
         if metrics.single(warm['series'], HIT) <= 0 or warm['cohorts']['partial']['n']+warm['cohorts']['full']['n'] < 1:
             raise ValueError('positive reuse not observed')
     elif data['case'] == 'BC-KV-008':
+        import kv_r5_session_cold as cold
+        completed_before = 0
         for phase in phases:
             if phase['plan'].get('reset_prefix_cache') is not True or not (phase['directory']/'reset.json').is_file():
                 raise ValueError('each session stage requires its frozen cold reset')
+            cold.reset_ack(phase['directory']/'reset.json')
             requests = phase['plan']['expected_requests']
             measured = [r for r in requests if not r['warmup']]
             warmup = [r for r in requests if r['warmup']]
@@ -222,6 +244,8 @@ def evaluate(data, phases):
             first_measured = next(i for i, r in enumerate(requests) if not r['warmup'])
             if usage[first_measured].get('prompt_tokens_details', {}).get('cached_tokens') != 0:
                 raise ValueError('stage cold marker contradicted by server')
+            observed[phase['plan']['name']]['first_measured_counter_window'] = cold.verify(phase, data['served_model'], completed_before)
+            completed_before += len(requests)
             for session in ids:
                 turns = [r['turn'] for r in measured if r['session_id'] == session]
                 if len(turns) < 3 or turns != list(range(turns[0], turns[0]+len(turns))):

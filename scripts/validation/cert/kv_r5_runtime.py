@@ -304,9 +304,10 @@ print(json.dumps(rows))'''
             if self.worker_epoch() != self.workers:
                 raise ValueError('worker process continuity changed before phase')
             with (directory/'proxy.stdout').open('x') as stdout, (directory/'proxy.stderr').open('x') as stderr:
+                proxy_args = self.family.proxy_args(d, phase) if hasattr(self.family, 'proxy_args') else []
                 self.proxy = subprocess.Popen([d['tools']['python3']['path'], str(HERE/'kv_r5_proxy.py'),
                     '--listen-port', str(d['proxy_port']), '--upstream-port', str(d['port']),
-                    '--out', str(directory/'trace.jsonl'), '--record-request-identity'],
+                    '--out', str(directory/'trace.jsonl'), '--record-request-identity', *proxy_args],
                     stdout=stdout, stderr=stderr, env=self.env())
             try:
                 import g6_counter_runner
@@ -319,9 +320,13 @@ print(json.dumps(rows))'''
                         conn.request('POST', '/reset_prefix_cache')
                         response = conn.getresponse()
                         raw = response.read(1024)
+                        save(directory/'reset.json', {'method': 'POST', 'path': '/reset_prefix_cache',
+                                                     'status': response.status, 'body': raw.decode()})
                         if response.status != 200:
                             raise ValueError('prefix reset failed')
-                        save(directory/'reset.json', {'status': response.status, 'body': raw.decode()})
+                        if d['case'] == 'BC-KV-008':
+                            import kv_r5_session_cold
+                            kv_r5_session_cold.reset_ack(directory/'reset.json')
                     finally:
                         conn.close()
                 if hasattr(self.family, 'before_phase'):

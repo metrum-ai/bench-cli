@@ -103,7 +103,7 @@ class VllmControls(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'cold reset'):
                 runner.evaluate({'case': 'BC-KV-008'}, [p])
             p['plan']['reset_prefix_cache'] = True
-            (p['directory']/'reset.json').write_text('{}')
+            (p['directory']/'reset.json').write_text(json.dumps({'method': 'POST', 'path': '/reset_prefix_cache', 'status': 200, 'body': '{"success":true}'}))
             with self.assertRaisesRegex(ValueError, 'dedicated session warmup'):
                 runner.evaluate({'case': 'BC-KV-008'}, [p])
 
