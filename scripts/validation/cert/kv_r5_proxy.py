@@ -15,7 +15,10 @@ def identity(body):
         raise ValueError('chat messages required')
     # Hash the entire ordered conversation, including recorded assistant turns.
     canonical = json.dumps(messages, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    text_only = all(isinstance(m, dict) and isinstance(m.get('content'), str)
+                    and set(m) <= {'role', 'content', 'name'} for m in messages)
     return {'messages_sha256': hashlib.sha256(canonical.encode()).hexdigest(),
+            'text_only': text_only,
             'options': {key: val for key, val in value.items() if key != 'messages'}}
 
 
