@@ -187,7 +187,9 @@ jobs:
       - name: Add Rust target
         run: rustup target add "${{ matrix.rust_target }}"
       - name: Build release-equivalent binaries
-        run: cargo zigbuild --locked --release --features otlp,tokenizer --target "${{ matrix.zig_target }}" --bins
+        run: |
+          cargo zigbuild --locked --release --features otlp,tokenizer --target "${{ matrix.zig_target }}" --bins
+          cargo zigbuild --locked --release --features otlp,tokenizer,cert-probes --target "${{ matrix.zig_target }}" --bin metrum-ai-bench-cli-cert-kv-cpu
       - name: Package and compare every tracked documentation byte
         shell: bash
         run: |

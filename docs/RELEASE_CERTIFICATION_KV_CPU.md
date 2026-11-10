@@ -20,13 +20,19 @@ results do not claim to characterize the full prompt-library corpus. No download
 or remote code execution occurs during a case. Child processes receive a minimal
 environment with offline flags; executable/interpreter pins are verified.
 
-The workflow package supplies `metrum-ai-bench-cli-prompts` and
+The certification workflow package supplies `metrum-ai-bench-cli-prompts` and
 `metrum-ai-bench-cli-cert-kv-cpu`. The latter exposes library-only HF transport,
 structural trace and export paths as an offline adapter. It calls the product
 libraries directly and does not contain a substitute cache implementation.
 Its mock request rows test export correctness only. Package identity is checked
 through the existing `pretag_artifact.verify` descriptor and archive verifier.
 Locally compiled development probes cannot satisfy that workflow-origin check.
+The helper requires the non-default `cert-probes` feature. Only its separate
+certification build enables that feature; normal CLI builds keep their existing
+features. Public release assets exclude certification targets even if an old
+executable remains in the build cache. The published crate excludes the helper
+source/target and certification-only additions, preserving its file membership
+and eight installable executables. CI checks the actual normalized crate archive.
 
 Each case has an independent Python oracle:
 
@@ -44,7 +50,7 @@ identity includes source, tokenizer and template bytes. Logical overlap and
 source hashes never establish physical cache residency or observed reuse.
 
 Development validation runs in ordinary offline CI through
-`cargo test --locked --test kv_cpu_certification`. That test supplies compiled
+`cargo test --locked --features cert-probes --test kv_cpu_certification`. That test supplies compiled
 product executables to the Python product tests; no CI network fetch is needed.
 Standalone Python discovery also tests the fixture pins and smoke separation.
 

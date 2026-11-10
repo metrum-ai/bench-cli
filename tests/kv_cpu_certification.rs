@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[test]
+#[cfg(feature = "cert-probes")]
 fn six_cpu_cases_reconcile_real_product_outputs_and_reject_controls_offline() {
     let output = std::process::Command::new("python3")
         .args([
