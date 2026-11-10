@@ -4,6 +4,18 @@
 set -euo pipefail
 CERT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CERT_DIR/common.sh"
+cert_manifest() {
+  python3 "$CERT_DIR/kv_c_adapter.py" --manifest "$CERT_MANIFEST" --lane KVS --field "$1"
+}
+cert_run() {
+  [[ "$1" == python3 && "$2" == "$CERT_DIR/kv_sglang_runner.py" ]] || return 2
+  "$@" &
+  CERT_RUNNER_PID=$!
+  local rc=0
+  wait "$CERT_RUNNER_PID" || rc=$?
+  CERT_RUNNER_PID=''
+  return "$rc"
+}
 [[ "${CERT_CASE_ID:-}" == BC-KV-003 || "${CERT_CASE_ID:-}" == BC-KV-004 ]] || { echo 'select one SGLang KV case' >&2; exit 2; }
 CERT_CASES=("$CERT_CASE_ID")
 cert_parse KVS "$@"

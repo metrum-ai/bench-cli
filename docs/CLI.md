@@ -79,6 +79,7 @@ Options:
           - vllm4ba-external
           - vllm4ba-offload
           - sglang
+          - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
           - lmcache
           - dynamo-kvbm
           - trt-llm
@@ -1312,6 +1313,7 @@ Options:
           - vllm4ba-external
           - vllm4ba-offload
           - sglang
+          - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
           - lmcache
           - dynamo-kvbm
           - trt-llm

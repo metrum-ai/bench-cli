@@ -43,7 +43,7 @@ required cached-token coverage and invalid rates. The existing #420 regression
 
 ## Executing BC-KV-003 or BC-KV-004
 
-Use `case_launcher.py` and a separately frozen execution manifest, with one
+Use the [shared frozen input contract](KV_ENGINE_FROZEN_INPUTS.md), `case_launcher.py` and a separately frozen execution manifest, with one
 selected case and `lane-kvs.sh` as launcher. The lane name is `KVS` in the lane
 manifest. The existing tool pins, harness closure, actual-host binding,
 watchdog limits and cleanup reconciliation remain mandatory. This procedure
@@ -96,7 +96,7 @@ The proposed checkpoint is `Qwen/Qwen3.8-27B-FP8` at
 `c3a462cc3d38cf351f3b26cbd763469eeb74ef81`. Its official metadata declares
 `Qwen3_5ForConditionalGeneration`, implemented in this SGLang source. Metadata
 reports 24,699,207,680 FP8 and 3,082,220,272 BF16 parameters: approximately
-28.75 GiB of tensor payload before scales, buffers, graphs, runtime allocations,
+28.74 GiB of tensor payload before scales, buffers, graphs, runtime allocations,
 KV and host-cache reserves. This is a planning lower bound, not a fit result.
 H100 80 GB or RTX PRO 6000 Blackwell may be selected only after the actual
 image/model/kernel and headroom checks. HiCache's hybrid-state behavior and

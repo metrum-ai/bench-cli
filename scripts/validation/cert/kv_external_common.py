@@ -127,8 +127,24 @@ def validate_fit(config):
         raise ValueError('fit has no measured memory headroom')
     if not isinstance(fit.get('gpu_uuid'), str) or not fit['gpu_uuid'].startswith('GPU-'):
         raise ValueError('fit requires actual GPU identity')
+    if not isinstance(fit.get('driver_version'), str) or not fit['driver_version'].strip():
+        raise ValueError('fit requires the demonstrated GPU driver')
     pinned(fit['evidence'])
     return fit
+
+
+def verify_fit_host(fit):
+    gpu = subprocess.run(['nvidia-smi', '--id=' + os.environ['CUDA_VISIBLE_DEVICES'],
+                          '--query-gpu=uuid,name,memory.total,memory.free,driver_version', '--format=csv,noheader,nounits'],
+                         check=True, text=True, capture_output=True, timeout=30).stdout.strip().split(',')
+    if (len(gpu) != 5 or gpu[0].strip() != fit['gpu_uuid'] or gpu[1].strip() != fit['gpu_class']
+            or int(gpu[2].strip()) * 1024**2 < fit['gpu_memory_bytes']
+            or int(gpu[3].strip()) * 1024**2 < fit['peak_gpu_memory_bytes'] or gpu[4].strip() != fit['driver_version']):
+        raise ValueError('actual GPU/driver/free memory differs from measured fit')
+    memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
+    available = int(memory['MemAvailable'].split()[0]) * 1024
+    if available <= fit['host_required_bytes']:
+        raise ValueError('actual host memory has no demonstrated cache headroom')
 
 
 def docker_json(container):

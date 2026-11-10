@@ -1,20 +1,19 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""KVS registration stub. Replace only this module when the runner is ready."""
+"""SGLang frozen execution and launch adapter."""
+import kv_c_adapter
+import kv_sglang_runner
 
-AVAILABLE = False
-
-
-def freeze(args):
-    """Freeze lane-specific inputs, write args.out, and return its manifest."""
-    raise ValueError('KVS: runner not yet available')
-
-
-def main(argv):
-    """Run with ['--case', ID, ...lane arguments]; return a process exit code."""
-    raise ValueError('KVS: runner not yet available')
+AVAILABLE = True
 
 
 def preflight(manifest):
-    """Validate frozen lane-specific identity, inputs and execution requirements."""
-    raise ValueError('KVS: runner not yet available')
+    return kv_c_adapter.preflight(manifest, kv_sglang_runner, 'KVS')
+
+
+def freeze(args):
+    return kv_c_adapter.freeze(args, kv_sglang_runner, 'KVS')
+
+
+def main(argv):
+    return kv_c_adapter.main(argv, kv_sglang_runner, 'KVS')

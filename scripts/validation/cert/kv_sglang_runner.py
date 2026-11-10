@@ -103,11 +103,7 @@ def runtime_source(container):
 def start_server(args, config):
     fit = validate_config(config)
     # Bind actual memory/GPU identity before starting the engine.
-    gpu = subprocess.run(['nvidia-smi', '--id=' + os.environ['CUDA_VISIBLE_DEVICES'],
-                          '--query-gpu=uuid,name,memory.total', '--format=csv,noheader,nounits'],
-                         check=True, text=True, capture_output=True, timeout=30).stdout.strip().split(',')
-    if len(gpu) != 3 or gpu[0].strip() != fit['gpu_uuid'] or gpu[1].strip() != fit['gpu_class'] or int(gpu[2].strip()) * 1024**2 < fit['gpu_memory_bytes']:
-        raise ValueError('actual GPU differs from measured fit')
+    common.verify_fit_host(fit)
     image = json.loads(subprocess.run(['docker', 'image', 'inspect', IMAGE], check=True, capture_output=True, text=True, timeout=30).stdout)[0]
     if image['Id'] != CONFIG or image.get('Architecture') != 'amd64' or IMAGE not in image.get('RepoDigests', []):
         raise ValueError('local image digest/config/platform differs')
