@@ -105,10 +105,12 @@ class LifecycleControls(unittest.TestCase):
                 self.assertEqual(call.call_args.args[0][1], 'inspect')
 
     def test_total_envelope_reserves_cleanup_and_includes_setup(self):
-        started = time.monotonic()-40
-        instance = runtime.Runtime({'timeout_seconds': 300}, '/unused', None, budget_start=started)
-        self.assertEqual(instance.total_deadline, started+300)
-        self.assertEqual(instance.deadline, started+180)
+        with patch.object(time, 'monotonic', return_value=1040.0):
+            started = time.monotonic()-40
+            instance = runtime.Runtime({'timeout_seconds': 300}, '/unused', None, budget_start=started)
+            self.assertEqual(instance.total_deadline, started+300)
+            self.assertEqual(instance.deadline, started+180)
+            self.assertEqual(instance.deadline-time.monotonic(), 140)
 
 
 if __name__ == '__main__':
