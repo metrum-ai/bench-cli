@@ -160,6 +160,9 @@ def main():
     evidence = args.out / 'evidence'
     observed, passed = {}, False
     try:
+        models = json.loads((evidence / 'models.json').read_text())
+        if [row.get('id') for row in models.get('data', [])] != [config['model']]:
+            raise ValueError('actual served model differs')
         binding = common.docker_json(args.container)
         if binding['image'] != CONFIG or binding['owner'] != args.container_owner or binding['restarts'] != 0:
             raise ValueError('owned image/epoch differs')

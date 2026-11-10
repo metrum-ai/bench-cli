@@ -65,6 +65,7 @@ class Checks(unittest.TestCase):
                 root = Path(directory)
                 evidence = root / 'evidence'
                 evidence.mkdir()
+                (evidence / 'models.json').write_text('{"data":[{"id":"fixture"}]}')
                 (evidence / 'gpu.csv').write_text('fixture-gpu,fixture-driver\n')
                 binary = root / 'candidate'
                 binary.write_bytes(b'fixture')
