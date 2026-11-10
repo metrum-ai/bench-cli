@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Strict independent scalar oracle. No label summation or physical inference."""
 import math
+from decimal import Decimal
 
 from metrics_oracle import SAMPLE, parse_labels
 
@@ -42,8 +43,10 @@ def snapshot(text, specs):
                 raise ValueError('duplicate or invalid sample')
             if unit == 'ratio' and value > 1:
                 raise ValueError('ratio outside [0,1]')
-            if kind == 'counter' and (value > 2**53 or (unit != 'seconds' and not value.is_integer())):
-                raise ValueError('unsafe cumulative value')
+            if kind == 'counter':
+                exact = Decimal(match[3])
+                if exact > 2**53 or (unit != 'seconds' and exact != exact.to_integral_value()):
+                    raise ValueError('unsafe cumulative value')
             values[key] = value
             seen.add(name)
     if set(specs) - seen:

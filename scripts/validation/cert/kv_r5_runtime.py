@@ -33,6 +33,12 @@ HERE = Path(__file__).resolve().parent
 SHA = re.compile('[0-9a-f]{64}\\Z')
 
 
+class HttpStatusError(ValueError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__('loopback endpoint returned HTTP '+str(status))
+
+
 def load(path):
     return json.loads(Path(path).read_text(), object_pairs_hook=manifest_tool.unique_object)
 
@@ -50,13 +56,25 @@ def pin(item):
     return path
 
 
+def expected_request(row, model):
+    if (not SHA.fullmatch(row['messages_sha256']) or type(row['warmup']) is not bool
+            or not isinstance(row['options'], dict) or row['options'].get('model') != model
+            or row['options'].get('stream') is not True):
+        raise ValueError('typed frozen streaming request identity required')
+    if row['session_id'] is not None and (not isinstance(row['session_id'], str) or not row['session_id']):
+        raise ValueError('invalid frozen session ID')
+    if row['turn'] is not None and (type(row['turn']) is not int or row['turn'] < 0):
+        raise ValueError('invalid frozen source turn')
+
+
 def validate(data, family):
     if data['schema_version'] != 'kv-r5-execution.v1' or data['case'] not in family.CASES:
         raise ValueError('unsupported r5 case')
     if not manifest_tool.REV.fullmatch(data['candidate_sha']):
         raise ValueError('full candidate SHA required')
     import execution_policy
-    execution_policy.validate_case_tools(data['tools'], 'KVV')
+    import kv_dispatch
+    execution_policy.validate_case_tools(data['tools'], kv_dispatch.CASE_LANES[data['case']])
     for item in [data['candidate'], data['oci_index'], data['oci_child'], *data['inputs'].values(), *data['tools'].values(), *data['model_files']]:
         pin(item)
     model_root = Path(data['model_snapshot']).resolve()
@@ -83,7 +101,9 @@ def validate(data, family):
         raise ValueError('image/source profile mismatch')
     r4_image_provenance.descriptor_chain(pin(data['oci_index']), pin(data['oci_child']),
                                         index_digest=family.IMAGE.split('@')[1], child_digest=family.CHILD)
-    if type(data['timeout_seconds']) is not int or not 0 < data['timeout_seconds'] <= family.LIMITS[data['case']]:
+    if type(data.get('cleanup_grace_seconds')) is not int or data['cleanup_grace_seconds'] != 120:
+        raise ValueError('freeze 120 seconds of cleanup grace inside the case envelope')
+    if type(data['timeout_seconds']) is not int or not 120 < data['timeout_seconds'] <= family.LIMITS[data['case']]:
         raise ValueError('case time envelope exceeded')
     if not data['source_files'] or not all(SHA.fullmatch(value) for value in data['source_files'].values()):
         raise ValueError('independently reviewed runtime source file pins required')
@@ -96,6 +116,8 @@ def validate(data, family):
             raise ValueError('frozen product argv required')
         if phase['argv'][0] != data['candidate']['path'] or not phase['expected_requests']:
             raise ValueError('phase must invoke the measured candidate and freeze wire order')
+        for request in phase['expected_requests']:
+            expected_request(request, data['served_model'])
         required_options = {'--url': 'http://127.0.0.1:'+str(data['proxy_port'])+'/v1/chat/completions',
                             '--model': data['served_model'], '--csv': '{out}/requests.csv',
                             '--html': '{out}/report.html', '--ndjson': '{out}/events.ndjson',
@@ -149,11 +171,31 @@ class Runtime:
             conn.request('GET', path)
             response = conn.getresponse()
             raw = response.read(4 * 1024 * 1024 + 1)
-            if response.status != 200 or len(raw) > 4 * 1024 * 1024:
+            if response.status != 200:
+                raise HttpStatusError(response.status)
+            if len(raw) > 4 * 1024 * 1024:
                 raise ValueError('bounded loopback fetch failed')
             return raw.decode('utf-8')
         finally:
             conn.close()
+
+    def worker_epoch(self):
+        """Observe process identities, not merely a declared exporter epoch."""
+        code = '''import os,pathlib,hashlib,json
+rows={}
+for directory in pathlib.Path('/proc').iterdir():
+ if not directory.name.isdigit() or int(directory.name)==os.getpid(): continue
+ try:
+  stat=(directory/'stat').read_text(); fields=stat[stat.rfind(')')+2:].split()
+  command=(directory/'cmdline').read_bytes()
+ except (FileNotFoundError,ProcessLookupError): continue
+ if command: rows[directory.name]={'start_ticks':fields[19],'command_sha256':hashlib.sha256(command).hexdigest()}
+ if len(rows)>4096: raise ValueError('process identity limit exceeded')
+print(json.dumps(rows))'''
+        rows = json.loads(self.docker('exec', self.name, 'python3', '-c', code).stdout)
+        if not rows:
+            raise ValueError('server process identity unavailable')
+        return rows
 
     def start(self):
         d = self.data
@@ -207,8 +249,12 @@ class Runtime:
                 if not any(x.get('id') == d['served_model'] for x in models.get('data', [])):
                     raise ValueError('served model mismatch')
                 save(self.out/'models.json', models)
+                self.workers = self.worker_epoch()
+                save(self.out/'worker-epoch.json', self.workers)
                 break
-            except (OSError, http.client.HTTPException):
+            except (OSError, http.client.HTTPException, HttpStatusError) as exc:
+                if isinstance(exc, HttpStatusError) and exc.status not in (404, 503):
+                    raise
                 if not self.inspect()['State']['Running']:
                     raise ValueError('server exited during readiness')
                 if time.monotonic() >= self.deadline:
@@ -221,6 +267,8 @@ class Runtime:
         for phase in d['phases']:
             directory = self.out/phase['name']
             directory.mkdir()
+            if self.worker_epoch() != self.workers:
+                raise ValueError('worker process continuity changed before phase')
             with (directory/'proxy.stdout').open('x') as stdout, (directory/'proxy.stderr').open('x') as stderr:
                 self.proxy = subprocess.Popen([d['tools']['python3']['path'], str(HERE/'kv_r5_proxy.py'),
                     '--listen-port', str(d['proxy_port']), '--upstream-port', str(d['port']),
@@ -258,6 +306,10 @@ class Runtime:
                 if (current['Id'], current['State']['StartedAt'], current['RestartCount']) != (
                     self.container['Id'], self.container['State']['StartedAt'], self.container['RestartCount']):
                     raise ValueError('server epoch changed')
+                workers = self.worker_epoch()
+                save(directory/'worker-epoch.json', workers)
+                if workers != self.workers:
+                    raise ValueError('worker process continuity changed during phase')
                 phases.append({'plan': phase, 'directory': directory, 'before': before, 'after': after})
             finally:
                 self.proxy.terminate()
@@ -338,39 +390,14 @@ def product_rows(phase):
 
 
 def adapter_preflight(manifest, family, lane):
-    """Generic launcher hook, deliberately separate from r4 manifest preflight."""
-    import build_roles
-    import harness_integrity
-    if manifest.get('schema_version') != 'kv-r5-frozen.v1' or manifest.get('lane') != lane:
-        raise ValueError('KV frozen envelope/lane mismatch')
-    cases = manifest['cases']
-    if len(cases) != 1 or next(iter(cases)) not in family.CASES:
-        raise ValueError('one registered KV case required')
-    for item in manifest['inputs']:
-        pin(item)
-    spec_path = pin(manifest['lane_manifest'])
-    spec = load(spec_path)
+    """Use the canonical shared envelope validator, then check this engine spec."""
+    import kv_envelope
+    cases = kv_envelope.validate(manifest, lane)
+    spec = load(pin(manifest['lane_manifest']))
     validate(spec, family)
-    if spec['case'] != next(iter(cases)) or spec['candidate_sha'] != manifest['candidate_sha']:
-        raise ValueError('KV selection/candidate binding changed')
-    measured, _ = build_roles.load_receipt(pin(manifest['build_receipt']), manifest['candidate_sha'])
-    matching = [item for item in measured if item['path'] == spec['candidate']['path']
-                and item['sha256'] == spec['candidate']['sha256']]
-    if len(matching) != 1 or manifest['candidate'] != matching[0]:
-        raise ValueError('KV candidate must be a shipped measured workflow artifact')
-    closure = harness_integrity.verify(HERE.parents[2], manifest['candidate_sha'])
-    if closure != manifest['harness_closure'] or manifest.get('harness_repo') != str(HERE.parents[2]):
-        raise ValueError('KV harness closure differs from candidate')
-    entry = cases[spec['case']]
-    expected = [str(HERE/'case_entry.sh'), '--case', spec['case'], '--lane', lane.lower(),
-                '--manifest', str(spec_path), '--manifest-sha256', manifest['lane_manifest']['sha256'],
-                '--out', entry['out']]
-    if entry['command'] != expected or pin(entry['launcher']) != HERE/'case_entry.sh':
-        raise ValueError('KV frozen command changed')
-    if manifest['tools'] != spec['tools']:
-        raise ValueError('KV tool pins changed')
-    for value in spec['inputs'].values():
-        result_writer.require_input_origin(entry['out'], Path(value['path']).parent)
+    if spec['case'] not in family.CASES or spec['candidate'] != {
+            key: manifest['candidate'][key] for key in ('path', 'sha256')}:
+        raise ValueError('KV engine specification candidate differs from envelope')
     return cases
 
 
@@ -412,7 +439,8 @@ def freeze_adapter(args, family, lane):
     closure = harness_integrity.verify(HERE.parents[2], spec['candidate_sha'])
     collect(closure)
     for path in [args.selection, args.catalog, args.lane_manifest, args.build_receipt, args.tool_manifest,
-                 args.build_receipt.parent/'validation-only.log', *args.input]:
+                 args.build_receipt.parent/'validation-only.log',
+                 HERE.parents[2]/'schemas/kv-r5-frozen.v1.json', *args.input]:
         item = file_pin(path)
         inputs[item['path']] = item
     lane_pin = file_pin(args.lane_manifest)

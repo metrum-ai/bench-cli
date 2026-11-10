@@ -39,11 +39,12 @@ The manifest must contain:
 | `source_revision`, `source_files` | Reviewed source revision and absolute runtime source paths mapped to reviewed file hashes. Import-location checks supplement hashing. Image labels alone are insufficient. |
 | `model`, `model_revision`, `served_model` | Model identity, full upstream revision and exact served model name. |
 | `model_snapshot`, `model_files` | Staged model directory and complete file-lock array of `{path, sha256}` objects, including tokenizer/configuration. Review the completeness against upstream separately. |
-| `tools` | Executable `{path, sha256}` pins for `docker`, `nvidia-smi`, `python3`. |
+| `tools` | Complete native executable pin map required by `execution_policy.validate_case_tools`, including `bash`, `env`, `python3`, `docker`, `nvidia-smi` and the shared launcher utilities. |
 | `inputs` | Named `{path, sha256}` pins for every workload, telemetry configuration, engine options file, dependency and harness source. |
 | `gpu_uuid`, `gpu_class`, `minimum_gpu_mib` | Actual execution GPU identity and measured fit envelope. Inventory is checked before launch. |
 | `port`, `proxy_port`, `metrics_port`, `metrics_internal_port` | Explicit loopback ports; the inference port maps to container port 8000. |
-| `timeout_seconds` | Entire case envelope, with 120 seconds reserved for scoped cleanup. |
+| `timeout_seconds`, `cleanup_grace_seconds` | Entire case envelope; freeze `cleanup_grace_seconds: 120` inside that envelope for scoped cleanup. |
+| `cgroup_root` | Canonical delegated cgroup-v2 root for the shared isolated launcher. |
 | `owner`, `evidence_link` | Private execution-record provenance. |
 | `phases` | Ordered unique phases, each containing `name`, candidate `argv` and `expected_requests`. |
 
@@ -65,6 +66,10 @@ order and independently reconciles usage with product CSV rows. Warmup stays
 outside measured cohorts. All phase commands must drain before returning.
 
 The descriptor chain, observed local image and running container must agree.
+Container identity and worker PID/start-time/command-hash sets are compared at
+readiness and each phase boundary. Changed workers block the case. Boundary
+sampling cannot exclude a process that appears and disappears entirely between
+samples; independent event continuity/exclusivity review is still required.
 The runner records a random ownership label before creating its container and
 removes only that owner. Cleanup failure prevents PASS. A separate external
 generation-bound watchdog remains necessary for machine loss, SIGKILL, and

@@ -29,6 +29,8 @@ class MetricControls(unittest.TestCase):
     def test_missing_reset_label_change_and_precision_are_rejected(self):
         for after in [self.page.replace('} 4', '} 3'), self.page.replace('worker="0"', 'worker="1"'),
                       self.page.replace('} 4', '} 9007199254740994'),
+                      self.page.replace('} 4', '} 9007199254740993'),
+                      self.page.replace('} 4', '} 9007199254740992.1'),
                       self.page.replace('hits_total{worker="0"} 4\n', ''),
                       self.page.replace('rate 0.5', 'rate NaN'), self.page.replace('rate 0.5', 'rate 1.1'),
                       self.page.replace('hits_total{worker="0"} 4', 'hits_total{worker="0"} 4.5'),
@@ -44,6 +46,15 @@ class MetricControls(unittest.TestCase):
 
 
 class WireControls(unittest.TestCase):
+    def test_frozen_warmup_and_turn_boundaries_require_typed_values(self):
+        good = {'messages_sha256': 'a'*64, 'options': {'model': 'fixture', 'stream': True},
+                'warmup': False, 'session_id': None, 'turn': None}
+        runtime.expected_request(good, 'fixture')
+        for changes in ({'warmup': 'false'}, {'turn': True}, {'messages_sha256': 'a'},
+                        {'options': {'model': 'other', 'stream': True}}):
+            with self.assertRaises(ValueError):
+                runtime.expected_request({**good, **changes}, 'fixture')
+
     def test_entire_conversation_is_hashed(self):
         a = {'messages': [{'role': 'user', 'content': 'A'}, {'role': 'assistant', 'content': 'B'}], 'stream': True}
         b = {**a, 'messages': list(reversed(a['messages']))}

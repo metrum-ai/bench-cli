@@ -4,11 +4,19 @@
 import math
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import kv_r5_trtllm_runner as runner
 
 
 class StableCollectorControls(unittest.TestCase):
+    def test_rc_package_cannot_use_stable_runtime_profile(self):
+        instance = SimpleNamespace(out=Path('/unused'), name='owned-fixture', docker=lambda *args:
+            SimpleNamespace(stdout='{"version":"1.2.1rc1","files":{}}'))
+        with patch.object(runner.runtime, 'save'), self.assertRaisesRegex(ValueError, 'not stable'):
+            runner.preflight(instance)
+
     def setUp(self):
         self.page = (Path(__file__).resolve().parents[3]/'tests/fixtures/trtllm121-collector-synthetic.prom').read_text()
         lines = []

@@ -6,6 +6,7 @@ import json
 import math
 import re
 import sys
+from decimal import Decimal
 
 import kv_r5_runtime as runtime
 from metrics_oracle import SAMPLE, parse_labels
@@ -68,10 +69,15 @@ def server(data):
 
 
 def preflight(instance):
-    code = ('import importlib.util,json,pathlib; '
+    code = ('import importlib.util,importlib.metadata,json,pathlib; '
             'root=pathlib.Path(importlib.util.find_spec("tensorrt_llm").origin).parent; '
-            'print(json.dumps({str(root/p):h for p,h in '+repr(SOURCE_FILES)+'.items()}))')
-    expected = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
+            'print(json.dumps({"version":importlib.metadata.version("tensorrt_llm"),'
+            '"files":{str(root/p):h for p,h in '+repr(SOURCE_FILES)+'.items()}}))')
+    package = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
+    runtime.save(instance.out/'trtllm-package.json', package)
+    if not re.fullmatch(r'1\.2\.1(?:\+[a-zA-Z0-9.]+)?', package['version']):
+        raise ValueError('actual standalone TRT-LLM package is not stable 1.2.1')
+    expected = package['files']
     if any(instance.data['source_files'].get(path) != digest for path, digest in expected.items()):
         raise ValueError('actual standalone collector/endpoint source is not pinned')
 
@@ -136,7 +142,8 @@ def snapshot(text):
                 raise ValueError('missing/incorrect source family TYPE')
             labels, value = parse_labels(match[2]), float(match[3])
             unit = 'seconds' if name.endswith('_sum') else 'observations' if name != SUCCESS else 'requests'
-            if not math.isfinite(value) or value < 0 or (unit != 'seconds' and (not value.is_integer() or value > 2**53)):
+            exact = Decimal(match[3])
+            if not math.isfinite(value) or value < 0 or (unit != 'seconds' and (exact != exact.to_integral_value() or exact > 2**53)):
                 raise ValueError('invalid cumulative sample')
             key = (name, labels)
             if key in values:
