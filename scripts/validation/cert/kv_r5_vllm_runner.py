@@ -66,9 +66,8 @@ def validate(data):
     if data['case'] != 'BC-KV-008' and any(p.get('reset_prefix_cache') for p in data['phases'][1:]):
         raise ValueError('reset across reuse/pressure epoch is forbidden')
     if data['case'] in ('BC-KV-002', 'BC-KV-009'):
-        runtime.pin(data['audit_tool'])
-        if data['audit_tool']['path'] not in {p['path'] for p in data['inputs'].values()}:
-            raise ValueError('independent observer must be a frozen input')
+        import kv_r5_eviction_observer as observer
+        observer.validate(data)
     if data['case'] == 'BC-KV-002' and ('--kv-offloading-size' not in flags or '--kv-offloading-backend' not in flags):
         raise ValueError('native CPU offload configuration required')
     if data['case'] == 'BC-KV-002' and flags[flags.index('--kv-offloading-backend')+1] != 'native':
@@ -85,37 +84,48 @@ def validate(data):
 
 
 def server(data):
-    return [IMAGE, '--model', '/model', '--served-model-name', MODEL,
-            '--host', '0.0.0.0', '--port', '8000', *data['server_flags']]
+    options, env = [], []
+    if data['case'] in ('BC-KV-002', 'BC-KV-009'):
+        import kv_r5_eviction_observer as observer
+        options = observer.server_options()
+        env = ['--env', 'VLLM_SERVER_DEV_MODE=1']
+    return [*env, IMAGE, '--model', '/model', '--served-model-name', MODEL,
+            '--host', '0.0.0.0', '--port', '8000', *options, *data['server_flags']]
 
 
 def preflight(instance):
+    needed = dict(SOURCE_FILES)
+    if instance.data['case'] in ('BC-KV-002', 'BC-KV-009'):
+        import kv_r5_eviction_observer as observer
+        needed.update(observer.SOURCE_FILES)
     code = ('import importlib.util,importlib.metadata,json,pathlib; '
             'root=pathlib.Path(importlib.util.find_spec("vllm").origin).parent; '
             'print(json.dumps({"version":importlib.metadata.version("vllm"),'
-            '"files":{str(root/p):h for p,h in '+repr(SOURCE_FILES)+'.items()}}))')
+            '"files":{str(root/p):h for p,h in '+repr(needed)+'.items()}}))')
     package = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
     runtime.save(instance.out/'vllm-package.json', package)
     if not re.fullmatch(r'0\.33\.0(?:\+[a-zA-Z0-9.]+)?', package['version']):
         raise ValueError('actual vLLM package is not stable 0.33.0')
     expected = package['files']
-    needed = SOURCE_FILES if instance.data['case'] == 'BC-KV-002' else {'v1/metrics/loggers.py': SOURCE_FILES['v1/metrics/loggers.py']}
+    if instance.data['case'] not in ('BC-KV-002', 'BC-KV-009'):
+        needed = {'v1/metrics/loggers.py': SOURCE_FILES['v1/metrics/loggers.py']}
     for relative, digest in needed.items():
         paths = [p for p, h in expected.items() if p.endswith('/'+relative) and h == digest]
         if len(paths) != 1 or instance.data['source_files'].get(paths[0]) != digest:
             raise ValueError('actual import source slice is not pinned')
 
 
+def before_phase(instance, phase, directory):
+    if instance.data['case'] in ('BC-KV-002', 'BC-KV-009'):
+        import kv_r5_eviction_observer as observer
+        observer.before_phase(instance, phase, directory)
+
+
 def after_phase(instance, phase, directory):
     if instance.data['case'] not in ('BC-KV-002', 'BC-KV-009'):
         return
-    # The separately reviewed observer reads engine/allocator evidence; it must
-    # emit raw event references, never derive eviction from an aggregate rate.
-    tool = instance.data['audit_tool']['path']
-    result = instance.command([tool, '--container', instance.name, '--phase', phase['name'],
-                               '--out', str(directory/'independent-audit.json')])
-    (directory/'audit.stdout').write_text(result.stdout)
-    (directory/'audit.stderr').write_text(result.stderr)
+    import kv_r5_eviction_observer as observer
+    observer.after_phase(instance, phase, directory)
 
 
 def percentile(values, p):
@@ -174,46 +184,6 @@ def accounting(phase, compare_product=True):
             if product[0][key] != independent[key]:
                 raise ValueError('product phase differs from independent source snapshots')
     return rows
-
-
-def audit(phase, prefix):
-    data = runtime.load(phase['directory']/'independent-audit.json')
-    if (data.get('schema_version') != 'kv-exclusive-window.v1' or data.get('phase') != phase['plan']['name']
-            or data.get('prefix_sha256') != prefix or not data.get('raw_event_paths')):
-        raise ValueError('independent target-prefix evidence missing')
-    events = []
-    for name in data['raw_event_paths']:
-        path = (phase['directory']/name).resolve()
-        if not path.is_relative_to(phase['directory'].resolve()) or not path.is_file():
-            raise ValueError('independent raw event evidence absent')
-        for line in path.read_text().splitlines():
-            event = json.loads(line)
-            if not isinstance(event, dict):
-                raise ValueError('invalid independent observer event')
-            events.append(event)
-    if not events:
-        raise ValueError('independent raw event stream is empty')
-    for name in ('same_epoch', 'exclusive_requests', 'exclusive_transfers', 'async_work_settled', 'target_gpu_evicted'):
-        if data.get(name) is not True:
-            raise ValueError('exclusive-window evidence unavailable: '+name)
-    evictions = [e for e in events if e.get('schema_version') == 'kv-target-gpu-eviction.v1'
-                 and e.get('prefix_sha256') == prefix and e.get('source') == 'engine_allocator'
-                 and e.get('phase') == 'pressure']
-    if len(evictions) != 1:
-        raise ValueError('independent allocator eviction observation absent')
-    event = evictions[0]
-    before, after = event.get('gpu_resident_blocks_before'), event.get('gpu_resident_blocks_after')
-    if type(before) is not int or before <= 0 or type(after) is not int or after != 0:
-        raise ValueError('target-prefix GPU eviction is not established')
-    scope = [e for e in events if e.get('schema_version') == 'kv-exclusive-observation.v1'
-             and e.get('phase') == 'rehit' and e.get('prefix_sha256') == prefix]
-    if len(scope) != 1 or scope[0].get('epoch') != event.get('epoch') or not event.get('epoch'):
-        raise ValueError('independent exclusive-window epoch unavailable')
-    for name, expected in (('target_requests', 1), ('competing_requests', 0),
-                           ('competing_transfers', 0), ('pending_transfers_at_end', 0)):
-        if type(scope[0].get(name)) is not int or scope[0][name] != expected:
-            raise ValueError('exclusive-window raw observation contradicts receipt')
-    return data
 
 
 def evaluate(data, phases):
@@ -276,7 +246,8 @@ def evaluate(data, phases):
             control = [r for r in by_name['control']['plan']['expected_requests'] if not r['warmup']]
             if len(control) != 1 or control[0]['messages_sha256'] == target['messages_sha256'] or control[0]['options'] != target['options']:
                 raise ValueError('distinct comparable control B request required')
-        proof = audit(by_name['rehit'], prefix)
+        import kv_r5_eviction_observer as observer
+        proof = observer.verify(data, phases)
         if not runtime.SHA.fullmatch(prefix):
             raise ValueError('frozen tokenized target prefix identity required')
         rehit = observed['rehit']['series']

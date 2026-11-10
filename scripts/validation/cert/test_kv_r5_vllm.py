@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import kv_r5_metrics
+import kv_r5_eviction_observer as observer
 import kv_r5_vllm_runner as runner
 
 
@@ -57,7 +58,7 @@ def phase(root, name, count=16, cached=0, offset=0):
 
 class VllmControls(unittest.TestCase):
     def test_rc_package_cannot_use_stable_runtime_profile(self):
-        instance = SimpleNamespace(out=Path('/unused'), name='owned-fixture', docker=lambda *args:
+        instance = SimpleNamespace(data={'case': 'BC-KV-002'}, out=Path('/unused'), name='owned-fixture', docker=lambda *args:
             SimpleNamespace(stdout=json.dumps({'version': '0.33.0rc1', 'files': {}})))
         with patch.object(runner.runtime, 'save'), self.assertRaisesRegex(ValueError, 'not stable'):
             runner.preflight(instance)
@@ -95,26 +96,6 @@ class VllmControls(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'dedicated session warmup'):
                 runner.evaluate({'case': 'BC-KV-008'}, [p])
 
-    def test_offload_and_pressure_require_independent_raw_eviction_evidence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = phase(Path(tmp), 'rehit', count=1)
-            with self.assertRaises(OSError):
-                runner.audit(p, 'a'*64)
-
-            proof = {'schema_version': 'kv-exclusive-window.v1', 'phase': 'rehit',
-                     'prefix_sha256': 'a'*64, 'raw_event_paths': ['missing.jsonl'],
-                     **dict.fromkeys(('same_epoch', 'exclusive_requests', 'exclusive_transfers',
-                                     'async_work_settled', 'target_gpu_evicted'), True)}
-            (p['directory']/'independent-audit.json').write_text(json.dumps(proof))
-            with self.assertRaisesRegex(ValueError, 'raw event evidence absent'):
-                runner.audit(p, 'a'*64)
-            (p['directory']/'missing.jsonl').write_text('')
-            with self.assertRaisesRegex(ValueError, 'stream is empty'):
-                runner.audit(p, 'a'*64)
-            (p['directory']/'missing.jsonl').write_text(json.dumps({'cached_hit_rate': .9})+'\n')
-            with self.assertRaisesRegex(ValueError, 'allocator eviction observation absent'):
-                runner.audit(p, 'a'*64)
-
     def test_pressure_cannot_attribute_target_a_eviction_to_a_different_rehit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -123,6 +104,53 @@ class VllmControls(unittest.TestCase):
                       for name in ('cold', 'populate', 'warm', 'pressure', 'rehit', 'control')]
             with self.assertRaisesRegex(ValueError, 'target A wire identity'):
                 runner.evaluate({'case': 'BC-KV-009', 'target_prefix_sha256': 'a'*64}, phases)
+
+    def test_native_offload_keeps_all_four_conditions_with_builtin_observer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phases = [phase(Path(tmp), name, count=1, offset=100 if name == 'pressure' else 0)
+                      for name in ('cold', 'populate', 'pressure', 'rehit')]
+            rehit = phases[-1]
+            rehit['plan']['native_cpu_load'] = True
+            extra = f'# TYPE {runner.LOAD} counter\n{runner.LOAD}{{engine="0"}} '
+            rehit['before'] += extra+'0\n'
+            rehit['after'] += extra+'8\n'
+            path = rehit['directory']/'requests.csv'
+            with path.open() as stream:
+                rows = list(csv.DictReader(stream))
+            rows[0]['ttft_s'] = '0.5'
+            with path.open('w') as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            data = {'case': 'BC-KV-002', 'target_prefix_sha256': 'a'*64}
+            with patch.object(observer, 'verify', return_value={'target_gpu_evicted': True}) as verify:
+                runner.evaluate(data, phases)
+                verify.assert_called_once_with(data, phases)
+                old = rehit['after']; rehit['after'] = rehit['after'].replace(extra+'8', extra+'0')
+                with self.assertRaisesRegex(ValueError, 'byte/hit'):
+                    runner.evaluate(data, phases)
+                rehit['after'] = old
+                summary = rehit['directory']/'stdout.json'
+                original_summary = summary.read_text()
+                rehit['after'] = page(110, 4)+extra+'8\n'
+                series = kv_r5_metrics.deltas(rehit['before'], rehit['after'], runner.APC)
+                summary.write_text(json.dumps({'config': {'native_cache_phase_analysis': [
+                    {'delta': {'window_unknown': None, 'continuity': 'operator_declared',
+                               'series': [{**r, 'unknown': None} for r in series]}}]}}))
+                with self.assertRaisesRegex(ValueError, 'byte/hit'):
+                    runner.evaluate(data, phases)
+                rehit['after'] = old
+                summary.write_text(original_summary)
+                rows[0]['ttft_s'] = '1'
+                with path.open('w') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+                    writer.writeheader()
+                    writer.writerows(rows)
+                with self.assertRaisesRegex(ValueError, 'strictly below'):
+                    runner.evaluate(data, phases)
+            with patch.object(observer, 'verify', side_effect=ValueError('target GPU eviction missing')):
+                with self.assertRaisesRegex(ValueError, 'eviction missing'):
+                    runner.evaluate(data, phases)
 
     def test_existing_real_exporter_serialization_is_parseable(self):
         fixture = Path(__file__).resolve().parents[3]/'tests/fixtures/vllm033-logger-synthetic-config.prom'
