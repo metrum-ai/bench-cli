@@ -2,140 +2,102 @@
 
 # Changelog
 
-## [1.9.0] - TBD-at-tag
+## [1.9.0] - Unreleased
 
-- Add a separate stable TRT-LLM 1.2.1 source profile for its standalone
-  `/prometheus/metrics` request-completion and duration families. TRT-LLM
-  cache-reuse attribution is unavailable on 1.2.1: cached-token evidence stays
-  Unknown with reason `not exported by 1.2.1`.
+The release date will be set when v1.9.0 is tagged.
 
-- Add source-pinned vLLM 0.33 APC, external-cache and offload metric profiles.
-  Preserve Unknown for incompatible revisions or missing evidence; connector
-  counters do not establish physical cache-tier participation (#484).
+### KV workloads and inputs
 
-- Update the v1.9.0 certification catalog to r4 following the maintainer decision
-  to use official Qwen3.8-27B in place of Qwen3-8B and Qwen3-4B.
-  Preserve the previous-release BC-PERF-001 gate configuration unchanged.
+- Add opt-in strategic request-role boundaries and sequential, recorded-history
+  sessions. Closed-loop concurrency counts active sessions and prevents turns of
+  one session from overlapping. Trusted stage reset hooks run after warmup drains
+  and require scoped acknowledgements, readiness and bounded cleanup (#413).
+- Add held-out warmup inputs and pinned local rendering for static workloads.
+  Validate fully rendered token prefixes before traffic; selected-renderer failure
+  or Unknown stops issuance. Closed-loop held-out warmup remains guarded pending
+  dynamic final-body bindings. Recorded history does not certify generated-history
+  reuse (#413).
+- Add shared reuse, per-request cache-busting and run-isolation policies to LLM
+  and strategic chat runs, with explicit ordering, prescribed replay and hashes of
+  final request bodies. Existing defaults remain unchanged. A nonce can leave a
+  shared system/template prefix; choosing reuse does not guarantee a hit (#414).
+- Add a library API for deterministic shared-prefix families with uniform or
+  Zipf allocation, pinned rendering and exact token-length checks. Group counts,
+  content repeats and block-aligned reuse ceilings are measured explicitly.
+  This generator is not yet a CLI workload or scheduler (#415).
+- Add bounded public-dataset preparation through `prompts dataset`: pinned
+  revisions and file checksums, verified offline inputs, JSON/JSONL/Parquet/ZIP
+  readers, document/question mapping and canonical input records. Dataset scripts
+  and source tool calls are never executed; terms are not accepted automatically.
+  Optional catalog entries retain their per-source review requirements (#424, #425).
+- Add separate library normalization for typed public session/tool histories and
+  structural traces. Trace helpers preserve declared time units and prefix
+  topology; a construction API can generate new text from that topology. Source
+  hashes do not recover original text. Capacity-scaled pressure plans and two-tier
+  cache models are offline APIs, not observed eviction, runtime trace replay or
+  physical offload measurements (#416, #426, #427).
+- Add opt-in content-unique selection and rendered-token overlap checks, plus
+  source/rights validation manifests and consolidation reports. Preserve source
+  rows versus selected targets, supplied versus rendered lengths, and sample
+  versus corpus counts. Missing token, rights or privacy evidence stays Unknown;
+  a valid manifest or public source does not grant content clearance (#422, #428).
 
-- Enable the `tokenizer` feature by default for crate builds and explicitly in
+### Cache evidence and study reports
+
+- Add source-pinned native metric profiles and opt-in startup discovery for vLLM
+  APC/external/offload (including 0.33.0), SGLang (including 0.5.23), LMCache,
+  legacy Dynamo KVBM and TRT-LLM. Keep
+  counter/gauge types, source labels and token/block/byte units distinct; required
+  missing or incompatible evidence stays Unknown. SGLang hit rate remains separate
+  from memory occupancy, retaining the correction shipped in 1.8.1 (#417, #420).
+- Profile stable LMCache 0.5.7 in MP mode with `LMCacheMPConnector` and the
+  separate `lmcache_mp_*` families. Lookup tokens and stored/loaded chunks are not
+  legacy metric aliases or resident occupancy. Dynamo KVBM is a legacy profile
+  restricted to Dynamo <=1.6.x; the 1.6.2 runtime additionally requires proof that
+  its conditional KVBM package is installed and operational (#417).
+- Add the separate standalone TRT-LLM 1.2.1 profile for request completions and
+  duration histograms at `/prometheus/metrics`. Cached-token attribution is
+  unavailable on 1.2.1 and stays Unknown with reason `not exported by 1.2.1`;
+  this profile makes no cache-reuse or physical-tier attribution (#417).
+- Add opt-in native counter windows with a baseline before measured issuance and
+  a terminal snapshot after complete drain and declared settling. Preserve series
+  identity, reset/continuity qualifications, coverage and valid counter arithmetic.
+  Missing boundaries, resets and unsupported sources never become invented zero values. Native
+  counters alone do not prove physical tier participation (#418).
+- Retain request cached-token provenance for unary and streaming chat, including
+  usage-only final chunks. Distinguish reported zero from missing, null or
+  contradictory usage; summarize cold/partial/full/unknown reported-token cohorts
+  while excluding warmup and errors. Keep headline, visible-answer and approximate
+  HTTP timing distinct; none is isolated server prefill time (#419).
+- Add opt-in record-bound KV study JSON/CSV/HTML exports with reconciled counts,
+  timing cohorts, scheduling coverage and native-window evidence. The report API
+  supports conditional comparisons across independent complete run pairs, with
+  bootstrap resampling of whole pairs. Manifest declarations remain unverified
+  and physical cache state remains Unknown; these are engineering reports, not
+  live cache certification (#421, #423). See
+  [scope and methodology](docs/KV_STUDY_EXPORTS.md).
+- Add synthetic cache-state/reset/error tests, source-derived metric exposition
+  fixtures and guarded live certification runners. Fixtures, exporter serialization
+  with injected observations and mock HTTP tests are not live engine captures.
+  Actual executable/source identity, model/kernel fit, runtime evidence and
+  cleanup must pass separately before any live certification claim (#417, #421).
+
+### Build defaults and release checks
+
+- Enable the `tokenizer` feature by default for crate builds and include it in
   release binaries. Source builds can opt out with `--no-default-features`; those
   builds cannot perform pinned local tokenizer/chat-template validation.
-
-- Add opt-in record-bound KV study JSON/CSV/HTML exports, exclusive preflight
-  reservations, request/cache/clock-separated timing tables, scheduling coverage,
-  existing measured native-window and final-wire/policy evidence projections.
-  Keep manifest metadata unverified and physical state Unknown. Repetition
-  prefixes remain unique; conditional paired-run mean TTFT uncertainty reuses
-  whole-run bootstrap statistics, never correlated-turn resampling. Add synthetic
-  HTTP state-machine, reset-failure, unknown-evidence and reconciliation proofs.
-  See [scope and methodology](docs/KV_STUDY_EXPORTS.md).
-
-- Add opt-in measured native cache counter windows to LLM and strategic runs,
-  reusing synchronous boundary GETs and preserving full private label identity.
-  Await baseline before measured issuance, capture terminal after complete drain
-  and declared settling, retain explicit Unknown/conditional continuity and
-  required-versus-optional coverage. Add compatible weighted-counter arithmetic
-  without inferred replica/tier sums or physical cache attribution (#418).
-
-- Add source-pinned native cache metric profiles and opt-in bounded startup
-  discovery for vLLM APC/offload, SGLang, LMCache, legacy KVBM and a narrow
-  TRT-LLM collector slice. Preserve units, missing/invalid evidence, histogram
-  components and source-specific qualifications. Export redacted capability and
-  snapshot metadata without private labels or endpoint URLs. Discovery is not
-  phase sampling, executable-version attestation or physical-tier proof (#417).
-
-- Retain versioned request cached-token evidence for unary/SSE chat, including
-  usage-only final chunks and usage preceding a stream error. Distinguish missing,
-  null and reported zero; keep invalid/contradictory reports Unknown. Add measured
-  cohort aggregation with error/warmup exclusions and separate headline timing
-  provenance/visible-answer timing, without physical-tier attribution (#419).
-
-- Add opt-in shared chat cache policy, effective prompt order and post-transform
-  wire-body evidence (`cache-workload.v1`) across LLM and strategic runners.
-  Preserve historical defaults, retain request/run nonce scope and digest-list
-  checksums, and extend fingerprint-first prescribed replay to strategic prompts.
-  Fix sequence logging to avoid applying original source indices twice after a
-  short prescription reorders the pool. Use a 16-hex (64-bit) nonce, record its
-  22-character overhead and pinned contextual token differences, and retain
-  actual residual shared blocks (including long template headers). Freeze policy
-  bodies per stage before held-out validation; send those same bytes. No physical
-  hit/offload claim (#414).
-
-- Add held-out strategic warmup pools and a fail-closed rendered-token overlap
-  boundary delegating to the authoritative offline validator. Opt-in static
-  `--warmup-render-config` consumes the producer-owned pinned local renderer,
-  freezes exact HTTP bytes before timing and validates both pools before traffic
-  or reset hooks. Selected-renderer Fail/Unknown abort even with an override.
-  Unconfigured mode retains non-certifying Unknown/explicit-override behavior.
-  The `kv-warmup-overlap.v1` projection retains validator version, body digest-list
-  hashes and producer population/truncation fields (never sampled-list totals).
-  Fingerprint-only rendering metadata records live cross-check NotRequested;
-  closed-loop held-out mode remains guarded pending dynamic bindings (#413).
-
-- Define the opt-in `kv-study-report.v1` JSON manifest/report contract with dataset
-  validation references, effective workload digests, explicit unknowns and
-  phase/reset evidence and timestamps. Retain warmup isolation overrides with
-  both rendered-body digest-list bindings; unknown verdicts cannot claim a Pass.
-  Add schema and offline mock contract tests. This does
-  not yet add runner emission or live engine/cache validation (#421).
-
-- Add opt-in strategic `--session-mode closed-loop`: concurrency limits active
-  recorded-history sessions, with sequential turns and no overlapping duplicate
-  session when cycling a small pool. Rate-sweep combinations fail before traffic;
-  request budgets can end at partial sessions (#413, scheduling slice).
-
-- Add opt-in trusted strategic stage reset hooks after warmup drain and before
-  measurement, with exact tier acknowledgement, readiness, total deadlines and
-  optional settle delay/pre-warmup reset. Record non-sensitive acknowledgements
-  and lifecycle timestamps; failures abort measured issuance (#413). Unix hooks
-  run via `/bin/sh -c` in an isolated process group, terminated on cancellation;
-  failures include bounded, escaped stderr diagnostics. Reject settle delays at
-  least as long as the total deadline. Hook stderr must not contain secrets.
-
-- Add opt-in strategic `--session-request-roles` for recorded-history request
-  boundaries, preserving original message indices and legacy defaults. Record
-  boundary/history policy in summary config (#413, first implementation slice).
-
-- Bound warmup/measured prefix validation using a compressed token trie and a
-  default 1,000-pair evidence cap with an explicit-cap helper. Preserve exact
-  maxima, duplicate multiplicity, default thresholds and Unknown handling.
-  Extend unreleased `kv-token-overlap.v1` in place with
-  `pairs_over_threshold_total: Option<u64>` (null on Unknown) and
-  `pairs_over_threshold_truncated: bool`; existing function signatures remain
-  unchanged. Stored pairs now use deterministic measured/token-lexicographic
-  order. Pair-list length alone must not determine pass/fail.
-
-- Metrum AI: cancel superseded PR workflows while preserving active and queued
-  non-PR evidence with unique run-ID groups, including the self-hosted job.
-  Add a pinned actionlint CI check for all PR-triggered workflows.
-
-- Metrum AI: keep all prerelease tags out of latest release promotion and
-  clarify reasoning-only truncation semantics in the output schema.
-
-- Metrum AI: develop GPU certification runners and independent evidence
-  checks; unsupported cases remain fail-closed. Prospectively revise the
-  reference comparison to use frozen ShareGPT prompts with a matched 1024-token
-  cap and distinguish first-choices timing from first-any. Fix G2 at eight
-  requests per cell, define BC-GPU-009's same-cohort median SLO, retarget
-  BC-GPU-015 to one NVIDIA GPU with at least 48 GB, and require all six complete
-  180-second G7 issuance windows. The same-cohort median selector is a hidden
-  certification-only option, not a public service SLO. GPU-003 records source and forwarded real
-  SSE for selected-choice, tool-output and transformed ordering checks, and
-  REASON-005 pins a thinking-capable vision model and image. LIVE-002–004
-  add pinned, isolated modality smoke runners; the image headline check now
-  actually decodes every PNG/JPEG artifact. Previous development attempts
-  remain intact.
-
-- Metrum AI: qualify releases using frozen core plus stratified extended case
-  selection, with changed-area and rotation coverage, selected-only lane plans
-  and explicit NOT-SELECTED results. Skip unchanged full nightly runs and use
-  change-triggered rather than monthly GPU regression scheduling. Retain the
-  nightly published-docs check on unchanged main. Revise BC-REASON-006 before
-  its first certification run to use the field-reported 512-token cap (#395).
-
-- Metrum AI: schedule nightly and weekly CPU release-quality checks, track test
-  cadence, and export certification evidence tables and reports. GPU lane
-  automation remains separate; missing evidence blocks release certification.
+- Extend the release certification catalog to r5 with fifteen mandatory KV cases,
+  including offline dataset/export checks. Missing, failed, pending or smoke
+  evidence blocks certification. The CPU certification probe is gated behind the
+  non-default `cert-probes` feature and excluded from the published crate and
+  release archives.
+- Strengthen selected-case release validation, isolated execution and provenance
+  checks while preserving the previous-release BC-PERF-001 configuration. Publish
+  certification evidence separately from development attempts and study exports.
+- Cancel superseded PR workflows while preserving non-PR evidence runs, lint
+  workflows, and retain nightly published-document checks. Keep prerelease tags
+  out of latest-release promotion.
 
 ## [1.8.1]
 
