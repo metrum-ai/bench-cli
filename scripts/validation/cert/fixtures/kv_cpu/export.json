@@ -1,0 +1,123 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Synthetic certification fixture; Apache-2.0.",
+  "job": {
+    "kind": "export",
+    "seed": {
+      "schema_version": "kv-study-report.v1",
+      "study_id": "cpu-export-fixture",
+      "reuse_kind": "exact_prefix",
+      "runtime": {
+        "model_revision": null,
+        "tokenizer_revision": null,
+        "chat_template_sha256": null,
+        "engine": null,
+        "engine_version": null,
+        "connector": null,
+        "connector_version": null,
+        "flags_sha256": null,
+        "block_size_tokens": null,
+        "kv_dtype": null,
+        "kv_layout": null,
+        "tensor_parallelism": null,
+        "routing": null,
+        "tiers": []
+      },
+      "datasets": [],
+      "limitations": [
+        "Synthetic mock cache state; export correctness only."
+      ],
+      "workload": {
+        "cache_policy": "reuse",
+        "order": "preserve",
+        "effective_order_sha256": null,
+        "body_fingerprints_sha256": null,
+        "history_mode": "recorded",
+        "arrival_mode": "closed_loop",
+        "concurrency": 1,
+        "input_distribution": null,
+        "output_distribution": null,
+        "warmup_isolation": "unverified"
+      },
+      "phases": [
+        {
+          "id": "cold",
+          "kind": "cold_populate",
+          "cache_state": "unknown",
+          "reset": {
+            "scope": [],
+            "acknowledged": false,
+            "ready": false,
+            "settled": false,
+            "status": "not_requested",
+            "reason": null,
+            "started_unix_ns": null,
+            "acknowledged_unix_ns": null,
+            "ready_unix_ns": null,
+            "settled_unix_ns": null
+          },
+          "requests": 999,
+          "errors": 999,
+          "cached_token_known": 999,
+          "cached_token_unknown": 999
+        },
+        {
+          "id": "warm",
+          "kind": "resident_warm",
+          "cache_state": "unknown",
+          "reset": {
+            "scope": [],
+            "acknowledged": false,
+            "ready": false,
+            "settled": false,
+            "status": "not_requested",
+            "reason": null,
+            "started_unix_ns": null,
+            "acknowledged_unix_ns": null,
+            "ready_unix_ns": null,
+            "settled_unix_ns": null
+          },
+          "requests": 999,
+          "errors": 999,
+          "cached_token_known": 999,
+          "cached_token_unknown": 999
+        }
+      ]
+    },
+    "phases": {
+      "cold": [
+        {
+          "success": true,
+          "warmup": false,
+          "cached_tokens": 0,
+          "ttft_s": 0.4
+        },
+        {
+          "success": true,
+          "warmup": false,
+          "cached_tokens": null,
+          "ttft_s": 0.5
+        },
+        {
+          "success": false,
+          "warmup": false,
+          "cached_tokens": 8,
+          "ttft_s": 9.0
+        },
+        {
+          "success": true,
+          "warmup": true,
+          "cached_tokens": 8,
+          "ttft_s": 0.1
+        }
+      ],
+      "warm": [
+        {
+          "success": true,
+          "warmup": false,
+          "cached_tokens": 8,
+          "ttft_s": 0.2
+        }
+      ]
+    }
+  }
+}

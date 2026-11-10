@@ -1,0 +1,28 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Synthetic certification fixture; Apache-2.0.",
+  "schema_version": "kv-cpu-fixtures.v1",
+  "files": {
+    "LICENSE": "d73fa90ac9255b6e24a245e147df498c7fa9fd459efec4bd7b4e26ce6a1d2aee",
+    "documents.jsonl": "64488e2e1e026e339338fc653e2962c2ba27571cf711fcea93c76f3123be4bf4",
+    "export.json": "1f396758df9d9398a6bc33343400074cc51c0f625592947eaf330c94edce3a7d",
+    "template.jinja": "10e02227d249ef4ae88f81abce46f71eed2914c1b2cbde0bf09ebd78139c3e05",
+    "trace.jsonl": "550c17f7eb31adc383f13ae5aa73f982be6be4633345a5fef26b55a603e8d16d",
+    "wordlevel.json": "0a457479da5218a82193d4edc9c41b20cd6283914a3a13de9346bda7cbdfce8c"
+  },
+  "public_inputs": {
+    "source_id": "metrum-ai/prompt-library",
+    "revision": "0666f62e581b482838ae2e17b333ee36ff3d01b0",
+    "files": {
+      "sample.jsonl": "b17a53a606fe323085e42286735e4a4978c5e5b188715dfe2e5ae5ef1807165f",
+      "manifest.json": "7f8ce321877f7041378116a63493220df1770363cd2fd714c50999ea43fdaef5",
+      "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "W2.jsonl": "e5480af17428c48e614a0840f30eda53acbea7f9efe869c5173cde5d5818edfd"
+    }
+  },
+  "schemas": {
+    "schemas/kv-dataset-manifest.v1.json": "936b0319220dfb1bd9d0e798bc528d4b2f0121745317a23816957302bba26ee4",
+    "schemas/kv-study-report.v1.json": "c680533271cd169481dd8ec757052e460ef44c3638855957382e748a11ce4809",
+    "schemas/kv-study-export.v1.json": "5a2ad09e3c79eda4cec75ba14d32b155e84fb0b05a06c8b8a548378d4a264347"
+  },
+  "native_vocabulary_sha256": "99d0314572dde9a0c126e8a336acc53f2b8e3d62ae7379c3cfe1389c65396e60"
+}

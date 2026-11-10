@@ -1,0 +1,30 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Synthetic certification fixture; Apache-2.0.",
+  "tokenizer": {
+    "version": "1.0",
+    "truncation": null,
+    "padding": null,
+    "added_tokens": [],
+    "normalizer": null,
+    "pre_tokenizer": {
+      "type": "WhitespaceSplit"
+    },
+    "post_processor": null,
+    "decoder": null,
+    "model": {
+      "type": "WordLevel",
+      "vocab": {
+        "[UNK]": 0,
+        "shared": 1,
+        "alpha": 2,
+        "other": 3,
+        "beta": 4,
+        "Question:": 5,
+        "one": 6,
+        "two": 7,
+        "three": 8
+      },
+      "unk_token": "[UNK]"
+    }
+  }
+}
