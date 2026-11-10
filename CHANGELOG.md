@@ -4,6 +4,11 @@
 
 ## [1.9.0] - TBD-at-tag
 
+- Add a separate stable TRT-LLM 1.2.1 source profile for its standalone
+  `/prometheus/metrics` request-completion and duration families. TRT-LLM
+  cache-reuse attribution is unavailable on 1.2.1: cached-token evidence stays
+  Unknown with reason `not exported by 1.2.1`.
+
 - Add source-pinned vLLM 0.33 APC, external-cache and offload metric profiles.
   Preserve Unknown for incompatible revisions or missing evidence; connector
   counters do not establish physical cache-tier participation (#484).

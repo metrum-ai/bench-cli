@@ -1,20 +1,19 @@
 # Copyright (c) 2026 Metrum AI, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""KVT registration stub. Replace only this module when the runner is ready."""
+"""Isolated KVT adapter; never enters the r4 engine lifecycle."""
+import kv_r5_runtime as runtime
+import kv_r5_trtllm_runner as family
 
-AVAILABLE = False
-
-
-def freeze(args):
-    """Freeze lane-specific inputs, write args.out, and return its manifest."""
-    raise ValueError('KVT: runner not yet available')
-
-
-def main(argv):
-    """Run with ['--case', ID, ...lane arguments]; return a process exit code."""
-    raise ValueError('KVT: runner not yet available')
+AVAILABLE = True
 
 
 def preflight(manifest):
-    """Validate frozen lane-specific identity, inputs and execution requirements."""
-    raise ValueError('KVT: runner not yet available')
+    return runtime.adapter_preflight(manifest, family, 'KVT')
+
+
+def freeze(args):
+    return runtime.freeze_adapter(args, family, 'KVT')
+
+
+def main(argv):
+    return runtime.adapter_main(argv, family)

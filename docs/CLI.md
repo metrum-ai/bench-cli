@@ -83,6 +83,7 @@ Options:
           - lmcache
           - dynamo-kvbm
           - trt-llm
+          - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
 
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
@@ -1317,6 +1318,7 @@ Options:
           - lmcache
           - dynamo-kvbm
           - trt-llm
+          - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
 
       --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
           Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
