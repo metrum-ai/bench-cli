@@ -4,8 +4,11 @@
 import base64
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import kv_r5_metrics as metrics
 import kv_r5_proxy as proxy
@@ -60,6 +63,26 @@ class WireControls(unittest.TestCase):
             phase['plan']['expected_requests'][0] = {**expected, 'messages_sha256': 'b'*64}
             with self.assertRaisesRegex(ValueError, 'wire order'):
                 runtime.wire(phase)
+
+
+class LifecycleControls(unittest.TestCase):
+    def test_owner_mismatch_prevents_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = {'timeout_seconds': 300, 'tools': {'docker': {'path': '/frozen/docker'}}}
+            instance = runtime.Runtime(data, tmp, None)
+            instance.started = True
+            foreign = SimpleNamespace(stdout=json.dumps([{'Config': {'Labels': {'metrum.cert.owner': 'someone-else'}}}]), stderr='')
+            with patch.object(runtime.subprocess, 'run', return_value=foreign) as call:
+                with self.assertRaisesRegex(ValueError, 'ownership mismatch'):
+                    instance.cleanup()
+                self.assertEqual(len(call.call_args_list), 1)
+                self.assertEqual(call.call_args.args[0][1], 'inspect')
+
+    def test_total_envelope_reserves_cleanup_and_includes_setup(self):
+        started = time.monotonic()-40
+        instance = runtime.Runtime({'timeout_seconds': 300}, '/unused', None, budget_start=started)
+        self.assertEqual(instance.total_deadline, started+300)
+        self.assertEqual(instance.deadline, started+180)
 
 
 if __name__ == '__main__':

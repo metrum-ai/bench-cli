@@ -17,6 +17,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -97,7 +98,8 @@ def validate(data, family):
             raise ValueError('phase must invoke the measured candidate and freeze wire order')
         required_options = {'--url': 'http://127.0.0.1:'+str(data['proxy_port'])+'/v1/chat/completions',
                             '--model': data['served_model'], '--csv': '{out}/requests.csv',
-                            '--html': '{out}/report.html', '--ndjson': '{out}/events.ndjson', '--sweep': '1'}
+                            '--html': '{out}/report.html', '--ndjson': '{out}/events.ndjson',
+                            '--sweep': '1', '--api-key': 'dummy'}
         for key, value in required_options.items():
             if phase['argv'].count(key) != 1 or phase['argv'][phase['argv'].index(key)+1] != value:
                 raise ValueError('product endpoint/output argv mismatch')
@@ -112,11 +114,11 @@ def validate(data, family):
 
 
 class Runtime:
-    def __init__(self, data, out, family):
+    def __init__(self, data, out, family, budget_start=None):
         self.data, self.out, self.family = data, Path(out), family
         self.owner = secrets.token_hex(16)
         self.name = 'cert-kv-' + secrets.token_hex(12)
-        self.total_deadline = time.monotonic() + data['timeout_seconds']
+        self.total_deadline = (time.monotonic() if budget_start is None else budget_start) + data['timeout_seconds']
         self.deadline = self.total_deadline - 120  # cleanup belongs inside the case envelope
         self.started = False
         self.proxy = None
@@ -184,6 +186,9 @@ class Runtime:
         self.started = True
         self.docker(*argv, timeout=60)
         self.container = self.inspect()
+        devices = self.container.get('HostConfig', {}).get('DeviceRequests', [])
+        if len(devices) != 1 or devices[0].get('DeviceIDs') != [d['gpu_uuid']]:
+            raise ValueError('running container device binding mismatch')
         receipt = r4_image_provenance.verify(pin(d['oci_index']), pin(d['oci_child']), image, self.container,
                     index_digest=self.family.IMAGE.split('@')[1], child_digest=self.family.CHILD)
         save(self.out/'image-runtime.json', receipt)
@@ -274,12 +279,20 @@ class Runtime:
             value = json.loads(call('inspect', self.name).stdout)[0]
             if value['Config']['Labels'].get('metrum.cert.owner') != self.owner:
                 raise ValueError('cleanup ownership mismatch')
-            (self.out/'server.log').write_text(call('logs', self.name).stdout)
+            logs = call('logs', self.name)
+            (self.out/'server.log').write_text(logs.stdout+logs.stderr)
             call('rm', '-f', self.name)
             remaining = call('ps', '-aq', '--filter', 'label=metrum.cert.owner='+self.owner).stdout.strip()
             if remaining:
                 raise ValueError('owned container remains after cleanup')
-        save(self.out/'cleanup.json', {'owned_containers_remaining': 0, 'owner': self.owner})
+            for port in {self.data['port'], self.data['metrics_port']}:
+                try:
+                    with socket.create_connection(('127.0.0.1', port), timeout=.2):
+                        raise ValueError('published case port remains open after cleanup')
+                except OSError:
+                    pass
+        save(self.out/'cleanup.json', {'owned_containers_remaining': 0, 'owner': self.owner,
+                                      'published_ports_closed': True})
 
 
 def wire(phase):
@@ -440,6 +453,7 @@ def main(family, argv=None):
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--preflight', action='store_true')
     args = parser.parse_args(argv)
+    budget_start = time.monotonic()
     runtime = None
     try:
         result_writer.require_python()
@@ -453,7 +467,7 @@ def main(family, argv=None):
         evidence = args.out/'evidence'
         evidence.mkdir()
         save(evidence/'manifest.json', data)
-        runtime = Runtime(data, evidence, family)
+        runtime = Runtime(data, evidence, family, budget_start=budget_start)
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         passed, observed = False, {}
         try:
@@ -472,6 +486,9 @@ def main(family, argv=None):
             except Exception as exc:
                 passed = False
                 observed['cleanup_error'] = type(exc).__name__+': '+str(exc)
+        if time.monotonic() > runtime.total_deadline:
+            passed = False
+            observed['deadline_error'] = 'complete case including setup and cleanup exceeded its envelope'
         record = {'ID': data['case'], 'result': 'PASS' if passed else 'FAIL',
             'candidate_sha': data['candidate_sha'], 'attempt': 1, 'start_utc': started,
             'end_utc': dt.datetime.now(dt.timezone.utc).isoformat(), 'owner': data['owner'],
