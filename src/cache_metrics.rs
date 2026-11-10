@@ -29,6 +29,8 @@ pub enum ProfileId {
     Lmcache,
     DynamoKvbm,
     TrtLlm,
+    /// Stable standalone 1.2.1 exports request completion and latency only.
+    TrtLlm121,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +68,7 @@ impl Unit {
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Query,
+    RequestCompleted,
     Hit,
     Stored,
     Read,
@@ -122,6 +125,10 @@ const fn c(metric: &'static str, unit: Unit, role: Role) -> MetricSpec {
     }
 }
 impl MetricSpec {
+    const fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
     const fn optional(mut self) -> Self {
         self.required = false;
         self
@@ -413,6 +420,111 @@ const TRTLLM: &[MetricSpec] = &[
     ),
 ];
 
+// Stable 1.2.1 has no cached-token, KV-reuse or physical-tier families.
+const TRTLLM121: &[MetricSpec] = &[
+    c(
+        "trtllm_request_success_total",
+        Unit::Requests,
+        Role::RequestCompleted,
+    ),
+    h(
+        "trtllm_e2e_request_latency_seconds_bucket",
+        "trtllm_e2e_request_latency_seconds",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_e2e_request_latency_seconds_count",
+        "trtllm_e2e_request_latency_seconds",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_e2e_request_latency_seconds_sum",
+        "trtllm_e2e_request_latency_seconds",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_to_first_token_seconds_bucket",
+        "trtllm_time_to_first_token_seconds",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_to_first_token_seconds_count",
+        "trtllm_time_to_first_token_seconds",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_to_first_token_seconds_sum",
+        "trtllm_time_to_first_token_seconds",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_per_output_token_seconds_bucket",
+        "trtllm_time_per_output_token_seconds",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_per_output_token_seconds_count",
+        "trtllm_time_per_output_token_seconds",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_time_per_output_token_seconds_sum",
+        "trtllm_time_per_output_token_seconds",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_request_queue_time_seconds_bucket",
+        "trtllm_request_queue_time_seconds",
+        HistogramPart::Bucket,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_request_queue_time_seconds_count",
+        "trtllm_request_queue_time_seconds",
+        HistogramPart::Count,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+    h(
+        "trtllm_request_queue_time_seconds_sum",
+        "trtllm_request_queue_time_seconds",
+        HistogramPart::Sum,
+        Unit::Seconds,
+        Role::OperationTime,
+    )
+    .required(),
+];
+
 impl ProfileId {
     pub fn source_revision(self) -> &'static str {
         match self {
@@ -426,6 +538,7 @@ impl ProfileId {
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
             Self::TrtLlm => "a3febfbfd0324bded62007ffd7d5241a06cbfc00",
+            Self::TrtLlm121 => "376f7e1bd8ed543f75014309e3fd4b237e9b0e73",
         }
     }
     pub fn metrics(self) -> &'static [MetricSpec] {
@@ -437,6 +550,7 @@ impl ProfileId {
             Self::Lmcache => LMCACHE,
             Self::DynamoKvbm => KVBM,
             Self::TrtLlm => TRTLLM,
+            Self::TrtLlm121 => TRTLLM121,
         }
     }
 }
@@ -498,6 +612,7 @@ pub fn probe(
     static SGLANG_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static LMCACHE_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static KVBM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
+    static TRTLLM121_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static TRTLLM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     let matcher = match profile {
         ProfileId::VllmApc | ProfileId::Vllm4baApc => &APC,
@@ -507,6 +622,7 @@ pub fn probe(
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
         ProfileId::TrtLlm => &TRTLLM_MATCHER,
+        ProfileId::TrtLlm121 => &TRTLLM121_MATCHER,
     };
     // Bound relevant series, not every unrelated histogram on an engine page.
     // Reuse the parser's filter-before-label-parsing behavior.

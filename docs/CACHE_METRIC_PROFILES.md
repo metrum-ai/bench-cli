@@ -22,6 +22,7 @@ synthetic, source-derived exposition, not captured live engine pages.
 | LMCache | `34f8a409e3631eff51d0b6fff67ca9c68f123377` | Requested/hit/stored tokens differ from remote byte counters and retrieve-request counts. Stored tokens include evicted tokens: not resident occupancy. Separate reported cache/storage byte gauges, eviction-operation events, evicted keys and failed-eviction **candidate counts** retain their units. A failed selection can count up to 64 candidates, not one failed call. |
 | Dynamo KVBM | `fa9852014950ed0aea74e56e1de441fc6de15307` | Directional transfer **blocks**, matched tokens and sliding-window hit-rate gauges are distinct. Object read/write failure counters also count **blocks**, not requests. No block-to-byte conversion. |
 | TRT-LLM collector | `a3febfbfd0324bded62007ffd7d5241a06cbfc00` | Cached prompt tokens, manager/iteration reused or missed blocks, accepted connector loads, reported directional bytes and layout/utilization gauges remain separate. Not Triton backend `nv_trt_llm_*` aliases. |
+| TRT-LLM stable 1.2.1 | `376f7e1bd8ed543f75014309e3fd4b237e9b0e73` | Separate `trt-llm121` profile: completed requests and four duration histograms at `/prometheus/metrics`; cached tokens Unknown, reason `not exported by 1.2.1`. [Source and runtime scope](KV_R5_TRTLLM.md). |
 
 Dynamo's pinned recipe explicitly requires **Dynamo <=1.6.x**; later releases
 no longer ship KVBM. The legacy source slice is not a claim that current Dynamo
@@ -113,6 +114,8 @@ preserve Unknown sample values rather than guessing executable compatibility.
 Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`,
 `vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `lmcache`,
 legacy `dynamo-kvbm` and `trt-llm`. These are selections, not backend autodetection.
+Stable standalone 1.2.1 uses the separate `trt-llm121` selection; it does not
+export the newer collector's cached-token or KV reuse families.
 
 Discovery performs one unauthenticated GET before measurement. It sends no
 workload body or inherited inference API key, refuses URL credentials, disables

@@ -179,6 +179,11 @@ impl ProfileCapabilities {
             ]
             } else {
                 match profile {
+                    ProfileId::TrtLlm121 => vec![
+                        "standalone stable TRT-LLM 1.2.1 endpoint /prometheus/metrics",
+                        "cached tokens: Unknown (not exported by 1.2.1)",
+                        "cache-reuse attribution and physical-tier evidence are unavailable",
+                    ],
                     ProfileId::Vllm4baApc => vec![
                         "local prefix counts exclude skipped lookups and preempted-request statistics",
                         "cache utilization is an engine-reported ratio, not physical allocation proof",
