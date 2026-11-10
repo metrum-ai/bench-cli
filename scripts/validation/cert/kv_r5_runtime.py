@@ -54,6 +54,8 @@ def validate(data, family):
         raise ValueError('unsupported r5 case')
     if not manifest_tool.REV.fullmatch(data['candidate_sha']):
         raise ValueError('full candidate SHA required')
+    import execution_policy
+    execution_policy.validate_case_tools(data['tools'], 'KVV')
     for item in [data['candidate'], data['oci_index'], data['oci_child'], *data['inputs'].values(), *data['tools'].values(), *data['model_files']]:
         pin(item)
     model_root = Path(data['model_snapshot']).resolve()
@@ -344,7 +346,7 @@ def adapter_preflight(manifest, family, lane):
     if len(matching) != 1 or manifest['candidate'] != matching[0]:
         raise ValueError('KV candidate must be a shipped measured workflow artifact')
     closure = harness_integrity.verify(HERE.parents[2], manifest['candidate_sha'])
-    if closure != manifest['harness_closure']:
+    if closure != manifest['harness_closure'] or manifest.get('harness_repo') != str(HERE.parents[2]):
         raise ValueError('KV harness closure differs from candidate')
     entry = cases[spec['case']]
     expected = [str(HERE/'case_entry.sh'), '--case', spec['case'], '--lane', lane.lower(),
@@ -367,6 +369,11 @@ def freeze_adapter(args, family, lane):
     if (selection['candidate_sha'] != spec['candidate_sha'] or args.case != spec['case']
             or args.case not in selection['selected']):
         raise ValueError('KV case/candidate not selected')
+    if selection.get('catalog_sha256') != manifest_tool.sha256_file(args.catalog):
+        raise ValueError('KV selection/catalog digest mismatch')
+    import execution_policy
+    if execution_policy.load_manifest(args.tool_manifest) != spec['tools']:
+        raise ValueError('KV frozen tool manifest differs from execution spec')
     validate(spec, family)
     measured, _ = build_roles.load_receipt(args.build_receipt, spec['candidate_sha'])
     matching = [item for item in measured if Path(item['path']).resolve() == args.candidate.resolve()
@@ -391,7 +398,7 @@ def freeze_adapter(args, family, lane):
     collect(load(args.build_receipt))
     closure = harness_integrity.verify(HERE.parents[2], spec['candidate_sha'])
     collect(closure)
-    for path in [args.selection, args.catalog, args.lane_manifest, args.build_receipt,
+    for path in [args.selection, args.catalog, args.lane_manifest, args.build_receipt, args.tool_manifest,
                  args.build_receipt.parent/'validation-only.log', *args.input]:
         item = file_pin(path)
         inputs[item['path']] = item
@@ -403,6 +410,7 @@ def freeze_adapter(args, family, lane):
         'candidate_sha': spec['candidate_sha'], 'candidate': matching[0],
         'build_receipt': file_pin(args.build_receipt), 'lane_manifest': lane_pin,
         'tools': spec['tools'], 'inputs': list(inputs.values()), 'harness_closure': closure,
+        'harness_repo': str(HERE.parents[2]),
         'cases': {args.case: {'launcher': file_pin(HERE/'case_entry.sh'), 'command': command,
                              'out': str(args.run_out.resolve())}}}
     adapter_preflight(manifest, family, lane)
