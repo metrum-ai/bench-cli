@@ -83,6 +83,7 @@ Options:
           - lmcache
           - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
           - dynamo-kvbm
+          - dynamo162-kvbm:   Stable Dynamo 1.6.2 source slice; runtime KVBM remains separately verified
           - trt-llm
           - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
 
@@ -1319,6 +1320,7 @@ Options:
           - lmcache
           - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
           - dynamo-kvbm
+          - dynamo162-kvbm:   Stable Dynamo 1.6.2 source slice; runtime KVBM remains separately verified
           - trt-llm
           - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
 

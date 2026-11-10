@@ -32,6 +32,8 @@ pub enum ProfileId {
     /// LMCache 0.5.7 MP lookup tokens and chunk/object transfers.
     Lmcache057Mp,
     DynamoKvbm,
+    /// Stable Dynamo 1.6.2 source slice; runtime KVBM remains separately verified.
+    Dynamo162Kvbm,
     TrtLlm,
     /// Stable standalone 1.2.1 exports request completion and latency only.
     TrtLlm121,
@@ -379,6 +381,17 @@ const KVBM: &[MetricSpec] = &[
     c("kvbm_object_write_failures", Unit::Blocks, Role::Failure).optional(),
 ];
 
+const KVBM162: &[MetricSpec] = &[
+    KVBM[0],
+    KVBM[1],
+    KVBM[2],
+    KVBM[3].required(),
+    KVBM[4].required(),
+    KVBM[5].required(),
+    KVBM[6],
+    KVBM[7],
+];
+
 // TRT-LLM's collector exposes several overlapping views. Keep legacy manager
 // reuse separate from iteration reuse and tier attribution. Connector acceptance
 // precedes async completion; layout gauges do not support block->byte conversion.
@@ -595,6 +608,7 @@ impl ProfileId {
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::Lmcache057Mp => "236f3eec32a2d330662a1795d90a01a1e0782c49",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
+            Self::Dynamo162Kvbm => "28f9765d98ded77149a94d0defee6d54e97f6741",
             Self::TrtLlm => "a3febfbfd0324bded62007ffd7d5241a06cbfc00",
             Self::TrtLlm121 => "376f7e1bd8ed543f75014309e3fd4b237e9b0e73",
         }
@@ -608,6 +622,7 @@ impl ProfileId {
             Self::Lmcache => LMCACHE,
             Self::Lmcache057Mp => LMCACHE057_MP,
             Self::DynamoKvbm => KVBM,
+            Self::Dynamo162Kvbm => KVBM162,
             Self::TrtLlm => TRTLLM,
             Self::TrtLlm121 => TRTLLM121,
         }
@@ -681,7 +696,7 @@ pub fn probe(
         ProfileId::Sglang | ProfileId::Sglang0523 => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::Lmcache057Mp => &LMCACHE057_MATCHER,
-        ProfileId::DynamoKvbm => &KVBM_MATCHER,
+        ProfileId::DynamoKvbm | ProfileId::Dynamo162Kvbm => &KVBM_MATCHER,
         ProfileId::TrtLlm => &TRTLLM_MATCHER,
         ProfileId::TrtLlm121 => &TRTLLM121_MATCHER,
     };
