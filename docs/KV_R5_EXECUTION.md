@@ -10,6 +10,19 @@ not provision hardware, fetch models, install engines or build the candidate.
 These are development runners; offline tests and exporter fixtures do not
 establish live certification or change release selection.
 
+The outer [frozen envelope schema](../schemas/kv-r5-frozen.v1.json) is
+`kv-r5-frozen.v1`. `freeze(args)` validates selection/catalog identity,
+workflow-origin measured build receipts and every nested pin, then writes a
+new envelope with one case. `preflight(manifest)` rechecks the envelope and
+returns `cases`. The inner `lane_manifest` pin references the immutable engine
+execution specification described below. `main(argv)` accepts `--case ID
+--manifest EXECUTION_SPEC --manifest-sha256 HASH --out DIR [--preflight]`.
+The sole command must match the case/lane, immutable spec hash and output path.
+No shell evaluation or r4 adapter fallback is allowed. A matching SHA string
+alone is insufficient: independently verify the workflow artifact origin, build
+receipt, complete input closure, actual-host binding and cleanup. Structural
+schema validation does not establish those properties.
+
 Invoke the selected engine entry point with `--manifest FILE
 --manifest-sha256 SHA256 --out NEW_DIRECTORY`; add `--preflight` to check
 frozen local inputs without starting Docker. Full release intake still uses
