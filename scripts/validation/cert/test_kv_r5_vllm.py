@@ -99,6 +99,12 @@ class VllmControls(unittest.TestCase):
             (p['directory']/'independent-audit.json').write_text(json.dumps(proof))
             with self.assertRaisesRegex(ValueError, 'raw event evidence absent'):
                 runner.audit(p, 'a'*64)
+            (p['directory']/'missing.jsonl').write_text('')
+            with self.assertRaisesRegex(ValueError, 'stream is empty'):
+                runner.audit(p, 'a'*64)
+            (p['directory']/'missing.jsonl').write_text(json.dumps({'cached_hit_rate': .9})+'\n')
+            with self.assertRaisesRegex(ValueError, 'allocator eviction observation absent'):
+                runner.audit(p, 'a'*64)
 
     def test_existing_real_exporter_serialization_is_parseable(self):
         fixture = Path(__file__).resolve().parents[3]/'tests/fixtures/vllm033-logger-synthetic-config.prom'

@@ -38,6 +38,16 @@ its interpretation require separate source review; these booleans are not
 self-authenticating proof. An absent observer, exporter aggregates alone, or
 inability to establish target eviction leaves the case blocked. No default
 observer fabricates evidence from hit rates or a configured memory tier.
+The raw stream cannot be empty: it must contain an attributable
+`kv-target-gpu-eviction.v1` allocator observation for the pressure phase with
+the target prefix, nonempty epoch, positive `gpu_resident_blocks_before` and
+zero `gpu_resident_blocks_after`, plus a same-epoch
+`kv-exclusive-observation.v1` for rehit with exactly one `target_requests`,
+zero `competing_requests`, zero `competing_transfers` and zero
+`pending_transfers_at_end`. Those fields are observations produced by the
+reviewed observer, not inferred from cached-token usage. The independent
+observer's source, event completeness and block/prefix mapping must be reviewed
+and bound before either physical eviction gate is executable.
 
 The existing exporter fixture tests instantiate real logger serialization with
 synthetic statistics. They are not a deployed-model capture. This runner saves

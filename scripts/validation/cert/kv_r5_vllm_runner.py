@@ -171,13 +171,38 @@ def audit(phase, prefix):
     if (data.get('schema_version') != 'kv-exclusive-window.v1' or data.get('phase') != phase['plan']['name']
             or data.get('prefix_sha256') != prefix or not data.get('raw_event_paths')):
         raise ValueError('independent target-prefix evidence missing')
+    events = []
     for name in data['raw_event_paths']:
         path = (phase['directory']/name).resolve()
         if not path.is_relative_to(phase['directory'].resolve()) or not path.is_file():
             raise ValueError('independent raw event evidence absent')
+        for line in path.read_text().splitlines():
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise ValueError('invalid independent observer event')
+            events.append(event)
+    if not events:
+        raise ValueError('independent raw event stream is empty')
     for name in ('same_epoch', 'exclusive_requests', 'exclusive_transfers', 'async_work_settled', 'target_gpu_evicted'):
         if data.get(name) is not True:
             raise ValueError('exclusive-window evidence unavailable: '+name)
+    evictions = [e for e in events if e.get('schema_version') == 'kv-target-gpu-eviction.v1'
+                 and e.get('prefix_sha256') == prefix and e.get('source') == 'engine_allocator'
+                 and e.get('phase') == 'pressure']
+    if len(evictions) != 1:
+        raise ValueError('independent allocator eviction observation absent')
+    event = evictions[0]
+    before, after = event.get('gpu_resident_blocks_before'), event.get('gpu_resident_blocks_after')
+    if type(before) is not int or before <= 0 or type(after) is not int or after != 0:
+        raise ValueError('target-prefix GPU eviction is not established')
+    scope = [e for e in events if e.get('schema_version') == 'kv-exclusive-observation.v1'
+             and e.get('phase') == 'rehit' and e.get('prefix_sha256') == prefix]
+    if len(scope) != 1 or scope[0].get('epoch') != event.get('epoch') or not event.get('epoch'):
+        raise ValueError('independent exclusive-window epoch unavailable')
+    for name, expected in (('target_requests', 1), ('competing_requests', 0),
+                           ('competing_transfers', 0), ('pending_transfers_at_end', 0)):
+        if type(scope[0].get(name)) is not int or scope[0][name] != expected:
+            raise ValueError('exclusive-window raw observation contradicts receipt')
     return data
 
 
@@ -213,13 +238,13 @@ def evaluate(data, phases):
             if None in ids or len(ids) < 4 or not warmup or ids & {r['session_id'] for r in warmup}:
                 raise ValueError('dedicated session warmup or measured sessions missing')
             rows, usage = decoded[phase['plan']['name']]
+            first_measured = next(i for i, r in enumerate(requests) if not r['warmup'])
+            if usage[first_measured].get('prompt_tokens_details', {}).get('cached_tokens') != 0:
+                raise ValueError('stage cold marker contradicted by server')
             for session in ids:
                 turns = [r['turn'] for r in measured if r['session_id'] == session]
                 if len(turns) < 3 or turns != list(range(turns[0], turns[0]+len(turns))):
                     raise ValueError('duplicate or missing session turn')
-                first = next(i for i,r in enumerate(requests) if r['session_id'] == session)
-                if usage[first].get('prompt_tokens_details', {}).get('cached_tokens') != 0:
-                    raise ValueError('session cold marker contradicted by server')
     else:
         prefix = data['target_prefix_sha256']
         proof = audit(by_name['rehit'], prefix)
