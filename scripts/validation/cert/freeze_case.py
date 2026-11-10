@@ -57,6 +57,13 @@ def freeze(args):
     if not catalog or len(catalog) != len(rows):
         raise ValueError('catalog contains duplicate IDs or is empty')
     row = catalog[args.case]
+    if args.case.startswith('BC-KV-'):
+        import kv_dispatch
+        import validate_results
+        kv_dispatch.require_lane(args.case, row['Parallel group'])
+        validate_results.require_executable(row)
+        # Never freeze a KV image through the r4 contract.
+        return kv_dispatch.adapter(args.case, row['Parallel group']).freeze(args)
     if row["Tier"] != "RC-GPU":
         raise ValueError("per-case GPU launcher requires an RC-GPU catalog case")
     lane_manifest = json.loads(args.lane_manifest.read_text(), object_pairs_hook=manifest_tool.unique_object)

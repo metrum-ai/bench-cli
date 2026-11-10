@@ -8,7 +8,10 @@ case_id=$2
 lane=$4
 shift 4
 [[ "$case_id" =~ ^BC-[A-Z]+-[0-9]{3}$ ]] || { echo 'invalid case ID' >&2; exit 2; }
-[[ "$lane" =~ ^(g[1-7]|l[1-4]|p[12]|r|d|v|w|comp002)$ ]] || { echo 'invalid case lane' >&2; exit 2; }
+[[ "$lane" =~ ^(g[1-7]|l[1-4]|p[12]|r|d|v|w|comp002|kv[vsldtc])$ ]] || { echo 'invalid case lane' >&2; exit 2; }
 [[ -z "${CERT_CASE_ID:-}" || "$CERT_CASE_ID" == "$case_id" ]] || { echo 'case does not match frozen launcher identity' >&2; exit 2; }
 export CERT_CASE_ID=$case_id
+if [[ "$lane" == kv* ]]; then
+    exec python3 "$CERT_DIR/kv_dispatch.py" --case "$case_id" --lane "${lane^^}" "$@"
+fi
 exec bash "$CERT_DIR/lane-$lane.sh" "$@"
