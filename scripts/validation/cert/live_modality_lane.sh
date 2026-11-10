@@ -30,21 +30,24 @@ for flag in "${flags[@]}"; do
   [[ "$flag" != *[[:space:]]* ]] || { echo 'xtask server flags cannot contain whitespace' >&2; exit 1; }
   server_args+="${flag} "
 done
-CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 CACHE="$(realpath "$CERT_HF_HUB_CACHE")"
 [[ "$CACHE" != *:* && "$CACHE" != *$'\n'* ]] || { echo 'invalid hub cache path' >&2; exit 1; }
 export CARGO_NET_OFFLINE=true GPU_DEVICES="device=${CUDA_VISIBLE_DEVICES}" HF_HOME="$CACHE"
 export SERVE_OUT="$CERT_OUT/evidence/serve"
 [[ "$(sha256sum "$CERT_MANIFEST" | cut -d' ' -f1)" == "$CERT_MANIFEST_SHA" ]] || { echo 'manifest changed during preflight' >&2; exit 1; }
+cert_r4_image_preflight
 CERT_STARTED=1
-cert_run cargo --locked xtask serve "$MODALITY" start --root "$ROOT" --model "$CERT_MODEL" \
+GPU_DEVICES="device=$CUDA_VISIBLE_DEVICES" SERVE_OUT="$CERT_OUT/evidence/serve" \
+  cert_run cargo --locked xtask serve "$MODALITY" start --root "$ROOT" --model "$CERT_MODEL" \
   --image "$CERT_IMAGE" --model-revision "$CERT_REVISION" "--args=$server_args" \
   --notes 'Pinned release certification serving configuration' --sources "https://huggingface.co/$CERT_MODEL" \
   --port "$CERT_PORT" --container-name "$CERT_CONTAINER" --cert-owner "$CERT_CONTAINER_OWNER" \
   --no-replace --loopback-only --hub-cache-only --offline \
   > "$CERT_OUT/evidence/serve-stdout.txt" 2> "$CERT_OUT/evidence/serve-stderr.txt"
 docker inspect --format '{{.Id}}' "$CERT_CONTAINER" > "$CERT_OUT/evidence/container-id.txt"
+cert_r4_image_runtime
 curl --fail --silent --max-time 5 "http://localhost:${CERT_PORT}/v1/models" > "$CERT_OUT/evidence/models.json"
+cert_phase server-ready
 cert_server_logs
 cert_run python3 "$CERT_DIR/live_modality_runner.py" --modality "$MODALITY" --out "$CERT_OUT" \
   --candidate "$CERT_CANDIDATE" --baseline "$CERT_BASELINE" --manifest "$CERT_MANIFEST" \

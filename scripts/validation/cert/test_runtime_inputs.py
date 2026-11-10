@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 import generated_inputs as generated
 import runtime_inputs as runtime
+import result_writer
 
 
 class RuntimeInputsTests(unittest.TestCase):
@@ -49,6 +50,25 @@ class RuntimeInputsTests(unittest.TestCase):
     def prepare(self):
         with patch.object(generated, 'run_generator', side_effect=self.generate):
             return runtime.prepare(self.parent, self.manifest, self.root / 'runtime')
+
+    def test_marked_frozen_input_rejected_before_generation_or_output(self):
+        smoke = self.root / 'smoke'; smoke.mkdir()
+        (smoke / result_writer.SMOKE_MARKER).write_text(json.dumps(
+            {'classification': result_writer.SMOKE_CLASS, 'expectations_sha256': 'f' * 64}))
+        recipe = self.manifest['generated_inputs'][0]['recipe']
+        dataset = smoke / 'dataset.jsonl'
+        dataset.write_bytes(Path(recipe['dataset']['path']).read_bytes())
+        old = recipe['dataset']
+        recipe['dataset'] = runtime.pin(dataset)
+        entry = self.manifest['generated_inputs'][0]
+        entry['structural'] = generated.validate(recipe, self.manifest['build_receipt']['path'], 'a' * 40)
+        self.manifest['inputs'] = [recipe['dataset'] if x == old else x for x in self.manifest['inputs']]
+        self.parent.write_text(json.dumps(self.manifest))
+        with patch.object(generated, 'run_generator') as generator:
+            with self.assertRaises(result_writer.NonCertificationEvidence):
+                runtime.prepare(self.parent, self.manifest, self.root / 'runtime')
+            generator.assert_not_called()
+        self.assertFalse((self.root / 'runtime').exists())
 
     def test_runtime_binding_seed_rejects_boolean_and_float_equal_to_integer(self):
         entry = self.manifest['generated_inputs'][0]

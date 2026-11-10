@@ -18,7 +18,6 @@ rc=0; cert_parse W "$@" || rc=$?
 [[ $rc == 0 ]] || exit "$rc"
 : "${CERT_HF_HUB_CACHE:?W requires a prepopulated offline model hub cache}"
 CERT_OFFLINE=1
-CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 cert_start_server
 cert_server_logs
 cert_run python3 "$CERT_DIR/w_runner.py" --out "$CERT_OUT" --candidate "$CERT_CANDIDATE" \

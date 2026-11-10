@@ -1,0 +1,3 @@
+{"$comment":"Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Synthetic certification fixture; Apache-2.0.","id":"a","input":16,"output":1,"time":0,"hashes":["x"],"prefix_parent":null,"session_parent":null}
+{"id":"b","input":32,"output":2,"time":0.125,"hashes":["x","y"],"prefix_parent":"a","session_parent":"a"}
+{"id":"c","input":16,"output":1,"time":0.25,"hashes":["z"],"prefix_parent":null,"session_parent":null}

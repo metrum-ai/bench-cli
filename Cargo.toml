@@ -7,7 +7,7 @@ resolver = "2"
 
 [package]
 name = "metrum-ai-bench-cli"
-version = "1.8.1"
+version = "1.9.0"
 edition = "2021"
 rust-version = "1.89"
 description = "Metrum AI Bench CLI: load testing and benchmarking tools for OpenAI-compatible LLM, VLM, ASR and image generation endpoints"
@@ -30,6 +30,15 @@ exclude = [
     "docs/HISTORY_REWRITE.md",
     "CLAUDE.md",
     "test-data/endpoints-4servers.yaml",
+    "test-data/public-datasets/**",
+    "src/bin/metrum-ai-bench-cli-cert-kv-cpu.rs",
+    "tests/kv_cpu_certification.rs",
+    "docs/RELEASE_CERTIFICATION_KV_CPU.md",
+    "scripts/validation/cert/kv_cpu*.py",
+    "scripts/validation/cert/test_kv_cpu.py",
+    "scripts/validation/cert/fixtures/kv_cpu/**",
+    "scripts/validation/cert/check_cert_probe_packaging.py",
+    "scripts/validation/cert/test_kv_probe_packaging.py",
 ]
 
 [lib]
@@ -37,9 +46,10 @@ name = "metrum_ai_bench"
 path = "src/lib.rs"
 
 [features]
-default = []
-tokenizer = ["dep:tokenizers"]
+default = ["tokenizer"]
+tokenizer = ["dep:tokenizers", "dep:minijinja"]
 otlp = []
+cert-probes = []
 
 # Primary binary names (preferred).
 [[bin]]
@@ -74,6 +84,11 @@ path = "src/bin/metrum-ai-bench-cli-strategic.rs"
 name = "metrum-ai-bench-cli-mock-server"
 path = "src/bin/metrum-ai-bench-cli-mock-server.rs"
 
+[[bin]]
+name = "metrum-ai-bench-cli-cert-kv-cpu"
+path = "src/bin/metrum-ai-bench-cli-cert-kv-cpu.rs"
+required-features = ["cert-probes"]
+
 [dependencies]
 axum = "0.8.4"
 chrono = { version = "0.4.45", features = ["serde"] }
@@ -84,7 +99,7 @@ log = "0.4.34"
 rand = "0.10.2"
 reqwest = { version = "0.12.28", features = ["json", "stream", "blocking", "multipart", "rustls-tls", "gzip"], default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde-saphyr = "2.0.0"
 sha2 = "0.11.0"
 simplelog = "0.12.2"
@@ -95,13 +110,22 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 jsonschema = { version = "0.60.2", default-features = false }
 uuid = { version = "1.26.1", features = ["v4"] }
 tempfile = "3.27.0"
-parquet = { version = "60.0.0", default-features = false, features = ["zstd", "snap"] }
+parquet = { version = "60.0.0", default-features = false, features = ["zstd", "snap", "json"] }
 tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
 pin-project-lite = "0.2"
 regex = { version = "1.13.1", features = ["std"] }
 bytes = "1.12.1"
+minijinja = { version = "3.0.5", default-features = false, features = ["builtins", "json", "fuel", "serde", "preserve_order"], optional = true }
+zip = { version = "9.4.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+
+[[example]]
+name = "trace_construct_probe"
+required-features = ["tokenizer"]
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["test-util"] }

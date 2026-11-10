@@ -34,6 +34,7 @@ class TokenizerProbeTests(unittest.TestCase):
     def test_probe_has_no_ambient_credentials_exporters_or_proxy(self):
         def fake(command, **kwargs):
             self.assertEqual(kwargs['env']['NO_PROXY'], '*')
+            self.assertEqual(kwargs['env']['PATH'], '')
             self.assertNotIn('OPENAI_API_KEY', kwargs['env'])
             self.assertNotIn('OTEL_EXPORTER_OTLP_ENDPOINT', kwargs['env'])
             output = Path(command[command.index('--data-log') + 1])

@@ -1,0 +1,3 @@
+{"$comment":"Copyright (c) 2026 Metrum AI, Inc. All rights reserved. Synthetic certification fixture; Apache-2.0.","id":"r1","doc":"d1","context":"shared alpha","question":"one"}
+{"id":"r2","doc":"d1","context":"shared alpha","question":"two"}
+{"id":"r3","doc":"d2","context":"other beta","question":"three"}

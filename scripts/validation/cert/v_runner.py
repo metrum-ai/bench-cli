@@ -11,8 +11,31 @@ from pathlib import Path
 
 import g4_modality_runner
 import manifest_tool
+import r4_model_pins
 import result_writer
 import v_checks
+
+
+def case_inputs(args, config):
+    flags = config['server_flags']
+    if args.model != r4_model_pins.GENERAL_MODEL or '--no-enable-prefix-caching' not in flags or not any(
+        flags[i:i+2] == ['--reasoning-parser', 'qwen3'] or flag == '--reasoning-parser=qwen3'
+        for i, flag in enumerate(flags)):
+        raise ValueError('case requires pinned Qwen3.8-27B-FP8 with the qwen3 parser and no prefix cache')
+    binary = g4_modality_runner.pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', args.candidate)
+    image = g4_modality_runner.pinned_file(config, 'vlm_image')
+    g4_modality_runner.image_prompts(args.prompt, image)
+    return binary, image
+
+
+def benchmark_command(args, vlm_binary, data, evidence):
+    """Assemble the real VLM product invocation."""
+    return [str(vlm_binary), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
+            '--scenario', 'v-reasoning', '--num-requests', '7', '--concurrency', '1', '--prompts', str(args.prompt),
+            '--model', args.model, '--data-log', str(data), '--streaming', '--max-tokens', '4096', '--temperature', '0',
+            '--warmup-requests', '0', '--seed', '42', '--request-timeout', '1200',
+            '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":true}}',
+            '--debug-log', str(evidence / 'v-reasoning-debug.log'), '--error-log', str(evidence / 'v-reasoning-error.log')]
 
 
 def main():
@@ -29,24 +52,12 @@ def main():
     vlm_binary = image = None
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['V']
-        flags = config['server_flags']
-        if args.model != 'Qwen/Qwen3-VL-8B-Thinking' or '--no-enable-prefix-caching' not in flags or not any(
-            flags[i:i+2] == ['--reasoning-parser', 'qwen3'] or flag == '--reasoning-parser=qwen3'
-            for i, flag in enumerate(flags)):
-            raise ValueError('case requires pinned Qwen3-VL-8B-Thinking with the qwen3 parser and no prefix cache')
-        vlm_binary = g4_modality_runner.pinned_file(config, 'vlm_binary', 'metrum-ai-bench-cli-vlm', args.candidate)
-        image = g4_modality_runner.pinned_file(config, 'vlm_image')
-        g4_modality_runner.image_prompts(args.prompt, image)
+        vlm_binary, image = case_inputs(args, config)
         models = json.loads((evidence / 'models.json').read_text(encoding='utf-8'))
         if not any(row.get('id') == args.model for row in models.get('data', [])):
             raise ValueError('real server does not serve the pinned model')
         data = evidence / 'v-reasoning-requests.jsonl'
-        bench = [str(vlm_binary), '--url', f'http://localhost:{args.proxy_port}/v1/chat/completions', '--api-key', 'dummy',
-                 '--scenario', 'v-reasoning', '--num-requests', '7', '--concurrency', '1', '--prompts', str(args.prompt),
-                 '--model', args.model, '--data-log', str(data), '--streaming', '--max-tokens', '4096', '--temperature', '0',
-                 '--warmup-requests', '0', '--seed', '42', '--request-timeout', '1200',
-                 '--extra-body-json', '{"chat_template_kwargs":{"enable_thinking":true}}',
-                 '--debug-log', str(evidence / 'v-reasoning-debug.log'), '--error-log', str(evidence / 'v-reasoning-error.log')]
+        bench = benchmark_command(args, vlm_binary, data, evidence)
         trace = g4_modality_runner.run_proxy(args, 'v-reasoning', bench, image=True)
         observed = v_checks.evaluate(data.read_text(encoding='utf-8'), trace, 0, manifest_tool.sha256_file(image), args.model)
         passed = True

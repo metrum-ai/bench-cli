@@ -6,10 +6,10 @@ use chrono::Utc;
 use clap::Parser;
 use log::{debug, error, info, trace, warn};
 use metrum_ai_bench::args_common::EffectiveCommonArgs;
+use metrum_ai_bench::cache_workload::{self, CachePolicy, OrderPolicy};
 use metrum_ai_bench::endpoints::resolve_endpoints;
 use metrum_ai_bench::prompt_inputs::load_metrum_ai_bench_llm_prompts;
 use metrum_ai_bench::unique_id;
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use reqwest::{Client, Response};
 use serde_json::{json, Value};
@@ -48,6 +48,12 @@ impl std::fmt::Display for MetrumAiBenchLLMMode {
 struct Args {
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
+    #[command(flatten)]
+    native_metrics: metrum_ai_bench::cache_metric_capture::NativeMetricArgs,
+    #[command(flatten)]
+    phase_metrics: metrum_ai_bench::cache_phase_cli::PhaseMetricArgs,
+    #[command(flatten)]
+    study_export: metrum_ai_bench::kv_study_cli::StudyExportArgs,
 
     #[arg(
         long,
@@ -213,6 +219,20 @@ struct Args {
         help = "Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)"
     )]
     prompt_sequence: Option<String>,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    cache_policy: CachePolicy,
+    #[arg(long, value_enum, default_value = "legacy-unspecified")]
+    prompt_order: OrderPolicy,
+    #[arg(
+        long,
+        help = "Independent effective-order shuffle seed; defaults to --seed"
+    )]
+    order_seed: Option<u64>,
+    #[arg(
+        long,
+        help = "Independent arrival RNG seed; defaults to --seed plus one"
+    )]
+    arrival_seed: Option<u64>,
 
     #[arg(
         long,
@@ -254,6 +274,7 @@ struct StreamMetrics {
     usage_presence: (bool, bool),
     nonstream_answer_completed: Option<bool>,
     reasoning_tokens: Option<u64>,
+    cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence,
     output_error: Option<metrum_ai_bench::error::RequestError>,
     finish_reason: Option<String>,
     prompt_words: usize,
@@ -268,6 +289,7 @@ async fn make_request(
     client: &Client,
     url: &str,
     payload: Value,
+    wire_body: Option<Vec<u8>>,
     mode: MetrumAiBenchLLMMode,
     streaming: bool,
     request_timeout: u64,
@@ -299,6 +321,10 @@ async fn make_request(
         serde_json::to_string_pretty(&payload).unwrap_or_default()
     );
 
+    let wire_bytes = match wire_body {
+        Some(bytes) => bytes,
+        None => serde_json::to_vec(&payload)?,
+    };
     if streaming {
         // Handle streaming response
         let response = match metrum_ai_bench::connect_timing::send(
@@ -306,7 +332,7 @@ async fn make_request(
                 .post(url)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", api_key))
-                .json(&payload)
+                .body(wire_bytes)
                 .timeout(Duration::from_secs(request_timeout)),
         )
         .await
@@ -378,6 +404,7 @@ async fn make_request(
             ),
             nonstream_answer_completed: None,
             reasoning_tokens: stream.reasoning_tokens,
+            cached_tokens: stream.cached_tokens,
             output_error,
             finish_reason: stream.finish_reason,
             prompt_words: prompt_word_count,
@@ -393,7 +420,7 @@ async fn make_request(
                 .post(url)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", api_key))
-                .json(&payload)
+                .body(wire_bytes)
                 .timeout(Duration::from_secs(request_timeout)),
         )
         .await
@@ -491,6 +518,9 @@ async fn make_request(
                 metrum_ai_bench::chat_stream::response_has_visible_output(&json_resp),
             ),
             reasoning_tokens,
+            cached_tokens: metrum_ai_bench::cached_tokens::CachedTokenEvidence::from_usage(
+                json_resp.get("usage").unwrap_or(&Value::Null),
+            ),
             output_error: None,
             finish_reason: None,
             prompt_words: prompt_word_count,
@@ -593,6 +623,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut args = Args::parse();
+    args.native_metrics.validate()?;
+    if args.cache_policy != CachePolicy::LegacyUnspecified
+        && (!matches!(args.mode, MetrumAiBenchLLMMode::Chat) || args.common.unique_prompts)
+    {
+        return Err(
+            "explicit --cache-policy requires chat and conflicts with --unique-prompts".into(),
+        );
+    }
+    let cache_workload_enabled = args.cache_policy != CachePolicy::LegacyUnspecified
+        || args.prompt_order != OrderPolicy::LegacyUnspecified
+        || args.order_seed.is_some()
+        || args.arrival_seed.is_some();
+    let effective_order_policy = cache_workload::resolve_order_policy(
+        args.prompt_order,
+        OrderPolicy::SeededShuffle,
+        args.prompt_sequence.is_some(),
+    )?;
+    let effective_order_seed = args.order_seed.unwrap_or(args.common.seed);
+    let effective_arrival_seed = args
+        .arrival_seed
+        .unwrap_or(args.common.seed.wrapping_add(1));
     // Agent/CI preset (#303): expand before anything reads the gate flags.
     args.common.apply_ci_safety_preset();
     if args.ttft_fallback.is_some()
@@ -647,7 +698,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
+    let mut study_protected = vec![
+        std::path::PathBuf::from(&args.data_log),
+        std::path::PathBuf::from(&args.debug_log),
+        std::path::PathBuf::from(&args.error_log),
+    ];
+    study_protected.extend(args.telemetry.ndjson.clone());
+    let study_exports = args.study_export.prepare(
+        1,
+        &study_protected,
+        args.cache_policy,
+        effective_order_policy,
+    )?;
     let telemetry_cfg = args.telemetry.resolve_config()?;
+    let phase_plan = args.phase_metrics.resolve(
+        telemetry_cfg.as_ref(),
+        args.telemetry.ndjson.is_some(),
+        &args.native_metrics,
+    )?;
 
     let effective_ramp_up = effective_ramp_up_seconds(args.ramp_up_seconds);
 
@@ -804,6 +872,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // #313: prescribed-sequence replay (converter compensation) reorders the
     // pool by content fingerprint and skips the seeded shuffle; the run
     // order is never silently substituted.
+    // Replay logging must resolve source indices against the original pool,
+    // not against the expanded/reordered issuance pool (short prescriptions and
+    // repeated source indices can otherwise double-map or invent new indices).
+    let sequence_log_source = (args.prompt_sequence.is_some()
+        && args.prompt_sequence_log.is_some())
+    .then(|| prompts.clone());
     let prescribed_order = match &args.prompt_sequence {
         Some(path) => {
             let entries = metrum_ai_bench::prompt_sequence::load_prescribed_entries(
@@ -821,12 +895,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         None => None,
     };
 
-    // Shuffle prompts once for even distribution, then cycle through them deterministically
+    // Both runners use the same opt-in order primitive; historical defaults differ.
     if prescribed_order.is_none() {
-        let mut shuffle_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed);
-        prompts.shuffle(&mut shuffle_rng);
+        let order = cache_workload::ordered_indices(
+            prompts.len(),
+            effective_order_policy,
+            effective_order_seed,
+            None,
+        )?;
+        metrum_ai_bench::prompt_sequence::apply_prescribed_sequence(&mut prompts, &order);
     }
-    let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(args.common.seed.wrapping_add(1));
+    let mut arrival_rng = rand::rngs::StdRng::seed_from_u64(effective_arrival_seed);
+    if cache_workload_enabled {
+        for prompt in &prompts {
+            let body = build_request_body(
+                args.mode,
+                &args.model,
+                args.max_tokens,
+                args.temperature,
+                prompt,
+                args.streaming,
+                args.common.ignore_eos,
+                args.common.min_tokens,
+                args.common.extra_body_json.as_deref(),
+                args.common.system_prompt.as_deref(),
+            )?;
+            cache_workload::prepare_chat_body(body, args.cache_policy, &run_id, 0)?;
+        }
+    }
 
     // #313: opt-in reproducible start-stagger (never applied to scored or
     // existing runs by default; recorded in the run config).
@@ -925,7 +1021,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(path) = &args.prompt_sequence_log {
         metrum_ai_bench::prompt_sequence::write_sequence_log(
             std::path::Path::new(path),
-            &prompts,
+            sequence_log_source.as_deref().unwrap_or(&prompts),
             u64::from(args.num_requests),
             u64::from(concurrency_limit as u32),
             prescribed_order.as_deref(),
@@ -933,6 +1029,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .map_err(|e| format!("Failed to write prompt sequence log '{path}': {e}"))?;
     }
 
+    // Discovery is opt-in and outside the measurement clock, not phase evidence.
+    let native_metrics = args.native_metrics.capture_if_enabled().await?;
     let mut handles = vec![];
 
     // Telemetry starts before the run clock so source probes are not timed.
@@ -971,6 +1069,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let start_time = telemetry
         .as_ref()
         .map_or_else(Instant::now, |session| session.run_start());
+    let phase_clock = telemetry.as_ref().map(|session| session.epoch());
     let ramp_up_start = start_time;
     let (record_tx, record_rx) =
         tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::record::RequestRecord>();
@@ -978,14 +1077,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // consumer (owner of the telemetry session, #310) for the synchronous
     // pre-measured baseline and awaits the ack before the first measured
     // send.
-    let (boundary_tx, boundary_rx) =
-        tokio::sync::mpsc::unbounded_channel::<metrum_ai_bench::telemetry::BoundaryRequest>();
+    let (boundary_tx, boundary_rx) = tokio::sync::mpsc::unbounded_channel::<
+        metrum_ai_bench::cache_phase_runtime::BoundaryCommand,
+    >();
     // Budget: per-source timeout × sources × 2 plus slack; default when no
     // telemetry is configured.
-    let boundary_budget_ms = telemetry_cfg
-        .as_ref()
-        .map(|cfg| cfg.timeout_ms.max(1) * cfg.sources.len() as u64 * 2 + 1_000)
-        .unwrap_or(5_000);
+    let boundary_budget_ms =
+        metrum_ai_bench::cache_phase_runtime::boundary_budget_ms(telemetry_cfg.as_ref())?;
 
     // Record consumer (#310): runs concurrently with issuance so tagged
     // request rows are emitted to the NDJSON stream as requests complete,
@@ -1021,24 +1119,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 maybe_req = boundary_rx.recv(), if !boundary_closed => {
                     match maybe_req {
                         Some(req) => {
-                            let outcome = match telemetry.as_mut() {
-                                Some(session) => match tokio::time::timeout(
-                                    Duration::from_millis(req.budget_ms),
-                                    session.boundary_sample(),
-                                )
-                                .await
-                                {
-                                    Ok(outcome) => outcome,
-                                    Err(_elapsed) => {
-                                        session.note_boundary_timeout(req.budget_ms).await
-                                    }
-                                },
-                                None => metrum_ai_bench::telemetry::BoundaryOutcome {
-                                    ok: true,
-                                    ..Default::default()
-                                },
-                            };
-                            let _ = req.ack.send(outcome);
+                            metrum_ai_bench::cache_phase_runtime::dispatch_boundary_command(telemetry.as_mut(),req).await;
                         }
                         None => boundary_closed = true,
                     }
@@ -1137,7 +1218,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut warmup_barrier =
         metrum_ai_bench::runner::WarmupBarrier::new(args.common.warmup_requests)
             .with_tracker(Arc::clone(&inflight_tracker));
+    let mut phase_before = None;
+    let mut phase_issued_ns = None;
+    let mut phase_required_failed = false;
     let mut measured_boundary_done = false;
+    let mut body_fingerprints = Vec::new();
     'request_loop: for slot in slots {
         // Measured requests wait for every warmup request (#226).
         let slot = warmup_barrier
@@ -1182,28 +1267,65 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             // the boundary sample is requested over a channel and the ack is
             // awaited before the first measured send — fire-and-forget would
             // not guarantee baseline-before-send.
-            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-            match boundary_tx.send(metrum_ai_bench::telemetry::BoundaryRequest {
-                budget_ms: boundary_budget_ms,
-                ack: ack_tx,
-            }) {
-                Ok(()) => {
-                    // Generous overall wait (budget + slack); a dead
-                    // consumer fails the ack fast, and the consumer join
-                    // below fails the run.
-                    let wait_ms = boundary_budget_ms + 2_000;
-                    match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
-                        Ok(Ok(_outcome)) => {}
-                        Ok(Err(_)) => {
-                            error!("telemetry boundary ack dropped by the consumer");
-                        }
-                        Err(_) => {
-                            error!("telemetry boundary did not answer within {wait_ms}ms");
+            if let Some(plan) = &phase_plan {
+                let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+                    stage: 0,
+                    phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+                    edge: metrum_ai_bench::cache_phase::Edge::Before,
+                };
+                let (request, reply) = plan.request(tag, boundary_budget_ms);
+                if boundary_tx
+                    .send(metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Native(request))
+                    .is_ok()
+                {
+                    phase_before = tokio::time::timeout(
+                        Duration::from_millis(boundary_budget_ms + 2000),
+                        reply,
+                    )
+                    .await
+                    .ok()
+                    .and_then(Result::ok);
+                }
+                if plan.required
+                    && !phase_before
+                        .as_ref()
+                        .is_some_and(|reply| plan.covered(reply))
+                {
+                    phase_required_failed = true;
+                    stop.stop();
+                    error!(
+                        "required native baseline coverage unavailable; refusing measured issuance"
+                    );
+                }
+                phase_issued_ns = phase_clock.as_ref().map(|clock| clock.elapsed_ns());
+            } else {
+                let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+                match boundary_tx.send(
+                    metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Legacy(
+                        metrum_ai_bench::telemetry::BoundaryRequest {
+                            budget_ms: boundary_budget_ms,
+                            ack: ack_tx,
+                        },
+                    ),
+                ) {
+                    Ok(()) => {
+                        // Generous overall wait (budget + slack); a dead
+                        // consumer fails the ack fast, and the consumer join
+                        // below fails the run.
+                        let wait_ms = boundary_budget_ms + 2_000;
+                        match tokio::time::timeout(Duration::from_millis(wait_ms), ack_rx).await {
+                            Ok(Ok(_outcome)) => {}
+                            Ok(Err(_)) => {
+                                error!("telemetry boundary ack dropped by the consumer");
+                            }
+                            Err(_) => {
+                                error!("telemetry boundary did not answer within {wait_ms}ms");
+                            }
                         }
                     }
-                }
-                Err(_) => {
-                    error!("telemetry boundary request failed: record consumer is gone");
+                    Err(_) => {
+                        error!("telemetry boundary request failed: record consumer is gone");
+                    }
                 }
             }
             measured_boundary_done = true;
@@ -1241,7 +1363,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &run_id,
         );
 
-        let request_body = build_request_body(
+        let mut request_body = build_request_body(
             args.mode,
             &args.model,
             args.max_tokens,
@@ -1254,6 +1376,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             args.common.system_prompt.as_deref(),
         )?;
 
+        let prepared = if cache_workload_enabled {
+            let prepared = cache_workload::prepare_chat_body(
+                request_body,
+                args.cache_policy,
+                &run_id,
+                slot.seq,
+            )?;
+            request_body = serde_json::from_slice(&prepared.bytes)?;
+            Some(prepared)
+        } else {
+            None
+        };
+        let body_sha256 = prepared.as_ref().map(|body| body.sha256.clone());
+        let cache_policy_effects = prepared.as_ref().map(|body| {
+            serde_json::to_string(&body.evidence).expect("serialize primitive policy evidence")
+        });
+        if let Some(hash) = &body_sha256 {
+            body_fingerprints.push(hash.clone());
+        }
+        let wire_body = prepared.map(|body| body.bytes);
         let request_timeout = args.request_timeout;
         let mode = args.mode;
         let streaming = args.streaming;
@@ -1283,6 +1425,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     &client,
                     &url,
                     request_body,
+                    wire_body,
                     mode,
                     streaming,
                     request_timeout,
@@ -1309,7 +1452,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 Err(_) => None,
             };
             let run_id_trace = run_id_task.clone();
-            let record = match result {
+            let mut record = match result {
                 Ok(sm) => {
                     let completed_at =
                         metrum_ai_bench::runner::completed_at_from_start(started_at, sm.latency);
@@ -1359,6 +1502,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     rec.usage_missing = usage_missing;
                     rec.usage_prompt_tokens_present = Some(sm.usage_presence.0);
                     rec.usage_completion_tokens_present = Some(sm.usage_presence.1);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then_some(sm.cached_tokens);
                     // Carry stream metrics fields via modality_metrics for console path.
                     rec.modality_metrics
                         .insert("prompt_words".into(), sm.prompt_words as f64);
@@ -1387,9 +1532,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .with_http_trace(http_trace)
                     .with_in_flight(in_flight_at_send)
                     .with_send_offset(send_offset);
+                    rec.cache_evidence =
+                        matches!(mode, MetrumAiBenchLLMMode::Chat).then(Default::default);
                     if let Some(failure) =
                         e.downcast_ref::<metrum_ai_bench::chat_stream::ChatStreamFailure>()
                     {
+                        if rec.cache_evidence.is_some() {
+                            rec.cache_evidence = Some(failure.usage.cached_tokens.as_ref().clone());
+                        }
                         rec.prompt_tokens = failure.usage.prompt_tokens;
                         rec.completion_tokens = failure.usage.completion_tokens;
                         rec.total_tokens = failure.usage.total_tokens;
@@ -1409,6 +1559,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
             };
 
+            if let Some(body_sha256) = body_sha256 {
+                record
+                    .modality_labels
+                    .insert("cache_workload_version".into(), "cache-workload.v1".into());
+                record
+                    .modality_labels
+                    .insert("body_sha256".into(), body_sha256);
+                if let Some(effects) = cache_policy_effects {
+                    record
+                        .modality_labels
+                        .insert("cache_policy_effects".into(), effects);
+                }
+            }
             if let Err(e) = sink_task.write(&record) {
                 warn!("Failed to write request JSONL: {e}");
             }
@@ -1446,7 +1609,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Join the record consumer (#310): it returns once every request task
     // has finished sending, with the session, records and counters.
-    let (telemetry, records, completed, mut errors) = match consumer.await {
+    let (mut telemetry, records, completed, mut errors) = match consumer.await {
         Ok(outcome) => outcome,
         Err(e) => {
             error!("Record consumer task failed: {e}");
@@ -1462,6 +1625,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             errors += 1;
         }
     }
+
+    // Terminal native fetch follows BOTH channel drain and every task join.
+    let phase_analysis = if let Some(plan) = &phase_plan {
+        let drained_ns = phase_clock.as_ref().map(|clock| clock.elapsed_ns());
+        if plan.settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(plan.settle_ms)).await;
+        }
+        let tag = metrum_ai_bench::cache_phase_runtime::PhaseBoundaryTag {
+            stage: 0,
+            phase: metrum_ai_bench::cache_phase::StudyPhase::Measured,
+            edge: metrum_ai_bench::cache_phase::Edge::After,
+        };
+        let (request, reply) = plan.request(tag, boundary_budget_ms);
+        metrum_ai_bench::cache_phase_runtime::dispatch_boundary_command(
+            telemetry.as_mut(),
+            metrum_ai_bench::cache_phase_runtime::BoundaryCommand::Native(request),
+        )
+        .await;
+        let after = reply.await.ok();
+        if plan.required && !after.as_ref().is_some_and(|reply| plan.covered(reply)) {
+            phase_required_failed = true;
+        }
+        Some(plan.report(&run_id, phase_before, after, phase_issued_ns, drained_ns))
+    } else {
+        None
+    };
 
     info!(
         "Completed {} out of {} requests ({} errors)",
@@ -1528,6 +1717,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         modality: {
             // #313: the comparability knobs are recorded, never silent.
             let mut map = std::collections::BTreeMap::new();
+            if let Some(analysis)=&phase_analysis {map.insert("native_cache_phase_analysis".into(),analysis.clone());}
+            if let Some(capture) = &native_metrics {
+                map.insert("native_cache_metric_discovery".into(), serde_json::to_value(capture)?);
+            }
+            if cache_workload_enabled {
+                map.insert("cache_workload".into(), json!({
+                    "schema_version": "cache-workload.v1", "policy": args.cache_policy,
+                    "order": effective_order_policy, "order_seed": effective_order_seed,
+                    "arrival_seed": effective_arrival_seed,
+                    "body_fingerprints_sha256": cache_workload::sha256(&serde_json::to_vec(&body_fingerprints)?),
+                    "effective_order_sha256": cache_workload::sha256(&serde_json::to_vec(&body_fingerprints.iter().map(|hash| format!("body:{hash}")).collect::<Vec<_>>())?),
+                    "fingerprinted_requests": body_fingerprints.len(),
+                    "body_serialization_timing": "explicit policy/order serializes before send clock; legacy serializes inside clock",
+                    "nonce_placement": args.cache_policy.nonce_placement(),
+                    "nonce_added_characters_per_request": args.cache_policy.nonce_added_characters(),
+                    "nonce_scope": args.cache_policy.nonce_scope()
+                }));
+            }
             if let Some(fallback) = &args.ttft_fallback {
                 map.insert("ttft_fallback".into(), serde_json::json!(fallback));
             }
@@ -1602,12 +1809,27 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         warn!("Failed to write summary JSONL: {e}");
     }
     run_summary.print_console();
+    if matches!(args.mode, MetrumAiBenchLLMMode::Chat) {
+        eprint!(
+            "{}",
+            metrum_ai_bench::cache_report::format_overview(
+                &metrum_ai_bench::cache_report::request_cohorts(&records)
+            )
+        );
+    }
     let truncated = run_summary.ttft_coverage.reasoning_truncated;
     if truncated > 0 {
         eprintln!("warning: {truncated}/{} measured requests exhausted the token budget on reasoning without an answer", run_summary.attempted);
     }
+    if let Some(exports) = study_exports {
+        let runtime = serde_json::json!({"schema_version":"kv-study-runtime-bindings.v1","scope":"actual configuration and public producer evidence; not executable/reset/physical attestation","cache_workload":run_summary.config.as_ref().and_then(|c|c.modality.get("cache_workload")),"effective_max_concurrency":run_summary.config.as_ref().map(|c|c.effective_max_concurrency),"cap_engagement":"unknown","warmup_protocol":"unverified; no generic warmup neutrality inference","body_scope":"observed request attempts; not proof of server receipt or all planned issuance"});
+        exports.requests(&records, phase_analysis.as_slice(), &runtime)?;
+    }
     ttft_audit?;
     telemetry_verdict?;
+    if phase_required_failed {
+        return Err("required native phase coverage unavailable".into());
+    }
 
     if let Some(ref validation) = isl_osl {
         metrum_ai_bench::isl_osl::enforce_osl_gate(validation, args.common.fail_on_osl_mismatch)?;

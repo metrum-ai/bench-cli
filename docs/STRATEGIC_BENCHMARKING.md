@@ -24,6 +24,138 @@ asr and imagegen remain unary, and `--tools` cannot be combined with
 sessions, structured output, embeddings, reranking, VLM, ASR and image
 generation sweeps, server correlation and portable exports. Existing modality-specific binaries remain supported.
 
+## Session request boundaries (v1.9.0 development)
+
+With `--sessions FILE`, opt into `--session-request-roles user,tool` to emit
+requests only at selected terminal roles. System and assistant messages remain
+in recorded history; `turn` retains the original one-based message position,
+not the selected-request ordinal. Omit the option to preserve legacy every-prefix
+behavior. Invalid role options, missing string roles under selection, and an empty
+selected pool fail before traffic. The summary config records
+`session_request_roles` (or `legacy_all_prefixes`) and `session_history_mode=recorded`.
+The stage request count still controls issuance and cycles the selected pool.
+
+### Sequential recorded-history sessions
+
+`--session-mode closed-loop --session-request-roles user,tool` makes stage
+concurrency count active sessions. Each session sends its selected request points
+in order and waits for completion before sending the next. When it finishes,
+another pending session starts. Pool cycling never activates a second instance
+of an already active session, so concurrency can be below the target when the
+pool is small. `--requests-per-stage` remains a request budget and may stop at
+a partial session. Warmup also respects turn sequencing, but still uses the
+same input pool until held-out warmup is supplied in a later lifecycle step.
+
+This mode requires a concurrency sweep; rate sweeps are rejected rather than
+mislabelled independent arrivals. Default `--session-mode legacy` retains flat
+request scheduling. Config records mode and budget semantics. This is recorded
+history replay, not live-generated-history conversation: outputs do not replace
+recorded assistant messages. Boundary selection alone does **not** enforce
+sequential sessions; select closed-loop explicitly. Neither mode proves cold caches.
+Recorded assistant history
+can differ from generated answers; do not infer reuse of generated KV. Held-out
+warmup needs token-prefix isolation, and cold measurement needs acknowledged tier
+reset after machine warmup; a new file/session ID is not sufficient. These lifecycle
+and scheduling enhancements are separate steps under #413. Generic prompt-library
+throughput profiles do not establish controlled KV reuse or offload evidence.
+
+## Held-out warmup integration boundary (v1.9.0 development)
+
+`--warmup-sessions FILE` or `--warmup-prompts FILE` isolates the warmup input
+pool from the measured pool. These options are chat-only, mutually exclusive,
+and require a positive warmup request count at least as large as the configured
+stage concurrency. Measured input indexing still restarts at zero after warmup.
+Summary `config.warmup` retains source SHA-256, pool/request counts and overlap
+policy. Source names, prompts and raw tokens are not exported.
+
+A different file or ID is **not** proof of token-prefix isolation. The preflight
+calls the agreed offline `validate_prefix_disjoint` interface with final request
+body digests, delegating to the authoritative producer-owned validator without
+copying its algorithm. Opt into the producer-owned [pinned local renderer](RUNTIME_RENDERING.md)
+with `--warmup-render-config PATH` and the `tokenizer` build feature. Static
+warmup/measured bodies are frozen and sent as the exact prebuilt bytes rendered
+at setup; rendering/serialization is outside stage timing and disclosed in metadata.
+Fail/Unknown with a selected renderer aborts before traffic/hooks, even with an
+override flag. The consumer projection retains validator version, exact pair
+population count (nullable on Unknown) and diagnostic truncation independently.
+Without renderer configuration, token IDs remain unavailable and verdict Unknown;
+this legacy development boundary fails before traffic unless
+`--allow-unverified-warmup` is explicitly supplied. That override remains an
+`Unknown` result, records both sorted body-digest-list hashes, and cannot justify
+an isolation/cold-cache claim. It is for plumbing tests and explicitly exploratory
+runs, not a substitute for completing rendered-token validation. Unknown maxima
+in an Unknown report are not overlap measurements.
+
+`--warmup-block-size-tokens` must match the actual serving cache. The default
+passing policy permits zero shared full blocks; tokenizer/template mismatches
+must remain Unknown. Body digests cover exact serialized JSON bytes after current
+body transformations. Any later mutation policy must regenerate token rendering
+and validation bindings before traffic. Default legacy warmup is unchanged when
+no held-out pool is supplied and makes no isolation claim.
+
+For cold studies, the required protocol remains held-out prefix-disjoint warmup,
+drain, acknowledged tier reset/readiness/settling, then measurement. Do not call
+an unvalidated warmup file prefix-disjoint. Local rendering pins are operator
+assertions about the serving policy, not independent physical-cache proof. Live
+engine cross-check status is NotRequested until an engine adapter is explicitly
+implemented/selected. Closed-loop held-out issuance remains guarded pending
+validated dynamic final-body bindings.
+
+## Trusted stage reset lifecycle (v1.9.0 development)
+
+`--stage-hook CMD --stage-reset-scope resident,external` is an explicit opt-in
+**trusted operator shell command**, executed on Unix as `/bin/sh -c CMD`,
+never a dataset-provided command. Non-Unix execution is unsupported. It runs
+once per cold stage after machine warmup requests have drained, before any
+measured issuance. It never runs between measured requests. Intended ordering:
+held-out token-prefix-disjoint machine warmup → drain → reset → scoped
+acknowledgement → readiness → optional asynchronous transfer settling → measure.
+Kernels/connections stay warm without leaving measured prefixes resident.
+
+The hook must exit zero and write one bounded JSON object (at most 64 KiB):
+
+```json
+{"success":true,"scope":["resident","external"],"ready":true,"settled":true}
+```
+
+All intended tiers must be acknowledged exactly; missing/malformed fields,
+`success=false`, unsettled transfers, nonzero exit or timeout abort before measured
+requests. The total `--stage-hook-timeout-seconds` deadline (default 60) includes
+execution, readiness and `--stage-settle-ms` (default 0). The settle delay must
+be strictly smaller than the total timeout; equal or larger delays fail validation
+without executing the hook. An optional
+`--stage-ready-url` must return successful HTTP with JSON `ready=true` and no
+false/malformed `success`; HTTP 200 alone is insufficient. Without that probe,
+the hook itself must acknowledge `ready=true`.
+
+`--pre-warmup-reset` additionally runs the hook before warmup; off by default.
+It does not replace the post-warmup reset. Both acknowledgements retain scope and
+UTC Unix-nanosecond start/ack/readiness/settling timestamps. Operators must still
+validate the actual engine/tier reset mechanism; a trusted command's declaration
+is not independent physical cache evidence or a live support claim.
+
+The command receives `BENCH_STAGE_INDEX` (one-based), `BENCH_STAGE_LOAD`, and
+`BENCH_RESET_SCOPE` as environment variables, never interpolated into `CMD`.
+Run only trusted scripts; use environment-based credentials, never command-line
+tokens. The raw command and stdout are not copied into failure diagnostics;
+config retains a command digest and non-sensitive lifecycle metadata. On failure,
+up to the first 4 KiB of stderr is included, escaped and explicitly marked complete
+or truncated. Do not emit secrets on stderr. Extra stderr is drained and discarded
+rather than allowed to block the command.
+
+Each hook starts its own Unix process group. Timeout or cancellation/drop kills
+the whole group, including backgrounded children/grandchildren; residual group
+members are also terminated after the shell exits. Hooks must not daemonize,
+create a different session/process group, or rely on detached/remote work being
+cancelled by this local mechanism. Ensure asynchronous transfers have drained
+before acknowledging settled state. A settle delay is not proof of completed
+transfers on its own.
+
+Default behavior is unchanged when no hook is supplied. These hooks do not yet
+provide held-out warmup input or prove prefix-disjointness; do not claim that the
+legacy warmup pool is isolated. Cold studies must configure safe warmup and
+validate every intended tier, not merely restart the benchmark client.
+
 ## Sweep and server correlation
 
 ```bash

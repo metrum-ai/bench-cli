@@ -902,7 +902,7 @@ pub fn write_jsonl(path: &Path, mix: &SelectedMix) -> Result<()> {
     Ok(())
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(crate) fn hex_digest(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         use std::fmt::Write as _;
@@ -1239,7 +1239,7 @@ pub fn resolve_revision(repo: &str, revision: &str, allow_moving: bool) -> Resul
         .ok_or_else(|| anyhow!("Hugging Face revision lookup for `{trimmed}` returned no sha"))
 }
 
-fn hf_headers() -> reqwest::header::HeaderMap {
+pub(crate) fn hf_headers() -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,

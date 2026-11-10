@@ -18,10 +18,31 @@ import perf_legacy_oracle
 import result_writer
 
 
-def compare_bundle(root, case, lane, model_tag, manifest, manifest_hash, candidate_sha, recorded_root=None):
+def check_predecessor_origin(source, destination, case):
+    """Preflight the entire retained source before reading or copying a bundle."""
+    source = Path(source).resolve()
+    result_writer.require_same_evidence_origin(destination, source)
+    if not source.exists():
+        return  # Normal missing-source handling produces a diagnostic FAIL.
+    for path in source.rglob('*'):
+        if path.is_symlink():
+            raise result_writer.NonCertificationEvidence('predecessor bundle contains a symlink')
+        result_writer.require_same_evidence_origin(destination, path if path.is_dir() else path.parent)
+    record_path = source / 'results' / (case + '.json')
+    if record_path.is_file():
+        try:
+            record = json.loads(record_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+        except (ValueError, OSError):
+            return  # Normal malformed-record handling produces a diagnostic FAIL.
+        result_writer.require_same_evidence_origin(destination, source, record)
+
+
+def compare_bundle(root, case, lane, model_tag, manifest, manifest_hash, candidate_sha, destination, recorded_root=None):
     root = Path(root).resolve()
+    result_writer.require_same_evidence_origin(destination, root)
     record_path = root / 'results' / (case + '.json')
     record = json.loads(record_path.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
+    result_writer.require_same_evidence_origin(destination, root, record)
     cleanup = json.loads((root / 'evidence/cleanup-verified.json').read_text(encoding='utf-8'))
     if (root / 'results/lane-error.json').exists() or cleanup != {'cleanup': 'verified'} or 'evidence/cleanup-verified.json' not in record.get('evidence_paths', []):
         raise ValueError(f'{case} cleanup not verified')
@@ -73,8 +94,10 @@ def compare_bundle(root, case, lane, model_tag, manifest, manifest_hash, candida
             'independent_legacy': independent}
 
 
-def copy_evidence(source, destination, case, lane):
-    source = source.resolve(); destination.mkdir(parents=True)
+def copy_evidence(source, destination, case, lane, output_root):
+    source = source.resolve()
+    check_predecessor_origin(source, output_root, case)
+    destination.mkdir(parents=True)
     wanted = [source / 'results' / f'{case}.json']
     # Explicit paths rather than a blind recursive copy: retain the exact data
     # used by the barrier, not unrelated generated content or credentials.
@@ -119,6 +142,16 @@ def main():
     args = parser.parse_args()
     if args.attempt < 1 or not args.owner.strip() or not args.evidence_link.strip():
         parser.error('positive attempt, owner and evidence link required')
+    # Reject classification violations before creating a certification output,
+    # so rejected smoke inputs cannot be copied or recorded as an attempt.
+    try:
+        for source, case in ((args.p1_out, 'BC-PERF-001'), (args.p2_out, 'BC-PERF-002')):
+            check_predecessor_origin(source, args.out, case)
+        if result_writer.smoke_origin(args.out) is None:
+            result_writer.reject_smoke_root(args.manifest.resolve().parent)
+    except (result_writer.NonCertificationEvidence, ValueError, OSError) as exc:
+        print(f'Cannot combine predecessor evidence: {exc}', file=sys.stderr)
+        return 1
     start = dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00', 'Z')
     args.out.mkdir(); (args.out / 'evidence').mkdir(); (args.out / 'results').mkdir()
     evidence = args.out / 'evidence'; observed = {}; passed = False
@@ -126,17 +159,17 @@ def main():
     try:
         manifest = json.loads(args.manifest.read_text(encoding='utf-8'), object_pairs_hook=manifest_tool.unique_object)
         sha = manifest['candidate_sha']; manifest_hash = manifest_tool.sha256_file(args.manifest)
-        left = compare_bundle(args.p1_out, 'BC-PERF-001', 'P1', 'q38-27b', manifest, manifest_hash, sha)
-        right = compare_bundle(args.p2_out, 'BC-PERF-002', 'P2', 'q38-27b-nvfp4', manifest, manifest_hash, sha)
+        left = compare_bundle(args.p1_out, 'BC-PERF-001', 'P1', 'q38-27b', manifest, manifest_hash, sha, args.out)
+        right = compare_bundle(args.p2_out, 'BC-PERF-002', 'P2', 'q38-27b-nvfp4', manifest, manifest_hash, sha, args.out)
         if (left['prompt_sha256'] != right['prompt_sha256'] or left['gpu_class'] != right['gpu_class']
                 or not left['gpu_class'] or not left['driver'] or not right['driver']):
             raise ValueError('two-model inputs or device-class provenance differ')
         # Copy under fixed aliases; evidence selection is independent of user directory names.
         for root, name, case in ((args.p1_out, 'p1', 'BC-PERF-001'), (args.p2_out, 'p2', 'BC-PERF-002')):
-            copy_evidence(root, evidence / name, case, name)
-        copied_left = compare_bundle(evidence / 'p1', 'BC-PERF-001', 'P1', 'q38-27b', manifest, manifest_hash, sha,
+            copy_evidence(root, evidence / name, case, name, args.out)
+        copied_left = compare_bundle(evidence / 'p1', 'BC-PERF-001', 'P1', 'q38-27b', manifest, manifest_hash, sha, args.out,
                                      recorded_root=args.p1_out.resolve() / 'evidence/perf')
-        copied_right = compare_bundle(evidence / 'p2', 'BC-PERF-002', 'P2', 'q38-27b-nvfp4', manifest, manifest_hash, sha,
+        copied_right = compare_bundle(evidence / 'p2', 'BC-PERF-002', 'P2', 'q38-27b-nvfp4', manifest, manifest_hash, sha, args.out,
                                       recorded_root=args.p2_out.resolve() / 'evidence/perf')
         if copied_left != left or copied_right != right:
             raise ValueError('copied evidence differs from the validated source bundles')
@@ -146,6 +179,9 @@ def main():
         observed = {'result': 'PASS', 'models': [left, right], 'comparable_points': 12,
                     'semantic_mapping': 'legacy success-only numerator and first measured send to last successful terminal; candidate native headline reported separately'}
         passed = True
+    except result_writer.NonCertificationEvidence as exc:
+        print(f'Cannot combine predecessor evidence: {exc}', file=sys.stderr)
+        return 1
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         observed = {'result': 'FAIL', 'error': str(exc)}
     (evidence / 'comp001-observed.json').write_text(json.dumps(observed, indent=2, allow_nan=False) + '\n', encoding='utf-8')

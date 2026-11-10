@@ -23,6 +23,7 @@ import l1_runner
 import manifest_tool
 import r_checks
 import result_writer
+import r4_model_pins as pins
 import schema_checks
 import trace_proxy
 
@@ -41,7 +42,7 @@ class ManifestTests(unittest.TestCase):
         self.helper.write_bytes(b"helper")
         self.prompt.write_bytes(b"prompt")
         self.sut = self.root / "sut.json"
-        self.sut.write_text(json.dumps({"model": {"id": "Qwen/Qwen3-8B", "revision": "c" * 40}}), encoding="utf-8")
+        self.sut.write_text(json.dumps({"model": {"id": pins.GENERAL_MODEL, "revision": pins.GENERAL_REVISION}}), encoding="utf-8")
         os.chmod(self.candidate, 0o755)
         os.chmod(self.baseline, 0o755)
         os.chmod(self.helper, 0o755)
@@ -49,8 +50,8 @@ class ManifestTests(unittest.TestCase):
         self.manifest = {"candidate_sha": "a" * 40,
                          "candidate_binary_sha256": digest(self.candidate),
                          "baseline_binary_sha256": digest(self.baseline),
-                         "lanes": {"L1": {"image": "example/image@sha256:" + "b" * 64,
-                                           "model": "Qwen/Qwen3-8B", "revision": "c" * 40,
+                         "lanes": {"L1": {"image": pins.IMAGE,
+                                           "model": pins.GENERAL_MODEL, "revision": pins.GENERAL_REVISION,
                                            "port": 8001, "server_flags": ["--max-model-len", "4096"],
                                            "sut": {"path": str(self.sut), "sha256": digest(self.sut)},
                                            "prompt_binary": {"path": str(self.helper), "sha256": digest(self.helper)},
@@ -82,7 +83,7 @@ class ManifestTests(unittest.TestCase):
         manifest_tool.load_manifest(self.path, "R", self.candidate, self.baseline, "0")
         manifest_tool.load_manifest(self.path, "G1", self.candidate, self.baseline, "0")
         manifest_tool.load_manifest(self.path, "G4", self.candidate, self.baseline, "0")
-        manifest_tool.load_manifest(self.path, "G5", self.candidate, self.baseline, "0")
+        manifest_tool.load_manifest(self.path, "G5", self.candidate, self.baseline, "0", case='BC-GPU-013')
         manifest_tool.load_manifest(self.path, "G6", self.candidate, self.baseline, "0")
         self.manifest["lanes"]["G6"]["strategic_binary"]["sha256"] = "0" * 64
         self.path.write_text(json.dumps(self.manifest))
@@ -105,16 +106,17 @@ class ManifestTests(unittest.TestCase):
 
     def test_live_modality_preflight_pins_every_input(self):
         root = Path(manifest_tool.__file__).resolve().parents[3]
-        cases = {'L2': ('vlm', 'Qwen/Qwen3-VL-8B-Instruct', ['test-data/vlm/prompts.jsonl', 'test-data/vlm/shapes-512.png']),
+        cases = {'L2': ('vlm', pins.GENERAL_MODEL, ['test-data/vlm/prompts.jsonl', 'test-data/vlm/shapes-512.png']),
                  'L3': ('asr', 'openai/whisper-large-v3-turbo', ['test-data/asr/input.jsonl', 'test-data/asr/truth.jsonl',
                          'test-data/asr/1089-134686-0030.wav', 'test-data/asr/2961-961-0016.wav', 'test-data/asr/6930-81414-0005.wav']),
                  'L4': ('imagegen', 'Tongyi-MAI/Z-Image-Turbo', [])}
         for lane, (modality, model, fixtures) in cases.items():
             binary = self.root / ('metrum-ai-bench-cli-' + modality); binary.write_text('binary'); binary.chmod(0o755)
-            sut = self.root / ('sut-' + lane + '.json'); sut.write_text(json.dumps({'model': {'id': model, 'revision': 'c' * 40}}))
+            revision = pins.GENERAL_REVISION if lane == 'L2' else 'c' * 40
+            sut = self.root / ('sut-' + lane + '.json'); sut.write_text(json.dumps({'model': {'id': model, 'revision': revision}}))
             default = root / fixtures[0] if fixtures else self.prompt
             config = self.manifest['lanes']['L1'].copy()
-            config.update({'model': model, 'revision': 'c' * 40,
+            config.update({'model': model, 'revision': revision,
                            'modality_binary': {'path': str(binary), 'sha256': manifest_tool.sha256_file(binary)},
                            'sut': {'path': str(sut), 'sha256': manifest_tool.sha256_file(sut)},
                            'prompt_sets': {'default': {'path': str(default), 'sha256': manifest_tool.sha256_file(default)}},
@@ -128,7 +130,7 @@ class ManifestTests(unittest.TestCase):
         config = self.manifest['lanes']['L1'].copy()
         binary = self.root / 'metrum-ai-bench-cli-vlm'; binary.write_text('binary'); binary.chmod(0o755)
         image = self.root / 'image.png'; image.write_bytes(b'image')
-        config.update({'model': 'Qwen/Qwen3-VL-8B-Thinking', 'proxy_port': 8111,
+        config.update({'model': pins.GENERAL_MODEL, 'proxy_port': 8111,
                        'server_flags': ['--reasoning-parser', 'qwen3', '--no-enable-prefix-caching'],
                        'vlm_binary': {'path': str(binary), 'sha256': manifest_tool.sha256_file(binary)},
                        'vlm_image': {'path': str(image), 'sha256': manifest_tool.sha256_file(image)}})
@@ -143,7 +145,8 @@ class ManifestTests(unittest.TestCase):
     def test_g7_requires_both_frozen_workloads_and_proxy(self):
         config = self.manifest["lanes"]["L1"].copy()
         default = config["prompt_sets"]["default"]
-        config.update({"proxy_port": 8111, "server_flags": ["--no-enable-prefix-caching"],
+        config.update({"model": pins.SMALL_MODEL, "revision": pins.SMALL_REVISION,
+                       "proxy_port": 8111, "server_flags": ["--no-enable-prefix-caching"],
                        "prompt_sets": {"W1": default, "W2": default}})
         self.manifest["lanes"]["G7"] = config
         self.path.write_text(json.dumps(self.manifest))

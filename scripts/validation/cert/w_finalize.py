@@ -17,6 +17,8 @@ import w_checks
 def finalize(root, signoff_path):
     root = Path(root).resolve(); evidence = root / 'evidence'
     collection_file = evidence / 'w-collection.json'; cleanup_file = evidence / 'cleanup-verified.json'
+    for path in (collection_file, cleanup_file, evidence / 'server-stop.txt', evidence / 'server.log', Path(signoff_path)):
+        result_writer.require_input_origin(root, path.resolve().parent)
     collection_bytes = collection_file.read_bytes()
     collection = json.loads(collection_bytes, object_pairs_hook=manifest_tool.unique_object)
     signoff_bytes = Path(signoff_path).read_bytes()
@@ -48,9 +50,11 @@ def finalize(root, signoff_path):
         path = Path(name)
         if path.is_absolute() or '..' in path.parts or (root / path).is_symlink() or not (root / path).resolve().is_relative_to(root):
             raise ValueError('unsafe W evidence path')
+        result_writer.require_input_origin(root, (root / path).resolve().parent)
         if manifest_tool.sha256_file(root / path) != digest: raise ValueError('W evidence changed after collection')
     for key, expected in (('candidate', versions['candidate_binary_sha256']), ('baseline', versions['baseline_binary_sha256']),
                           ('manifest', versions['manifest_sha256']), ('wrapper', versions['wrapper_sha256']), ('prompt', inputs['prompt_sha256'])):
+        result_writer.require_input_origin(root, Path(inputs[key]).resolve().parent)
         if manifest_tool.sha256_file(inputs[key]) != expected: raise ValueError('W frozen input changed')
     for mode in ('adequate', 'strict', 'safety'):
         cli = evidence / f'w-{mode}-cli.jsonl'; wrapper = evidence / f'w-{mode}-wrapper.json'; trace = evidence / f'w-{mode}-trace.jsonl'

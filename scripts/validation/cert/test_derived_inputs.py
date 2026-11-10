@@ -82,6 +82,13 @@ class DerivedInputTests(unittest.TestCase):
             enriched = execution_evidence.enrich(self.root / 'attempt', record)
         self.assertEqual(enriched['versions']['derived_inputs']['l1']['input_sha256'], pin(self.input)['sha256'])
 
+    def test_duplicate_selector_command_keys_stop_before_generation(self):
+        self.command.write_text('{"binary":"first","binary":"second","argv":[]}')
+        with patch.object(generated, 'run_generator') as run:
+            with self.assertRaisesRegex(ValueError, 'duplicate'):
+                derived.boundary(self.manifest, self.command, self.input, self.out)
+            run.assert_not_called()
+
     def test_seed_or_profile_drift_stops_before_independent_generation(self):
         values = json.loads(self.command.read_text())
         values['argv'][values['argv'].index('--seed') + 1] = '42'

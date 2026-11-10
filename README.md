@@ -137,7 +137,11 @@ cd bench-cli
 cargo build --release
 ```
 
-Rust 1.89 or later is required to build from source. The dummy server used in
+Rust 1.89 or later is required to build from source. The default crate build
+(including `cargo install`) enables `tokenizer` for pinned local tokenizer and
+chat-template rendering; release binaries include both `otlp` and `tokenizer`.
+Use `--no-default-features` only for a deliberate tokenizer-free source build;
+rendered-token validation is unavailable in that build. The dummy server used in
 Quickstart and the examples requires Go when built from source; a release
 tarball already includes it. The benchmark binaries do not need Go. Pass
 `--quiet` or set `NO_BANNER=1` to suppress ASCII banner art (a one-line
@@ -467,7 +471,33 @@ is never touched).
 Full definitions: [docs/METRICS.md](docs/METRICS.md). Also see
 [output schema](docs/OUTPUT_SCHEMA.md), [data-point counts](docs/DATA_POINTS.md),
 [CLI reference](docs/CLI.md),
-[strategic telemetry](docs/TELEMETRY.md), [prompt library](docs/PROMPT_LIBRARY.md),
+[strategic telemetry](docs/TELEMETRY.md), [KV study contract](docs/KV_STUDIES.md),
+[observed study JSON/CSV/HTML exports](docs/KV_STUDY_EXPORTS.md),
+[cache policy/order contracts](docs/CACHE_WORKLOADS.md),
+[measured native metric windows](docs/CACHE_PHASES.md),
+[native cache metric profiles](docs/CACHE_METRIC_PROFILES.md),
+[session request boundaries](docs/STRATEGIC_BENCHMARKING.md#session-request-boundaries-v190-development),
+[sequential sessions](docs/STRATEGIC_BENCHMARKING.md#sequential-recorded-history-sessions),
+[trusted stage resets](docs/STRATEGIC_BENCHMARKING.md#trusted-stage-reset-lifecycle-v190-development),
+[held-out warmup boundary](docs/STRATEGIC_BENCHMARKING.md#held-out-warmup-integration-boundary-v190-development),
+[prompt library](docs/PROMPT_LIBRARY.md),
+[offline warmup isolation](docs/WARMUP_ISOLATION.md),
+[public dataset contract](docs/PUBLIC_DATASETS.md),
+[canonical runtime inputs](docs/CANONICAL_INPUTS.md),
+[canonical workload consumption](docs/CANONICAL_WORKLOADS.md),
+[rendered-token validation](docs/PREFIX_VALIDATION.md),
+[pinned local chat rendering](docs/CHAT_RENDERING.md),
+[synthetic prefix families](docs/PREFIX_FAMILIES.md),
+[public document inputs](docs/PUBLIC_DOCUMENTS.md),
+[optional pinned source catalog](docs/PUBLIC_CATALOG.md),
+[scoped provenance/rights consolidation](docs/VALIDATION_CONSOLIDATION.md),
+[public dataset command](docs/PUBLIC_DATASET_CLI.md),
+[cached-token evidence](docs/CACHED_TOKENS.md),
+[structural trace building blocks](docs/TRACE_INPUTS.md),
+[declared constructed trace content](docs/CONSTRUCTED_TRACES.md),
+[logical capacity-aware pressure and cyclic/integer-Zipf families](docs/PRESSURE_INPUTS.md),
+[explicit source-relative time offsets](docs/TRACE_INPUTS.md#explicit-relative-offsets),
+[typed public session normalization](docs/PUBLIC_SESSIONS.md),
 [reproduction](docs/REPRODUCING.md), [reasoning models](docs/REASONING_MODELS.md),
 [serving stacks](docs/SERVING.md), [ASR](docs/ASR.md),
 [image generation](docs/IMAGEGEN.md), and [known limitations](docs/LIMITATIONS.md).

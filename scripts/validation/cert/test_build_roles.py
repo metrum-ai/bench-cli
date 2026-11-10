@@ -16,7 +16,7 @@ class BuildRoleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.sha = 'a' * 40
         self.manifest = {'candidate_sha': self.sha}
-        for key, role, features in [('candidate', 'measured', ['otlp']),
+        for key, role, features in [('candidate', 'measured', ['otlp', 'tokenizer']),
                                    ('tokenizer_validation', 'validation-only', ['otlp', 'tokenizer'])]:
             path = self.root / key
             path.write_text('#!/bin/sh\n# Copyright (c) 2026 Metrum AI, Inc.\n# ' + role + '\nexit 0\n')
@@ -66,6 +66,30 @@ class BuildRoleTests(unittest.TestCase):
                     build_roles.check_measured_config({'lane': {field: validation}}, measured, validation)
         # External telemetry tooling is pinned independently, not a bench CLI.
         build_roles.check_measured_config({'all_smi_binary': unregistered}, measured, validation)
+
+    def test_live_xtask_never_falls_back_to_unregistered_siblings(self):
+        binaries = {}
+        for suffix in ('llm', 'prompts', 'vlm', 'asr', 'imagegen'):
+            name = 'metrum-ai-bench-cli-' + suffix
+            binary = self.root / name
+            binary.write_text('#!/bin/sh\nexit 0\n')
+            binary.chmod(0o755)
+            binaries[name] = {'path': str(binary)}
+        self.manifest['cases'] = {f'BC-LIVE-00{n}': {} for n in range(1, 5)}
+        with self.assertRaisesRegex(ValueError, 'candidate must be the registered LLM'):
+            build_roles.check_live_xtask_binaries(self.manifest, binaries)
+        self.manifest['candidate']['path'] = binaries['metrum-ai-bench-cli-llm']['path']
+        build_roles.check_live_xtask_binaries(self.manifest, binaries)
+        registered = self.root / 'different-vlm'
+        registered.write_bytes((self.root / 'metrum-ai-bench-cli-vlm').read_bytes())
+        registered.chmod(0o755)
+        binaries['metrum-ai-bench-cli-vlm']['path'] = str(registered)
+        with self.assertRaisesRegex(ValueError, 'not the registered artifact'):
+            build_roles.check_live_xtask_binaries(self.manifest, binaries)
+        binaries['metrum-ai-bench-cli-vlm']['path'] = str(self.root / 'metrum-ai-bench-cli-vlm')
+        (self.root / 'metrum-ai-bench-cli-prompts').unlink()
+        with self.assertRaisesRegex(ValueError, 'missing from registered'):
+            build_roles.check_live_xtask_binaries(self.manifest, binaries)
 
     def test_receipt_and_lane_binding_reject_mutation_before_direct_launch(self):
         from build_role_test_fixture import bind

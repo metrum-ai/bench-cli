@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import result_writer
 
 import case_dispatch
 import l1_runner
@@ -61,7 +62,9 @@ def main():
             start = dt.datetime.fromisoformat(args.start_utc.replace('Z', '+00:00'))
             if recorded.tzinfo is None or start.tzinfo is None or recorded >= start or not str(noise.get('evidence_link', '')).strip():
                 raise ValueError('noise floor must have prior timestamp and independently reviewable evidence')
-            noise_copy = evidence / 'p1-noise-floor.json'; shutil.copyfile(noise['path'], noise_copy)
+            noise_copy = evidence / 'p1-noise-floor.json'
+            result_writer.require_input_origin(args.out, Path(noise['path']).resolve().parent)
+            shutil.copyfile(noise['path'], noise_copy)
             if manifest_tool.sha256_file(noise_copy) != noise['sha256']:
                 raise ValueError('noise floor changed before collection')
             versions['noise_floor_sha256'] = noise['sha256']
@@ -126,6 +129,9 @@ def main():
         if manifest_tool.sha256_file(config['all_smi_binary']['path']) != source['binary_sha256']:
             raise ValueError('all-smi binary changed during collection')
         telemetry_pass = len(samples) == 12
+    except result_writer.NonCertificationEvidence as exc:
+        print(f'Input evidence rejected: {exc}', file=sys.stderr)
+        return 1
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
         observed['error'] = str(exc)
         perf_pass = telemetry_pass = False

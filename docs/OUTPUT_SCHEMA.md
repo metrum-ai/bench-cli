@@ -3,6 +3,234 @@
 
 # JSONL output schema
 
+## Opt-in native measured-window analysis
+
+`native_cache_phase_analysis` is an independently versioned optional extension:
+LLM summary modality metadata contains one `cache-phase-analysis.v1` report;
+strategic config contains a stage-local array. Per-series `cache-phase-delta.v1`
+retains explicit Unknown/null reasons and qualified continuity; neither raw labels,
+endpoint URLs nor continuity identifiers are projected. Optional missing capture
+never becomes zero. Physical cache state, sample freshness and exclusivity remain
+Unknown, not implied by numeric coverage. Core versions and CSV columns are
+unchanged. See [CACHE_PHASES.md](CACHE_PHASES.md).
+
+## Opt-in native cache metric discovery
+
+`config.native_cache_metric_discovery` is present only when explicitly requested.
+`cache-metric-capture.v1` contains source/profile reference, operator-declared
+version evidence, coded failures, missing families and redacted observations.
+`cache-metric-capabilities.v1` distinguishes expected descriptors from actual
+observations; neither proves the running executable or physical tier behavior.
+Private endpoint URLs, full labels, invalid raw values and token bodies are not
+projected. IDs are snapshot-local, not cross-snapshot worker identities.
+Startup wall-clock bounds do not establish phase deltas or sample freshness;
+no counter sum, hit-rate ratio, histogram quantile or physical-state claim is
+inferred. See [CACHE_METRIC_PROFILES.md](CACHE_METRIC_PROFILES.md).
+
+## Cached-token evidence extension (`cached-token-evidence.v1`)
+
+Chat request `cache_evidence` is an optional, separately versioned object retaining
+reported counters, source/units, null/missing state and contradiction flags. Core
+schema IDs remain readable; an absent extension is Unknown. Strategic CSV encodes
+the object as a JSON cell and defaults old missing columns to absent. See
+[CACHED_TOKENS.md](CACHED_TOKENS.md) for exact inference and timing-population rules.
+
+## Opt-in cache workload extension (`cache-workload.v1`)
+
+LLM request `modality_labels.cache_workload_version` and `body_sha256` bind
+post-transformation HTTP body bytes without adding raw prompt content. Strategic
+CSV appends optional `cache_workload_version`, `body_sha256` and
+`cache_policy_effects` columns after the already-landed canonical lineage column
+(old inputs default to absent). LLM labels also include `cache_policy_effects`,
+a JSON-encoded `cache-policy-effects.v1` object. This body-free object records
+22-character policy nonce overhead where applied, a nullable signed contextual
+token delta and pinned before/after counts, planned nonce ordinal for busting,
+and the nullable native pool-wide residual shared-full-block maximum. Without
+pinned rendering/validation those quantities remain unknown, not invented zero. Existing core record schema versions remain unchanged; the
+extension is separately versioned. Summary metadata records effective policy,
+order/seeds, nonce scope/placement, digest-list checksums and serialization timing.
+See [CACHE_WORKLOADS.md](CACHE_WORKLOADS.md) for exact digest and coverage semantics.
+
+## Held-out warmup provenance (v1.9.0 development)
+
+Optional `config.warmup` retains source SHA-256, pool/request counts, block size,
+`overlap_report`, `override_unverified` and `rendered_tokens_available`. The report
+binds sorted warmup/measured body-digest lists to exact post-transformation JSON
+request bytes. The `kv-warmup-overlap.v1` consumer projection retains
+`validator_schema_version=kv-token-overlap.v1` from the authoritative validator;
+it does not pretend to be the full producer report schema. Missing pinned final-chat
+rendering still produces Unknown and fails before traffic unless explicitly
+overridden in legacy unconfigured mode. Opt-in `--warmup-render-config` records
+fingerprint-only `rendering_evidence`, explicit NotRequested live-check status,
+and preparation timing. Selected-renderer Fail/Unknown cannot be overridden. Override never changes verdict to Pass; Unknown maxima are not
+measurements. Pair population count/truncation come from the bounded authoritative producer;
+Unknown totals remain null and diagnostic sample length is never substituted. No raw prompts/tokens
+are exported.
+
+## Opt-in KV study interchange (v1.9.0 development)
+
+The separate `kv-study-report.v1` manifest/report contract is specified in
+[KV_STUDIES.md](KV_STUDIES.md) and [kv-study-report.v1.json](../schemas/kv-study-report.v1.json).
+Opt-in record-bound views use the separate `kv-study-export.v1` envelope:
+[scope, flags, table units, repetition and methodology](KV_STUDY_EXPORTS.md),
+[output schema](../schemas/kv-study-export.v1.json). Manifest metadata stays
+unverified; runtime observations are separate and physical state stays Unknown.
+JSON, CSV metadata cells and escaped HTML derive from one typed phase model.
+This does not append fields to existing core CSV/summary schemas.
+It preserves unknown evidence and phase/reset provenance and references the
+separately versioned dataset validation manifest by digest. This initial contract
+is not emitted by runners yet and does not change existing JSONL schema versions.
+
+## Strategic trusted reset metadata (v1.9.0 development)
+
+When opted in, `config.stage_hook` records command SHA-256 (not raw command),
+intended tier scope, deadline, readiness-probe presence, settle delay and optional
+pre-warmup reset. `config.stage_resets[]` records stage index/load and reset
+position (`before_warmup` or `after_warmup`), plus scope, acknowledgement,
+readiness, settling and UTC Unix-nanosecond lifecycle timestamps. These are trusted
+operator acknowledgements, not independent evidence of physical cache state.
+Failed resets abort before measured issuance; they are never relabelled cold.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
+## Strategic session request-boundary selection (v1.9.0 development)
+
+Session summaries record `config.session_request_roles` as the selected role array,
+or `legacy_all_prefixes` when omitted, and `config.session_history_mode=recorded`.
+`config.session_mode` is `legacy` or `closed-loop`; the latter limits active
+sessions on concurrency sweeps and records `session_budget_semantics` because
+the issued-request budget may end with a partial session.
+Per-request `turn` stays the original one-based message position, not a filtered
+ordinal. These optional config fields do not change existing record versions.
+See [STRATEGIC_BENCHMARKING.md](STRATEGIC_BENCHMARKING.md).
+
+## Offline warmup overlap artifact
+
+The standalone `kv-token-overlap.v1` report is documented in
+[WARMUP_ISOLATION.md](WARMUP_ISOLATION.md). It contains sorted warmup/measured
+wire-body digest-list fingerprints, maximum shared tokens/full blocks, offending
+request pairs, tokenizer/template identity and Pass/Fail/Unknown verdict. It is
+not yet embedded in runner JSONL. Unknown evidence never establishes isolation.
+The unreleased v1 report adds `pairs_over_threshold_total` (nullable on Unknown)
+and `pairs_over_threshold_truncated`; default stored-pair cap is 1,000. Maxima and
+totals remain exact independently of that cap; an empty list can still mean Fail.
+
+## Source-stage consolidation and optional catalog
+
+[VALIDATION_CONSOLIDATION.md](VALIDATION_CONSOLIDATION.md) documents the standalone
+[source-validation-consolidation.v1 schema](../schemas/source-validation-consolidation.v1.json),
+with exact manifest/rights/selection bindings, measured/publisher/unknown count
+claims, partial/unavailable metadata, scoped contradictions and declared component
+reviews. Unknown privacy/semantic/history/issued-body/physical evidence is not Pass.
+[PUBLIC_CATALOG.md](PUBLIC_CATALOG.md) documents optional pinned discovery and the
+[optional-public-catalog.v1 schema](../schemas/optional-public-catalog.v1.json);
+card hints never grant rights. CLI canonical payload, profile and consolidation
+outputs remain separate. Existing canonical, manifest and runner/report fields are
+unchanged; logical job declarations are bound through existing transformations.
+
+## Logical pressure and structural source artifacts
+
+[PRESSURE_INPUTS.md](PRESSURE_INPUTS.md) describes `logical-pressure-plan.v1`,
+a configured-capacity plan and CPU-only modeled LRU outcomes, not observed cache
+hits or physical tier participation. [TRACE_INPUTS.md](TRACE_INPUTS.md) describes
+`structural-source-trace.v1`, preserving source order, lengths, exact time and
+prefix/session topology under explicit mapping/coverage. Full source artifacts
+contain private source identifiers; they are not default public evidence.
+Length/time-only inputs and all unrendered structural plans retain rendered-token
+overlap Unknown. The separate [logical-pressure-family.v1 schema](../schemas/logical-pressure-family.v1.json)
+records cyclic/integer-Zipf config, achieved order/group counts/footprint and a
+versioned logical-body fingerprint. Requested pool capacity relation is separate
+from achieved footprint; neither establishes instantaneous cache residence.
+These artifacts do not change canonical inputs or runner JSONL.
+
+## Declared constructed trace content
+
+[CONSTRUCTED_TRACES.md](CONSTRUCTED_TRACES.md) describes the separate private
+[constructed-source-trace.v1 schema](../schemas/constructed-source-trace.v1.json).
+It preserves verified source provenance and stores **new constructed literals**,
+raw-prompt token IDs, known source full-node IDs and seeded constructed tails.
+Raw prefix/count validation is not final chat-template overlap or original-text
+recovery. The artifact retains rendered Unknown and physical unavailable; no
+canonical or runner JSONL schema changes. Metadata summaries omit content/IDs.
+Deserialization/JSON Schema shape is not constructor revalidation or rights approval.
+`trace_candidates::construct_candidates_jsonl` explicitly returns checked frozen
+canonical Prompt candidates plus an actual `ValidationManifest`; reference output
+lengths and source graph/history/time remain metadata, not automatic output
+requests, runtime arrivals or dependency replay. Constructed adapter/trace IDs
+label this new content; rendered/corpus/physical evidence remains Unknown.
+
+## Source trace time metadata
+
+The source-only `trace_inputs::NormalizedTraceTime` helper is documented in
+[TRACE_INPUTS.md](TRACE_INPUTS.md). It retains exact source decimal value/unit,
+positive rational scale, explicit rounding and a precision-loss flag. It does
+not represent an actual arrival or cache measurement, and is not embedded in
+runner JSONL. `NormalizedTraceOffset` additionally retains the explicit source
+origin and computes rational subtraction BEFORE unit/scaling/rounding; it does
+not infer epochs or arrival times. Deserialization alone does not validate source
+rights or numeric invariants. No runtime record or report schema version changes.
+
+## Canonical runtime input JSONL
+
+[CANONICAL_INPUTS.md](CANONICAL_INPUTS.md) defines the separate runtime input
+contract: record_id/source_row_id/session_id/turn_index(u32)/group_id/trace_id,
+arrival_offset_ms(u64), body: CanonicalBody::Prompt(String) or Chat(Vec<Message>),
+expected_output_tokens(u32), and required source: DatasetEnvelopeRef. Null metadata remains unknown. This adds a new
+loader without changing legacy Vec<String> APIs or runner output schema versions.
+
+## Local pinned chat rendering
+
+The optional tokenizer-feature `RenderedChat` artifact separates exact final
+HTTP `body_sha256` from `rendered_text_sha256`, and retains actual `token_ids`
+and the full rendering identity. See [CHAT_RENDERING.md](CHAT_RENDERING.md).
+It does not change existing runner output. Any body mutation after rendering
+invalidates its use as issuance or warmup-isolation evidence.
+
+## Synthetic prefix-family profile
+
+The standalone `prefix-families.v1` generator artifact is documented in
+[PREFIX_FAMILIES.md](PREFIX_FAMILIES.md). It preserves the requested configuration,
+canonical generated group IDs, effective row order, measured token-overlap report,
+requested/achieved group counts and a deterministic profile fingerprint. It does
+not alter existing runner JSONL and does not assert observed server cache hits.
+
+## Public dataset job/report
+
+The `public-dataset-job.v1` command configuration and metadata-only profile report
+are documented in [PUBLIC_DATASET_CLI.md](PUBLIC_DATASET_CLI.md). Inputs use pinned
+origin/files, reviewed rights, declared JSON/JSONL/Parquet/ZIP formats, mapping and
+explicit budgets. Report output includes the validation manifest, optional measured
+overlap artifact and a human summary. Missing token validation remains Unknown;
+canonical payload JSONL is separate and must not be published by default.
+
+## Public document adapter output
+
+The standalone document adapter emits `IngestionRecord` with
+`IngestionBody::DocumentQuestion`; the command's checked conversion yields the
+final runtime `CanonicalRecord` with `CanonicalBody::Chat`. Mapping and fixture
+provenance are documented in
+[PUBLIC_DOCUMENTS.md](PUBLIC_DOCUMENTS.md). Source rows and expanded targets are
+separate units. The adapter does not change runner JSONL or certify token lengths,
+window feasibility, rights beyond caller policy, or observed cache reuse.
+
+## Typed session source normalization
+
+[PUBLIC_SESSIONS.md](PUBLIC_SESSIONS.md) defines source SessionTranscript values,
+not unconditional runtime request points. Metadata output uses
+session-normalization.v1 and includes counts/role distribution and an ordered
+normalization fingerprint; raw identifiers/messages/tool arguments are omitted.
+Corpus counts, arrivals and live-history overlap remain unknown. The session
+runtime owns request-point selection, sequential execution and generated history.
+
+## Public input provenance sub-contract
+
+The standalone `public_dataset::ValidationManifest` uses string
+`schema_version: "kv-dataset-manifest.v1"` and is documented in [PUBLIC_DATASETS.md](PUBLIC_DATASETS.md).
+It is not yet embedded into runner output. Corpus counts and validation checks
+carry explicit measured/publisher/unknown status; canonical target counts are
+separate from source rows. Its fingerprint covers source file digests, mappings,
+rights, transformations and tokenizer/template versions. Logical input overlap
+must never be exported as an observed server cache-hit metric.
+
 Each line is a complete JSON object and carries `schema_version`.
 Per-release counts of the data points these records carry, and the condition
 that fires each optional field, are in [DATA_POINTS.md](DATA_POINTS.md)

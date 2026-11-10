@@ -6,6 +6,7 @@
 
 mod config;
 mod epoch;
+mod native_boundary;
 mod parser;
 mod row;
 mod scraper;
@@ -17,6 +18,7 @@ pub use config::{
     DEFAULT_REQUIRE_FAILURES, DEFAULT_TIMEOUT_MS, MIN_INTERVAL_MS,
 };
 pub use epoch::RunEpoch;
+pub use native_boundary::{NativeBoundaryCapture, NativeBoundaryConfig, NativeBoundaryFailure};
 pub use parser::{engine_include_patterns, parse_exposition, ParseResult, ParsedSample};
 pub use row::{
     MetricType, PhaseKind, RequestRow, Row, RunRow, ScrapeErrorRow, StageRow, SummaryRow,
@@ -27,8 +29,8 @@ pub use scraper::{
     LastSeenMap, ProbeResult,
 };
 pub use session::{
-    close_session, request_row, BoundaryOutcome, BoundaryRequest, RunStamp, SessionOptions,
-    TelemetryArgs, TelemetryRunInfo, TelemetrySession, BOUNDARY_PRE_MEASURED,
+    close_session, request_row, BoundaryOutcome, BoundaryRequest, NativeBoundaryOutcome, RunStamp,
+    SessionOptions, TelemetryArgs, TelemetryRunInfo, TelemetrySession, BOUNDARY_PRE_MEASURED,
 };
 pub use writer::{NdjsonWriter, NdjsonWriterHandle, WriterStats, TELEMETRY_CHANNEL_CAPACITY};
 

@@ -54,7 +54,7 @@ pub fn build_telemetry_client(insecure_tls: bool, accept_gzip: bool) -> Result<r
     builder.build().context("build telemetry HTTP client")
 }
 
-fn auth_headers(src: &CompiledSource) -> Result<HeaderMap> {
+pub(super) fn auth_headers(src: &CompiledSource) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     if let Some(env_name) = &src.bearer_env {
         let token = std::env::var(env_name).with_context(|| {
@@ -202,41 +202,121 @@ pub async fn boundary_scrape_once(
     boundary: &str,
     sample_history: &SampleHistory,
 ) -> Result<u64> {
+    boundary_scrape_observed(
+        BoundaryScrape {
+            client,
+            cfg,
+            src,
+            epoch,
+            run_id,
+            writer,
+            boundary,
+            sample_history,
+        },
+        None,
+    )
+    .await
+    .result
+}
+
+pub(super) struct BoundaryScrape<'a> {
+    pub client: &'a reqwest::Client,
+    pub cfg: &'a TelemetryConfig,
+    pub src: &'a CompiledSource,
+    pub epoch: &'a RunEpoch,
+    pub run_id: &'a str,
+    pub writer: &'a NdjsonWriter,
+    pub boundary: &'a str,
+    pub sample_history: &'a SampleHistory,
+}
+pub(super) struct ObservedBoundary {
+    pub result: Result<u64>,
+    pub native: Option<super::native_boundary::NativeBoundaryCapture>,
+}
+/// Native acquisition replaces the same boundary fetch. Defaults retain the
+/// legacy transport/decoding and result contract, with no extra request.
+pub(super) async fn boundary_scrape_observed(
+    request: BoundaryScrape<'_>,
+    native: Option<&super::native_boundary::NativeBoundaryConfig>,
+) -> ObservedBoundary {
+    let BoundaryScrape {
+        client,
+        cfg,
+        src,
+        epoch,
+        run_id,
+        writer,
+        boundary,
+        sample_history,
+    } = request;
     let timeout = Duration::from_millis(cfg.timeout_ms.min(src.interval_ms).max(1));
     let started = Instant::now();
     let t_ns = epoch.elapsed_ns();
-    // Boundary requests are tagged so a fixture can distinguish the
-    // baseline from periodic scrapes (#312 review).
-    let (text, _offset, _status) =
-        fetch_body(client, src, timeout, cfg.max_body_bytes, Some(boundary)).await?;
+    let (text, mut capture) = if let Some(options) = native {
+        match super::native_boundary::fetch(cfg, src, epoch, boundary, options).await {
+            Ok(body) => (body.text, Some(body.capture)),
+            Err(capture) => {
+                return ObservedBoundary {
+                    result: Err(anyhow::anyhow!(
+                        "native boundary acquisition failed: {:?}",
+                        capture.failure
+                    )),
+                    native: Some(*capture),
+                }
+            }
+        }
+    } else {
+        match fetch_body(client, src, timeout, cfg.max_body_bytes, Some(boundary)).await {
+            Ok((text, _, _)) => (text, None),
+            Err(err) => {
+                return ObservedBoundary {
+                    result: Err(err),
+                    native: None,
+                }
+            }
+        }
+    };
     let scrape_ms = started.elapsed().as_secs_f64() * 1000.0;
-    let parsed = parse_exposition(&text, &src.include);
-    let matched = parsed.samples.len() as u64;
-    if matched > 0 {
-        // The boundary baseline is a real at-or-before-send sample for the
-        // requests issued right after it (#312 review: freshness history).
-        note_sample(sample_history, &src.name, t_ns);
+    let result = async {
+        let parsed = parse_exposition(&text, &src.include);
+        let matched = parsed.samples.len() as u64;
+        if matched > 0 {
+            // The boundary baseline is a real at-or-before-send sample for the
+            // requests issued right after it (#312 review: freshness history).
+            note_sample(sample_history, &src.name, t_ns);
+        }
+        for sample in parsed.samples {
+            let (value, unit, raw) = apply_units(src, &sample.metric, sample.value);
+            writer
+                .send_priority(Row::Telemetry(TelemetryRow {
+                    run_id: run_id.to_string(),
+                    t_ns,
+                    src: src.name.clone(),
+                    metric: sample.metric,
+                    labels: sample.labels,
+                    value,
+                    unit,
+                    mtype: sample.mtype,
+                    scrape_ms,
+                    raw,
+                    boundary: Some(boundary.to_string()),
+                }))
+                .await
+                .map_err(|err| anyhow::anyhow!("boundary scrape write failed: {err:#}"))?;
+        }
+        Ok(matched)
     }
-    for sample in parsed.samples {
-        let (value, unit, raw) = apply_units(src, &sample.metric, sample.value);
-        writer
-            .send_priority(Row::Telemetry(TelemetryRow {
-                run_id: run_id.to_string(),
-                t_ns,
-                src: src.name.clone(),
-                metric: sample.metric,
-                labels: sample.labels,
-                value,
-                unit,
-                mtype: sample.mtype,
-                scrape_ms,
-                raw,
-                boundary: Some(boundary.to_string()),
-            }))
-            .await
-            .map_err(|err| anyhow::anyhow!("boundary scrape write failed: {err:#}"))?;
+    .await;
+    if result.is_err() {
+        if let Some(capture) = &mut capture {
+            capture.probe = None;
+            capture.failure = Some(super::native_boundary::NativeBoundaryFailure::Write);
+        }
     }
-    Ok(matched)
+    ObservedBoundary {
+        result,
+        native: capture,
+    }
 }
 
 /// Emit the boundary-tagged scrape_error row for a failed boundary scrape

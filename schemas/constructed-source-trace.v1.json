@@ -1,0 +1,56 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/metrum-ai/bench-cli/schemas/constructed-source-trace.v1.json",
+  "title": "Private constructed content from structural source topology, not recovered text",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "source_trace", "config", "requests", "tokenization_calls", "tokenized_bytes", "constructed_raw_prefixes_validated", "source_original_text_recovered", "rendered_token_overlap", "physical_cache_evidence", "construction_sha256"],
+  "properties": {
+    "schema_version": {"const": "constructed-source-trace.v1"},
+    "source_trace": {"$ref": "https://github.com/metrum-ai/bench-cli/schemas/structural-source-trace.v1.json"},
+    "config": {"$ref": "#/$defs/config"},
+    "requests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/request"}},
+    "tokenization_calls": {"$ref": "#/$defs/positive"},
+    "tokenized_bytes": {"$ref": "#/$defs/positive"},
+    "constructed_raw_prefixes_validated": {"const": true},
+    "source_original_text_recovered": {"const": false},
+    "rendered_token_overlap": {"const": "unknown"},
+    "physical_cache_evidence": {"const": "unavailable"},
+    "construction_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "uint": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+    "positive": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "text": {"type": "string", "minLength": 1},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "config": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tokenizer_revision", "tokenizer_sha256", "alphabet", "seed", "max_tokenizer_bytes", "max_rows", "max_output_tokens", "max_output_bytes", "max_candidate_bytes", "max_tokenization_calls", "max_tokenized_bytes", "max_attempts_per_segment"],
+      "properties": {
+        "tokenizer_revision": {"$ref": "#/$defs/text"},
+        "tokenizer_sha256": {"$ref": "#/$defs/digest"},
+        "alphabet": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9]+$"}},
+        "seed": {"$ref": "#/$defs/uint"},
+        "max_tokenizer_bytes": {"$ref": "#/$defs/positive"},
+        "max_rows": {"$ref": "#/$defs/positive"},
+        "max_output_tokens": {"$ref": "#/$defs/positive"},
+        "max_output_bytes": {"$ref": "#/$defs/positive"},
+        "max_candidate_bytes": {"$ref": "#/$defs/positive"},
+        "max_tokenization_calls": {"$ref": "#/$defs/positive"},
+        "max_tokenized_bytes": {"$ref": "#/$defs/positive"},
+        "max_attempts_per_segment": {"type": "integer", "minimum": 1, "maximum": 64}
+      }
+    },
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_row_id", "source_line", "text", "text_sha256", "raw_prompt_token_ids", "known_source_full_nodes", "constructed_tail_tokens"],
+      "properties": {
+        "source_row_id": {"$ref": "#/$defs/text"}, "source_line": {"$ref": "#/$defs/uint"},
+        "text": {"$ref": "#/$defs/text"}, "text_sha256": {"$ref": "#/$defs/digest"},
+        "raw_prompt_token_ids": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}},
+        "known_source_full_nodes": {"type": "array", "items": {"$ref": "#/$defs/uint"}},
+        "constructed_tail_tokens": {"$ref": "#/$defs/uint"}
+      }
+    }
+  }
+}

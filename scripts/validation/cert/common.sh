@@ -55,6 +55,10 @@ cert_parse() {
   CERT_OUT="$(realpath "$CERT_OUT")"
   mkdir "$CERT_OUT/evidence" "$CERT_OUT/results"
   CERT_CONTAINER="cert-${CERT_LANE,,}-$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
+  CERT_CONTAINER_OWNER="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+  # Make ownership discoverable before Docker can create anything. This is
+  # needed even if the lane is killed before it can write a container ID.
+  cert_track_owner server "$CERT_CONTAINER_OWNER" || return 1
   CERT_STARTED=0
   CERT_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   export CERT_SHA CERT_START_UTC CERT_MANIFEST CERT_CANDIDATE CERT_BASELINE CERT_LANE
@@ -70,6 +74,31 @@ cert_parse() {
   fi
 }
 
+cert_track_owner() {
+  local role=$1 owner=$2
+  [[ "$role" == server || "$role" == auxiliary ]] && [[ "$owner" =~ ^[0-9a-f]{32}$ ]] || {
+    echo 'invalid container ownership receipt' >&2; return 1;
+  }
+  python3 - "$CERT_OUT/evidence" "$role" "$owner" <<'PYOWNER'
+import os
+import sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+path = directory / (sys.argv[2] + '-container-owner.txt')
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, 'w', encoding='ascii') as stream:
+    stream.write(sys.argv[3] + '\n')
+    stream.flush()
+    os.fsync(stream.fileno())
+directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PYOWNER
+}
+
 cert_manifest() {
   python3 "$CERT_DIR/manifest_tool.py" --manifest "$CERT_MANIFEST" --lane "$CERT_LANE" \
     --candidate "$CERT_CANDIDATE" --baseline "$CERT_BASELINE" --field "$1"
@@ -83,6 +112,21 @@ cert_phase() {
     [[ -n "$case_id" ]] || continue
     python3 "$CERT_DIR/execution_evidence.py" "${CERT_PHASE_ROOT:-$CERT_OUT}" --case "$case_id" --phase "$1"
   done
+}
+
+cert_r4_image_preflight() {
+  local image='vllm/vllm-openai@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e'
+  if [[ "$CERT_IMAGE" == "$image" ]]; then
+    python3 "$CERT_DIR/r4_image_provenance.py" --image "$CERT_IMAGE" --out "$CERT_OUT/evidence/r4-image-preflight.json"
+  fi
+}
+
+cert_r4_image_runtime() {
+  local image='vllm/vllm-openai@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e'
+  if [[ "$CERT_IMAGE" == "$image" ]]; then
+    python3 "$CERT_DIR/r4_image_provenance.py" --image "$CERT_IMAGE" \
+      --container "$CERT_CONTAINER" --out "$CERT_OUT/evidence/r4-image-runtime.json"
+  fi
 }
 
 cert_start_server() {
@@ -101,12 +145,15 @@ cert_start_server() {
     [[ -d "$CERT_HF_HUB_CACHE" ]] || { echo 'configured Hugging Face hub cache is missing' >&2; return 1; }
     cache_args=(--mount "type=bind,src=$(realpath "$CERT_HF_HUB_CACHE"),dst=/root/.cache/huggingface/hub" --env HF_HUB_OFFLINE=1)
   fi
+  # Verify the staged index-to-platform chain and local image before launch.
+  cert_r4_image_preflight
   # Arm cleanup before launch so an interrupted docker client cannot orphan the container.
   CERT_STARTED=1
   docker run -d --name "$CERT_CONTAINER" "${offline_args[@]}" "${owner_args[@]}" "${gpu_args[@]}" --ipc=host \
     --env CUDA_VISIBLE_DEVICES=0 "${token_args[@]}" "${cache_args[@]}" -p "127.0.0.1:${CERT_PORT}:8000" \
     "$CERT_IMAGE" --model "$CERT_MODEL" --revision "$CERT_REVISION" \
     --port 8000 "${flags[@]}" > "$CERT_OUT/evidence/container-id.txt"
+  cert_r4_image_runtime
   local attempt
   for ((attempt=0; attempt<900; attempt++)); do
     if curl --fail --silent --max-time 5 "http://localhost:${CERT_PORT}/v1/models" > "$CERT_OUT/evidence/models.json"; then
@@ -160,7 +207,14 @@ cert_on_exit() {
       fi
     fi
     if ((owned == 1)); then
-      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/server.log" 2>&1 || {
+      # Non-W cases can have already hashed the startup snapshot in server.log.
+      # Preserve it and retain the final snapshot separately. W has no case
+      # result until its later manual sign-off, which binds the final log.
+      local log_name=server.log
+      if [[ -e "$CERT_OUT/evidence/server.log" && "${CERT_LANE:-}" != W ]]; then
+        log_name=server-teardown.log
+      fi
+      docker logs "$CERT_CONTAINER" > "$CERT_OUT/evidence/$log_name" 2>&1 || {
         [[ "${CERT_PERF_FINALIZE:-0}" != 1 && "${CERT_LANE:-}" != W ]] || rc=1
       }
       if ! docker rm -f "$CERT_CONTAINER" > "$CERT_OUT/evidence/server-stop.txt" 2>&1; then
@@ -170,6 +224,9 @@ cert_on_exit() {
         local remaining
         remaining="$(docker ps -a --filter "label=metrum.cert.owner=$CERT_CONTAINER_OWNER" --format '{{.ID}}')" || rc=1
         [[ -z "$remaining" ]] || { echo 'owned container remains after cleanup' >&2; rc=1; }
+      fi
+      if [[ "$log_name" == server-teardown.log ]]; then
+        (cd "$CERT_OUT/evidence" && sha256sum server-teardown.log > server-teardown.sha256) || rc=1
       fi
     fi
   fi

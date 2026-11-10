@@ -65,6 +65,51 @@ Options:
       --version-only
           Print version information and exit
 
+      --cache-metrics-url <CACHE_METRICS_URL>
+          Opt-in native metric discovery endpoint; unauthenticated bounded GET outside measurement
+
+      --cache-metrics-profile <CACHE_METRICS_PROFILE>
+          Explicit source-pinned native profile; not backend autodetection
+
+          Possible values:
+          - vllm-apc
+          - vllm-external
+          - vllm-offload
+          - vllm4ba-apc:      vLLM source revision 4ba787ec, as identified by the v0.33.0 image
+          - vllm4ba-external
+          - vllm4ba-offload
+          - sglang
+          - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
+          - lmcache
+          - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
+          - dynamo-kvbm
+          - dynamo162-kvbm:   Stable Dynamo 1.6.2 source slice; runtime KVBM remains separately verified
+          - trt-llm
+          - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
+
+      --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
+          Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
+
+      --cache-phase-source <CACHE_PHASE_SOURCE>
+          Opt-in measured-window native analysis on this exact configured telemetry source
+
+      --cache-phase-epoch <CACHE_PHASE_EPOCH>
+          Explicit operator-declared continuity identifier; not an observed process/manager epoch
+
+      --cache-phase-required
+          Fail when native counter coverage is unavailable; requires explicit revision and continuity declaration
+
+      --cache-phase-settle-ms <CACHE_PHASE_SETTLE_MS>
+          Opt-in native terminal settling after complete request drain (0..10000 ms)
+
+          [default: 0]
+
+      --kv-study-manifest <KV_STUDY_MANIFEST>
+          Opt-in unverified study declaration; measured phases map to planned stages in array order
+
+      --kv-study-prefix <KV_STUDY_PREFIX>
+          New artifact prefix for .study.json/.study.csv/.study.html; never overwrite existing files
+
       --ntp-check
           Opt-in NTP clock check; records offset when available (does not hard-fail)
 
@@ -315,6 +360,25 @@ Options:
 
       --prompt-sequence <PROMPT_SEQUENCE>
           Replay a prescribed prompt sequence JSONL (recorded by --prompt-sequence-log); content-matched by fingerprint, skips the seeded shuffle, never silently reorders (#313)
+
+      --cache-policy <CACHE_POLICY>
+          Possible values:
+          - legacy-unspecified: Preserve historical mutation controls; no reuse/isolation assertion
+          - reuse:              Do not add policy mutation; not a guarantee of a physical hit
+          - bust-request:       Distinct nonce at first-message content for every request
+          - isolate-run:        One first-message nonce per invocation, preserving within-run reuse
+
+          [default: legacy-unspecified]
+
+      --prompt-order <PROMPT_ORDER>
+          [default: legacy-unspecified]
+          [possible values: legacy-unspecified, preserve, seeded-shuffle, prescribed]
+
+      --order-seed <ORDER_SEED>
+          Independent effective-order shuffle seed; defaults to --seed
+
+      --arrival-seed <ARRIVAL_SEED>
+          Independent arrival RNG seed; defaults to --seed plus one
 
       --start-jitter-ms <START_JITTER_MS>
           Reproducible closed-loop start-stagger: seeded uniform jitter in [0, MS) ms per slot, to break persistent phase-locking (#313); opt-in, recorded in the run config
@@ -1091,6 +1155,12 @@ Options:
 
 ```text
 Usage: metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]
+       metrum-ai-bench-cli-prompts dataset --job <PATH> --output <PATH> --report <PATH> [OPTIONS]
+
+Commands:
+  catalog  List optional pinned public sources; never download or grant access
+  dataset  Ingest pinned public document files into canonical runtime JSONL
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --version-only
@@ -1232,6 +1302,51 @@ Options:
       --version-only
           Print version information and exit
 
+      --cache-metrics-url <CACHE_METRICS_URL>
+          Opt-in native metric discovery endpoint; unauthenticated bounded GET outside measurement
+
+      --cache-metrics-profile <CACHE_METRICS_PROFILE>
+          Explicit source-pinned native profile; not backend autodetection
+
+          Possible values:
+          - vllm-apc
+          - vllm-external
+          - vllm-offload
+          - vllm4ba-apc:      vLLM source revision 4ba787ec, as identified by the v0.33.0 image
+          - vllm4ba-external
+          - vllm4ba-offload
+          - sglang
+          - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
+          - lmcache
+          - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
+          - dynamo-kvbm
+          - dynamo162-kvbm:   Stable Dynamo 1.6.2 source slice; runtime KVBM remains separately verified
+          - trt-llm
+          - trt-llm121:       Stable standalone 1.2.1 exports request completion and latency only
+
+      --cache-metrics-source-revision <CACHE_METRICS_SOURCE_REVISION>
+          Operator-declared exact source SHA; absent/unsupported revisions retain Unknown values
+
+      --cache-phase-source <CACHE_PHASE_SOURCE>
+          Opt-in measured-window native analysis on this exact configured telemetry source
+
+      --cache-phase-epoch <CACHE_PHASE_EPOCH>
+          Explicit operator-declared continuity identifier; not an observed process/manager epoch
+
+      --cache-phase-required
+          Fail when native counter coverage is unavailable; requires explicit revision and continuity declaration
+
+      --cache-phase-settle-ms <CACHE_PHASE_SETTLE_MS>
+          Opt-in native terminal settling after complete request drain (0..10000 ms)
+
+          [default: 0]
+
+      --kv-study-manifest <KV_STUDY_MANIFEST>
+          Opt-in unverified study declaration; measured phases map to planned stages in array order
+
+      --kv-study-prefix <KV_STUDY_PREFIX>
+          New artifact prefix for .study.json/.study.csv/.study.html; never overwrite existing files
+
       --url <URL>
 
 
@@ -1298,6 +1413,9 @@ Options:
 
       --prompts <PROMPTS>
           JSONL prompt file (objects with "prompt"; vlm rows also carry images, as metrum-ai-bench-cli-vlm --prompts); chat and imagegen also accept an http(s) URL; cycles across requests
+
+      --canonical-jsonl <CANONICAL_JSONL>
+          Canonical JSONL; fails closed until the canonical loader is integrated
 
       --max-tokens <MAX_TOKENS>
           Max completion tokens for chat and vlm bodies; required for vlm and when chat uses --prompts, recommended for all chat sweeps
@@ -1374,6 +1492,41 @@ Options:
 
           [default: 0]
 
+      --warmup-sessions <WARMUP_SESSIONS>
+          Held-out recorded-history warmup sessions; isolation must be validated or explicitly overridden
+
+      --warmup-prompts <WARMUP_PROMPTS>
+          Held-out warmup prompt JSONL; isolation must be validated or explicitly overridden
+
+      --allow-unverified-warmup
+          Explicitly permit Fail/Unknown warmup token-prefix isolation; records override and both digest-list hashes, never a cold/isolation claim
+
+      --warmup-block-size-tokens <WARMUP_BLOCK_SIZE_TOKENS>
+          Token block size for warmup overlap validation (must match the serving engine)
+
+          [default: 16]
+
+      --warmup-render-config <WARMUP_RENDER_CONFIG>
+          Pinned local renderer JSON for exact final held-out warmup/measured chat bytes (requires tokenizer feature); Fail/Unknown always abort
+
+      --stage-hook <STAGE_HOOK>
+          Trusted operator shell command, once per stage after warmup drains and before measurement; requires scoped JSON acknowledgement
+
+      --stage-reset-scope <STAGE_RESET_SCOPE>
+          Exact tier IDs the trusted reset hook must acknowledge
+
+      --stage-hook-timeout-seconds <STAGE_HOOK_TIMEOUT_SECONDS>
+          [default: 60]
+
+      --stage-ready-url <STAGE_READY_URL>
+          Optional readiness probe after scoped reset acknowledgement
+
+      --stage-settle-ms <STAGE_SETTLE_MS>
+          [default: 0]
+
+      --pre-warmup-reset
+          Also run the scoped hook before warmup (off by default); does not replace the post-warmup reset
+
       --seed <SEED>
           RNG seed used when --shuffle-prompts is set
 
@@ -1382,8 +1535,41 @@ Options:
       --shuffle-prompts
           Shuffle --prompts with --seed before cycling
 
+      --cache-policy <CACHE_POLICY>
+          Possible values:
+          - legacy-unspecified: Preserve historical mutation controls; no reuse/isolation assertion
+          - reuse:              Do not add policy mutation; not a guarantee of a physical hit
+          - bust-request:       Distinct nonce at first-message content for every request
+          - isolate-run:        One first-message nonce per invocation, preserving within-run reuse
+
+          [default: legacy-unspecified]
+
+      --prompt-order <PROMPT_ORDER>
+          [default: legacy-unspecified]
+          [possible values: legacy-unspecified, preserve, seeded-shuffle, prescribed]
+
+      --order-seed <ORDER_SEED>
+
+
+      --prompt-sequence <PROMPT_SEQUENCE>
+
+
+      --prompt-sequence-log <PROMPT_SEQUENCE_LOG>
+
+
       --sessions <SESSIONS>
 
+
+      --session-request-roles <SESSION_REQUEST_ROLES>
+          Emit recorded-history requests only after these roles; omitted preserves every-prefix legacy behavior
+
+          [possible values: user, tool, system, assistant, developer, function]
+
+      --session-mode <SESSION_MODE>
+          Closed-loop limits active sessions and completes each recorded turn before sending the next; concurrency sweeps only
+
+          [default: legacy]
+          [possible values: legacy, closed-loop]
 
       --prefix-control <PREFIX_CONTROL>
           [default: shared]

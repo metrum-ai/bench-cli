@@ -79,6 +79,8 @@ enum Condition {
     TtftApprox,
     ReasoningStream,
     ReasoningUsage,
+    CachedUsage,
+    PromptUsage,
     Tokenizer,
     OpenLoop,
     Slo,
@@ -106,6 +108,8 @@ impl Condition {
             Self::TtftApprox => "ttft-approx",
             Self::ReasoningStream => "reasoning-stream",
             Self::ReasoningUsage => "reasoning-usage",
+            Self::CachedUsage => "server-cached-usage",
+            Self::PromptUsage => "chat-prompt-usage",
             Self::Tokenizer => "tokenizer",
             Self::OpenLoop => "open-loop",
             Self::Slo => "slo",
@@ -151,6 +155,8 @@ impl Condition {
                 "The server reports `usage.completion_tokens_details.reasoning_tokens` \
                  (or an accepted variant)."
             }
+            Self::CachedUsage => "Chat server reports a valid integer at usage.prompt_tokens_details.cached_tokens; never substitute zero for missing/null.",
+            Self::PromptUsage => "Chat usage reports integer prompt_tokens; cached-token evidence retains this denominator even when completion usage is missing.",
             Self::Tokenizer => {
                 "`--tokenizer` is set (client token counts; also fills \
                  `usage_missing` rows)."
@@ -225,6 +231,8 @@ const SUMMARY_ROWS: &[(&str, &[Condition])] = &[
 const REQUEST_ROWS: &[(&str, &[Condition])] = &[
     ("bytes_received", &[HttpPath]),
     ("bytes_sent", &[HttpPath]),
+    ("cache_evidence.cached_tokens", &[CachedUsage]),
+    ("cache_evidence.prompt_tokens", &[PromptUsage]),
     ("chunks_received", &[HttpPath]),
     ("connect_s", &[HttpPath]),
     ("decode_s", &[Streaming, TtftApprox]),
@@ -348,7 +356,14 @@ fn modality_kinds() -> [(&'static [&'static str], &'static [Condition]); 3] {
 
 /// Conditions a plain closed-loop `--streaming` llm run against a server
 /// that reports usage meets (the parity harness `plain` scenario).
-const PLAIN_RUN: &[Condition] = &[HttpPath, Usage, Streaming, VisibleAnswer, PositiveWindow];
+const PLAIN_RUN: &[Condition] = &[
+    HttpPath,
+    Usage,
+    PromptUsage,
+    Streaming,
+    VisibleAnswer,
+    PositiveWindow,
+];
 
 // Fixtures
 
@@ -678,6 +693,11 @@ fn request_max() -> RequestRecord {
         usage_completion_tokens_present: Some(true),
         modality_metrics: BTreeMap::from([("prompt_words".to_string(), 40.0)]),
         modality_labels: BTreeMap::from([("image_0_sha256".to_string(), "00".to_string())]),
+        cache_evidence: Some(
+            metrum_ai_bench::cached_tokens::CachedTokenEvidence::from_usage(
+                &json!({"prompt_tokens":50,"prompt_tokens_details":{"cached_tokens":25}}),
+            ),
+        ),
         error: Some(RequestError::Timeout),
         partial: false,
     }
@@ -730,6 +750,7 @@ fn request_min() -> RequestRecord {
         usage_completion_tokens_present: None,
         modality_metrics: BTreeMap::new(),
         modality_labels: BTreeMap::new(),
+        cache_evidence: None,
         error: None,
         partial: false,
     }
@@ -1498,6 +1519,12 @@ fn maximal_cases() -> Vec<(&'static str, &'static str, Value, &'static [&'static
             &["error"],
         ),
         (
+            "src/cached_tokens.rs",
+            "CachedTokenEvidence",
+            to_json(&request_max())["cache_evidence"].clone(),
+            &[],
+        ),
+        (
             "src/strategic.rs",
             "SweepPoint",
             to_json(&sweep_max()),
@@ -1867,6 +1894,7 @@ fn published_counts_match_real_llm_runs() {
         VisibleAnswer,
         ReasoningStream,
         ReasoningUsage,
+        PromptUsage,
         OpenLoop,
         Slo,
         UserTpsSlo,

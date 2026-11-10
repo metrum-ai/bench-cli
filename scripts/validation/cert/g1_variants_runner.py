@@ -22,7 +22,8 @@ TOOL = {'type': 'function', 'function': {'name': 'get_weather',
         'parameters': {'type': 'object', 'properties': {'city': {'type': 'string'}}, 'required': ['city']}}}
 
 
-def run_cell(args, label, prompt, body, reorder):
+def cell_commands(args, label, prompt, body, reorder):
+    """Assemble the exact product and proxy argv used by each live cell."""
     evidence = args.out / 'evidence'
     trace = evidence / f'{label}-trace.jsonl'
     data = evidence / f'{label}-requests.jsonl'
@@ -36,12 +37,18 @@ def run_cell(args, label, prompt, body, reorder):
                '--error-log', str(evidence / f'{label}-error.log')]
     proxy_cmd = [sys.executable, str(Path(__file__).with_name('trace_proxy.py')), '--listen-port', str(args.proxy_port),
                  '--upstream-port', str(args.port), '--out', str(trace), *(['--reorder', reorder] if reorder else [])]
+    return command, proxy_cmd, data, trace
+
+
+def run_cell(args, label, prompt, body, reorder, env=None):
+    evidence = args.out / 'evidence'
+    command, proxy_cmd, data, trace = cell_commands(args, label, prompt, body, reorder)
     (evidence / f'{label}-command.json').write_text(json.dumps({'command': command, 'proxy': proxy_cmd}, indent=2) + '\n', encoding='utf-8')
     with (evidence / f'{label}-proxy-error.txt').open('wb') as proxy_err:
-        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=proxy_err, cwd=ROOT)
+        proxy = subprocess.Popen(proxy_cmd, stdout=subprocess.DEVNULL, stderr=proxy_err, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, proxy)
-            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800)
+            code = l1_runner.call(command, evidence / f'{label}-stdout.txt', evidence / f'{label}-stderr.txt', 1800, env=env)
             if code == 0:
                 g7_runner.wait_for_trace(trace)
         finally:
@@ -50,6 +57,39 @@ def run_cell(args, label, prompt, body, reorder):
             except subprocess.TimeoutExpired:
                 proxy.kill(); proxy.wait(timeout=10)
     return data.read_text(encoding='utf-8'), trace.read_text(encoding='utf-8'), code
+
+
+def tool_prompt(config):
+    """Validate the same pinned tool input and server flags used by the runner."""
+    flags = config['server_flags']
+    if '--enable-auto-tool-choice' not in flags or not any(
+        flags[i:i+2] == ['--tool-call-parser', 'qwen3_coder'] or flag == '--tool-call-parser=qwen3_coder'
+        for i, flag in enumerate(flags)):
+        raise ValueError('G1 requires pinned qwen3_coder tool parser and auto tool choice')
+    tool = config['prompt_sets']['tool']
+    prompt = Path(tool['path']).resolve(strict=True)
+    if not prompt.is_file() or manifest_tool.sha256_file(prompt) != tool['sha256']:
+        raise ValueError('tool prompt pin mismatch')
+    rows = [json.loads(line, object_pairs_hook=manifest_tool.unique_object)
+            for line in prompt.read_text(encoding='utf-8').splitlines() if line.strip()]
+    if not rows or any(not isinstance(row, dict) or not isinstance(row.get('prompt'), str)
+                       or not row['prompt'].strip() for row in rows):
+        raise ValueError('tool prompt must contain nonempty JSONL prompt strings')
+    return prompt
+
+
+def modes(args, config):
+    """Select the same pinned prompt and all six production cell variants."""
+    prompt_tool = tool_prompt(config)
+    return [
+        ('reasoning', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, None, 'reasoning'),
+        ('answer-only', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}}, None, 'answer_only'),
+        ('tool', prompt_tool, {'chat_template_kwargs': {'enable_thinking': False}, 'tools': [TOOL],
+                               'tool_choice': {'type': 'function', 'function': {'name': 'get_weather'}}}, None, 'tool'),
+        ('multiple', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}, 'n': 2}, 'unselected-first', 'unselected_before_selected'),
+        ('answer-first', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'answer-first', 'answer_before_reasoning'),
+        ('same-event', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'same-event', 'same_event'),
+    ]
 
 
 def main():
@@ -67,25 +107,7 @@ def main():
     cells, errors = {}, []
     try:
         config = json.loads(args.manifest.read_text(encoding='utf-8'))['lanes']['G1']
-        flags = config['server_flags']
-        if '--enable-auto-tool-choice' not in flags or not any(
-            flags[i:i+2] == ['--tool-call-parser', 'hermes'] or flag == '--tool-call-parser=hermes'
-            for i, flag in enumerate(flags)):
-            raise ValueError('G1 requires pinned hermes tool parser and auto tool choice')
-        tool = config['prompt_sets']['tool']
-        prompt_tool = Path(tool['path']).resolve(strict=True)
-        if manifest_tool.sha256_file(prompt_tool) != tool['sha256']:
-            raise ValueError('tool prompt pin mismatch')
-        modes = [
-            ('reasoning', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, None, 'reasoning'),
-            ('answer-only', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}}, None, 'answer_only'),
-            ('tool', prompt_tool, {'chat_template_kwargs': {'enable_thinking': False}, 'tools': [TOOL],
-                                   'tool_choice': {'type': 'function', 'function': {'name': 'get_weather'}}}, None, 'tool'),
-            ('multiple', args.prompt, {'chat_template_kwargs': {'enable_thinking': False}, 'n': 2}, 'unselected-first', 'unselected_before_selected'),
-            ('answer-first', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'answer-first', 'answer_before_reasoning'),
-            ('same-event', args.prompt, {'chat_template_kwargs': {'enable_thinking': True}}, 'same-event', 'same_event'),
-        ]
-        for label, prompt, body, reorder, required in modes:
+        for label, prompt, body, reorder, required in modes(args, config):
             try:
                 data, trace, code = run_cell(args, 'g1-variants-' + label, prompt, body, reorder)
                 cells[label] = g1_variants_checks.evaluate(data, trace, code, reorder, required)

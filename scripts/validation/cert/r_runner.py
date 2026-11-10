@@ -5,6 +5,7 @@
 import argparse
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import time
@@ -23,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, fault=None, field_reported=False,
-             fault_request=None, delay_request=None, delay_seconds=0, request_timeout=600, streaming=True, record_identity=False):
+             fault_request=None, delay_request=None, delay_seconds=0, request_timeout=600, streaming=True, record_identity=False, env=None):
     if field_reported and (count != 64 or cap != 512 or thinking is not True or extra or concurrency != 16 or fault is not None or fault_request is not None or delay_request is not None or request_timeout != 600 or not streaming):
         raise ValueError("field-reported case requires 64 requests, thinking ON, cap 512, and no other overrides")
     evidence = args.out / "evidence"
@@ -53,10 +54,10 @@ def run_cell(args, label, binary, count, cap, thinking, extra, concurrency=16, f
         if record_identity:
             proxy_command += ["--record-request-identity"]
         (evidence / f"{label}-proxy-command.json").write_text(json.dumps(proxy_command, indent=2) + "\n", encoding="utf-8")
-        process = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT)
+        process = subprocess.Popen(proxy_command, stdout=subprocess.DEVNULL, stderr=stderr_file, cwd=ROOT, env=env)
         try:
             g6_counter_runner.wait_for_proxy(args.proxy_port, process)
-            exit_code = l1_runner.call(command, stdout, stderr, 3600)
+            exit_code = l1_runner.call(command, stdout, stderr, 3600, env=env)
             deadline = time.monotonic() + 15
             while data.is_file() and time.monotonic() < deadline:
                 try:
@@ -108,6 +109,7 @@ def main():
                 "manifest_sha256": manifest_tool.sha256_file(args.manifest)}
     common_files = ["evidence/gpu.csv", "evidence/server.log", "evidence/binary-hashes.txt"]
     outcomes = {}
+    hardware_prerequisite_files = []
 
     def record(case_id, callback, thresholds):
         target = os.environ.get("CERT_CASE_ID")
@@ -127,6 +129,8 @@ def main():
                        "owner": args.owner, "evidence_link": args.evidence_link, "gpu_class": gpu_line[0].strip(),
                        "driver": gpu_line[1].strip() if len(gpu_line) > 1 else "", "versions": versions,
                        "observed_values": observed, "thresholds": thresholds, "evidence_paths": files}
+        if case_id in prerequisites and passed:
+            hardware_prerequisite_files.extend(files)
         if case_dispatch.selected(case_id):
             result_writer.write_record(args.out, record_data)
         outcomes[case_id] = passed
@@ -170,11 +174,15 @@ def main():
     record("BC-REASON-004", live, {"requests": 16, "reasoning_streams_min": 1, "usage_coverage": 1.0})
 
     def hardware(_files):
-        if "L40S" not in gpu_line[0] or not all(outcomes.get(case, False) for case in ("BC-REASON-001", "BC-REASON-002", "BC-REASON-003")):
-            raise ValueError("second-class case requires L40S and all three reasoning cases PASS")
+        if (not re.match(r"^NVIDIA H100(?:\s|$)", gpu_line[0].strip())
+                or not all(outcomes.get(case, False) for case in ("BC-REASON-001", "BC-REASON-002", "BC-REASON-003"))):
+            raise ValueError("second-class case requires NVIDIA H100 and all three reasoning cases PASS")
+        # Bind the actual same-invocation reasoning requests to the hardware
+        # record, rather than relying on outcomes from separate case runs.
+        _files.extend(path for path in dict.fromkeys(hardware_prerequisite_files) if path not in _files)
         return {"gpu_class": gpu_line[0].strip(), "reasoning_cases_passed": 3}
 
-    record("BC-HW-001", hardware, {"gpu_class": "L40S", "reasoning_cases_passed": 3})
+    record("BC-HW-001", hardware, {"gpu_class": "NVIDIA H100", "reasoning_cases_passed": 3})
     return 0 if outcomes and all(outcomes.values()) else 1
 
 

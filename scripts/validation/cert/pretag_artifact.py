@@ -12,15 +12,13 @@ from execution_evidence import digest
 REPOSITORY = 'metrum-ai/bench-cli'
 TARGET = 'x86_64-unknown-linux-gnu'
 ARTIFACT = 'pretag-release-' + TARGET
-TOKENIZER_ARTIFACT = 'pretag-tokenizer-' + TARGET
 WORKFLOW = '.github/workflows/pretag-certification.yml'
+CERT_PROBE = 'metrum-ai-bench-cli-cert-kv-cpu'
 
 
-def variant_profile(sha, version):
-    return {'candidate_sha': sha, 'version': version, 'label': 'feature-variant build (tokenizer)',
-            'features': ['otlp', 'tokenizer'], 'profile': 'release', 'target': TARGET,
-            'argv': ['cargo', 'zigbuild', '--locked', '--release', '--features', 'otlp,tokenizer',
-                     '--target', TARGET + '.2.17', '--bin', 'metrum-ai-bench-cli-llm']}
+def measured_features(name):
+    """Only the explicitly built certification probe enables its extra feature."""
+    return ['otlp', 'tokenizer'] + (['cert-probes'] if name == CERT_PROBE else [])
 
 
 def pin(path):
@@ -46,8 +44,8 @@ def verified_file(item):
     return path
 
 
-def verify(origin, sha, *, variant=False):
-    artifact_name = TOKENIZER_ARTIFACT if variant else ARTIFACT
+def verify(origin, sha):
+    artifact_name = ARTIFACT
     if origin.get('kind') != 'pretag-workflow' or origin.get('artifact_name') != artifact_name:
         raise ValueError('local measured builds are not certification evidence')
     version = origin['version']
@@ -62,13 +60,12 @@ def verify(origin, sha, *, variant=False):
     verified_file(origin['download_log'])
     archive = verified_file(origin['archive'])
     checksum = verified_file(origin['checksum'])
-    root = f'metrum-ai-bench-cli-v{version}-{TARGET}' + ('-tokenizer' if variant else '')
+    root = f'metrum-ai-bench-cli-v{version}-{TARGET}'
     expected = root + '.tar.gz'
     fields = checksum.read_text().split()
     if archive.name != expected or fields != [digest(archive), expected]:
         raise ValueError('pretag archive does not match workflow-recorded checksum')
     binaries = {}
-    profile = None
     with tarfile.open(archive, 'r:gz') as tar:
         seen = set()
         for member in tar:
@@ -78,10 +75,6 @@ def verify(origin, sha, *, variant=False):
             if member.name.startswith('/') or '..' in parts or canonical in seen:
                 raise ValueError('unsafe or duplicate pretag archive member')
             seen.add(canonical)
-            if variant and parts == (root, 'build-profile.json'):
-                if not member.isfile() or member.size > 16384:
-                    raise ValueError('variant build profile must be a bounded regular file')
-                profile = json.load(tar.extractfile(member))
             if len(parts) != 3 or parts[:2] != (root, 'bin'):
                 continue
             if not member.isfile() or not member.mode & 0o111:
@@ -90,19 +83,17 @@ def verify(origin, sha, *, variant=False):
                 continue  # Go fixture server is not a measured Cargo CLI.
             stream = tar.extractfile(member)
             binaries[parts[2]] = hashlib.file_digest(stream, 'sha256').hexdigest()
-    if variant and (profile != variant_profile(sha, version) or set(binaries) != {'metrum-ai-bench-cli-llm'}):
-        raise ValueError('variant build profile/source/features/target mismatch')
     if 'metrum-ai-bench-cli-llm' not in binaries:
         raise ValueError('pretag package lacks measured LLM CLI')
     return binaries
 
 
-def download(sha, version, run_id, out, *, variant=False):
+def download(sha, version, run_id, out):
     if type(run_id) is not int or run_id <= 0:
         raise ValueError('workflow run id must be positive')
     if not re.fullmatch(r'[a-f0-9]{40}', sha) or not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', version):
         raise ValueError('pretag download requires full source SHA and stable version')
-    artifact_name = TOKENIZER_ARTIFACT if variant else ARTIFACT
+    artifact_name = ARTIFACT
     def api(endpoint):
         return json.loads(subprocess.check_output(['gh', 'api', '--hostname', 'github.com',
                           f'repos/{REPOSITORY}/actions/{endpoint}'], text=True))
@@ -124,14 +115,14 @@ def download(sha, version, run_id, out, *, variant=False):
         subprocess.run(['gh', 'run', 'download', str(run_id), '--repo', 'https://github.com/' + REPOSITORY,
                         '--name', artifact_name, '--dir', str(out / 'download')],
                        stdout=log, stderr=subprocess.STDOUT, check=True)
-    root = f'metrum-ai-bench-cli-v{version}-{TARGET}' + ('-tokenizer' if variant else '')
+    root = f'metrum-ai-bench-cli-v{version}-{TARGET}'
     archive = out / 'download' / (root + '.tar.gz')
     origin = {'kind': 'pretag-workflow', 'run_id': run_id, 'artifact_name': artifact_name, 'version': version,
               'run': pin(out / 'run.json'), 'artifact_metadata': pin(out / 'artifact.json'),
               'artifact_listing': pin(out / 'artifacts.json'),
               'archive': pin(archive), 'checksum': pin(Path(str(archive) + '.sha256')),
               'download_log': pin(out / 'download.log')}
-    members = verify(origin, sha, variant=variant)
+    members = verify(origin, sha)
     destination = out / 'bin'
     destination.mkdir()
     with tarfile.open(archive, 'r:gz') as tar:

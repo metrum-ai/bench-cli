@@ -1,0 +1,50 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# HELP lmcache_mp_lookup_requested_tokens_total Total tokens submitted for lookup (denominator of the L1+L2 token-level hit rate). Only chunk-aligned tokens are counted.
+# TYPE lmcache_mp_lookup_requested_tokens_total counter
+lmcache_mp_lookup_requested_tokens_total{cache_salt="fixture",model_name="fixture-model"} 1568.0
+# HELP lmcache_mp_lookup_hit_tokens_total Total tokens found in L1+L2 during lookup (numerator of the L1+L2 token-level hit rate). Counts the contiguous prefix hit only.
+# TYPE lmcache_mp_lookup_hit_tokens_total counter
+lmcache_mp_lookup_hit_tokens_total{cache_salt="fixture",model_name="fixture-model"} 784.0
+# HELP lmcache_mp_lookups_requests_total Completed lookups (denominator for lookup_early_exit).
+# TYPE lmcache_mp_lookups_requests_total counter
+lmcache_mp_lookups_requests_total{cache_salt="fixture",model_name="fixture-model"} 1.0
+# HELP lmcache_mp_lookup_hit_l1_tokens_total Of lookup_hit: tokens served from objects L1 already held (from the storage manager's per-tier hit counts).
+# TYPE lmcache_mp_lookup_hit_l1_tokens_total counter
+lmcache_mp_lookup_hit_l1_tokens_total{cache_salt="fixture",model_name="fixture-model"} 784.0
+# HELP lmcache_mp_lookup_hit_l2_tokens_total Of lookup_hit: tokens L2 added beyond the L1-servable prefix. lookup_hit_l1 + lookup_hit_l2 == lookup_hit.
+# TYPE lmcache_mp_lookup_hit_l2_tokens_total counter
+lmcache_mp_lookup_hit_l2_tokens_total{cache_salt="fixture",model_name="fixture-model"} 0.0
+# HELP lmcache_mp_lookup_prompt_tokens_total Whole prompt length of each looked-up request (denominator of the request-level hit rate).
+# TYPE lmcache_mp_lookup_prompt_tokens_total counter
+lmcache_mp_lookup_prompt_tokens_total{cache_salt="fixture",model_name="fixture-model"} 1568.0
+# HELP lmcache_mp_lookup_request_hit_tokens_total Prefix of the prompt served by the engine's prefix cache or LMCache (numerator of the request-level hit rate).
+# TYPE lmcache_mp_lookup_request_hit_tokens_total counter
+lmcache_mp_lookup_request_hit_tokens_total{cache_salt="fixture",model_name="fixture-model"} 784.0
+# HELP lmcache_mp_lookup_hit_l1_keys_total Hit keys (one per object group, kv rank and chunk) that L1 already held.
+# TYPE lmcache_mp_lookup_hit_l1_keys_total counter
+lmcache_mp_lookup_hit_l1_keys_total{cache_salt="fixture",model_name="fixture-model"} 0.0
+# HELP lmcache_mp_lookup_hit_l2_keys_total Hit keys loaded from L2 into L1.
+# TYPE lmcache_mp_lookup_hit_l2_keys_total counter
+lmcache_mp_lookup_hit_l2_keys_total{cache_salt="fixture",model_name="fixture-model"} 0.0
+# HELP lmcache_mp_l1_write_chunks_total Total chunks written to L1
+# TYPE lmcache_mp_l1_write_chunks_total counter
+lmcache_mp_l1_write_chunks_total{cache_salt="fixture",l1_tag="default"} 2.0
+# HELP lmcache_mp_l1_read_chunks_total Total chunks read from L1
+# TYPE lmcache_mp_l1_read_chunks_total counter
+lmcache_mp_l1_read_chunks_total{cache_salt="fixture",l1_tag="default"} 2.0
+# HELP lmcache_mp_num_chunks_loaded_total Total number of LMCache chunks loaded into the engine (summed across all retrieve operations).
+# TYPE lmcache_mp_num_chunks_loaded_total counter
+lmcache_mp_num_chunks_loaded_total{cache_salt="fixture",model_name="fixture-model",worker_id="fixture-worker"} 2.0
+# HELP lmcache_mp_num_submitted_stores_total Total GPU→CPU store transfers enqueued on the device stream.
+# TYPE lmcache_mp_num_submitted_stores_total counter
+lmcache_mp_num_submitted_stores_total{device="cuda:0"} 1.0
+# HELP lmcache_mp_num_finished_stores_total Total GPU→CPU store transfers completed on the device stream (regardless of how many chunks were committed).
+# TYPE lmcache_mp_num_finished_stores_total counter
+lmcache_mp_num_finished_stores_total{device="cuda:0"} 1.0
+# HELP lmcache_mp_num_submitted_retrieves_total Total CPU→GPU retrieve transfers enqueued on the device stream.
+# TYPE lmcache_mp_num_submitted_retrieves_total counter
+lmcache_mp_num_submitted_retrieves_total{device="cuda:0"} 1.0
+# HELP lmcache_mp_num_finished_retrieves_total Total CPU→GPU retrieve transfers completed on the device stream (regardless of how many chunks were retrieved).
+# TYPE lmcache_mp_num_finished_retrieves_total counter
+lmcache_mp_num_finished_retrieves_total{device="cuda:0"} 1.0

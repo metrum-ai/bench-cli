@@ -241,15 +241,44 @@ fn append_cross_run(path: &str, seed: u64, expected_runs: usize) -> anyhow::Resu
     Ok(())
 }
 
+fn study_run_args(args: &[OsString], run: u32, runs: u32) -> Result<Vec<OsString>, String> {
+    let mut child = args.to_vec();
+    if runs <= 1 {
+        return Ok(child);
+    }
+    let mut index = 0;
+    while index < child.len() {
+        if child[index] == "--kv-study-prefix" {
+            let value = child
+                .get_mut(index + 1)
+                .ok_or("--kv-study-prefix requires a value")?;
+            value.push(format!(".run-{run:04}"));
+            index += 1;
+        } else if let Some(value) = child[index]
+            .to_str()
+            .and_then(|s| s.strip_prefix("--kv-study-prefix="))
+        {
+            child[index] = OsString::from(format!("--kv-study-prefix={value}.run-{run:04}"));
+        } else if child[index]
+            .to_string_lossy()
+            .starts_with("--kv-study-prefix=")
+        {
+            return Err("non-UTF8 study prefix must use a separate argument".into());
+        }
+        index += 1;
+    }
+    Ok(child)
+}
 fn dispatch(binary: &str, mut args: Vec<OsString>) -> Result<ExitCode, String> {
     let runs = extract_runs(&mut args)?;
     let data_log = argument_value(&args, "--data-log");
     let seed = argument_value(&args, "--seed")
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
-    for _ in 0..runs {
+    for run in 1..=runs {
+        let child_args = study_run_args(&args, run, runs)?;
         let status = sibling_binary(binary)
-            .and_then(|path| Command::new(path).args(&args).status())
+            .and_then(|path| Command::new(path).args(&child_args).status())
             .map_err(|error| format!("failed to launch {binary}: {error}"))?;
         if !status.success() {
             return Ok(ExitCode::from(status.code().unwrap_or(1) as u8));

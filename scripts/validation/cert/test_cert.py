@@ -4,6 +4,7 @@
 import datetime as dt
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -83,19 +84,72 @@ class ValidatorTests(unittest.TestCase):
 
     def test_result_and_periodic_sheet_headers_and_report(self):
         import csv
-        self.run_record(self.record)
+        import execution_intake
+        import harness_integrity
+        # Build a fresh local Git fixture, so the real subprocess validates its
+        # own source tree against a real candidate commit (not a mocked verifier).
+        source = Path(cert.__file__).resolve().parents[3]
+        repo = self.root / 'synthetic-repo'
+        repo.mkdir()
+        for name in harness_integrity.SCOPES:
+            src, dst = source / name, repo / name
+            if src.is_dir():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            elif src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        def git(*args):
+            return subprocess.run(['/usr/bin/git', '-C', str(repo), *args],
+                                  check=True, capture_output=True, text=True).stdout
+        git('init', '-q')
+        git('add', '.')
+        git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
+            'commit', '-qm', 'Synthetic test source')
+        self.sha = git('rev-parse', 'HEAD').strip()
+        self.record['candidate_sha'] = self.sha
+        selection = select_cases.make_selection(cert.load_catalog(self.catalog),
+            select_cases.catalog_hash(self.catalog), self.sha, .3, 3, [], [])
+        self.selection.write_text(json.dumps(selection), encoding='utf-8')
+        closure = harness_integrity.verify(repo, self.sha)
+        proof_dir = self.root / 'proofs'
+        proof_dir.mkdir()
+        tools = {name: {'path': '/synthetic/' + name, 'sha256': 'b' * 64} for name in ('bash', 'env', 'python3')}
+        manifest = proof_dir / 'manifest.json'
+        manifest.write_text(json.dumps({'candidate_sha': self.sha, 'lane': 'MOCK', 'cases': {'BC-CLI-001': {}},
+                                        'tools': tools, 'harness_repo': str(repo), 'harness_closure': closure}))
+        phases = proof_dir / 'phases.jsonl'
+        phases.write_text('\n'.join(json.dumps({'case': 'BC-CLI-001', 'phase': phase, 'utc': utc})
+            for phase, utc in (('inputs-ready', '2026-11-04T11:59:00Z'),
+                               ('record-validated', '2026-11-04T12:01:01Z'))) + '\n')
+        record = {**self.record, 'input_hashes': {'execution_manifest': execution_intake.digest(manifest)},
+                  'output_hashes': {'evidence.txt': execution_intake.digest(self.root / 'evidence.txt')},
+                  'versions': {'execution_tools': tools}}
+        self.run_record(record)
+        plan = proof_dir / 'plan.json'
+        plan.write_text(json.dumps({'candidate_sha': self.sha, 'selection_sha256': execution_intake.digest(self.selection),
+            'catalog_sha256': execution_intake.digest(self.catalog),
+            'manifests': [{'path': '/synthetic', 'sha256': execution_intake.digest(manifest)}]}))
+        index_path = self.root / 'execution-index.json'
+        index_path.write_text(json.dumps({'candidate_sha': self.sha, 'selection_sha256': execution_intake.digest(self.selection),
+            'catalog_sha256': execution_intake.digest(self.catalog),
+            'selected_plan': {'path': 'proofs/plan.json', 'sha256': execution_intake.digest(plan)},
+            'entries': [{'ID': 'BC-CLI-001', 'record_sha256': execution_intake.digest(self.results / 'BC-CLI-001.json'),
+                         'manifest': {'path': 'proofs/manifest.json', 'sha256': execution_intake.digest(manifest)},
+                         'phases': {'path': 'proofs/phases.jsonl', 'sha256': execution_intake.digest(phases)}}]}))
         for mode in ("release", "weekly"):
             with self.subTest(mode=mode):
                 dest = self.root / (mode + ".csv")
                 report = self.root / (mode + ".md")
-                args = [sys.executable, str(Path(cert.__file__)), "--catalog", str(self.catalog),
+                args = [sys.executable, str(repo / 'scripts/validation/cert/validate_results.py'), "--catalog", str(self.catalog),
                         "--results", str(self.results), "--candidate-sha", self.sha, "--release", "v1.8.0",
                         "--csv", str(dest), "--markdown", str(report)]
                 if mode == "weekly":
                     args += ["--cadence", "weekly", "--run-id", "run-1", "--run-date-utc", "2026-11-05T00:00:00Z",
                              "--branch", "main", "--compared-against", "v1.7.2"]
                 else:
-                    args += ["--selection", str(self.selection)]
+                    args += ["--selection", str(self.selection), "--execution-index", str(index_path),
+                             "--execution-index-sha256", execution_intake.digest(index_path)]
                 result = subprocess.run(args, check=False, capture_output=True, text=True)
                 self.assertEqual(0, result.returncode, result.stderr)
                 with dest.open(newline="", encoding="utf-8") as stream:

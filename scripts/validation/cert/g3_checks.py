@@ -154,12 +154,19 @@ def verify_window(data, trace, order):
             "completion_tokens_total": summary.get("completion_tokens_total"), "usage_complete": complete_usage}
 
 
-def verify_goodput_median(data, trace):
-    rows, summary, window, proxy_window = load(data, trace)
+def median_answered_values(rows):
+    """Apply the same-cohort population requirement without computing a threshold."""
     answered = [row for row in rows if row.get('answer_completed') is True and row.get('error') is None]
     values = [finite(row.get('latency_s')) for row in answered]
     if len(values) < 2 or len(set(values)) < 2 or any(value <= 0 for value in values):
         raise ValueError('same-cohort median requires two distinct positive answered latencies')
+    return values
+
+
+def verify_goodput_median(data, trace):
+    rows, summary, window, proxy_window = load(data, trace)
+    answered = [row for row in rows if row.get('answer_completed') is True and row.get('error') is None]
+    values = median_answered_values(rows)
     if any(finite(row.get('queue_delay_s', 0)) != 0 for row in rows):
         raise ValueError('same-cohort raw e2e requires zero scheduling delay')
     slo = statistics.median(values)

@@ -39,7 +39,8 @@ def main():
             raise ValueError('W requires the specified NVIDIA H100 and driver evidence')
         prompt = str(Path(config['prompt_sets']['default']['path']).resolve())
         url = f"http://127.0.0.1:{config['proxy_port']}/v1/chat/completions"
-        count = 8; observed = {}; files = ['evidence/gpu.csv', 'evidence/binary-hashes.txt', 'evidence/models.json']
+        count = 8; observed = {}; files = ['evidence/gpu.csv', 'evidence/binary-hashes.txt', 'evidence/models.json',
+                                         'evidence/r4-image-preflight.json', 'evidence/r4-image-runtime.json']
         modes = (('adequate', 4096, []), ('strict', 128, config['strict_args']), ('safety', 128, config['safety_args']))
         for mode, cap, strict_args in modes:
             cli = evidence / f'w-{mode}-cli.jsonl'; output = evidence / f'w-{mode}-wrapper.json'

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/metrum-ai/bench-cli/blob/integration/v1.9.0/schemas/kv-study-export.v1.json",
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. All rights reserved.",
+  "title": "Non-certifying observed KV study export v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "report", "phases", "engineering_non_certifying", "metadata_provenance", "publication_blockers", "comparisons", "runtime_bindings"],
+  "properties": {
+    "schema_version": {"const": "kv-study-export.v1"},
+    "report": {"$ref": "https://github.com/metrum-ai/bench-cli/blob/integration/v1.9.0/schemas/kv-study-report.v1.json"},
+    "engineering_non_certifying": {"const": true},
+    "metadata_provenance": {"type": "string", "minLength": 1},
+    "publication_blockers": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "phases": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/phase"}},
+    "comparisons": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/comparison"}},
+    "runtime_bindings": {"type": "object", "required": ["schema_version"], "properties": {"schema_version": {"const": "kv-study-runtime-bindings.v1"}}, "description": "Observed configuration and existing producer evidence, separately scoped from manifest declarations. Not executable or physical attestation."}
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "nullable_number": {"type": ["number", "null"]},
+    "dist": {
+      "type": "object", "additionalProperties": false,
+      "required": ["n", "min", "max", "avg", "std", "mad", "p50", "p90", "p95", "p99", "percentile_method", "p90_unreliable", "p95_unreliable", "p99_unreliable"],
+      "properties": {
+        "n": {"$ref": "#/$defs/count"}, "min": {"$ref": "#/$defs/nullable_number"}, "max": {"$ref": "#/$defs/nullable_number"},
+        "avg": {"$ref": "#/$defs/nullable_number"}, "std": {"$ref": "#/$defs/nullable_number"}, "mad": {"$ref": "#/$defs/nullable_number"},
+        "p50": {"$ref": "#/$defs/nullable_number"}, "p90": {"$ref": "#/$defs/nullable_number"}, "p95": {"$ref": "#/$defs/nullable_number"}, "p99": {"$ref": "#/$defs/nullable_number"},
+        "percentile_method": {"const": "hyndman_fan_type7"}, "p90_unreliable": {"type": "boolean"}, "p95_unreliable": {"type": "boolean"}, "p99_unreliable": {"type": "boolean"}
+      }
+    },
+    "phase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phase_id", "phase_label", "kind", "cache_state", "requests", "errors", "cached_token_known", "cached_token_unknown", "ttft_unit", "uncertainty", "small_n_warning", "cohorts", "scheduled_delays", "native_window", "observed_final_bodies"],
+      "properties": {
+        "phase_id": {"type": "string", "pattern": "^phase-[1-9][0-9]*$"}, "phase_label": {"type": "string", "pattern": "^phase: "},
+        "kind": {"enum": ["cold_populate", "resident_warm", "pressure", "rehit"]}, "cache_state": {"const": "unknown"},
+        "requests": {"$ref": "#/$defs/count"}, "errors": {"$ref": "#/$defs/count"}, "cached_token_known": {"$ref": "#/$defs/count"}, "cached_token_unknown": {"$ref": "#/$defs/count"},
+        "ttft_unit": {"const": "seconds"}, "uncertainty": {"type": "string"}, "small_n_warning": {"type": "boolean"},
+        "cohorts": {"type": "object", "required": ["schema_version", "counts", "groups"], "properties": {"schema_version": {"const": "cached-token-cohorts.v1"}}},
+        "native_window": {"type": "object", "required": ["schema_version", "physical_cache_state"], "properties": {"schema_version": {"const": "cache-phase-analysis.v1"}, "physical_cache_state": {"const": "unknown"}}},
+        "observed_final_bodies": {"type": "array", "maxItems": 100000, "items": {"type": "object", "additionalProperties": false, "required": ["attempt_ordinal", "body_sha256", "policy_effects", "unknown"], "properties": {
+          "attempt_ordinal": {"type": "integer", "minimum": 1}, "body_sha256": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-f0-9]{64}$"}]},
+          "policy_effects": {"anyOf": [{"type": "null"}, {"$ref": "https://github.com/metrum-ai/bench-cli/blob/integration/v1.9.0/schemas/kv-study-report.v1.json#/$defs/policy_effects"}]}, "unknown": {"type": ["string", "null"]}
+        }}},
+        "scheduled_delays": {"type": "object", "additionalProperties": false, "required": ["unit", "scheduled_rows", "missing_or_invalid_rows", "client_queue_delay_s", "scheduled_arrival_latency_s", "cap_engagement"], "properties": {
+          "unit": {"const": "seconds"}, "scheduled_rows": {"$ref": "#/$defs/count"}, "missing_or_invalid_rows": {"$ref": "#/$defs/count"}, "client_queue_delay_s": {"$ref": "#/$defs/dist"}, "scheduled_arrival_latency_s": {"$ref": "#/$defs/dist"}, "cap_engagement": {"type": "string"}
+        }}
+      }
+    },
+    "comparison": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "statistic", "unit", "clock", "supplied_pairs", "included_pairs", "small_cluster_warning", "independence", "fixed_controls_sha256", "differences", "ci95", "unknown", "physical_interpretation"],
+      "properties": {
+        "schema_version": {"const": "kv-study-paired-runs.v1"}, "statistic": {"const": "treatment_minus_baseline_mean_ttft_per_run"}, "unit": {"const": "seconds"},
+        "clock": {"anyOf": [{"const": "visible_answer"}, {"type": "object", "additionalProperties": false, "required": ["headline"], "properties": {"headline": {"enum": ["stream", "first_byte_approx", "first_token_fallback"]}}}]},
+        "supplied_pairs": {"$ref": "#/$defs/count"}, "included_pairs": {"$ref": "#/$defs/count"}, "small_cluster_warning": {"type": "boolean"},
+        "independence": {"enum": ["not_declared", "operator_declared_unverified"]}, "fixed_controls_sha256": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-f0-9]{64}$"}]},
+        "differences": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/dist"}]}, "unknown": {"type": ["string", "null"]}, "physical_interpretation": {"type": "string"},
+        "ci95": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["level", "low", "high", "resamples", "method"], "properties": {"level": {"const": 0.95}, "low": {"type": "number"}, "high": {"type": "number"}, "resamples": {"const": 10000}, "method": {"const": "percentile_bootstrap"}}}]}
+      }
+    }
+  }
+}

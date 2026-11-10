@@ -1,0 +1,39 @@
+{
+  "schema_version": "vllm033-kv-events-serialization-fixture.v1",
+  "source_revision": "4ba787ec9959e566d3b587a796dff07673324da5",
+  "source_sha256": "82b362a0a7f89318d9127addfce254d537f5078a31aa87beb08493b0953895ee",
+  "serializer": "msgspec 0.19.0",
+  "scope": "injected synthetic events; actual upstream structs, publish, publisher thread and replay serialization; no GPU run",
+  "replay": [
+    [
+      "",
+      "YmVuY2gtY2xpLWt2LXI1",
+      "AAAAAAAAAAA=",
+      "k8tAj0AAAAAAAJLeAAqkdHlwZatCbG9ja1N0b3JlZKxibG9ja19oYXNoZXOSxCBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYcQgYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmKxcGFyZW50X2Jsb2NrX2hhc2jAqXRva2VuX2lkc5QBAgMEqmJsb2NrX3NpemUCp2xvcmFfaWTApm1lZGl1baNHUFWpbG9yYV9uYW1lwKlncm91cF9pZHgAsmt2X2NhY2hlX3NwZWNfa2luZK5mdWxsX2F0dGVudGlvbt4ACqR0eXBlq0Jsb2NrU3RvcmVkrGJsb2NrX2hhc2hlc5HEIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJisXBhcmVudF9ibG9ja19oYXNowKl0b2tlbl9pZHOUAQIDBKpibG9ja19zaXplBKdsb3JhX2lkwKZtZWRpdW2jR1BVqWxvcmFfbmFtZcCpZ3JvdXBfaWR4AbJrdl9jYWNoZV9zcGVjX2tpbmSlbWFtYmEA"
+    ],
+    [
+      "",
+      "YmVuY2gtY2xpLWt2LXI1",
+      "AAAAAAAAAAE=",
+      "k8tAj0gAAAAAAJLeAAqkdHlwZatCbG9ja1N0b3JlZKxibG9ja19oYXNoZXOSxCBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYcQgYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmKxcGFyZW50X2Jsb2NrX2hhc2jAqXRva2VuX2lkc5QBAgMEqmJsb2NrX3NpemUCp2xvcmFfaWTApm1lZGl1baNHUFWpbG9yYV9uYW1lwKlncm91cF9pZHgAsmt2X2NhY2hlX3NwZWNfa2luZK5mdWxsX2F0dGVudGlvbt4ACqR0eXBlq0Jsb2NrU3RvcmVkrGJsb2NrX2hhc2hlc5HEIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJisXBhcmVudF9ibG9ja19oYXNowKl0b2tlbl9pZHOUAQIDBKpibG9ja19zaXplBKdsb3JhX2lkwKZtZWRpdW2jR1BVqWxvcmFfbmFtZcCpZ3JvdXBfaWR4AbJrdl9jYWNoZV9zcGVjX2tpbmSlbWFtYmEA"
+    ],
+    [
+      "",
+      "YmVuY2gtY2xpLWt2LXI1",
+      "AAAAAAAAAAI=",
+      "k8tAj1AAAAAAAJKEpHR5cGWsQmxvY2tSZW1vdmVkrGJsb2NrX2hhc2hlc5LEIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhxCBiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYqZtZWRpdW2jR1BVqWdyb3VwX2lkeACEpHR5cGWsQmxvY2tSZW1vdmVkrGJsb2NrX2hhc2hlc5HEIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJipm1lZGl1baNHUFWpZ3JvdXBfaWR4AQA="
+    ],
+    [
+      "",
+      "YmVuY2gtY2xpLWt2LXI1",
+      "AAAAAAAAAAM=",
+      "k8tAj1gAAAAAAJKEpHR5cGWsQmxvY2tSZW1vdmVkrGJsb2NrX2hhc2hlc5LEIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhxCBiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYqZtZWRpdW2jR1BVqWdyb3VwX2lkeACEpHR5cGWsQmxvY2tSZW1vdmVkrGJsb2NrX2hhc2hlc5HEIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJipm1lZGl1baNHUFWpZ3JvdXBfaWR4AQA="
+    ],
+    [
+      "",
+      "",
+      "//////////8=",
+      ""
+    ]
+  ]
+}

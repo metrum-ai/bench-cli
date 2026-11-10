@@ -24,8 +24,8 @@ def clean_source(repo, sha, version=None):
     if git(repo, 'status', '--porcelain'):
         raise ValueError('build source must be clean')
     package = tomllib.loads((repo / 'Cargo.toml').read_text())
-    if package.get('features', {}).get('default', []):
-        raise ValueError('unexpected default features; review release equivalence')
+    if package.get('features', {}).get('default') != ['tokenizer']:
+        raise ValueError('unexpected default features; expected shipped tokenizer profile')
     if version is not None and package['package']['version'] != version:
         raise ValueError('frozen source version must match pretag version')
 
@@ -51,16 +51,9 @@ def build(args):
               'version': args.version, 'started_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'builds': {}}
     # No local measured compiler invocation exists in this producer.
     origin, paths = pretag_artifact.download(args.candidate_sha, args.version, args.workflow_run_id, out / 'measured')
-    measured = {name: artifact(path, args.candidate_sha, 'measured', ['otlp'], origin)
+    measured = {name: artifact(path, args.candidate_sha, 'measured', pretag_artifact.measured_features(name), origin)
                 for name, path in paths.items()}
     result['builds']['measured'] = {'origin': origin, 'binaries': measured}
-    if getattr(args, 'tokenizer_variant', False):
-        variant_origin, variant_paths = pretag_artifact.download(
-            args.candidate_sha, args.version, args.workflow_run_id, out / 'tokenizer-variant', variant=True)
-        variants = {name: artifact(path, args.candidate_sha, 'feature-variant-tokenizer',
-                                  ['otlp', 'tokenizer'], variant_origin)
-                    for name, path in variant_paths.items()}
-        result['builds']['feature-variant-tokenizer'] = {'origin': variant_origin, 'binaries': variants}
     clean_source(repo, args.candidate_sha, args.version)
     command = ['cargo', 'build', '--locked', '--release', '--features', 'otlp,tokenizer',
                '--target-dir', str(out / 'validation-only'), '--bin', 'metrum-ai-bench-cli-llm']
@@ -88,8 +81,6 @@ def main():
     for name in ('candidate-sha', 'version'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--workflow-run-id', type=int, required=True)
-    parser.add_argument('--tokenizer-variant', action='store_true',
-                        help='also import the separately labelled BC-GPU-010 fallback artifact')
     args = parser.parse_args()
     try:
         build(args)

@@ -4,7 +4,7 @@
 //! Select a reproducible ISL/OSL mix from metrum-ai/prompt-library and write
 //! JSONL for metrum-ai-bench-cli-llm.
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use metrum_ai_bench::prompt_library::{
     default_cache_dir, format_select_failure, load_hub_dataset, load_jsonl, load_parquet_files,
     recommended_max_tokens, resolve_revision, select_mix, selection_failure_report,
@@ -22,9 +22,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
     author,
     version,
     about = "Select ISL/OSL mixes from metrum-ai/prompt-library for metrum-ai-bench-cli-llm",
-    override_usage = "metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]"
+    subcommand_negates_reqs = true,
+    override_usage = "metrum-ai-bench-cli-prompts --count <COUNT> (--profile <PROFILE> | --isl-target <TOKENS> --osl-target <TOKENS>) --output <PATH> --report <PATH> [OPTIONS]\n       metrum-ai-bench-cli-prompts dataset --job <PATH> --output <PATH> --report <PATH> [OPTIONS]"
 )]
 struct Args {
+    #[command(subcommand)]
+    command: Option<ProfileCommand>,
+
     #[arg(long, help = "Print version information and exit")]
     version_only: bool,
 
@@ -182,6 +186,40 @@ struct Args {
     report: Option<PathBuf>,
 }
 
+#[derive(Subcommand, Debug)]
+enum ProfileCommand {
+    /// List optional pinned public sources; never download or grant access.
+    Catalog,
+    /// Ingest pinned public document files into canonical runtime JSONL.
+    Dataset {
+        #[arg(long, help = "Local public-dataset-job.v1 JSON configuration")]
+        job: PathBuf,
+        #[arg(
+            long,
+            help = "New canonical JSONL output; existing files are never overwritten"
+        )]
+        output: PathBuf,
+        #[arg(long, help = "New metadata-only validation report JSON")]
+        report: PathBuf,
+        #[arg(
+            long,
+            help = "Never download; require verified cache or explicit local files"
+        )]
+        offline: bool,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+        #[arg(long,requires_all=["rights_review","consolidation_report"])]
+        catalog_key: Option<String>,
+        #[arg(long, requires = "catalog_key")]
+        rights_review: Option<PathBuf>,
+        #[arg(
+            long,
+            help = "New standalone scoped provenance/rights consolidation JSON"
+        )]
+        consolidation_report: Option<PathBuf>,
+    },
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     if args.version_only {
@@ -189,7 +227,12 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-prompts", args.quiet);
+    if matches!(args.command, Some(ProfileCommand::Catalog)) {
+        // Discovery reserves stdout for machine-readable JSON, including on TTYs.
+        eprintln!("Metrum AI Bench metrum-ai-bench-cli-prompts {VERSION}");
+    } else {
+        metrum_ai_bench::banner::print_banner(VERSION, "metrum-ai-bench-cli-prompts", args.quiet);
+    }
 
     if let Err(error) = run(args) {
         eprintln!("error: {error:#}");
@@ -199,6 +242,80 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> anyhow::Result<()> {
+    if matches!(args.command, Some(ProfileCommand::Catalog)) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "$comment":"Copyright (c) 2026 Metrum AI, Inc. All rights reserved.",
+                "schema_version":"optional-public-catalog.v1",
+                "automatic_access_granted":false,
+                "source_checks_run":false,
+                "entries":metrum_ai_bench::public_catalog::entries()
+            }))?
+        );
+        return Ok(());
+    }
+    if let Some(ProfileCommand::Dataset {
+        job,
+        output,
+        report,
+        offline,
+        cache_dir,
+        catalog_key,
+        rights_review,
+        consolidation_report,
+    }) = &args.command
+    {
+        let job = metrum_ai_bench::public_profile::load_job(job)?;
+        let cache = cache_dir
+            .clone()
+            .unwrap_or_else(|| default_cache_dir().with_file_name("public-datasets"));
+        let mut outputs = vec![output.as_path(), report.as_path()];
+        if let Some(path) = consolidation_report {
+            outputs.push(path.as_path());
+        }
+        metrum_ai_bench::public_profile::check_new_outputs(&outputs)?;
+        let (records, evidence, consolidation) = if let Some(key) = catalog_key {
+            let review = metrum_ai_bench::public_catalog::load_review(
+                rights_review
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("catalog requires explicit rights review"))?,
+            )?;
+            let built = metrum_ai_bench::public_catalog::build(
+                key,
+                &job,
+                review.review(),
+                &cache,
+                *offline,
+            )?;
+            (built.records, built.profile, Some(built.consolidation))
+        } else {
+            let (records, evidence) =
+                metrum_ai_bench::public_profile::build(&job, &cache, *offline)?;
+            let consolidation = if consolidation_report.is_some() {
+                Some(metrum_ai_bench::validation_consolidation::consolidate(
+                    metrum_ai_bench::validation_consolidation::ConsolidationInput {
+                        manifest: &evidence.manifest,
+                        overlap: evidence.overlap.as_ref(),
+                        counts: &[],
+                        required_component_scopes: &[],
+                        component_inventory_complete: false,
+                        component_reviews: &[],
+                    },
+                )?)
+            } else {
+                None
+            };
+            (records, evidence, consolidation)
+        };
+        metrum_ai_bench::public_profile::write_profile(&records, &evidence, output, report)?;
+        if let (Some(evidence), Some(path)) = (&consolidation, consolidation_report) {
+            metrum_ai_bench::validation_consolidation::write_report(evidence, path)?;
+            println!("{}", evidence.human_summary);
+        }
+        println!("{}", evidence.human_summary);
+        return Ok(());
+    }
     let count = args
         .count
         .ok_or_else(|| anyhow::anyhow!("--count is required"))? as usize;
@@ -395,4 +512,86 @@ fn run(args: Args) -> anyhow::Result<()> {
     println!("wrote {}", output.display());
     println!("wrote {}", report_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod public_dataset_cli_tests {
+    use super::*;
+
+    #[test]
+    fn dataset_command_has_no_legacy_length_requirements() {
+        let args = Args::try_parse_from([
+            "prompts",
+            "dataset",
+            "--job",
+            "job.json",
+            "--output",
+            "canonical.jsonl",
+            "--report",
+            "validation.json",
+            "--offline",
+        ])
+        .unwrap();
+        assert!(matches!(
+            args.command,
+            Some(ProfileCommand::Dataset { offline: true, .. })
+        ));
+        assert!(Args::try_parse_from([
+            "prompts",
+            "dataset",
+            "--output",
+            "canonical.jsonl",
+            "--report",
+            "validation.json"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn catalog_listing_requires_no_legacy_targets_or_network_settings() {
+        let args = Args::try_parse_from(["prompts", "catalog"]).unwrap();
+        assert!(matches!(args.command, Some(ProfileCommand::Catalog)));
+        assert!(Args::try_parse_from(["prompts", "catalog", "--offline"]).is_err());
+    }
+
+    #[test]
+    fn catalog_profile_requires_review_and_separate_consolidation_output() {
+        let base = [
+            "prompts",
+            "dataset",
+            "--job",
+            "job.json",
+            "--output",
+            "data.jsonl",
+            "--report",
+            "profile.json",
+            "--catalog-key",
+            "loogle-longdep-qa",
+        ];
+        assert!(Args::try_parse_from(base).is_err());
+        let full = base.into_iter().chain([
+            "--rights-review",
+            "review.json",
+            "--consolidation-report",
+            "consolidation.json",
+        ]);
+        assert!(Args::try_parse_from(full).is_ok());
+    }
+
+    #[test]
+    fn legacy_required_flags_are_unchanged() {
+        assert!(Args::try_parse_from(["prompts"]).is_err());
+        assert!(Args::try_parse_from([
+            "prompts",
+            "--count",
+            "2",
+            "--profile",
+            "chat-short",
+            "--output",
+            "prompts.jsonl",
+            "--report",
+            "report.json"
+        ])
+        .is_ok());
+    }
 }

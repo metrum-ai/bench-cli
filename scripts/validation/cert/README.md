@@ -23,6 +23,25 @@ weekly job additionally checks the actual published archives against their tag.
 
 ## Execution-time records and freeze checks
 
+The pre-rental RC-GPU gate is a **loopback offline rehearsal (no netns isolation)**:
+it exercises the selected RC-GPU cases' non-Docker launch paths using frozen inputs,
+candidate binaries and loopback stand-ins, including production argument/input
+assembly, record writing and validator intake. Docker-dependent steps and their
+required runtime receipts are deferred to GPU-session smoke, not counted as passes.
+Non-GPU cases run directly in certification;
+post-tag and future-dependent inputs are frozen at their trigger points. Approved N/As
+remain N/As, not simulated executions. The partial probes below are not the complete
+gate. They provide no OS-enforced network isolation or physical-tier evidence.
+
+For catalog r4 image-backed lanes, the freezer pins the tracked OCI index and
+linux/amd64 child descriptor bytes into each execution manifest. Offline
+preflight rechecks both digests, platform selection and the child config digest.
+Before serving, the runner checks the local image configuration against the
+child descriptor; after starting each r4 container it checks the container
+image identity and records index, child, platform and config digests. Missing,
+changed or ambiguous descriptor/runtime evidence fails closed. These checks do
+not establish physical cache-tier activity or replace the integrity audit.
+
 The harness requires Python 3.12 or newer. The shared result writer atomically
 publishes a case record, evidence SHA256 hashes, candidate identity, typed
 infrastructure history and conservative carry-over eligibility. The shared lane
@@ -51,31 +70,168 @@ monotonic clock). It appends those observed UTC values, not finalization time;
 missing clocks remain null. Per-case launch validation appends record validation.
 Never substitute runner start/end for actual first/last request times.
 
+For VLM cases whose runner requires absolute image paths, prepare a new pinned
+prompt file before freezing, using `prepare_vlm_input.py --source SOURCE
+--source-sha256 SHA --image IMAGE --image-sha256 SHA --root REPOSITORY_ROOT
+--out NEW_JSONL`. It rejects remote, mismatched, multiple and ambiguous images,
+never overwrites a file, and prints the new path/hash for the lane manifest.
+Freeze the original source and image as inputs too; the prepared JSONL is an
+ordinary frozen input consumed unchanged by the runner. This is input preparation,
+not an offline launch rehearsal or certification evidence.
+
+For product `--require-sut` consumers, `prepare_product_sut.py --inventory
+OBSERVED.json --inventory-sha256 SHA --lane-manifest LANE.json --lane-sha256 SHA
+--lane L1 --out NEW_SUT.json` produces a separate product-schema declaration from
+exactly one observed GPU inventory and the pinned lane. Its fields distinguish
+observed inventory from declared server/model; fractional GiB is rounded down.
+Pin the original inventory and lane, and pin the generated declaration as the
+lane SUT. Do not use synthetic inventory as live evidence. Input preparation
+alone does not prove that the product parser accepts the result. The narrow
+`rehearse_product_llm.py --binary FROZEN_LLM --binary-sha256 SHA --sut NEW_SUT.json
+--sut-sha256 SHA` loopback probe checks the actual pinned LLM binary's
+`--require-sut` parser and resulting summary against the SUT identity; it cannot
+stand in for parsing other modalities or exercising the case runner. It uses
+only temporary outputs and an isolated disposable local server.
+
+`rehearse_live_modalities.py --manifest FROZEN_CASE.json --case BC-LIVE-001`
+(or BC-LIVE-002/003/004) is a partial CPU-only loopback check: it verifies the
+frozen case entry argv and pinned harness, uses the same smoke/headline command
+assembly as the actual runner, invokes the frozen modality binary through
+`cargo --locked xtask`, and verifies the required-SUT summary and local request
+cohort. For L1 it checks xtask's actual selector argv against the frozen recipe
+and compares its output with an independent double generation. Since this uses
+temporary output paths, it does not call the production case-output boundary;
+the loopback requests precede the independent check and are never evidence.
+It does not call a record writer or exercise non-live cases, physical GPU behavior
+or the native offload gate, and is **not** the complete selected-set rehearsal.
+Its disposable loopback server is not an OS network sandbox.
+
+`rehearse_g1_variants.py --manifest FROZEN_CASE.json` is a partial GPU-003
+check: it validates the frozen G1 inputs and actual runner's tool prompt, then
+runs all six real product/proxy command variants against a synthetic loopback
+server using disposable output. It checks each product request and forwarded
+variant fields, but does not run the GPU-003 validator or write a case record.
+Its loopback fixture is not an OS network sandbox, real-model evidence, or the
+complete selected-set rehearsal.
+
+`rehearse_g5_strategic.py --manifest FROZEN_CASE.json` exercises the GPU-013
+strategic benchmark and intentional export-failure argv with the pinned product
+binary, real trace proxy and synthetic loopback responses. It does not kill or
+restart a server, invoke the validator or write a case record; it is not real
+server evidence or the complete selected-set rehearsal. Its fixture is not an OS
+network sandbox.
+
+`rehearse_g5_endpoints.py --manifest FROZEN_CASE.json` exercises the GPU-015
+four-port configuration check and actual endpoint-file/product argv against two
+synthetic local servers with two trace proxies. It verifies successful measured
+requests reach both endpoints, but does not kill a server, invoke the validator
+or write a case record. Temporary loopback ports replace the frozen ports after
+checking them; it is not an OS network sandbox, real failover evidence or the
+complete selected-set rehearsal.
+
+`rehearse_vlm_reasoning.py --manifest FROZEN_CASE.json` exercises the actual
+REASON-005 VLM product/proxy argv against a synthetic local server, verifies
+seven completed product requests and compares the wire-embedded image bytes
+with the frozen image pin. It checks the actual runner's input validation but
+does not invoke its result validator or write a case record. It is not a network
+sandbox, real reasoning evidence or the complete selected-set rehearsal.
+
+`rehearse_g4_modality.py --manifest FROZEN_CASE.json` exercises GPU-011's
+actual LLM, VLM and two strategic product/proxy command cohorts against a
+synthetic local server, checks model/options and pinned VLM image bytes on the
+wire, and uses temporary outputs. It does not stop or launch model servers,
+invoke the GPU-011 validator or write a case record. It is not a network sandbox,
+real-model evidence or the complete selected-set rehearsal.
+
+`rehearse_d_default.py --manifest FROZEN_CASE.json` exercises REASON-006's
+actual 64-request field-default runner/product/proxy argv on a synthetic local
+server, checking the pinned model, thinking option and 512-token cap on the
+wire. It does not invoke the truncation validator or write a case record; it is
+not a network sandbox, real-model evidence or the complete selected-set rehearsal.
+
+`rehearse_g6_schema.py --manifest FROZEN_CASE.json` runs GPU-016's actual
+locked/offline schema fixtures plus its LLM and strategic product argv against a
+synthetic server. It fails when the executing host's Cargo cache is incomplete.
+It does not invoke the live schema result validator, write a case record, provide
+an OS network sandbox or replace the complete selected-set rehearsal.
+
+For BC-COMP-002, `prepare_reference_inputs.py --source SOURCE_JSONL
+--source-sha256 SHA --out-dir NEW_DIRECTORY` constructs the reference prompt,
+ShareGPT and order inputs from exactly 64 distinct source prompts, validates
+them with the real runner's input checks and emits a pinned receipt. The order
+rows include the product parser's required concurrency-one `cohort`; regenerate
+any earlier order file that lacks it before freezing. Freeze the source, receipt
+and all three outputs; this preparation does not run the case.
+`rehearse_comp_candidate.py --manifest FROZEN_CASE.json --tokenizer-cache CACHE`
+checks the frozen tokenizer snapshot and executes the actual candidate-side argv
+and prompt order against synthetic loopback. It assembles the reference command
+but does **not** execute the vLLM reference parser or container, invoke the
+comparison validator, or write a case record; it is not a complete rehearsal or
+an OS network sandbox.
+
+Selected-set preflight recomputes the production selection policy before case
+preflight; rehashing an edited selected list is insufficient. This does not
+independently attest the supplied change and history inputs, which must still be
+verified against the candidate and release records.
+
+Before going offline for BC-GPU-016, run `scripts/validation/cert/prepare_schema_cache.sh`
+with the intended Cargo home and toolchain. It runs `cargo fetch --locked` followed
+by an offline no-run build of the exact schema-history/migration test targets;
+this preparatory step is not itself evidence that the measured case ran. The
+operator must arrange and verify that cache on the actual execution host.
+
+Freeze now also calls the actual runner's input checks for selected known cases
+(GPU-003/011/013/015, REASON-005, COMP-002). These are early checks only, not
+complete runner argv or SUT parsing and **not** the complete offline rehearsal
+required before rental; missing selected-case coverage remains a blocker.
+
 `case_launcher.py --manifest FROZEN.json --preflight` checks Python, the frozen
 candidate executable, SUT system/GPU memory and `host_os`, tokenizer revision
 and content pin, all-smi executable pin, every input pin and each launcher pin.
 Tokenizer validation probes the separately pinned **validation-only build**
 against a one-request loopback CPU fixture with no server usage, never the
 measured candidate. Both builds must be release builds of the same frozen
-commit: shipped measured features are `otlp` only, validation-only features are
-`otlp,tokenizer`. The narrowly scoped GPU-010 fallback variant below is separate
-from both roles. The probe inherits no API/exporter credentials and never
+commit: shipped measured features and validation-only features are both
+`otlp,tokenizer`, with distinct roles and binaries. For BC-GPU-010 preflight
+also probes the exact shipped binary. The probe inherits no API/exporter credentials and never
 becomes GPU case evidence or a request-phase measurement. Temporary files and
 the fixture server are cleaned up on success or failure. Preflight allocates
 no hardware or model-serving process.
+
+Each `freeze_case.py` invocation also requires `--tool-manifest FILE`: a JSON
+object mapping command names to `{ "path": ABSOLUTE_CANONICAL_PATH, "sha256":
+LOWERCASE_SHA256 }`. Pin the actual execution-host tools, including the
+required interpreter and lane tools. Tool pins must be native Linux ELF files,
+not shell-script shims; synthetic test manifests are not evidence.
+The frozen manifest binds both the tool manifest and each executable. The
+launcher creates a private pinned-tool PATH and uses the pinned `env -i` with
+an allowlist, then rechecks tool hashes and links after the child exits. Record
+provenance includes the absolute tool paths and hashes. Before accepting a case
+PASS, the launcher also requires its record to match the exact pre-launch
+execution-manifest digest and tool map, and rejects manifest changes during
+execution. This local check does not authenticate records supplied directly to
+the final selected-set validator. This profile deliberately
+does not forward `HF_TOKEN`; stage needed inputs before execution. It is not an
+OS sandbox and does not attest dynamic libraries, Cargo caches or configuration,
+repository closure, host trust, or isolation from a malicious same-user process.
+Those remain part of the pre-qualification integrity audit.
 
 The manifest binds `candidate_sha`, role-tagged `candidate` and
 `tokenizer_validation` artifacts, the execution-time `build_receipt`, and the
 frozen `lane_manifest`. Build and log hashes are rechecked before launch.
 Secondary CLI pins must belong to the measured artifact registry; a validation
 binary (including renamed copies) cannot appear in measured argv/config.
-BC-GPU-010 requires a separate `feature_variant_tokenizer` entry from the same
-frozen-source pretag run, with its own executable hash, archive build-profile
-record and frozen provenance pins. Only its fallback cell uses this workflow-built
-`otlp,tokenizer` executable, labelled **feature-variant build (tokenizer)**.
-Truncated, empty and missing-usage cells use shipped `otlp`; every other measured
-case remains shipped `otlp`. Missing bindings fail closed before any cell issues a
-request. Validation-only executables or their copies cannot fill the variant slot.
+All four BC-GPU-010 cells use the same workflow-built shipped LLM binary with
+`otlp,tokenizer`. Its receipt, executable and workflow-origin evidence must be
+frozen as inputs; a separate variant is forbidden. L1–L4 also require xtask's
+canonical `BENCH_BIN_DIR` binaries to resolve to the registered measured paths;
+ambient search fallback is not acceptable. After a case exits, the launcher
+rechecks the build, lane and frozen input pins before validating a record. A
+lane-error marker rejects the case in `report_rows` even if its runner already
+wrote PASS. These checks do not replace immutable execution environments or the
+pre-qualification integrity audit. Missing bindings fail closed
+before any cell issues a request. Validation-only executables or their copies
+cannot be substituted for the shipped binary.
 Every cell must pass unchanged criteria; no waiver, N/A or skipped fallback is
 accepted. Each cell writes a build proof before invocation and an exit outcome
 afterward. The launcher replays the original checks from raw data/trace, verifies
@@ -89,7 +245,13 @@ record. The launcher rejects reused attempt directories. On failure or an
 interrupt it stops its owned process group and preserves a typed FAIL with null
 unknown counts if the case did not publish a record. Existing records are never
 overwritten: a separate failure sentinel prevents an earlier PASS from masking
-a launcher/cleanup failure. A sibling `OUT-lifecycle` directory retains append-only
+a launcher/cleanup failure. Once a non-W case may have recorded its startup
+`evidence/server.log`, cleanup preserves that file and writes the final container
+snapshot to `evidence/server-teardown.log`, with a separate
+`evidence/server-teardown.sha256`. The checksum is an independent sidecar, not
+an output hash in a case record already written before cleanup; retain both for
+review. W has no result until external sign-off, which binds its final
+`server.log` after cleanup. A sibling `OUT-lifecycle` directory retains append-only
 input-ready and record-validated observations. External provisioning events must
 still be supplied by the operator at their actual source. Launch one case with `--case ID`, or omit `--case` for the whole selected
 set. Pins are rechecked before each launch; no shell evaluation is performed.
@@ -168,11 +330,8 @@ status and the exact pretag workflow/repository/artifact. It uses
 workflow-recorded archive checksum and safely copies measured Cargo binaries.
 Local measured compilation is not an option. The helper alone uses native
 `cargo build --locked --release --features otlp,tokenizer` from the same source.
-For BC-GPU-010, also pass `--tokenizer-variant`: this downloads the separate
-`pretag-tokenizer-x86_64-unknown-linux-gnu` artifact from that same successful
-workflow, verifies its archive checksum and exact source/version/features/argv
-build-profile declaration, and records the `feature-variant-tokenizer` role.
-It never compiles a local measured variant or relabels the validation helper.
+BC-GPU-010 uses the shipped LLM artifact for all four cells; no separate
+feature-variant artifact or local measured build is used.
 
 It emits `builds.json` only after artifact verification and validation build
 succeed, binding run/artifact API responses, download log, archive/checksum,
@@ -202,13 +361,117 @@ exactly true; diagnostic cell dictionaries do not count as case verdicts.
 No performance gate thresholds are changed.
 
 `selected_set.py --selection SELECTION --catalog CATALOG --index INDEX --preflight`
-is the complete-set preflight entry. Omit `--preflight` only for an authorized
-execution. The index contains `candidate_sha`, `selection_sha256`,
-`catalog_sha256`, and ordered `manifests` entries (`path`, `sha256`). Every case
-manifest must have exactly one case; the set must exactly equal the selected
-RC-GPU IDs, without missing/duplicate/extra IDs. All manifests are verified
-before any launch and rechecked at each execution boundary. The order in the
-index is the execution order, so dependencies must precede their barriers.
+is the selected RC-GPU preflight entry, not an all-tier dispatcher. Omit
+`--preflight` only for an authorized execution. The index contains `candidate_sha`,
+`selection_sha256`, `catalog_sha256`, and ordered `manifests` entries (`path`,
+`sha256`). Every executable case manifest must have exactly one case. Optional
+`approved_na` entries have a `record` pin, absolute `evidence_root`, and an
+`evidence` map of relative evidence paths to SHA-256. Each N/A must be selected,
+match the candidate and case, have independent unexpired approval scoped to that
+case, and retain all pinned evidence. N/As are reported as N/A, never launched;
+independent review must authenticate the approval. Executable manifests plus
+approved N/As must exactly cover selected RC-GPU IDs without duplicates or extras.
+All manifests are verified before any launch, and N/A pins are rechecked at each
+execution boundary. The order in the index is the execution order, so
+dependencies must precede their barriers.
+
+For inputs that do not yet exist, an index may explicitly list `deferred_at_trigger`
+entries, each with exactly `case` and sorted `after` fields. Only `BC-COMP-001`
+(after both `BC-PERF-001` and `BC-PERF-002`) and `BC-OPS-001` (after every other
+selected executable RC-GPU case) may be declared. Use `--pretrigger` explicitly;
+without it, deferred declarations are rejected. The command preflights or executes
+only the static subset, reports each deferral, and exits 3 even when that subset
+succeeds: it is **not** a completed selected set. At each actual trigger, validate
+and bind the real same-run predecessor outputs before freezing and executing the
+remaining case. Declarations alone do not prove predecessor success, authorize a
+PASS, or satisfy final intake. Final validation still requires every selected case,
+its complete execution index and the separately approved index digest.
+
+The freezer and launcher compare the certification source tree, xtask sources
+and declared build configuration to the candidate commit and pin their bytes;
+they reject changed, missing, symlinked or untracked code in that scope. Final
+fresh-PASS intake independently checks the validator checkout against the same
+candidate and compares the manifest's relative source names and hashes. This
+is not a trusted-host or complete execution-closure attestation: Python startup
+and bytecode, Git and its dependencies, Cargo caches/configuration, third-party
+libraries, dynamic linkers and validator startup still require independent audit.
+A matching Git tree alone does not authenticate the selected candidate.
+
+A future Stage-0 smoke must use a dedicated root with a regular
+`.stage0-smoke-root.json` marker containing exactly `classification` set to
+`Stage-0 smoke, not certification` and `expectations_sha256` set to the reviewed
+expectations digest. The normal writer labels records beneath that root; the
+certification validator rejects labeled records. This is a defense against
+accidental mixing, not an authenticated boundary against record rewriting. No
+smoke controller or approved expectations are supplied by this marker alone:
+never submit smoke records to certification intake, history or the sheet.
+
+The initial `stage0_controller.py`, `stage0_plan.py`, `stage0_attempt.py`,
+`stage0_generic_adapter.py`, `stage0_dispatch.py`, `stage0_device.py`,
+`stage0_settlement.py`, `stage0_process.py`,
+`stage0_milestones.py`, `stage0_limits.py`, `stage0_backstop.py`,
+`stage0_cleanup.py`, `stage0_docker.py`, `stage0_cgroup.py`,
+`stage0_cgroup_exec.py`, `stage0_watchdog_state.py` and `stage0_watchdog.py`
+modules are **incomplete control primitives**, not a runnable Stage-0 controller.
+One generic adapter handles supported common r4 single-server dispatches with
+expectations-pinned request logs and an explicitly predeclared COMPLETE/PASS.
+It validates all assigned cases before the first launch; unsupported layouts
+and terminal classes fail closed. The common checks require a bound writer
+record and request, server-ready lifecycle event, bound nonempty server log,
+matching ready-model response, runtime identity, and isolated intake rejection.
+Even successful execution requires a matched create ID and owned runtime
+receipt. Failed or interrupted creates remain ambiguous. The adapter and
+settlement assumptions have fake-based tests only; they still need independent
+review, live execution, a verified backstop and bounded cleanup.
+
+L2 uses a small modality-launch hook: it binds the selected GPU and output path,
+records the readiness phase, and matches the create response to the inspected
+container; its live behavior remains untested. Required overrides (not
+implemented) are P1/P2/telemetry performance and exporter layouts;
+L3/L4 modality servers; G4's
+additional VLM server; G5's additional endpoint server; the COMP-002 reference
+container; and trigger-bound COMP-001/OPS-001 or external INTEG-001 flows.
+These cannot silently fall back to the common adapter. G7 can use the common
+adapter only for a complete PASS of its unchanged full grid; no short G7
+profile or incomplete-grid terminal class is implemented.
+The attempt helper requires a full GPU UUID (not a potentially ambiguous numeric
+index) and probes the reviewed GPU name/UUID before launch and again after
+cleanup. The smoke-only r4 receipt checks Docker requested exactly that UUID
+and compares an in-container GPU query to the host before readiness. These
+checks rely on the host and runtime; fake probes do not attest a live host. Their offline tests exercise per-box control flow,
+process signalling, limited r4/LLM milestone checks, exact budget arithmetic and
+a fake-provider watchdog loop. They do not start an independent watchdog or
+provide a deployed provider watchdog, implement all modality and performance
+evidence adapters, or establish owned-resource cleanup. Watchdog state receipts
+alone do not establish independent deployment, liveness or a settled provider
+create. The lane owner receipts
+are persisted before container creation, and a pinned Docker adapter is tested
+only with fake commands; a controller must still wire it to those receipts and
+track detached processes. The cgroup primitives have fake-file and join-wrapper
+tests only; they are not wired into a controller or verified on a delegated
+kernel cgroup, and they provide no network namespace or hostile-child sandbox.
+The plan preflight uses the production selected-set checks and requires each
+manifest output to be a fresh path below the expectations-bound smoke marker.
+It therefore needs a separately frozen smoke-output manifest plan; never reuse a
+certification-output plan as smoke. Its tests mock selected-set integration and
+do not constitute supervisor approval. The isolated smoke
+checks exercise both the production record-level and execution-index root guards;
+they do not establish that a complete execution index would otherwise pass. A fake adapter or a
+returned control-flow summary is not an authenticated box barrier. Do not run Stage 0 or
+infer a certification result from these modules.
+
+### Remaining offline launch rehearsal work (#469)
+
+The selected-set preflight and individual synthetic loopbacks are **not** a
+complete offline launch rehearsal. Before rental, exercise the non-Docker
+portions of every selected executable RC-GPU case using its actual runner input
+assembly and relevant argument/SUT parsers against frozen manifests. Unknown or
+missing handlers must fail. L1's production derived-input/output boundary, the
+remaining selected cases, frozen input-plan wiring and execution-host schema-cache
+provisioning are outstanding. Docker-dependent steps, including the actual
+COMP-002 reference container and parser, are deferred to GPU-session smoke.
+The native CPU-offload validation plan and integrity audit are separate required
+work. Loopbacks are not physical-tier evidence or an OS network sandbox.
 
 BC-COMP-001, BC-OPS-001 and externally signed BC-INTEG-001 require an explicit
 pinned command via `freeze_case.py --command-json`: they are respectively a
@@ -256,7 +519,7 @@ missing source populations fail. G3 uses the hidden certification-only
 median for BC-GPU-009. It requires at least two distinct answered latencies and
 zero scheduling delay, and is not a prospective service SLO. G4 requires a pinned tokenizer.json and a
 separate validation-only tokenizer tool. Case 010 additionally requires the
-scoped workflow feature variant and per-cell build bindings described above;
+shipped workflow artifact and per-cell build bindings described above;
 all four cells retain their original assertions and thresholds. Case 011 also pins the VLM binary,
 strategic binary, thinking-capable VLM image/model/revision, prompt file and
 local image. G5 pins the strategic binary, distinct
@@ -373,8 +636,27 @@ requires all selected PR, RC and RC-GPU rows and produces `results.csv` and
 python3 scripts/validation/cert/validate_results.py \
   --catalog docs/RELEASE_CERTIFICATION_CATALOG.csv \
   --results RESULTS/results --candidate-sha FULL_COMMIT_SHA --release v1.8.0 \
-  --selection selection.json
+  --selection selection.json --execution-index execution-index.json \
+  --execution-index-sha256 INDEPENDENTLY_APPROVED_SHA256
 ```
+
+Fresh selected PASS records in release mode require a reviewed execution index.
+The index binds `candidate_sha`, `selection_sha256`, `catalog_sha256`, a
+`selected_plan` pin, and an `entries` array. Each entry contains `ID`, the
+original `record_sha256`, and relative `manifest` and `phases` pins (each a
+`path`/`sha256` object); runtime-generated manifests additionally require a
+`structural_manifest` pin. The selected plan is the frozen case index with
+matching candidate, selection and catalog hashes. Copy proof files byte-for-byte
+under the results parent, and independently review the final index digest before
+passing it. `build_execution_index.py` can build the final index from already
+staged, unchanged records and a per-case proof map, and it runs production
+intake before writing the index. It does not run cases or independently attest
+its inputs. An index cannot substitute for the actual selected-set rehearsal:
+the all-tier selected plan, late-bound barriers, generated input re-verification
+at intake and full harness-to-candidate closure are not complete. Hashes do not
+authenticate a forged bundle or replace host trust and an independent integrity
+audit. Approved N/As are checked separately; they do not need a fabricated
+execution entry.
 
 For a periodic run, pass `--cadence weekly --run-id ID --run-date-utc ISO_UTC
 --branch main --compared-against VERSION`; the CSV defaults to `periodic.csv`.
