@@ -53,6 +53,7 @@ class AdapterTests(unittest.TestCase):
                 'lanes': {'KVS': {'kv_case': 'BC-KV-003', 'port': 8000, 'server_flags': [], 'revision': 'b' * 40,
                                  'prompt_sets': {'seed': adapter.file_pin(prompts)}}},
                 'model_snapshot': str(model), 'hub_cache': str(root / 'hub'), 'timeout_seconds': 2100,
+                'cleanup_grace_seconds': 120, 'cgroup_root': '/sys/fs/cgroup/test',
                 'model_files': [adapter.file_pin(p) for p in model.iterdir()], 'prompt_token_counts': adapter.file_pin(lengths)}
             family = SimpleNamespace(CASES={'BC-KV-003'}, validate_config=lambda config: {'max_prompt_tokens': 16})
             with patch.object(adapter.execution_policy, 'validate_case_tools', return_value={}), \

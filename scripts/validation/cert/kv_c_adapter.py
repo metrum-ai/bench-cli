@@ -68,6 +68,12 @@ def validate_spec(spec, family, lane, case=None):
     fit = family.validate_config(config)
     if type(spec.get('timeout_seconds')) is not int or not 180 <= spec['timeout_seconds'] <= 14400:
         raise ValueError('explicit bounded setup/workload/cleanup envelope required')
+    grace = spec.get('cleanup_grace_seconds')
+    if type(grace) is not int or not 120 <= grace < spec['timeout_seconds'] - 120:
+        raise ValueError('reserve scoped container cleanup inside the outer cgroup cleanup envelope')
+    group = spec.get('cgroup_root')
+    if not isinstance(group, str) or not Path(group).is_absolute() or '..' in Path(group).parts or str(Path(group)) != group:
+        raise ValueError('canonical delegated cgroup root required')
     root = Path(spec['model_snapshot']).absolute()
     hub = Path(spec['hub_cache']).resolve(strict=True)
     if not root.is_dir() or root.name != config['revision'] or not root.resolve().is_relative_to(hub):
@@ -209,7 +215,7 @@ def main(argv, family, lane):
     process = subprocess.Popen(command, env=env, start_new_session=True)
     try:
         try:
-            code = process.wait(timeout=spec['timeout_seconds'] - 120)
+            code = process.wait(timeout=spec['timeout_seconds'] - spec['cleanup_grace_seconds'] - 120)
         except subprocess.TimeoutExpired:
             # Reserve cleanup inside the case envelope. The shell's existing
             # owner-labelled cleanup runs on TERM; a timeout cannot certify.

@@ -20,9 +20,10 @@ The hash-pinned `lane_manifest` is a `kv-r5-c-execution.v1` JSON object with:
 | `lanes` | Exactly selected engine configuration under `KVS` or `KVL`; see the engine-specific document. |
 | `tools`, `tool_manifest` | Content-pinned native executables and the pin of the tool map; the existing isolated tool policy applies. |
 | `hub_cache`, `model_snapshot` | Staged offline hub cache and exact-revision snapshot within it. No credentials directory is mounted. |
-| `model_files` | Complete snapshot file inventory, each with absolute snapshot `path` and independently checked `sha256`, including weights, tokenizer and configuration. Resolved files must remain inside the hub cache. |
+| `model_files` | Complete snapshot file inventory, each with canonical resolved file `path` and independently checked `sha256`, including weights, tokenizer and configuration. Resolved files must remain inside the hub cache. |
 | `prompt_token_counts` | File pin for `{ "tokenizer_sha256": "...", "counts": { "full-prompt-sha256": token_count } }`. Cover exactly every cohort prompt with positive counts within the demonstrated fit bound. These are frozen tokenizer outputs, not string-length estimates. |
-| `timeout_seconds` | Explicit setup/workload/cleanup limit, 180..14400 seconds. The launcher reserves the last 120 seconds for scoped cleanup; workload timeout always fails. This is independent of planning estimates. |
+| `cleanup_grace_seconds`, `cgroup_root` | Outer cleanup grace (at least 120 seconds) and the canonical delegated cgroup root. Leave another 120 seconds inside the process deadline for container removal. |
+| `timeout_seconds` | Explicit setup/workload/cleanup limit, 180..14400 seconds. The launcher reserves 120 seconds for owned-container cleanup before the outer process deadline; workload timeout always fails. This is independent of planning estimates. |
 
 The fit object and its underlying evidence receipt are also transitive inputs.
 Include `driver_version` in the fit: actual GPU identity, driver, total/free
