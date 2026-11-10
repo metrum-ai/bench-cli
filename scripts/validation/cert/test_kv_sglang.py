@@ -79,12 +79,12 @@ class Checks(unittest.TestCase):
                            'unknown': 'invalid_value' if unknown else None, 'unit': 'ratio',
                            'role': 'reported_hit_rate', 'expected_family_type': 'gauge'}]}
                 cohort = {'rows': [{'native_cache_metric_discovery': capture}], 'requests': [{}, {}],
-                          'usage': [{'prompt_tokens_details': {'cached_tokens': 64}}]}
+                          'usage': [{'prompt_tokens': 128, 'prompt_tokens_details': {'cached_tokens': 64}}]}
                 binding = {'image': runner.CONFIG, 'owner': 'owner', 'restarts': 0}
                 stack.enter_context(patch.dict('os.environ', {'CERT_CASE_ID': 'BC-KV-003', 'CERT_SHA': 'a' * 40,
                                                              'CERT_START_UTC': '2026-01-01T00:00:00Z'}))
                 stack.enter_context(patch.object(argparse.ArgumentParser, 'parse_args', return_value=args))
-                stack.enter_context(patch.object(runner, 'validate_config', return_value={}))
+                stack.enter_context(patch.object(runner, 'validate_config', return_value={'max_prompt_tokens': 1024}))
                 stack.enter_context(patch.object(runner, 'runtime_source', return_value={'matched': True}))
                 stack.enter_context(patch.object(common, 'docker_json', return_value=binding))
                 stack.enter_context(patch.object(runner.time, 'sleep'))

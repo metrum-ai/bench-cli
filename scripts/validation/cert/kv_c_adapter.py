@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import signal
+import socket
 import subprocess
 from pathlib import Path
 
@@ -112,6 +113,8 @@ def preflight(manifest, family, lane):
     matches = [item for item in measured if item['path'] == spec['candidate']['path'] and item['sha256'] == spec['candidate']['sha256']]
     if len(matches) != 1 or manifest['candidate'] != matches[0]:
         raise ValueError('candidate is not the shipped measured workflow artifact')
+    if manifest.get('harness_repo') != str(ROOT):
+        raise ValueError('frozen harness repository differs')
     closure = harness_integrity.verify(ROOT, manifest['candidate_sha'])
     if manifest['harness_closure'] != closure:
         raise ValueError('candidate harness closure changed')
@@ -162,7 +165,7 @@ def freeze(args, family, lane):
                '--manifest-sha256', lane_pin['sha256'], '--out', str(args.run_out.resolve())]
     manifest = {'schema_version': 'kv-r5-frozen.v1', 'lane': lane, 'candidate_sha': spec['candidate_sha'], 'candidate': matches[0],
                 'build_receipt': file_pin(args.build_receipt), 'lane_manifest': lane_pin, 'tools': spec['tools'],
-                'inputs': list(inputs.values()), 'harness_closure': closure,
+                'inputs': list(inputs.values()), 'harness_repo': str(ROOT), 'harness_closure': closure,
                 'cases': {args.case: {'launcher': file_pin(HERE / 'case_entry.sh'), 'command': command, 'out': str(args.run_out.resolve())}}}
     preflight(manifest, family, lane)
     with args.out.open('x') as stream:
@@ -215,6 +218,22 @@ def main(argv, family, lane):
             return 124
         if manifest_tool.sha256_file(args.manifest) != args.manifest_sha256:
             raise ValueError('execution spec changed during launch')
+        if code == 0:
+            owner = (args.out / 'evidence/server-container-owner.txt').read_text().strip()
+            if len(owner) != 32 or any(c not in '0123456789abcdef' for c in owner):
+                raise ValueError('cleanup ownership receipt missing')
+            remaining = subprocess.run([spec['tools']['docker']['path'], 'ps', '-a', '--filter',
+                                       'label=metrum.cert.owner=' + owner, '--format', '{{.ID}}'],
+                                      check=True, capture_output=True, text=True, timeout=30)
+            if remaining.stdout.strip():
+                raise ValueError('owned container remains after shell cleanup')
+            config = spec['lanes'][lane]
+            for port in (config['port'], config['proxy_port']):
+                with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    probe.bind(('127.0.0.1', port))
+            (args.out / 'evidence/kv-cleanup-reconciled.json').write_text(json.dumps(
+                {'owned_containers': [], 'loopback_ports_bindable': [config['port'], config['proxy_port']]}) + '\n')
         return code
     finally:
         if process.poll() is None:

@@ -103,10 +103,13 @@ def runtime_source(container):
 def start_server(args, config):
     fit = validate_config(config)
     # Bind actual memory/GPU identity before starting the engine.
-    common.verify_fit_host(fit)
+    actual_fit = common.verify_fit_host(fit)
+    (args.out / 'evidence/kv-fit-runtime.json').write_text(json.dumps(actual_fit) + '\n')
     image = json.loads(subprocess.run(['docker', 'image', 'inspect', IMAGE], check=True, capture_output=True, text=True, timeout=30).stdout)[0]
-    if image['Id'] != CONFIG or image.get('Architecture') != 'amd64' or IMAGE not in image.get('RepoDigests', []):
+    if image['Id'] != CONFIG or image.get('Architecture') != 'amd64' or image.get('Os') != 'linux' or IMAGE not in image.get('RepoDigests', []):
         raise ValueError('local image digest/config/platform differs')
+    (args.out / 'evidence/kv-image-preflight.json').write_text(json.dumps(
+        {'reference': IMAGE, 'config': image['Id'], 'platform': 'linux/amd64', 'repo_digests': image['RepoDigests']}) + '\n')
     command = ['docker', 'run', '-d', '--pull=never', '--name', args.container, '--label', f'metrum.cert.owner={args.container_owner}',
                '--gpus', 'device=' + os.environ['CUDA_VISIBLE_DEVICES'], '--ipc=host', '--env', 'CUDA_VISIBLE_DEVICES=0',
                '-p', f'127.0.0.1:{config["port"]}:8000', '--entrypoint', 'python3']
@@ -163,7 +166,8 @@ def main():
         observed['runtime'] = runtime_source(args.container)
         observed['fit'] = fit
         (evidence / 'kv-runtime-binding.json').write_text(json.dumps(binding) + '\n')
-        common.run_cohort(args, config, 'seed', args.port, 'sglang0523', REVISION)
+        seed_result = common.run_cohort(args, config, 'seed', args.port, 'sglang0523', REVISION)
+        common.check_usage_bound(seed_result['usage'], fit['max_prompt_tokens'])
         phases = ['repeat', 'unique'] + (['pressure', 'rehit'] if case == 'BC-KV-004' else [])
         observed['phases'] = {}
         for cohort in phases:
@@ -176,6 +180,7 @@ def main():
             (evidence / f'kv-{cohort}-quiet.prom').write_text(quiet)
             (evidence / f'kv-{cohort}-before.prom').write_text(before)
             result = common.run_cohort(args, config, cohort, args.port, 'sglang0523', REVISION)
+            common.check_usage_bound(result['usage'], fit['max_prompt_tokens'])
             time.sleep(config['settle_seconds'])
             after = common.fetch(args.port)
             (evidence / f'kv-{cohort}-after.prom').write_text(after)

@@ -145,6 +145,8 @@ def verify_fit_host(fit):
     available = int(memory['MemAvailable'].split()[0]) * 1024
     if available <= fit['host_required_bytes']:
         raise ValueError('actual host memory has no demonstrated cache headroom')
+    return {'gpu_uuid': gpu[0].strip(), 'gpu_class': gpu[1].strip(), 'gpu_memory_mib': int(gpu[2].strip()),
+            'gpu_free_mib': int(gpu[3].strip()), 'driver': gpu[4].strip(), 'host_available_bytes': available}
 
 
 def docker_json(container):
@@ -237,3 +239,8 @@ def run_cohort(args, config, cohort, metrics_port, profile, revision):
     data = (args.out / 'evidence' / f'{label}.jsonl').read_text()
     rows, requests, usage = verify_trace(data, trace, expected, args.model)
     return {'rows': rows, 'requests': requests, 'usage': usage}
+
+
+def check_usage_bound(usage, maximum):
+    if not usage or any(type(u.get('prompt_tokens')) is not int or not 0 < u['prompt_tokens'] <= maximum for u in usage):
+        raise ValueError('actual server prompt length exceeds or lacks demonstrated fit bound')
