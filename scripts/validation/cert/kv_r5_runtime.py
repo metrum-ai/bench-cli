@@ -303,6 +303,8 @@ print(json.dumps(rows))'''
                         save(directory/'reset.json', {'status': response.status, 'body': raw.decode()})
                     finally:
                         conn.close()
+                if hasattr(self.family, 'before_phase'):
+                    self.family.before_phase(self, phase, directory)
                 before = self.get(d['metrics_port'], self.family.METRICS_PATH)
                 (directory/'before.prom').write_text(before)
                 argv = [a.replace('{out}', str(directory)) for a in phase['argv']]

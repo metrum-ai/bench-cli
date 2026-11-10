@@ -25,29 +25,16 @@ required phase coverage. Each invocation has one measured concurrency-one stage.
 The runner records per-cohort count, median and type-7 p95 without a speedup gate.
 Cache cohort labels derive from returned cached tokens, never turn number.
 
-Offload and pressure need `target_prefix_sha256` and an executable `audit_tool`
-pin also listed in `inputs`. This separately reviewed observer is invoked as
-`TOOL --container OWNED_CONTAINER --phase PHASE --out NEW_JSON`. It must retain
-independent raw engine/allocator evidence under the phase directory and emit
-`kv-exclusive-window.v1` with `phase`, `prefix_sha256`, `raw_event_paths`,
-`same_epoch`, `exclusive_requests`, `exclusive_transfers`, `async_work_settled`
-and `target_gpu_evicted`. Pressure additionally needs independently verified
-`pressure_geometry_verified` and `rehit_miss_accounting_verified`. Every flag
-must be true, with raw evidence paths present. An observer implementation and
-its interpretation require separate source review; these booleans are not
-self-authenticating proof. An absent observer, exporter aggregates alone, or
-inability to establish target eviction leaves the case blocked. No default
-observer fabricates evidence from hit rates or a configured memory tier.
-The raw stream cannot be empty: it must contain an attributable
-`kv-target-gpu-eviction.v1` allocator observation for the pressure phase with
-the target prefix, nonempty epoch, positive `gpu_resident_blocks_before` and
-zero `gpu_resident_blocks_after`, plus a same-epoch
-`kv-exclusive-observation.v1` for rehit with exactly one `target_requests`,
-zero `competing_requests`, zero `competing_transfers` and zero
-`pending_transfers_at_end`. Those fields are observations produced by the
-reviewed observer, not inferred from cached-token usage. The independent
-observer's source, event completeness and block/prefix mapping must be reviewed
-and bound before either physical eviction gate is executable.
+Offload and pressure use the source-bound
+[KV-events observer](KV_R5_EVICTION_OBSERVER.md). Freeze
+`eviction_observer: "vllm033-kv-events.v1"`, `target_prefix_sha256`,
+`inputs.eviction_plan` and `inputs.kv_group_inventory`. Arbitrary executable
+receipts and aggregate hit rates cannot supply eviction evidence. The runner
+retains raw replay frames, independent counter pages, pause/resume replies,
+server tokenization and process epochs; evaluation reconstructs the proof.
+A missing observer input, incomplete stream, unknown group geometry or failure
+to observe complete target eviction blocks both cases. Offline tests do not
+turn these gates into a live certification result.
 
 The existing exporter fixture tests instantiate real logger serialization with
 synthetic statistics. They are not a deployed-model capture. This runner saves
