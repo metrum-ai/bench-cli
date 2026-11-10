@@ -18,6 +18,7 @@ synthetic, source-derived exposition, not captured live engine pages.
 | vLLM external | same revision | Separate connector hit/query token counters, never silently summed with native counters. |
 | vLLM offload | same revision | Flat directional byte counters, cumulative transfer time in **seconds** and allocation-failure **events**. Deprecated transfer-type aggregates are deliberately excluded, not summed or aliased. |
 | vLLM 4ba APC, external, offload | `4ba787ec9959e566d3b587a796dff07673324da5` | Separate exact-revision slices of the same metric families and units. See the revision-specific caveats below; these profiles do not imply tier attribution. |
+| SGLang v0.5.23 | `297e54fd105e974cdf401e5b4d20253a22c16f90` | Separate exact-revision slice; see [source and certification notes](KV_SGLANG_CERTIFICATION.md). Same cached-token source labels and hit-rate gauge semantics, never occupancy. |
 | SGLang | `188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a` | Cached-token counter retains device/host/storage/total source labels; hit-rate gauge is not a phase counter. |
 | LMCache | `34f8a409e3631eff51d0b6fff67ca9c68f123377` | Requested/hit/stored tokens differ from remote byte counters and retrieve-request counts. Stored tokens include evicted tokens: not resident occupancy. Separate reported cache/storage byte gauges, eviction-operation events, evicted keys and failed-eviction **candidate counts** retain their units. A failed selection can count up to 64 candidates, not one failed call. |
 | Dynamo KVBM | `fa9852014950ed0aea74e56e1de441fc6de15307` | Directional transfer **blocks**, matched tokens and sliding-window hit-rate gauges are distinct. Object read/write failure counters also count **blocks**, not requests. No block-to-byte conversion. |
@@ -111,7 +112,7 @@ Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optiona
 a supplied revision must be a full source SHA. Missing/unsupported revisions
 preserve Unknown sample values rather than guessing executable compatibility.
 Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`,
-`vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `lmcache`,
+`vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `sglang0523`, `lmcache`,
 legacy `dynamo-kvbm` and `trt-llm`. These are selections, not backend autodetection.
 
 Discovery performs one unauthenticated GET before measurement. It sends no

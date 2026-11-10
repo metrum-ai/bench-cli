@@ -26,6 +26,8 @@ pub enum ProfileId {
     Vllm4baExternal,
     Vllm4baOffload,
     Sglang,
+    /// SGLang v0.5.23 source slice; independently selected, never a release alias.
+    Sglang0523,
     Lmcache,
     DynamoKvbm,
     TrtLlm,
@@ -423,6 +425,7 @@ impl ProfileId {
                 "4ba787ec9959e566d3b587a796dff07673324da5"
             }
             Self::Sglang => "188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a",
+            Self::Sglang0523 => "297e54fd105e974cdf401e5b4d20253a22c16f90",
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
             Self::TrtLlm => "a3febfbfd0324bded62007ffd7d5241a06cbfc00",
@@ -433,7 +436,7 @@ impl ProfileId {
             Self::VllmApc | Self::Vllm4baApc => VLLM_APC,
             Self::VllmExternal | Self::Vllm4baExternal => VLLM_EXTERNAL,
             Self::VllmOffload | Self::Vllm4baOffload => VLLM_OFFLOAD,
-            Self::Sglang => SGLANG,
+            Self::Sglang | Self::Sglang0523 => SGLANG,
             Self::Lmcache => LMCACHE,
             Self::DynamoKvbm => KVBM,
             Self::TrtLlm => TRTLLM,
@@ -503,7 +506,7 @@ pub fn probe(
         ProfileId::VllmApc | ProfileId::Vllm4baApc => &APC,
         ProfileId::VllmExternal | ProfileId::Vllm4baExternal => &EXTERNAL,
         ProfileId::VllmOffload | ProfileId::Vllm4baOffload => &OFFLOAD,
-        ProfileId::Sglang => &SGLANG_MATCHER,
+        ProfileId::Sglang | ProfileId::Sglang0523 => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
         ProfileId::TrtLlm => &TRTLLM_MATCHER,
