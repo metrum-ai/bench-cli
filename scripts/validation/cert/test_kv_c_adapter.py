@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fake frozen-envelope and immutable-input controls; no live server."""
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -27,6 +28,45 @@ class AdapterTests(unittest.TestCase):
                 adapter.main(['--case', 'BC-KV-003', '--manifest', str(source), '--manifest-sha256', '0' * 64,
                               '--out', str(root / 'out')], family, 'KVS')
             execute.assert_not_called()
+
+    def test_guarded_launch_reserves_cleanup_and_timeout_cannot_pass(self):
+        from unittest.mock import MagicMock
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                out = root / 'run'
+                (out / 'evidence').mkdir(parents=True)
+                (out / 'evidence/server-container-owner.txt').write_text('a' * 32)
+                candidate = root / 'candidate'
+                candidate.write_text('fixture')
+                spec = {'candidate': adapter.file_pin(candidate), 'baseline': adapter.file_pin(candidate),
+                    'tools': {'bash': {'path': '/bin/bash'}, 'docker': {'path': '/usr/bin/docker'}},
+                    'hub_cache': str(root), 'timeout_seconds': 600, 'cleanup_grace_seconds': 120,
+                    'lanes': {'KVS': {'port': 8000, 'proxy_port': 8001}}}
+                source = root / 'spec.json'
+                source.write_text(json.dumps(spec))
+                envelope = root / 'envelope.json'
+                envelope.write_text(json.dumps({'lane_manifest': adapter.file_pin(source),
+                    'cases': {'BC-KV-003': {'out': str(out)}}}))
+                process = MagicMock()
+                process.pid = 12345
+                process.poll.return_value = 0
+                process.wait.side_effect = [subprocess.TimeoutExpired('fixture', 360), 0] if timeout else [0]
+                family = SimpleNamespace(CASES={'BC-KV-003'})
+                with patch.dict('os.environ', {'CERT_INPUT_MANIFEST': str(envelope)}), \
+                        patch.object(adapter, 'validate_spec'), patch.object(adapter, 'preflight'), \
+                        patch.object(adapter.subprocess, 'Popen', return_value=process) as launch, \
+                        patch.object(adapter.subprocess, 'run', return_value=SimpleNamespace(stdout='')), \
+                        patch.object(adapter.socket, 'socket'), patch.object(adapter.os, 'killpg') as kill:
+                    result = adapter.main(['--case', 'BC-KV-003', '--manifest', str(source),
+                        '--manifest-sha256', adapter.file_pin(source)['sha256'], '--out', str(out)], family, 'KVS')
+                    self.assertEqual(124 if timeout else 0, result)
+                    self.assertEqual(360, process.wait.call_args_list[0].kwargs['timeout'])
+                    self.assertEqual('BC-KV-003', launch.call_args.kwargs['env']['CERT_CASE_ID'])
+                    self.assertEqual(str(root), launch.call_args.kwargs['env']['CERT_HF_HUB_CACHE'])
+                    self.assertTrue(launch.call_args.kwargs['start_new_session'])
+                    self.assertEqual(1 if timeout else 0, kill.call_count)
+                self.assertFalse((out / 'results').exists())
 
     def test_complete_model_inventory_and_tokenizer_bound_cohorts_are_required(self):
         import hashlib
