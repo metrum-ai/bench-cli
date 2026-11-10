@@ -11,7 +11,7 @@ Missing, FAIL, PENDING and smoke evidence cannot satisfy these gates. Unknown
 metric values remain Unknown; they never become zero or a physical cache claim.
 
 The catalog records proposed image descriptors, not proof of executable source
-identity or runtime support. SGLang, LMCache, Dynamo and TensorRT-LLM carry
+identity or runtime support. SGLang, LMCache and Dynamo carry
 `TBD-pin` until source review, matching exposition fixtures and runtime checks
 resolve their compatibility. Selection keeps these mandatory cases and marks
 them `TBD-pin-not-executable`. Execution preflight and result validation reject
@@ -24,12 +24,18 @@ model files, tokenizer and collector at execution freeze. Publisher labels alone
 cannot establish source compatibility. No RC or development engine image is
 eligible. TensorRT-LLM uses standalone stable 1.2.1, independently of Dynamo;
 Dynamo KVBM uses stable 1.6.2 with the vLLM runtime and requires proof that its
-conditional KVBM package is installed and operational.
+conditional KVBM package is installed and operational. The standalone TRT-LLM
+1.2.1 collector uses source `376f7e1b` and `/prometheus/metrics`. It does not
+export cached tokens: report Unknown with reason `not exported by 1.2.1`, with
+no reuse or physical-tier attribution. Required source-defined families, types,
+units and independently consistent live deltas remain mandatory.
 
 Prefer Qwen/Qwen3.8-27B-FP8 at
 `c3a462cc3d38cf351f3b26cbd763469eeb74ef81`. For an unsupported engine select
 the newest verified supported official Qwen and document the reason and measured
-fit. Qwen3-8B is a flagged last resort. Every live row allows H100 80 GB or RTX
+fit. TRT-LLM uses Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 at
+`5a5a776300a41aaa681dd7ff0106608ef2bc90db`, conditional on measured at least
+25% KV headroom. Qwen3-8B is a flagged last resort. Every live row allows H100 80 GB or RTX
 PRO 6000 Blackwell only after actual runtime, kernel and KV headroom checks.
 BC-KV-002 additionally needs at least 64 GiB host RAM. Its entire exclusive L1
 window, including applicable setup and cleanup, remains bounded by two GPU-hours.
@@ -56,3 +62,19 @@ Changing the catalog or harness changes the candidate. Rebuild workflow-origin
 artifacts, refreeze the full selection and execution requirements, and use the
 existing reviewed carry-over process for any earlier results; a dry run or an
 earlier r4 result does not establish an r5 PASS.
+
+## Engine lane dispatch
+
+Catalog lanes are KVV (vLLM), KVS (SGLang), KVL (LMCache), KVD (Dynamo),
+KVT (TRT-LLM) and KVC (CPU). `kv_dispatch.LANE_MODULES` imports one independent
+module per lane in `scripts/validation/cert/kv_lanes/`. Each module implements
+`main(argv) -> int` (receives `--case ID` plus lane arguments) and
+`freeze(args) -> dict` (writes `args.out` and returns the frozen manifest).
+Registration stubs raise `runner not yet available`; replace only the owning
+module and set `AVAILABLE = True` when reviewed offline tests cover it. No shared
+registry edit is needed. `case_entry.sh` and `freeze_case.py` check the exact
+case/lane mapping before delegating. The common r4 adapter remains closed to KV.
+
+Live KV execution requires image/GPU provenance, launcher terminal evidence,
+smoke-intake rejection, independently proven scoped cleanup and engine-specific
+source/runtime identity checks. Registration alone is not executable evidence.

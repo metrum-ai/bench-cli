@@ -39,7 +39,7 @@ class CatalogR5Tests(unittest.TestCase):
         selection = select_cases.make_selection(rows, select_cases.catalog_hash(CATALOG),
             'a' * 40, .01, 3, [], [{'release': 'prior', 'ran': sorted(rows)}])
         self.assertTrue(CASES <= set(selection['selected']))
-        for n in (3, 4, 5, 6, 7):
+        for n in (3, 4, 5, 6):
             case = f'BC-KV-{n:03}'
             self.assertIn('TBD-pin-not-executable', selection['selected'][case])
             with self.assertRaisesRegex(ValueError, 'not executable'):
