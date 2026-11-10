@@ -4,6 +4,7 @@
 """vLLM r5 APC, exclusive native CPU offload, sessions and pressure gates."""
 import json
 import math
+import re
 import statistics
 import sys
 
@@ -85,10 +86,15 @@ def server(data):
 
 
 def preflight(instance):
-    code = ('import importlib.util,json,pathlib; '
+    code = ('import importlib.util,importlib.metadata,json,pathlib; '
             'root=pathlib.Path(importlib.util.find_spec("vllm").origin).parent; '
-            'print(json.dumps({str(root/p):h for p,h in '+repr(SOURCE_FILES)+'.items()}))')
-    expected = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
+            'print(json.dumps({"version":importlib.metadata.version("vllm"),'
+            '"files":{str(root/p):h for p,h in '+repr(SOURCE_FILES)+'.items()}}))')
+    package = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
+    runtime.save(instance.out/'vllm-package.json', package)
+    if not re.fullmatch(r'0\.33\.0(?:\+[a-zA-Z0-9.]+)?', package['version']):
+        raise ValueError('actual vLLM package is not stable 0.33.0')
+    expected = package['files']
     needed = SOURCE_FILES if instance.data['case'] == 'BC-KV-002' else {'v1/metrics/loggers.py': SOURCE_FILES['v1/metrics/loggers.py']}
     for relative, digest in needed.items():
         paths = [p for p, h in expected.items() if p.endswith('/'+relative) and h == digest]

@@ -8,6 +8,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import kv_r5_metrics
 import kv_r5_vllm_runner as runner
@@ -54,6 +56,12 @@ def phase(root, name, count=16, cached=0, offset=0):
 
 
 class VllmControls(unittest.TestCase):
+    def test_rc_package_cannot_use_stable_runtime_profile(self):
+        instance = SimpleNamespace(out=Path('/unused'), name='owned-fixture', docker=lambda *args:
+            SimpleNamespace(stdout=json.dumps({'version': '0.33.0rc1', 'files': {}})))
+        with patch.object(runner.runtime, 'save'), self.assertRaisesRegex(ValueError, 'not stable'):
+            runner.preflight(instance)
+
     def test_apc_reconciles_product_wire_and_independent_snapshots(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
