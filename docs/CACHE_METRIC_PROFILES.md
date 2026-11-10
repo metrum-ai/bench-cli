@@ -20,10 +20,17 @@ synthetic, source-derived exposition, not captured live engine pages.
 | vLLM 4ba APC, external, offload | `4ba787ec9959e566d3b587a796dff07673324da5` | Separate exact-revision slices of the same metric families and units. See the revision-specific caveats below; these profiles do not imply tier attribution. |
 | SGLang v0.5.23 | `297e54fd105e974cdf401e5b4d20253a22c16f90` | Separate exact-revision slice; see [source and certification notes](KV_SGLANG_CERTIFICATION.md). Same cached-token source labels and hit-rate gauge semantics, never occupancy. |
 | SGLang | `188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a` | Cached-token counter retains device/host/storage/total source labels; hit-rate gauge is not a phase counter. |
+| LMCache v0.5.7 MP | `236f3eec32a2d330662a1795d90a01a1e0782c49` | Separate MP lookup-token and store/load chunk slice; no legacy aliases or resident occupancy. See [source and certification notes](KV_LMCACHE_CERTIFICATION.md). |
 | LMCache | `34f8a409e3631eff51d0b6fff67ca9c68f123377` | Requested/hit/stored tokens differ from remote byte counters and retrieve-request counts. Stored tokens include evicted tokens: not resident occupancy. Separate reported cache/storage byte gauges, eviction-operation events, evicted keys and failed-eviction **candidate counts** retain their units. A failed selection can count up to 64 candidates, not one failed call. |
 | Dynamo KVBM | `fa9852014950ed0aea74e56e1de441fc6de15307` | Directional transfer **blocks**, matched tokens and sliding-window hit-rate gauges are distinct. Object read/write failure counters also count **blocks**, not requests. No block-to-byte conversion. |
 | TRT-LLM collector | `a3febfbfd0324bded62007ffd7d5241a06cbfc00` | Cached prompt tokens, manager/iteration reused or missed blocks, accepted connector loads, reported directional bytes and layout/utilization gauges remain separate. Not Triton backend `nv_trt_llm_*` aliases. |
 | TRT-LLM stable 1.2.1 | `376f7e1bd8ed543f75014309e3fd4b237e9b0e73` | Separate `trt-llm121` profile: completed requests and four duration histograms at `/prometheus/metrics`; cached tokens Unknown, reason `not exported by 1.2.1`. [Source and runtime scope](KV_R5_TRTLLM.md). |
+
+`Sglang0523` is a separate `ProfileId` with its own exact source revision.
+It reuses the `SGLANG` metric spec because the pinned-source review and
+[upstream exporter serialization fixture](../tests/fixtures/sglang0523-source-slice.prom)
+confirm identical cached-token counter and hit-rate gauge definitions.
+This shared metric spec does not create a source or release alias.
 
 Dynamo's pinned recipe explicitly requires **Dynamo <=1.6.x**; later releases
 no longer ship KVBM. The legacy source slice is not a claim that current Dynamo
@@ -113,7 +120,7 @@ Both runners accept `--cache-metrics-url`, `--cache-metrics-profile` and optiona
 a supplied revision must be a full source SHA. Missing/unsupported revisions
 preserve Unknown sample values rather than guessing executable compatibility.
 Profile choices are `vllm-apc`, `vllm-external`, `vllm-offload`,
-`vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `sglang0523`, `lmcache`,
+`vllm4ba-apc`, `vllm4ba-external`, `vllm4ba-offload`, `sglang`, `sglang0523`, `lmcache`, `lmcache057-mp`,
 legacy `dynamo-kvbm` and `trt-llm`. These are selections, not backend autodetection.
 Stable standalone 1.2.1 uses the separate `trt-llm121` selection; it does not
 export the newer collector's cached-token or KV reuse families.
