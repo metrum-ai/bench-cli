@@ -77,6 +77,15 @@ class WireControls(unittest.TestCase):
 
 
 class LifecycleControls(unittest.TestCase):
+    def test_engine_parser_aliases_cannot_override_controlled_options(self):
+        forbidden = {'--kv-transfer-config', '--language-model-only', '--kv-cache-memory-bytes', '--served-model-name', '-tp'}
+        for value in ('--kv_transfer_config.kv_connector=Other', '--kv-transfer-config+',
+                      '--no_language_model_only', '--kv_cache_memory_bytes=1',
+                      '--kv-cache-memory-b=1', '--served_model_name+=other', '-tp=2'):
+            with self.subTest(value=value):
+                self.assertTrue(runtime.server_overrides([value], forbidden))
+        self.assertFalse(runtime.server_overrides(['--max-model-len', '4096', '--gpu-memory-utilization=.9'], forbidden))
+
     def test_unlisted_weights_cannot_hide_behind_a_pinned_model_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
