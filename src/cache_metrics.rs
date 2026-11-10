@@ -29,6 +29,8 @@ pub enum ProfileId {
     /// SGLang v0.5.23 source slice; independently selected, never a release alias.
     Sglang0523,
     Lmcache,
+    /// LMCache 0.5.7 MP lookup tokens and chunk/object transfers.
+    Lmcache057Mp,
     DynamoKvbm,
     TrtLlm,
     /// Stable standalone 1.2.1 exports request completion and latency only.
@@ -41,6 +43,7 @@ pub enum Unit {
     Requests,
     Bytes,
     Blocks,
+    Chunks,
     Ratio,
     Seconds,
     Events,
@@ -56,6 +59,7 @@ impl Unit {
             Self::Requests => "requests",
             Self::Bytes => "bytes",
             Self::Blocks => "blocks",
+            Self::Chunks => "chunks",
             Self::Ratio => "ratio",
             Self::Seconds => "seconds",
             Self::Events => "events",
@@ -314,6 +318,56 @@ const LMCACHE: &[MetricSpec] = &[
     )
     .optional(),
 ];
+
+// MP lookup tokens exclude native GPU hits and sub-chunk tails. Chunk/object
+// operations retain source units; no conversion to stored tokens or bytes.
+const LMCACHE057_MP: &[MetricSpec] = &[
+    c(
+        "lmcache_mp_lookup_requested_tokens_total",
+        Unit::Tokens,
+        Role::Query,
+    ),
+    c(
+        "lmcache_mp_lookup_hit_tokens_total",
+        Unit::Tokens,
+        Role::Hit,
+    ),
+    c(
+        "lmcache_mp_l1_write_chunks_total",
+        Unit::Chunks,
+        Role::Stored,
+    ),
+    c(
+        "lmcache_mp_num_chunks_loaded_total",
+        Unit::Chunks,
+        Role::Read,
+    ),
+    c("lmcache_mp_l1_read_chunks_total", Unit::Chunks, Role::Read).optional(),
+    c(
+        "lmcache_mp_num_submitted_stores_total",
+        Unit::Events,
+        Role::Transfer,
+    )
+    .optional(),
+    c(
+        "lmcache_mp_num_finished_stores_total",
+        Unit::Events,
+        Role::Transfer,
+    )
+    .optional(),
+    c(
+        "lmcache_mp_num_submitted_retrieves_total",
+        Unit::Events,
+        Role::Transfer,
+    )
+    .optional(),
+    c(
+        "lmcache_mp_num_finished_retrieves_total",
+        Unit::Events,
+        Role::Transfer,
+    )
+    .optional(),
+];
 const KVBM: &[MetricSpec] = &[
     c("kvbm_offload_blocks_d2h", Unit::Blocks, Role::Transfer),
     c("kvbm_onboard_blocks_h2d", Unit::Blocks, Role::Transfer),
@@ -539,6 +593,7 @@ impl ProfileId {
             Self::Sglang => "188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a",
             Self::Sglang0523 => "297e54fd105e974cdf401e5b4d20253a22c16f90",
             Self::Lmcache => "34f8a409e3631eff51d0b6fff67ca9c68f123377",
+            Self::Lmcache057Mp => "236f3eec32a2d330662a1795d90a01a1e0782c49",
             Self::DynamoKvbm => "fa9852014950ed0aea74e56e1de441fc6de15307",
             Self::TrtLlm => "a3febfbfd0324bded62007ffd7d5241a06cbfc00",
             Self::TrtLlm121 => "376f7e1bd8ed543f75014309e3fd4b237e9b0e73",
@@ -551,6 +606,7 @@ impl ProfileId {
             Self::VllmOffload | Self::Vllm4baOffload => VLLM_OFFLOAD,
             Self::Sglang | Self::Sglang0523 => SGLANG,
             Self::Lmcache => LMCACHE,
+            Self::Lmcache057Mp => LMCACHE057_MP,
             Self::DynamoKvbm => KVBM,
             Self::TrtLlm => TRTLLM,
             Self::TrtLlm121 => TRTLLM121,
@@ -614,6 +670,7 @@ pub fn probe(
     static OFFLOAD: OnceLock<RegexSet> = OnceLock::new();
     static SGLANG_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static LMCACHE_MATCHER: OnceLock<RegexSet> = OnceLock::new();
+    static LMCACHE057_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static KVBM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static TRTLLM121_MATCHER: OnceLock<RegexSet> = OnceLock::new();
     static TRTLLM_MATCHER: OnceLock<RegexSet> = OnceLock::new();
@@ -623,6 +680,7 @@ pub fn probe(
         ProfileId::VllmOffload | ProfileId::Vllm4baOffload => &OFFLOAD,
         ProfileId::Sglang | ProfileId::Sglang0523 => &SGLANG_MATCHER,
         ProfileId::Lmcache => &LMCACHE_MATCHER,
+        ProfileId::Lmcache057Mp => &LMCACHE057_MATCHER,
         ProfileId::DynamoKvbm => &KVBM_MATCHER,
         ProfileId::TrtLlm => &TRTLLM_MATCHER,
         ProfileId::TrtLlm121 => &TRTLLM121_MATCHER,
