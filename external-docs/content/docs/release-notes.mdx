@@ -15,10 +15,46 @@ in the repository `CHANGELOG.md`.
 
 ## Metrum AI Bench CLI 1.9.0
 
-Unreleased; certification and publication are pending. This candidate adds
-opt-in KV study exports and cache evidence, held-out warmup and session
-controls, and source-pinned cache metric profiles. Missing evidence remains
-Unknown and does not establish physical cache-tier participation.
+Unreleased. The release date will be set at the tag; certification and publication
+are pending. This candidate adds opt-in tools for preparing reproducible KV-cache
+workloads and reporting the evidence available from a run.
+
+- Control request boundaries and ordering with sequential recorded-history
+  sessions, explicit reuse/cache-busting policies and prescribed replay. Held-out
+  warmup with pinned rendering and trusted stage reset hooks adds isolation checks;
+  closed-loop held-out warmup remains guarded pending dynamic body bindings.
+- Prepare pinned public document/question datasets with `prompts dataset`, verified
+  file checksums, offline inputs, content-unique selection and rendered-token
+  overlap checks. Typed session/tool normalization, synthetic prefix generators,
+  structural trace conversion and capacity-scaled pressure models are separate
+  library building blocks. They do not automatically replay a source trace or
+  establish live generated-history reuse. Dataset terms and rights checks remain
+  required; ingestion never executes source scripts or tool calls.
+- Record server-reported cached tokens and keep missing, invalid and reported-zero
+  evidence distinct. Compare timing by reported-token cohort while preserving
+  headline versus visible-answer timing. Native metric discovery and measured
+  before/after windows retain source revisions, units, coverage and reset limits.
+- Select source-pinned vLLM and SGLang profiles, LMCache 0.5.7 in MP mode, legacy
+  Dynamo KVBM (`<=1.6.x`), or standalone TRT-LLM 1.2.1. LMCache's `lmcache_mp_*`
+  lookup-token and store/load-chunk counters remain separate from legacy metrics
+  and occupancy. Dynamo requires an installed, operational KVBM package. TRT-LLM
+  1.2.1 does not export cached-token attribution: it stays Unknown with reason
+  `not exported by 1.2.1`; this profile covers request completions and durations.
+- Export opt-in KV study JSON, CSV and HTML reports bound to recorded requests,
+  with reconciled counts, timing cohorts, scheduling coverage and native-window
+  evidence. Declared runtime metadata stays unverified and physical cache state
+  stays Unknown. Native counters, logical overlap and lower TTFT alone do not
+  prove physical tier participation, saved prefill work or offload performance.
+- The `tokenizer` feature is now on by default and included in release binaries.
+  Source builds can opt out with `--no-default-features`, which disables pinned
+  local tokenizer/chat-template validation.
+
+Validation includes synthetic cache models, mock HTTP tests and source-derived
+exporter fixtures, including serialization with injected observations. These are
+not live engine captures. Live certification separately requires exact runtime
+identity, model/kernel and memory-fit checks, measured evidence and proven cleanup.
+The fifteen r5 KV certification cases remain release gates; a fixture or study
+export does not satisfy them.
 
 ---
 
