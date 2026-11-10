@@ -26,6 +26,7 @@ PATH_AREAS = {
     'src/bin/metrum-ai-bench-cli-llm.rs': {'*'},
     'src/bin/metrum-ai-bench-cli-mock-server.rs': {'*'},
     'src/bin/metrum-ai-bench-cli-prompts.rs': {'*'},
+    'src/bin/metrum-ai-bench-cli-cert-kv-cpu.rs': {'*'},
     'src/bin/metrum-ai-bench-cli-strategic.rs': {'*'},
     'src/bin/metrum-ai-bench-cli-vlm.rs': {'*'},
     'src/bin/metrum-ai-bench-cli.rs': {'*'},

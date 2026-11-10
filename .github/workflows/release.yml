@@ -172,7 +172,7 @@ jobs:
           import json, sys
           meta = json.load(sys.stdin)
           for target in meta["packages"][0]["targets"]:
-              if "bin" in target.get("kind", []):
+              if "bin" in target.get("kind", []) and "cert-probes" not in target.get("required-features", []):
                   print(target["name"])
           ')
           for name in "${bins[@]}"; do

@@ -13,6 +13,12 @@ REPOSITORY = 'metrum-ai/bench-cli'
 TARGET = 'x86_64-unknown-linux-gnu'
 ARTIFACT = 'pretag-release-' + TARGET
 WORKFLOW = '.github/workflows/pretag-certification.yml'
+CERT_PROBE = 'metrum-ai-bench-cli-cert-kv-cpu'
+
+
+def measured_features(name):
+    """Only the explicitly built certification probe enables its extra feature."""
+    return ['otlp', 'tokenizer'] + (['cert-probes'] if name == CERT_PROBE else [])
 
 
 def pin(path):

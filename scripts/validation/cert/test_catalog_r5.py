@@ -19,6 +19,16 @@ CASES = {f'BC-KV-{n:03}' for n in range(1, 16)}
 
 
 class CatalogR5Tests(unittest.TestCase):
+    def test_lmcache_mp_mode_has_distinct_units_and_recipe(self):
+        row = validator.load_catalog(CATALOG)['BC-KV-005']
+        self.assertIn('connector_mode=mp', row['Model/server'])
+        self.assertIn('LMCacheMPConnector', row['Model/server'])
+        for flag in ('mamba-cache-mode align', 'prefix caching', 'separate-object-groups'):
+            self.assertIn(flag, row['Command or procedure'])
+        self.assertIn('reuse/lookup-hit delta', row['Pass criteria'])
+        self.assertIn('lmcache_mp_*', row['Pass criteria'])
+        self.assertIn('no stored-token or occupancy value is inferred', row['Pass criteria'])
+
     def test_rows_core_tier_cadence_and_r4_unchanged(self):
         rows = validator.load_catalog(CATALOG)
         self.assertEqual(CASES, {case for case in rows if case.startswith('BC-KV-')})

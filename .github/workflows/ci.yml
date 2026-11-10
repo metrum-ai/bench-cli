@@ -194,7 +194,10 @@ jobs:
       - name: documentation links and command blocks
         run: cargo --locked xtask check-docs
       - name: package dry run
-        run: cargo --locked package --allow-dirty --target-dir ${{ runner.temp }}/pkg
+        run: |
+          cargo --locked package --allow-dirty --target-dir ${{ runner.temp }}/pkg
+          package_version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          python3 scripts/validation/cert/check_cert_probe_packaging.py "${{ runner.temp }}/pkg/package/metrum-ai-bench-cli-${package_version}.crate"
 
   check_stub:
     name: fmt, clippy, test (stable)

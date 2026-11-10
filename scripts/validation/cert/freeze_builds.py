@@ -51,7 +51,7 @@ def build(args):
               'version': args.version, 'started_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'builds': {}}
     # No local measured compiler invocation exists in this producer.
     origin, paths = pretag_artifact.download(args.candidate_sha, args.version, args.workflow_run_id, out / 'measured')
-    measured = {name: artifact(path, args.candidate_sha, 'measured', ['otlp', 'tokenizer'], origin)
+    measured = {name: artifact(path, args.candidate_sha, 'measured', pretag_artifact.measured_features(name), origin)
                 for name, path in paths.items()}
     result['builds']['measured'] = {'origin': origin, 'binaries': measured}
     clean_source(repo, args.candidate_sha, args.version)

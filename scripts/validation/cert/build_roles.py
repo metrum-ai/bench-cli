@@ -36,7 +36,8 @@ def check_roles(manifest):
     sha = manifest['candidate_sha']
     measured = manifest['candidate']
     validation = manifest.get('tokenizer_validation')
-    primary = check_build(measured, sha, 'measured', ['otlp', 'tokenizer'])
+    features = pretag_artifact.measured_features(Path(measured['path']).name)
+    primary = check_build(measured, sha, 'measured', features)
     helper = check_build(validation, sha, 'validation-only', ['otlp', 'tokenizer'])
     if primary.samefile(helper) or measured['sha256'] == validation['sha256']:
         raise ValueError('measured and validation-only builds must be distinct')

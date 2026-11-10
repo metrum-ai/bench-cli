@@ -31,6 +31,14 @@ exclude = [
     "CLAUDE.md",
     "test-data/endpoints-4servers.yaml",
     "test-data/public-datasets/**",
+    "src/bin/metrum-ai-bench-cli-cert-kv-cpu.rs",
+    "tests/kv_cpu_certification.rs",
+    "docs/RELEASE_CERTIFICATION_KV_CPU.md",
+    "scripts/validation/cert/kv_cpu*.py",
+    "scripts/validation/cert/test_kv_cpu.py",
+    "scripts/validation/cert/fixtures/kv_cpu/**",
+    "scripts/validation/cert/check_cert_probe_packaging.py",
+    "scripts/validation/cert/test_kv_probe_packaging.py",
 ]
 
 [lib]
@@ -41,6 +49,7 @@ path = "src/lib.rs"
 default = ["tokenizer"]
 tokenizer = ["dep:tokenizers", "dep:minijinja"]
 otlp = []
+cert-probes = []
 
 # Primary binary names (preferred).
 [[bin]]
@@ -74,6 +83,11 @@ path = "src/bin/metrum-ai-bench-cli-strategic.rs"
 [[bin]]
 name = "metrum-ai-bench-cli-mock-server"
 path = "src/bin/metrum-ai-bench-cli-mock-server.rs"
+
+[[bin]]
+name = "metrum-ai-bench-cli-cert-kv-cpu"
+path = "src/bin/metrum-ai-bench-cli-cert-kv-cpu.rs"
+required-features = ["cert-probes"]
 
 [dependencies]
 axum = "0.8.4"
