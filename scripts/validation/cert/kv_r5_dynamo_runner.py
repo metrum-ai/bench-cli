@@ -4,6 +4,7 @@
 """Single-box stable Dynamo KVBM/vLLM certification gate; no tier inference."""
 import json
 import os
+import re
 import sys
 
 import kv_r5_metrics as metrics
@@ -70,11 +71,13 @@ import kvbm
 from kvbm.vllm_integration.connector import DynamoConnector
 root=pathlib.Path(kvbm.__file__).parent
 files={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*.so')}
-print(json.dumps({'version':importlib.metadata.version('kvbm'),'extensions':files,
+print(json.dumps({'version':importlib.metadata.version('kvbm'),'backend_version':importlib.metadata.version('vllm'),'extensions':files,
  'connector_source':importlib.util.find_spec('kvbm.vllm_integration.connector').origin,
  'connector_class':DynamoConnector.__name__}))'''
     actual = json.loads(instance.docker('exec', instance.name, 'python3', '-c', code).stdout)
     runtime.save(instance.out/'kvbm-package.json', actual)
+    if not re.fullmatch(r'0\.31\.0(?:\+[a-zA-Z0-9.]+)?', actual['backend_version']):
+        raise ValueError('Dynamo runtime backend is not stable vLLM 0.31.0')
     proof = runtime.load(runtime.pin(instance.data['inputs']['kvbm_build_provenance']))
     if not actual['extensions'] or actual['extensions'] != proof['extension_sha256']:
         raise ValueError('installed KVBM extension differs from reviewed build evidence')

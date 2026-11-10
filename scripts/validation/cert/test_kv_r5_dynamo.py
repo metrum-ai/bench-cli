@@ -4,12 +4,19 @@
 import copy
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import kv_r5_dynamo_runner as runner
 
 
 class DynamoControls(unittest.TestCase):
+    def test_rc_backend_is_rejected_even_in_a_claimed_stable_image(self):
+        instance = SimpleNamespace(out=Path('/unused'), name='owned-fixture', docker=lambda *args:
+            SimpleNamespace(stdout='{"backend_version":"0.31.0rc1"}'))
+        with patch.object(runner.runtime, 'save'), self.assertRaisesRegex(ValueError, 'not stable'):
+            runner.preflight(instance)
+
     def setUp(self):
         self.page = (Path(__file__).resolve().parents[3]/'tests/fixtures/dynamo162-registry-synthetic.prom').read_text()
 
