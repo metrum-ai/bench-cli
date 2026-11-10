@@ -257,6 +257,25 @@ def evaluate(data, phases):
                     raise ValueError('duplicate or missing session turn')
     else:
         prefix = data['target_prefix_sha256']
+        target_phases = ['cold', 'populate', 'rehit']
+        if data['case'] == 'BC-KV-009':
+            target_phases.insert(2, 'warm')
+        target_rows = []
+        for name in target_phases:
+            requests = [r for r in by_name[name]['plan']['expected_requests'] if not r['warmup']]
+            if len(requests) != 1:
+                raise ValueError('one frozen target A request required in each target phase')
+            target_rows.append(requests[0])
+        target = target_rows[0]
+        if any((r['messages_sha256'], r['options']) != (target['messages_sha256'], target['options']) for r in target_rows):
+            raise ValueError('target A wire identity/settings changed across eviction and rehit')
+        pressure = by_name['pressure']['plan']['expected_requests']
+        if any(r['messages_sha256'] == target['messages_sha256'] for r in pressure):
+            raise ValueError('pressure sequence contains target A')
+        if data['case'] == 'BC-KV-009':
+            control = [r for r in by_name['control']['plan']['expected_requests'] if not r['warmup']]
+            if len(control) != 1 or control[0]['messages_sha256'] == target['messages_sha256'] or control[0]['options'] != target['options']:
+                raise ValueError('distinct comparable control B request required')
         proof = audit(by_name['rehit'], prefix)
         if not runtime.SHA.fullmatch(prefix):
             raise ValueError('frozen tokenized target prefix identity required')

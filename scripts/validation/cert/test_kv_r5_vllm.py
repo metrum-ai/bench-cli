@@ -100,6 +100,7 @@ class VllmControls(unittest.TestCase):
             p = phase(Path(tmp), 'rehit', count=1)
             with self.assertRaises(OSError):
                 runner.audit(p, 'a'*64)
+
             proof = {'schema_version': 'kv-exclusive-window.v1', 'phase': 'rehit',
                      'prefix_sha256': 'a'*64, 'raw_event_paths': ['missing.jsonl'],
                      **dict.fromkeys(('same_epoch', 'exclusive_requests', 'exclusive_transfers',
@@ -113,6 +114,15 @@ class VllmControls(unittest.TestCase):
             (p['directory']/'missing.jsonl').write_text(json.dumps({'cached_hit_rate': .9})+'\n')
             with self.assertRaisesRegex(ValueError, 'allocator eviction observation absent'):
                 runner.audit(p, 'a'*64)
+
+    def test_pressure_cannot_attribute_target_a_eviction_to_a_different_rehit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phases = [phase(root, name, count=1, cached=4 if name == 'warm' else 0,
+                            offset=100 if name == 'pressure' else 200 if name == 'control' else 9 if name == 'rehit' else 0)
+                      for name in ('cold', 'populate', 'warm', 'pressure', 'rehit', 'control')]
+            with self.assertRaisesRegex(ValueError, 'target A wire identity'):
+                runner.evaluate({'case': 'BC-KV-009', 'target_prefix_sha256': 'a'*64}, phases)
 
     def test_existing_real_exporter_serialization_is_parseable(self):
         fixture = Path(__file__).resolve().parents[3]/'tests/fixtures/vllm033-logger-synthetic-config.prom'
