@@ -72,8 +72,14 @@ class CatalogR5Tests(unittest.TestCase):
         for cases, module, profile, child in engines:
             runner = importlib.import_module(module)
             child = child or runner.CHILD
-            model = getattr(runner, 'MODEL', 'Qwen/Qwen3.8-27B-FP8')
-            revision = getattr(runner, 'MODEL_REVISION', 'c3a462cc3d38cf351f3b26cbd763469eeb74ef81')
+            # The Dynamo full-attention fallback also works before the
+            # adapter exposes MODEL/MODEL_REVISION as module constants.
+            if module == 'kv_r5_dynamo_runner':
+                fallback = ('Qwen/Qwen3-VL-32B-Instruct-FP8', '4bf2c2f39c37c0fede78bede4056e1f18cdf8109')
+            else:
+                fallback = ('Qwen/Qwen3.8-27B-FP8', 'c3a462cc3d38cf351f3b26cbd763469eeb74ef81')
+            model = getattr(runner, 'MODEL', fallback[0])
+            revision = getattr(runner, 'MODEL_REVISION', fallback[1])
             for case in cases:
                 with self.subTest(case=case):
                     pin = rows[case]['Model/server']

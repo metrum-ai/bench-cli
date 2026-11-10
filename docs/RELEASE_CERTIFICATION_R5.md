@@ -43,7 +43,14 @@ Prefer Qwen/Qwen3.8-27B-FP8 at
 the newest verified supported official Qwen and document the reason and measured
 fit. TRT-LLM uses Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 at
 `5a5a776300a41aaa681dd7ff0106608ef2bc90db`, conditional on measured at least
-25% KV headroom. Qwen3-8B is a flagged last resort. Every live row allows H100 80 GB or RTX
+25% KV headroom. Dynamo KVBM instead uses text-only
+Qwen/Qwen3-VL-32B-Instruct-FP8 at
+`4bf2c2f39c37c0fede78bede4056e1f18cdf8109` because
+`DynamoConnector 1.6.2 lacks HMA; hybrid SSM unsupported`. Stable vLLM 0.31.0's
+[source registry](https://github.com/vllm-project/vllm/blob/db9527a46873454610df6dbedf79a36d6bf1a7f6/vllm/model_executor/models/registry.py)
+registers `Qwen3VLForConditionalGeneration`. Source support is separate from
+installed-image registry/class verification and measured at least 25% KV headroom,
+which must be recorded at Stage-0. Qwen3-8B is a flagged last resort for other rows. Every live row allows H100 80 GB or RTX
 PRO 6000 Blackwell only after actual runtime, kernel and KV headroom checks.
 BC-KV-002 additionally needs at least 64 GiB host RAM. Its entire exclusive L1
 window, including applicable setup and cleanup, remains bounded by two GPU-hours.
