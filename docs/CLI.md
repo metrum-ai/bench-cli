@@ -81,6 +81,7 @@ Options:
           - sglang
           - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
           - lmcache
+          - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
           - dynamo-kvbm
           - trt-llm
 
@@ -1315,6 +1316,7 @@ Options:
           - sglang
           - sglang0523:       SGLang v0.5.23 source slice; independently selected, never a release alias
           - lmcache
+          - lmcache057-mp:    LMCache 0.5.7 MP lookup tokens and chunk/object transfers
           - dynamo-kvbm
           - trt-llm
 
