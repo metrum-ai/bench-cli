@@ -238,12 +238,13 @@ def main(argv, family, lane):
             if remaining.stdout.strip():
                 raise ValueError('owned container remains after shell cleanup')
             config = spec['lanes'][lane]
-            for port in (config['port'], config['proxy_port']):
+            ports = [config['port'], config['proxy_port']] + ([config['metrics_port']] if 'metrics_port' in config else [])
+            for port in ports:
                 with socket.socket() as probe:
                     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     probe.bind(('127.0.0.1', port))
             (args.out / 'evidence/kv-cleanup-reconciled.json').write_text(json.dumps(
-                {'owned_containers': [], 'loopback_ports_bindable': [config['port'], config['proxy_port']]}) + '\n')
+                {'owned_containers': [], 'loopback_ports_bindable': ports}) + '\n')
         return code
     finally:
         if process.poll() is None:
