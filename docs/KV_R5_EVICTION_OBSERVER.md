@@ -93,6 +93,73 @@ only true booleans cannot supply this proof. The four native-offload
 conditions and complete 7200-second startup/workload/cleanup envelope remain
 unchanged.
 
+## Development-mode scope and case evidence
+
+The runner supplies `VLLM_SERVER_DEV_MODE=1`, KV-event configuration and
+explicit TP/PP/DP size 1 **only for BC-KV-002 and BC-KV-009** in
+[`server()`](../scripts/validation/cert/kv_r5_vllm_runner.py).
+The shared runtime writes the complete Docker argv to each case's
+`server-argv.json` before launch; that file records the exact environment
+assignment, event-socket configuration and topology flags. Retain it with
+`vllm-package.json`, `runtime-source.json` and each phase's
+`observer-before/control.jsonl` and `observer-after/control.jsonl`.
+The latter files record the exact control methods, paths and raw replies.
+The runner supplies none of these observer options to 001/008 or another
+engine family.
+
+At the pinned revision, the Python
+[router gate](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/launchers/api_server/routers.py#L46)
+registers the development and RL routers. Their handlers expose:
+
+| Endpoints | Behavior when explicitly called |
+| --- | --- |
+| POST `/reset_prefix_cache`, `/reset_mm_cache`, `/reset_encoder_cache` | Reset prefix, multimodal or encoder caches. |
+| POST `/collective_rpc`; GET `/server_info` | Dispatch an engine RPC; report server configuration. |
+| POST `/sleep`, `/release_kv_cache_memory`, `/wake_up`; GET `/is_sleeping` | Suspend/release/recreate engine memory or query sleep state. |
+| POST `/pause`, `/resume`, `/abort_requests`; GET `/is_paused` | Drain/pause, resume, abort requests or query pause state. |
+| POST `/init_weight_transfer_engine`, `/shutdown_weight_transfer_engine`, `/start_weight_update`, `/start_draft_weight_update`, `/update_weights`, `/finish_weight_update`, `/update_weight_version` | Initialize or perform explicit weight-transfer/version operations. |
+| GET `/weight_info`, `/get_world_size`; POST `/weight_checker` | Query weight version/topology or checksum/reset/compare weights. |
+
+Sources: [development router registration](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/__init__.py),
+[cache handlers](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/dev/cache/api_router.py),
+[sleep handlers](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/dev/sleep/api_router.py),
+[RPC handler](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/dev/rpc/api_router.py),
+[server-info handler](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/dev/server_info/api_router.py),
+and [RL handlers](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/rl/online/api_router.py).
+The [Rust frontend gate](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/rust/src/server/src/routes.rs#L193)
+likewise gates route registration. `/tokenize`, `/metrics` and chat serving
+are registered independently; profiling and LoRA updating have separate gates.
+The observer calls only pause, pause-status and resume, plus ordinary
+read-only tokenization/metrics. It never calls the reset, sleep, RPC, abort,
+weight-update or weight-checker endpoints.
+
+A full-tree search of this revision finds no reads of this flag in the
+scheduler, cache managers, GPU worker or KV-transfer/offloading code. The
+remaining Python runtime references are its
+[Boolean environment definition](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/envs.py#L1468),
+its explicit exclusion from
+[compile-cache key factors](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/envs.py#L2377),
+and the default for
+[`log_error_stack`](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/common/cli_args.py#L209).
+That default controls stack-trace logging on error paths, as shown by the
+[HTTP exception handler](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/serve/exception_handling/handlers/http.py#L16);
+unsuccessful requests already fail these cases. Registration also emits a
+startup warning. Enabling the flag itself does not select a different
+scheduling policy, cache lookup/eviction algorithm or native offload backend.
+The measured request path uses the same pinned engine implementations.
+
+The observer intentionally pauses/drains **between** measured phases, with
+`clear_cache=false`, then resumes before invoking the candidate. Those
+explicit fence calls change inter-phase timing and establish quiescence;
+they do not reset the cache or alter the active scheduling/offload policy.
+KV-event collection adds event bookkeeping/publication work after the same
+cache updates in BlockPool and the scheduler. Publication can backpressure
+its bounded queue. No identical-latency or zero-overhead claim follows: the
+strict cold/rehit TTFT comparison is measured with this same instrumentation
+enabled in every phase. The explicit size-1 topology matches the frozen
+single-GPU case. Raw control evidence, continuous events, counter windows
+and process epochs must still establish the full gate.
+
 ## Frozen input contract
 
 Set `eviction_observer` to `vllm033-kv-events.v1` in the engine specification.
