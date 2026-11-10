@@ -94,7 +94,8 @@ class AdapterTests(unittest.TestCase):
                                    candidate=binary, baseline=binary, build_receipt=receipt, input=[], command_json=None,
                                    tool_manifest=receipt, out=root / 'frozen.json', run_out=root / 'run')
             family = SimpleNamespace(CASES={'BC-KV-003'})
-            with patch.object(adapter, 'validate_spec'), patch.object(adapter.build_roles, 'load_receipt', return_value=([measured], {})), \
+            with patch.dict('sys.modules', {'kv_envelope': SimpleNamespace(validate=lambda *args: None)}), \
+                    patch.object(adapter, 'SCHEMA', receipt), patch.object(adapter, 'validate_spec'), patch.object(adapter.build_roles, 'load_receipt', return_value=([measured], {})), \
                     patch.object(adapter.harness_integrity, 'verify', return_value=[]):
                 frozen = adapter.freeze(args, family, 'KVS')
                 self.assertEqual('kv-r5-frozen.v1', frozen['schema_version'])

@@ -18,6 +18,7 @@ import result_writer
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
+SCHEMA = ROOT / 'schemas/kv-r5-frozen.v1.json'
 
 
 def load(path):
@@ -72,12 +73,13 @@ def validate_spec(spec, family, lane, case=None):
     if not root.is_dir() or root.name != config['revision'] or not root.resolve().is_relative_to(hub):
         raise ValueError('offline model snapshot must bind the exact revision inside hub cache')
     files = spec['model_files']
-    inventory = {str(p.absolute()) for p in root.rglob('*') if p.is_file()}
+    named_files = [p for p in root.rglob('*') if p.is_file()]
+    inventory = {str(p.resolve()) for p in named_files}
     if not inventory or len(files) != len(inventory) or {p['path'] for p in files} != inventory:
         raise ValueError('complete model snapshot file/checksum lock required')
     if any(not common.pinned(p).is_relative_to(hub) for p in files):
         raise ValueError('model file resolves outside staged hub cache')
-    if not any(Path(p).suffix == '.safetensors' for p in inventory) or not (root / 'tokenizer.json').is_file():
+    if not any(p.suffix == '.safetensors' for p in named_files) or not (root / 'tokenizer.json').is_file():
         raise ValueError('model weights and tokenizer required')
     # Independently verify every tokenized cohort fits the demonstrated runtime.
     # The pinned per-prompt counts are inputs, not estimates from string length.
@@ -98,6 +100,8 @@ def preflight(manifest, family, lane):
     result_writer.require_python()
     if manifest.get('schema_version') != 'kv-r5-frozen.v1' or manifest.get('lane') != lane:
         raise ValueError('KV frozen envelope/lane mismatch')
+    import kv_envelope
+    kv_envelope.validate(manifest, lane)
     cases = manifest['cases']
     if not isinstance(cases, dict) or len(cases) != 1 or next(iter(cases)) not in family.CASES:
         raise ValueError('one registered engine case required')
@@ -157,7 +161,7 @@ def freeze(args, family, lane):
             path = common.pinned(item)
             inputs[str(path)] = file_pin(path)
     for path in [args.selection, args.catalog, args.lane_manifest, args.build_receipt,
-                 args.build_receipt.parent / 'validation-only.log', *args.input]:
+                 args.build_receipt.parent / 'validation-only.log', SCHEMA, *args.input]:
         item = file_pin(path)
         inputs[item['path']] = item
     lane_pin = file_pin(args.lane_manifest)
