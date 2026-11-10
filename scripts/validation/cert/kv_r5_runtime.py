@@ -322,7 +322,107 @@ def product_rows(phase):
     return rows, usage
 
 
-def main(family):
+def adapter_preflight(manifest, family, lane):
+    """Generic launcher hook, deliberately separate from r4 manifest preflight."""
+    import build_roles
+    import harness_integrity
+    if manifest.get('schema_version') != 'kv-r5-frozen.v1' or manifest.get('lane') != lane:
+        raise ValueError('KV frozen envelope/lane mismatch')
+    cases = manifest['cases']
+    if len(cases) != 1 or next(iter(cases)) not in family.CASES:
+        raise ValueError('one registered KV case required')
+    for item in manifest['inputs']:
+        pin(item)
+    spec_path = pin(manifest['lane_manifest'])
+    spec = load(spec_path)
+    validate(spec, family)
+    if spec['case'] != next(iter(cases)) or spec['candidate_sha'] != manifest['candidate_sha']:
+        raise ValueError('KV selection/candidate binding changed')
+    measured, _ = build_roles.load_receipt(pin(manifest['build_receipt']), manifest['candidate_sha'])
+    matching = [item for item in measured if item['path'] == spec['candidate']['path']
+                and item['sha256'] == spec['candidate']['sha256']]
+    if len(matching) != 1 or manifest['candidate'] != matching[0]:
+        raise ValueError('KV candidate must be a shipped measured workflow artifact')
+    closure = harness_integrity.verify(HERE.parents[2], manifest['candidate_sha'])
+    if closure != manifest['harness_closure']:
+        raise ValueError('KV harness closure differs from candidate')
+    entry = cases[spec['case']]
+    expected = [str(HERE/'case_entry.sh'), '--case', spec['case'], '--lane', lane.lower(),
+                '--manifest', str(spec_path), '--manifest-sha256', manifest['lane_manifest']['sha256'],
+                '--out', entry['out']]
+    if entry['command'] != expected or pin(entry['launcher']) != HERE/'case_entry.sh':
+        raise ValueError('KV frozen command changed')
+    if manifest['tools'] != spec['tools']:
+        raise ValueError('KV tool pins changed')
+    for value in spec['inputs'].values():
+        result_writer.require_input_origin(entry['out'], Path(value['path']).parent)
+    return cases
+
+
+def freeze_adapter(args, family, lane):
+    import build_roles
+    import harness_integrity
+    selection = load(args.selection)
+    spec = load(args.lane_manifest)
+    if (selection['candidate_sha'] != spec['candidate_sha'] or args.case != spec['case']
+            or args.case not in selection['selected']):
+        raise ValueError('KV case/candidate not selected')
+    validate(spec, family)
+    measured, _ = build_roles.load_receipt(args.build_receipt, spec['candidate_sha'])
+    matching = [item for item in measured if Path(item['path']).resolve() == args.candidate.resolve()
+                and item['sha256'] == spec['candidate']['sha256']]
+    if len(matching) != 1 or Path(spec['candidate']['path']).resolve() != args.candidate.resolve():
+        raise ValueError('KV measured candidate/build receipt mismatch')
+    def file_pin(path):
+        path = Path(path).resolve(strict=True)
+        return {'path': str(path), 'sha256': manifest_tool.sha256_file(path)}
+    inputs = {}
+    def collect(value):
+        if isinstance(value, dict):
+            if 'path' in value and 'sha256' in value:
+                path = pin(value)
+                inputs[str(path)] = file_pin(path)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+    collect(spec)
+    collect(load(args.build_receipt))
+    closure = harness_integrity.verify(HERE.parents[2], spec['candidate_sha'])
+    collect(closure)
+    for path in [args.selection, args.catalog, args.lane_manifest, args.build_receipt,
+                 args.build_receipt.parent/'validation-only.log', *args.input]:
+        item = file_pin(path)
+        inputs[item['path']] = item
+    lane_pin = file_pin(args.lane_manifest)
+    command = [str(HERE/'case_entry.sh'), '--case', args.case, '--lane', lane.lower(),
+               '--manifest', lane_pin['path'], '--manifest-sha256', lane_pin['sha256'],
+               '--out', str(args.run_out.resolve())]
+    manifest = {'schema_version': 'kv-r5-frozen.v1', 'lane': lane,
+        'candidate_sha': spec['candidate_sha'], 'candidate': matching[0],
+        'build_receipt': file_pin(args.build_receipt), 'lane_manifest': lane_pin,
+        'tools': spec['tools'], 'inputs': list(inputs.values()), 'harness_closure': closure,
+        'cases': {args.case: {'launcher': file_pin(HERE/'case_entry.sh'), 'command': command,
+                             'out': str(args.run_out.resolve())}}}
+    adapter_preflight(manifest, family, lane)
+    save(args.out, manifest)
+    return manifest
+
+
+def adapter_main(argv, family):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--case', required=True, choices=family.CASES)
+    parser.add_argument('--manifest', required=True, type=Path)
+    args, _ = parser.parse_known_args(argv)
+    if load(args.manifest)['case'] != args.case:
+        raise ValueError('KV command case does not match the frozen execution spec')
+    # Remove only the dispatch-owned --case pair; retain all runtime arguments.
+    index = argv.index('--case')
+    return main(family, argv[:index]+argv[index+2:])
+
+
+def main(family, argv=None):
     def interrupted(_signum, _frame):
         raise InterruptedError('execution interrupted')
     signal.signal(signal.SIGTERM, interrupted)
@@ -331,7 +431,7 @@ def main(family):
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--preflight', action='store_true')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     runtime = None
     try:
         result_writer.require_python()
