@@ -80,9 +80,10 @@ class KVLauncherTests(unittest.TestCase):
                     self.assertTrue((root / 'synthetic-procs').read_text().isdecimal())
 
     def test_timeout_and_surviving_descendant_block_terminal_acceptance(self):
+        import signal
         from build_role_test_fixture import tool_fixture
         from stage0_process import ProcessOutcome
-        for timed_out, leaked in ((True, False), (False, True)):
+        for timed_out, leaked, interrupted in ((True, False, False), (False, True, False), (False, False, True)):
             with self.subTest(timed_out=timed_out, leaked=leaked), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp); tools, _ = tool_fixture(root)
                 spec = root / 'spec.json'; spec.write_text(json.dumps({'timeout_seconds': 2,
@@ -94,14 +95,20 @@ class KVLauncherTests(unittest.TestCase):
                 path = root / 'manifest.json'; path.write_text(json.dumps(manifest))
                 group = Mock(join_fd=9); group.name = 'synthetic'
                 group.populated.side_effect = [leaked, False]
+                before = signal.getsignal(signal.SIGTERM)
+                def bounded(*args, **kwargs):
+                    if interrupted:
+                        signal.raise_signal(signal.SIGTERM)
+                    return ProcessOutcome(0, timed_out, False)
                 with patch.object(kv_dispatch, 'preflight', return_value=['BC-KV-007']), \
                      patch('stage0_cgroup.create', return_value=group), \
-                     patch('stage0_process.run_bounded', return_value=ProcessOutcome(0, timed_out, False)):
-                    with self.assertRaises(ValueError):
+                     patch('stage0_process.run_bounded', side_effect=bounded):
+                    with self.assertRaises((ValueError, InterruptedError)):
                         case_launcher.run_case(path, manifest, 'BC-KV-007')
                     self.assertTrue((out / 'results/lane-error.json').is_file())
                     if leaked:
                         group.kill.assert_called_once()
+                self.assertEqual(before, signal.getsignal(signal.SIGTERM))
 
 
 if __name__ == '__main__':
