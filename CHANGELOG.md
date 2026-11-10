@@ -76,6 +76,10 @@ The release date will be set when v1.9.0 is tagged.
   and physical cache state remains Unknown; these are engineering reports, not
   live cache certification (#421, #423). See
   [scope and methodology](docs/KV_STUDY_EXPORTS.md).
+- vLLM offload and pressure certification requires a separately reviewed
+  target-prefix eviction observer with retained raw engine/allocator evidence.
+  Missing or ambiguous eviction evidence blocks those cases; exporter aggregates
+  alone cannot satisfy the observer requirement (#494).
 - Add synthetic cache-state/reset/error tests, source-derived metric exposition
   fixtures and guarded live certification runners. Fixtures, exporter serialization
   with injected observations and mock HTTP tests are not live engine captures.
