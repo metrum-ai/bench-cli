@@ -84,6 +84,10 @@ The validator binds measured workflow artifacts, transitive source/input pins,
 the schema, build log, baseline `bash`/`env`/`python3` tools and exact command.
 Engine-specific tools, source and actual-host identity checks remain mandatory
 in each adapter. KV lanes do not require r4 serving-contract tools or probes.
+The KV exemption from the r4 `CASE_TOOLS` set retains the base `REQUIRED`
+tools and exact outer/inner tool-map equality. Each lane adapter's preflight
+must additionally enforce its own engine-specific required executables; the
+exemption never authorizes an incomplete engine tool map.
 
 `case_launcher.py` delegates only KV codes to the separate dispatcher. The
 dispatcher calls preflight and starts a separate process group through pinned
