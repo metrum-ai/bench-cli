@@ -15,7 +15,7 @@ CHILD = 'sha256:6b14a01c813c0a4ab8a5ac2c13a6403b639ac1ed08e816c16ad9eda0f93af75f
 REVISION = '28f9765d98ded77149a94d0defee6d54e97f6741'
 METRICS_PATH = '/metrics'
 CASES = ('BC-KV-006',)
-LIMITS = {'BC-KV-006': 3600}
+LIMITS = {'BC-KV-006': None}  # The reviewed per-run manifest supplies the cap.
 CRITERIA = {'BC-KV-006': {'required_families_complete': True, 'positive_matched_token_delta': True,
                         'correct_block_token_ratio_units': True, 'physical_tier': 'unknown'}}
 SPECS = {'kvbm_offload_blocks_d2h': ('counter', 'blocks'),
@@ -37,6 +37,8 @@ def validate(data):
         raise ValueError('frozen bounded CPU cache required')
     if not data['model'].startswith('Qwen/') or not runtime.manifest_tool.REV.fullmatch(data['model_revision']):
         raise ValueError('official Qwen model and full revision required')
+    if data['model'] == 'Qwen/Qwen3.8-27B-FP8' and data['model_revision'] != 'c3a462cc3d38cf351f3b26cbd763469eeb74ef81':
+        raise ValueError('primary Qwen model revision mismatch')
     if data['model'] == 'Qwen/Qwen3-8B' and data.get('last_resort_notice') is not True:
         raise ValueError('last-resort model requires explicit notice')
     if data['model'] != 'Qwen/Qwen3.8-27B-FP8' and not data.get('model_selection_reason'):
