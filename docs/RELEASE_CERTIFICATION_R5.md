@@ -10,13 +10,21 @@ included in the certification sheet. Existing rows and thresholds are unchanged.
 Missing, FAIL, PENDING and smoke evidence cannot satisfy these gates. Unknown
 metric values remain Unknown; they never become zero or a physical cache claim.
 
-The catalog records proposed image descriptors, not proof of executable source
-identity or runtime support. SGLang, LMCache and Dynamo carry
-`TBD-pin` until source review, matching exposition fixtures and runtime checks
-resolve their compatibility. Selection keeps these mandatory cases and marks
-them `TBD-pin-not-executable`. Execution preflight and result validation reject
-any row containing `TBD-pin`, including a submitted PASS or N-A. Removing a
-required case from the frozen selection also fails policy recomputation.
+Rows BC-KV-003 through BC-KV-007 bind the reviewed stable image descriptors,
+full source revisions, profile IDs and model revisions from the
+[SGLang](KV_SGLANG_CERTIFICATION.md), [LMCache MP](KV_LMCACHE_CERTIFICATION.md),
+[Dynamo KVBM](KV_R5_DYNAMO.md) and [standalone TRT-LLM](KV_R5_TRTLLM.md)
+profiles. LMCache's official image is a single linux/amd64 manifest; its
+published digest is recorded directly, with no invented parent index.
+All fifteen r5 rows pass the catalog's executable-pin gate. Actual package/source
+identity, architecture/kernel compatibility, model fit, KVBM installation and
+the remaining runtime evidence must still pass each adapter's preflight and
+execution checks.
+
+The unresolved-pin gate remains mandatory for any future `TBD-pin`: selection
+retains the case and marks it `TBD-pin-not-executable`; execution preflight and
+result validation reject the row, including a submitted PASS or N-A. Removing
+a required case from the frozen selection also fails policy recomputation.
 
 The proposed vLLM index and amd64 child are recorded in each applicable row.
 For every engine verify the descriptor chain, actual package/source revision,

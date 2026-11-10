@@ -4,6 +4,7 @@
 import csv
 import datetime as dt
 import hashlib
+import importlib
 import json
 import tempfile
 import unittest
@@ -49,11 +50,53 @@ class CatalogR5Tests(unittest.TestCase):
         selection = select_cases.make_selection(rows, select_cases.catalog_hash(CATALOG),
             'a' * 40, .01, 3, [], [{'release': 'prior', 'ran': sorted(rows)}])
         self.assertTrue(CASES <= set(selection['selected']))
-        for n in (3, 4, 5, 6):
-            case = f'BC-KV-{n:03}'
-            self.assertIn('TBD-pin-not-executable', selection['selected'][case])
-            with self.assertRaisesRegex(ValueError, 'not executable'):
+        for case in sorted(CASES):
+            self.assertNotIn('TBD-pin-not-executable', selection['selected'][case])
+
+    def test_all_fifteen_r5_rows_have_resolved_executable_pins(self):
+        rows = validator.load_catalog(CATALOG)
+        for case in sorted(CASES):
+            with self.subTest(case=case):
                 validator.require_executable(rows[case])
+
+    def test_reviewed_engine_pins_match_runner_sources(self):
+        rows = validator.load_catalog(CATALOG)
+        engines = (
+            (('BC-KV-003', 'BC-KV-004'), 'kv_sglang_runner', 'sglang0523',
+             'sha256:f7876bef696ccf9cf75a2bf7ccb82970f5fac577f082fb8ca95c9a59d2160eb5'),
+            (('BC-KV-005',), 'kv_lmcache_runner', 'lmcache057-mp',
+             'sha256:3be0a977f2aa4bf1acd29d5ae1e18716c6660c4733e1528caaafd758cb452cbb'),
+            (('BC-KV-006',), 'kv_r5_dynamo_runner', 'dynamo162-kvbm', None),
+            (('BC-KV-007',), 'kv_r5_trtllm_runner', 'trt-llm121', None),
+        )
+        for cases, module, profile, child in engines:
+            runner = importlib.import_module(module)
+            child = child or runner.CHILD
+            model = getattr(runner, 'MODEL', 'Qwen/Qwen3.8-27B-FP8')
+            revision = getattr(runner, 'MODEL_REVISION', 'c3a462cc3d38cf351f3b26cbd763469eeb74ef81')
+            for case in cases:
+                with self.subTest(case=case):
+                    pin = rows[case]['Model/server']
+                    for item in (runner.IMAGE, f'amd64 {child}',
+                                 f'source {runner.REVISION}', f'profile {profile}',
+                                 f'{model} revision {revision}'):
+                        self.assertIn(item, pin)
+                    if case == 'BC-KV-005':
+                        self.assertIn('single-manifest image (no index)', pin)
+                    else:
+                        self.assertIn(f'index {runner.IMAGE}', pin)
+
+    def test_unresolved_pin_in_any_field_still_blocks_selection_and_execution(self):
+        rows = validator.load_catalog(CATALOG)
+        for case in sorted(CASES):
+            for field in ('Model/server', 'Notes'):
+                with self.subTest(case=case, field=field):
+                    bad = {**rows, case: {**rows[case], field: 'TBD-pin synthetic negative control'}}
+                    selection = select_cases.make_selection(bad, select_cases.catalog_hash(CATALOG),
+                        'a' * 40, .01, 3, [], [])
+                    self.assertIn('TBD-pin-not-executable', selection['selected'][case])
+                    with self.assertRaisesRegex(ValueError, 'not executable'):
+                        validator.require_executable(bad[case])
 
     def test_each_r5_omission_from_selection_rejected(self):
         rows = validator.load_catalog(CATALOG)
@@ -79,7 +122,7 @@ class CatalogR5Tests(unittest.TestCase):
             (root / 'proof.txt').write_text('synthetic evidence')
             catalog = root / 'catalog.csv'
             rows = validator.load_catalog(CATALOG)
-            # Resolved-pin fixture isolates result intake from the separate pin gate.
+            # Resolved synthetic pins isolate result intake from the pin gate.
             with catalog.open('w', newline='') as stream:
                 writer = csv.DictWriter(stream, fieldnames=list(next(iter(rows.values()))))
                 writer.writeheader()
@@ -121,7 +164,11 @@ class CatalogR5Tests(unittest.TestCase):
                             self.assertTrue(any(case in error for error in validate()[1]))
                         path.write_text(json.dumps(record(case)))
             # Even an apparently valid PASS cannot bypass an unresolved pin.
-            catalog.write_text(catalog.read_text().replace('resolved-fixture', 'TBD-pin'))
+            with catalog.open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(next(iter(rows.values()))))
+                writer.writeheader()
+                for case in sorted(CASES):
+                    writer.writerow({**rows[case], 'Model/server': 'TBD-pin synthetic negative control'})
             selection = select_cases.make_selection(validator.load_catalog(catalog),
                 select_cases.catalog_hash(catalog), sha, .3, 3, [], [])
             self.assertTrue(any('TBD-pin' in error for error in validate()[1]))
