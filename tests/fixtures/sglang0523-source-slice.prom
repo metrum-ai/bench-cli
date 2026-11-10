@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# HELP sglang:cached_tokens_total Number of cached prompt tokens by source (device/host/storage).
+# TYPE sglang:cached_tokens_total counter
+sglang:cached_tokens_total{cache_source="device",model_name="fixture-model",tp_rank="0"} 32.0
+sglang:cached_tokens_total{cache_source="host",model_name="fixture-model",tp_rank="0"} 48.0
+sglang:cached_tokens_total{cache_source="total",model_name="fixture-model",tp_rank="0"} 16.0
+# HELP sglang:cache_hit_rate The prefix cache hit rate.
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{model_name="fixture-model",tp_rank="0"} 0.625
