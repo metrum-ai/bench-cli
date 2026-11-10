@@ -74,7 +74,11 @@ class EnvelopeTests(unittest.TestCase):
             envelope.validate(bad)
         bad = copy.deepcopy(self.manifest); bad['lane'] = 'KVS'
         bad['cases']['BC-KV-003'] = bad['cases'].pop('BC-KV-007')
-        with self.assertRaisesRegex(ValueError, 'TBD-pin'):
+        # Keep the pin gate negative control independent of resolved live rows.
+        import validate_results
+        rows = validate_results.load_catalog(envelope.REPO / 'docs/RELEASE_CERTIFICATION_CATALOG.csv')
+        rows['BC-KV-003']['Model/server'] = 'TBD-pin synthetic negative control'
+        with patch.object(validate_results, 'load_catalog', return_value=rows), self.assertRaisesRegex(ValueError, 'TBD-pin'):
             envelope.validate(bad)
 
     def test_smoke_input_is_rejected_even_if_hash_matches(self):
