@@ -1,0 +1,125 @@
+{
+  "$comment": "Copyright (c) 2026 Metrum AI, Inc. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Isolated KV certification frozen envelope",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "lane",
+    "candidate_sha",
+    "candidate",
+    "build_receipt",
+    "lane_manifest",
+    "tools",
+    "inputs",
+    "cases",
+    "harness_repo",
+    "harness_closure"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "kv-r5-frozen.v1"
+    },
+    "lane": {
+      "enum": [
+        "KVV",
+        "KVS",
+        "KVL",
+        "KVD",
+        "KVT",
+        "KVC"
+      ]
+    },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate": {
+      "$ref": "#/$defs/pin"
+    },
+    "build_receipt": {
+      "$ref": "#/$defs/pin"
+    },
+    "lane_manifest": {
+      "$ref": "#/$defs/pin"
+    },
+    "tools": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/pin"
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/pin"
+      }
+    },
+    "harness_closure": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pin"
+      }
+    },
+    "cases": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "patternProperties": {
+        "^BC-KV-0(0[1-9]|1[0-5])$": {
+          "type": "object",
+          "required": [
+            "command",
+            "out"
+          ],
+          "properties": {
+            "command": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "out": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "launcher": {
+              "$ref": "#/$defs/pin"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "harness_repo": {
+      "type": "string",
+      "pattern": "^/"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "pin": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "description": "Shared KV envelope. harness_repo and harness_closure use the existing r4 execution-manifest definitions so final ExecutionIndex intake remains unchanged."
+}
