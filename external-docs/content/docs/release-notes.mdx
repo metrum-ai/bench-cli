@@ -53,6 +53,10 @@ Validation includes synthetic cache models, mock HTTP tests and source-derived
 exporter fixtures, including serialization with injected observations. These are
 not live engine captures. Live certification separately requires exact runtime
 identity, model/kernel and memory-fit checks, measured evidence and proven cleanup.
+For vLLM offload and pressure certification, a source-bound KV-events observer
+reconstructs target-prefix eviction from retained raw observations. Missing or
+incomplete events and unknown cache-group geometry block those cases. The evidence
+concerns GPU cache lookup entries, not byte erasure or physical occupancy.
 The fifteen r5 KV certification cases remain release gates; a fixture or study
 export does not satisfy them.
 
