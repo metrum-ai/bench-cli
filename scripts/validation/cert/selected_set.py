@@ -95,6 +95,9 @@ def load_set(selection_path, catalog_path, index_path, allow_pretrigger=False):
     if unknown:
         raise ValueError(f'selection contains unknown cases: {sorted(unknown)}')
     required = {case for case in selected if catalog[case]['Tier'] == 'RC-GPU'}
+    import validate_results
+    for case in required:
+        validate_results.require_executable(catalog[case])
     if not required:
         raise ValueError('selected GPU case set is empty')
     index = json.loads(Path(index_path).read_text(), object_pairs_hook=manifest_tool.unique_object)

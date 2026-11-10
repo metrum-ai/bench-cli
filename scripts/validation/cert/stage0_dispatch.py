@@ -10,6 +10,9 @@ REPO = HERE.parents[2]
 # These require evidence, identity, cleanup or terminal-class layouts that do
 # not follow one common r4 server. They must not silently use this profile.
 OVERRIDES = {
+    # KV phases require engine-specific snapshots, resets and attribution;
+    # none may fall through to the common r4 server adapter.
+    **{f'BC-KV-{n:03}': 'KV phase/evidence runner' for n in range(1, 10)},
     'BC-PERF-001': 'P1 performance/exporter',
     'BC-TELEM-001': 'P1 performance/exporter',
     'BC-PERF-002': 'P2 performance',

@@ -1,0 +1,121 @@
+# Copyright (c) 2026 Metrum AI, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Core r5 selection, unresolved pins and fail-closed release intake."""
+import csv
+import datetime as dt
+import hashlib
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import select_cases
+import validate_results as validator
+
+REPO = Path(__file__).resolve().parents[3]
+CATALOG = REPO / 'docs/RELEASE_CERTIFICATION_CATALOG.csv'
+CASES = {f'BC-KV-{n:03}' for n in range(1, 16)}
+
+
+class CatalogR5Tests(unittest.TestCase):
+    def test_rows_core_tier_cadence_and_r4_unchanged(self):
+        rows = validator.load_catalog(CATALOG)
+        self.assertEqual(CASES, {case for case in rows if case.startswith('BC-KV-')})
+        for n in range(1, 16):
+            row = rows[f'BC-KV-{n:03}']
+            self.assertEqual('core', row['Selection'])
+            self.assertEqual('per-release', row['Cadence'])
+            self.assertEqual('RC-GPU' if n < 10 else 'RC', row['Tier'])
+        existing = b''.join(line for line in CATALOG.read_bytes().splitlines(keepends=True)
+                            if not line.startswith(b'BC-KV-'))
+        # Frozen r4 bytes at 5a869da45e3a11e2b3465102521559b11f43a56b;
+        # usable with a shallow CI checkout as well as a full clone.
+        self.assertEqual('2b8b6ea76add584f7263a41bffe0ae6e5edd583a22946188810ac7b8b329de87',
+                         hashlib.sha256(existing).hexdigest())
+
+    def test_all_selected_even_with_complete_history_and_low_sample_rate(self):
+        rows = validator.load_catalog(CATALOG)
+        selection = select_cases.make_selection(rows, select_cases.catalog_hash(CATALOG),
+            'a' * 40, .01, 3, [], [{'release': 'prior', 'ran': sorted(rows)}])
+        self.assertTrue(CASES <= set(selection['selected']))
+        for n in (3, 4, 5, 6, 7):
+            case = f'BC-KV-{n:03}'
+            self.assertIn('TBD-pin-not-executable', selection['selected'][case])
+            with self.assertRaisesRegex(ValueError, 'not executable'):
+                validator.require_executable(rows[case])
+
+    def test_each_r5_omission_from_selection_rejected(self):
+        rows = validator.load_catalog(CATALOG)
+        selection = select_cases.make_selection(rows, select_cases.catalog_hash(CATALOG),
+            'a' * 40, .3, 3, [], [])
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'selection.json'
+            for case in sorted(CASES):
+                with self.subTest(case=case):
+                    bad = json.loads(json.dumps(selection))
+                    del bad['selected'][case]
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(ValueError):
+                        validator.load_selection(path, CATALOG, rows, 'a' * 40)
+
+    @patch('execution_intake.ExecutionIndex')
+    def test_every_missing_fail_pending_and_smoke_result_blocks(self, index):
+        index.return_value.unused_errors.return_value = []
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            results = root / 'results'
+            results.mkdir()
+            (root / 'proof.txt').write_text('synthetic evidence')
+            catalog = root / 'catalog.csv'
+            rows = validator.load_catalog(CATALOG)
+            # Resolved-pin fixture isolates result intake from the separate pin gate.
+            with catalog.open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(next(iter(rows.values()))))
+                writer.writeheader()
+                for case in sorted(CASES):
+                    writer.writerow({key: value.replace('TBD-pin', 'resolved-fixture')
+                                     for key, value in rows[case].items()})
+            rows = validator.load_catalog(catalog)
+            sha = 'a' * 40
+            selection = select_cases.make_selection(rows, select_cases.catalog_hash(catalog), sha, .3, 3, [], [])
+            def record(case):
+                return {'ID': case, 'candidate_sha': sha, 'result': 'PASS',
+                    'observed_values': {'fixture': True}, 'thresholds': {'fixture': True},
+                    'evidence_paths': ['proof.txt'], 'evidence_link': 'fixture',
+                    'owner': 'fixture', 'attempt': 1, 'start_utc': '2026-01-01T00:00:00Z',
+                    'end_utc': '2026-01-01T00:01:00Z'}
+            for case in CASES:
+                (results / f'{case}.json').write_text(json.dumps(record(case)))
+            def validate():
+                return validator.validate(catalog, results, sha, dt.datetime.now(dt.timezone.utc),
+                    selection=selection, execution_index=root / 'synthetic-index',
+                    execution_index_sha256='b' * 64, selection_sha256='c' * 64)
+            self.assertEqual([], validate()[1])
+            for case in sorted(CASES):
+                path = results / f'{case}.json'
+                for state in ('missing', 'FAIL', 'PENDING', 'smoke'):
+                    with self.subTest(case=case, state=state):
+                        path.unlink()
+                        if state != 'missing':
+                            rec = record(case)
+                            if state == 'smoke':
+                                rec['evidence_class'] = 'Stage-0 smoke, not certification'
+                            else:
+                                rec['result'] = state
+                            path.write_text(json.dumps(rec))
+                        if state == 'smoke':
+                            with self.assertRaises(validator.NonCertificationEvidence):
+                                validate()
+                        else:
+                            self.assertTrue(any(case in error for error in validate()[1]))
+                        path.write_text(json.dumps(record(case)))
+            # Even an apparently valid PASS cannot bypass an unresolved pin.
+            catalog.write_text(catalog.read_text().replace('resolved-fixture', 'TBD-pin'))
+            selection = select_cases.make_selection(validator.load_catalog(catalog),
+                select_cases.catalog_hash(catalog), sha, .3, 3, [], [])
+            self.assertTrue(any('TBD-pin' in error for error in validate()[1]))
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -188,6 +188,11 @@ def make_selection(catalog, digest, candidate, rate, rotation, changes, history,
         for case in cases[:max(1, math.ceil(len(cases) * rate))]:
             reasons[case].append('sample')
     selected = {case: sorted(why) for case, why in sorted(reasons.items()) if why}
+    for case in selected:
+        try:
+            validate_results.require_executable(active[case])
+        except ValueError:
+            selected[case] = sorted(selected[case] + ['TBD-pin-not-executable'])
     lanes = {}
     for case in selected:
         row = active[case]
