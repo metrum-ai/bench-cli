@@ -96,7 +96,8 @@ unchanged.
 ## Development-mode scope and case evidence
 
 The runner supplies `VLLM_SERVER_DEV_MODE=1`, KV-event configuration and
-explicit TP/PP/DP size 1 **only for BC-KV-002 and BC-KV-009** in
+explicit TP/PP/DP size 1 for BC-KV-002/009; BC-KV-008 also receives
+`VLLM_SERVER_DEV_MODE=1` for its existing per-stage reset path in
 [`server()`](../scripts/validation/cert/kv_r5_vllm_runner.py).
 The shared runtime writes the complete Docker argv to each case's
 `server-argv.json` before launch; that file records the exact environment
@@ -104,8 +105,8 @@ assignment, event-socket configuration and topology flags. Retain it with
 `vllm-package.json`, `runtime-source.json` and each phase's
 `observer-before/control.jsonl` and `observer-after/control.jsonl`.
 The latter files record the exact control methods, paths and raw replies.
-The runner supplies none of these observer options to 001/008 or another
-engine family.
+BC-KV-008 receives no KV-event or observer topology options. BC-KV-001
+and the other engine families receive no development-mode override.
 
 At the pinned revision, the Python
 [router gate](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/entrypoints/launchers/api_server/routers.py#L46)
@@ -129,9 +130,13 @@ and [RL handlers](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b5
 The [Rust frontend gate](https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/rust/src/server/src/routes.rs#L193)
 likewise gates route registration. `/tokenize`, `/metrics` and chat serving
 are registered independently; profiling and LoRA updating have separate gates.
-The observer calls only pause, pause-status and resume, plus ordinary
+The 002/009 observer calls only pause, pause-status and resume, plus ordinary
 read-only tokenization/metrics. It never calls the reset, sleep, RPC, abort,
-weight-update or weight-checker endpoints.
+weight-update or weight-checker endpoints. The explicit 008 exception calls
+POST `/reset_prefix_cache` at every named session stage on the same engine.
+Its retained `reset.json` must contain HTTP 200 and `{"success":true}`; a 200
+response with `success:false` fails the stage. Its development flag is recorded
+in the same per-case `server-argv.json` evidence.
 
 A full-tree search of this revision finds no reads of this flag in the
 scheduler, cache managers, GPU worker or KV-transfer/offloading code. The
@@ -159,6 +164,20 @@ strict cold/rehit TTFT comparison is measured with this same instrumentation
 enabled in every phase. The explicit size-1 topology matches the frozen
 single-GPU case. Raw control evidence, continuous events, counter windows
 and process epochs must still establish the full gate.
+
+For 008, `kv_r5_session_cold.py` additionally brackets each stage's first
+measured request after dedicated warmup. The proxy retains raw exporter pages
+and `first-measured-cold.json`, waits for the source's disjoint completion bins
+to reach the exact frozen request count with running/waiting gauges zero,
+and requires positive prefix-query delta and **zero prefix-hit delta** for
+that single request. The evaluator recomputes the result from the raw pages
+and also retains the existing server cached-token-zero check. Missing pages,
+changed series, counter resets, extra requests and unsuccessful reset replies
+fail closed. The frozen sweep is 1; the proxy holds the next POST until the
+counter observation finishes, forwarding response chunks normally. This adds
+an observation gap without buffering the selected response or restarting the
+engine. No KV-event observer is enabled for 008. The helper is included in the
+candidate's existing frozen harness closure.
 
 ## Frozen input contract
 
