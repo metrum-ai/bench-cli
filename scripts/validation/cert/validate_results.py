@@ -54,6 +54,12 @@ def load_catalog(path):
         return rows
 
 
+def require_executable(row):
+    """Provisional catalog pins cannot authorize execution or release credit."""
+    if any('tbd-pin' in str(value).casefold() for value in row.values()):
+        raise ValueError('TBD-pin: catalog case is not executable')
+
+
 def check_evidence(base, paths):
     if not isinstance(paths, list) or not paths:
         raise ValueError("evidence_paths must be a nonempty list")
@@ -300,6 +306,7 @@ def validate(catalog, results, candidate, as_of, cadence=None, history=None, sel
             continue
         record = records.get(case)
         try:
+            require_executable(rows[case])
             if record is None:
                 raise ValueError("missing result")
             source = record.get("candidate_sha")
