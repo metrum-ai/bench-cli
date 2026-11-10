@@ -106,3 +106,13 @@ Plan approximately 35 minutes for BC-KV-003 and 40 for BC-KV-004, including
 startup and cleanup; these are estimates, not caps or measured runtimes.
 Actual GPU/host headroom and operational compatibility remain unmeasured here.
 No live certification was performed while preparing these offline changes.
+
+The pinned source has a hybrid HiCache path, rather than merely a generic model
+loader: [`registry.py`](https://github.com/sgl-project/sglang/blob/297e54fd105e974cdf401e5b4d20253a22c16f90/python/sglang/srt/mem_cache/registry.py)
+adds the MAMBA component alongside FULL for hybrid SSM models and calls
+`init_hicache` when hierarchical cache is enabled. The
+[`unified cache`](https://github.com/sgl-project/sglang/blob/297e54fd105e974cdf401e5b4d20253a22c16f90/python/sglang/srt/mem_cache/unified_radix_cache.py)
+attaches a hybrid host pool and controller, including recurrent state.
+Thus the primary checkpoint's architecture has a source-supported HiCache
+route in 0.5.23; exact FP8 kernel behavior and measured operation remain Stage-0
+checks. No fallback is selected solely because the model is hybrid.
