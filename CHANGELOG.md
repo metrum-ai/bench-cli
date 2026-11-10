@@ -76,6 +76,11 @@ The release date will be set when v1.9.0 is tagged.
   and physical cache state remains Unknown; these are engineering reports, not
   live cache certification (#421, #423). See
   [scope and methodology](docs/KV_STUDY_EXPORTS.md).
+- vLLM offload and pressure certification use a source-bound KV-events
+  observer with retained replay frames and independent window evidence. Missing
+  or gapped streams, unknown cache-group geometry or incomplete target eviction
+  block the gates. This observes GPU cache lookup entries, not byte erasure or
+  physical occupancy (#506).
 - Add synthetic cache-state/reset/error tests, source-derived metric exposition
   fixtures and guarded live certification runners. Fixtures, exporter serialization
   with injected observations and mock HTTP tests are not live engine captures.
