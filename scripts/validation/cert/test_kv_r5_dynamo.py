@@ -97,7 +97,10 @@ class DynamoControls(unittest.TestCase):
             return {'architectures': [runner.ARCHITECTURE], 'model_type': 'qwen3_vl'} if str(path).endswith('config.json') else proof
         with patch.object(runner.runtime.manifest_tool, 'sha256_file', return_value='2329a2c9022d94906d5af9bafe93ca97cba0eedb5426fc42ca64f2bfcd65e949'), patch.object(runner.runtime, 'pin'), patch.object(runner.runtime, 'load', side_effect=load):
             runner.validate(data)
-            for flag in ('--language-model-only=false', '--enable-mm-embeds', '--kv-cache-memory-bytes=1', '--hf-overrides', '-tp'):
+            for flag in ('--language-model-only=false', '--enable-mm-embeds', '--kv-cache-memory-bytes=1', '--hf-overrides', '-tp',
+                         '--kv_cache_memory_bytes=1', '--kv-cache-memory-b=1', '--no-language-model-only',
+                         '--no_language_model_only', '--kv_transfer_config.kv_connector=Other',
+                         '--hf_overrides.architectures=Other', '--served_model_name+=other'):
                 with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, 'override'):
                     runner.validate({**data, 'server_flags': ['--enable-prefix-caching', flag]})
 

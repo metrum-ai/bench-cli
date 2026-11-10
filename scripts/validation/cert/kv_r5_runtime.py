@@ -56,6 +56,27 @@ def pin(item):
     return path
 
 
+def server_option_name(arg):
+    """Match vLLM's underscore and dotted-JSON spelling of an option name."""
+    name = arg.partition('=')[0].partition('.')[0].rstrip('+')
+    return name.replace('_', '-') if name.startswith('--') else name
+
+
+def server_overrides(flags, forbidden):
+    for arg in flags:
+        name = server_option_name(arg)
+        if not name.startswith('-') or len(name) <= 1:
+            continue
+        names = {name}
+        if name.startswith('--no-'):
+            names.add('--'+name[5:])
+        # argparse can accept unambiguous abbreviations. Reject prefixes of
+        # controlled options too, before the engine parses the frozen argv.
+        if any(blocked.startswith(candidate) for candidate in names for blocked in forbidden):
+            return True
+    return False
+
+
 def expected_request(row, model):
     if (not SHA.fullmatch(row['messages_sha256']) or type(row['warmup']) is not bool
             or not isinstance(row['options'], dict) or row['options'].get('model') != model

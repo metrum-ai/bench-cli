@@ -48,12 +48,13 @@ def validate(data):
     if data['metrics_port'] != data['port'] or data['metrics_internal_port'] != 8000:
         raise ValueError('vLLM metrics endpoint mismatch')
     flags = data['server_flags']
-    if '--enable-prefix-caching' not in flags or '--no-enable-prefix-caching' in flags:
+    if '--enable-prefix-caching' not in flags or any(runtime.server_option_name(a) == '--no-enable-prefix-caching' for a in flags):
         raise ValueError('APC must be explicitly enabled')
-    for forbidden in ('--model', '--revision', '--served-model-name', '--host', '--port', '--tokenizer'):
-        if any(a.split('=')[0] == forbidden for a in flags):
-            raise ValueError('server identity override')
-    if 'H100' in data['gpu_class'] and (flags.count('--max-num-seqs') != 1
+    if runtime.server_overrides(flags, {'--model', '--revision', '--served-model-name', '--host', '--port',
+                                       '--tokenizer', '--config', '--hf-overrides', '--model-impl'}):
+        raise ValueError('server identity override')
+    seq_flags = [a for a in flags if a.startswith('--') and '--max-num-seqs'.startswith(runtime.server_option_name(a))]
+    if 'H100' in data['gpu_class'] and (seq_flags != ['--max-num-seqs']
             or any(a.startswith('--max-num-seqs=') for a in flags)
             or flags[flags.index('--max-num-seqs')+1] != '256'):
         raise ValueError('H100 requires --max-num-seqs 256')

@@ -57,6 +57,17 @@ def phase(root, name, count=16, cached=0, offset=0):
 
 
 class VllmControls(unittest.TestCase):
+    def test_engine_identity_aliases_are_rejected_before_launch(self):
+        data = {'model': runner.MODEL, 'model_revision': runner.MODEL_REVISION, 'served_model': runner.MODEL,
+                'metrics_port': 9000, 'port': 9000, 'metrics_internal_port': 8000}
+        for flag in ('--served_model_name=other', '--served-model-n=other', '--hf_overrides.architectures=Other', '--config=other'):
+            with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, 'identity override'):
+                runner.validate({**data, 'server_flags': ['--enable-prefix-caching', flag]})
+        for flag in ('--max_num_seqs=512', '--max-num-seq=512'):
+            with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, 'max-num-seqs 256'):
+                runner.validate({**data, 'gpu_class': 'H100',
+                                 'server_flags': ['--enable-prefix-caching', '--max-num-seqs', '256', flag]})
+
     def test_rc_package_cannot_use_stable_runtime_profile(self):
         instance = SimpleNamespace(data={'case': 'BC-KV-002'}, out=Path('/unused'), name='owned-fixture', docker=lambda *args:
             SimpleNamespace(stdout=json.dumps({'version': '0.33.0rc1', 'files': {}})))

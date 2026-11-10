@@ -69,7 +69,7 @@ def validate(data):
                  '--language-model-only', '--limit-mm-per-prompt', '--enable-mm-embeds', '--enable-prompt-embeds',
                  '--hf-overrides', '--model-impl', '--config', '--kv-cache-memory-bytes', '--num-gpu-blocks-override',
                  '--tensor-parallel-size', '-tp', '--pipeline-parallel-size', '-pp', '--data-parallel-size', '-dp'}
-    if any(a.split('=')[0] in forbidden for a in flags):
+    if runtime.server_overrides(flags, forbidden):
         raise ValueError('identity/connector override forbidden')
     if '--enable-prefix-caching' not in flags:
         raise ValueError('prefix caching must be explicit')
