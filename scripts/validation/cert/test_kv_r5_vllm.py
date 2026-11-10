@@ -39,7 +39,7 @@ def phase(root, name, count=16, cached=0, offset=0):
                      'session_id': '', 'turn': '', 'input_tokens': 10, 'output_tokens': 1,
                      'ttft_source': 'stream', 'ttft_s': 1,
                      'cache_evidence': json.dumps({'cached_tokens': cached, 'prompt_tokens': 10,
-                         'cached_status': 'reported', 'source': 'openai-chat-usage.v1:/prompt_tokens_details/cached_tokens',
+                         'cached_status': 'reported', 'prompt_status': 'reported', 'source': 'openai-chat-usage.v1:/prompt_tokens_details/cached_tokens',
                          'units': 'tokens', 'invalid_report_seen': False, 'conflicting_reports': False})})
     (directory/'trace.jsonl').write_text('\n'.join(map(json.dumps, events)))
     with (directory/'requests.csv').open('w') as stream:

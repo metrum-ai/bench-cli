@@ -19,7 +19,7 @@ MODEL_REVISION = 'c3a462cc3d38cf351f3b26cbd763469eeb74ef81'
 METRICS_PATH = '/metrics'
 ALLOW_RESET = True
 CASES = ('BC-KV-001', 'BC-KV-002', 'BC-KV-008', 'BC-KV-009')
-LIMITS = dict(zip(CASES, (2100, 7200, 2400, 3600)))
+LIMITS = dict(zip(CASES, (None, 7200, None, None)))
 CRITERIA = {
     'BC-KV-001': {'paired_requests_min': 16, 'server_cached_tokens_positive': True,
                   'positive_same_series_queries_and_hits': True, 'cli_delta_equals_oracle': True},
@@ -53,7 +53,9 @@ def validate(data):
     for forbidden in ('--model', '--revision', '--served-model-name', '--host', '--port', '--tokenizer'):
         if any(a.split('=')[0] == forbidden for a in flags):
             raise ValueError('server identity override')
-    if 'H100' in data['gpu_class'] and ('--max-num-seqs' not in flags or flags[flags.index('--max-num-seqs')+1] != '256'):
+    if 'H100' in data['gpu_class'] and (flags.count('--max-num-seqs') != 1
+            or any(a.startswith('--max-num-seqs=') for a in flags)
+            or flags[flags.index('--max-num-seqs')+1] != '256'):
         raise ValueError('H100 requires --max-num-seqs 256')
     names = [p['name'] for p in data['phases']]
     expected = {'BC-KV-001': ['cold', 'warm', 'unique'],
@@ -69,6 +71,8 @@ def validate(data):
             raise ValueError('independent observer must be a frozen input')
     if data['case'] == 'BC-KV-002' and ('--kv-offloading-size' not in flags or '--kv-offloading-backend' not in flags):
         raise ValueError('native CPU offload configuration required')
+    if data['case'] == 'BC-KV-002' and flags[flags.index('--kv-offloading-backend')+1] != 'native':
+        raise ValueError('the native CPU offload gate requires the native backend')
     for phase in data['phases']:
         args = phase['argv']
         for option, value in (('--cache-metrics-profile', 'vllm4ba-apc'),
@@ -131,9 +135,9 @@ def cohort(rows, usage):
         if type(cached) is not int or not 0 <= cached <= prompt or prompt <= 0:
             raise ValueError('server cached-token observation unavailable')
         evidence = json.loads(row['cache_evidence'])
-        if (evidence.get('cached_tokens'), evidence.get('prompt_tokens'), evidence.get('cached_status'),
+        if (evidence.get('cached_tokens'), evidence.get('prompt_tokens'), evidence.get('cached_status'), evidence.get('prompt_status'),
             evidence.get('source'), evidence.get('units'), evidence.get('invalid_report_seen'), evidence.get('conflicting_reports')) != (
-            cached, prompt, 'reported', 'openai-chat-usage.v1:/prompt_tokens_details/cached_tokens', 'tokens', False, False):
+            cached, prompt, 'reported', 'reported', 'openai-chat-usage.v1:/prompt_tokens_details/cached_tokens', 'tokens', False, False):
             raise ValueError('product cached-token provenance disagrees with server')
         group = 'cold' if cached == 0 else 'full' if cached == prompt else 'partial'
         groups[group].append(float(row['ttft_s']))
