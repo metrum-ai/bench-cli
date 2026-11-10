@@ -208,7 +208,9 @@ def main(argv, family, lane):
     if common.pinned(envelope['lane_manifest']) != args.manifest.resolve() or envelope['cases'][args.case]['out'] != str(args.out):
         raise ValueError('launch arguments differ from frozen envelope')
     env = os.environ.copy()
-    env.update(CERT_CASE_ID=args.case, CERT_HF_HUB_CACHE=spec['hub_cache'])
+    config = spec['lanes'][lane]
+    fit = load(common.pinned(config['fit']))
+    env.update(CERT_CASE_ID=args.case, CERT_HF_HUB_CACHE=spec['hub_cache'], CUDA_VISIBLE_DEVICES=fit['gpu_uuid'])
     command = [spec['tools']['bash']['path'], str(HERE / f'lane-{lane.lower()}.sh'),
                '--candidate', spec['candidate']['path'], '--baseline', spec['baseline']['path'],
                '--manifest', str(args.manifest), '--out', str(args.out)]

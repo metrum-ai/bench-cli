@@ -39,10 +39,12 @@ class AdapterTests(unittest.TestCase):
                 (out / 'evidence/server-container-owner.txt').write_text('a' * 32)
                 candidate = root / 'candidate'
                 candidate.write_text('fixture')
+                fit = root / 'fit.json'
+                fit.write_text(json.dumps({'gpu_uuid': 'GPU-' + 'a' * 32}))
                 spec = {'candidate': adapter.file_pin(candidate), 'baseline': adapter.file_pin(candidate),
                     'tools': {'bash': {'path': '/bin/bash'}, 'docker': {'path': '/usr/bin/docker'}},
                     'hub_cache': str(root), 'timeout_seconds': 600, 'cleanup_grace_seconds': 120,
-                    'lanes': {'KVS': {'port': 8000, 'proxy_port': 8001}}}
+                    'lanes': {'KVS': {'port': 8000, 'proxy_port': 8001, 'fit': adapter.file_pin(fit)}}}
                 source = root / 'spec.json'
                 source.write_text(json.dumps(spec))
                 envelope = root / 'envelope.json'
@@ -64,6 +66,7 @@ class AdapterTests(unittest.TestCase):
                     self.assertEqual(360, process.wait.call_args_list[0].kwargs['timeout'])
                     self.assertEqual('BC-KV-003', launch.call_args.kwargs['env']['CERT_CASE_ID'])
                     self.assertEqual(str(root), launch.call_args.kwargs['env']['CERT_HF_HUB_CACHE'])
+                    self.assertEqual('GPU-' + 'a' * 32, launch.call_args.kwargs['env']['CUDA_VISIBLE_DEVICES'])
                     self.assertTrue(launch.call_args.kwargs['start_new_session'])
                     self.assertEqual(1 if timeout else 0, kill.call_count)
                 self.assertFalse((out / 'results').exists())
