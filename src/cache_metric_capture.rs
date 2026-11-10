@@ -159,8 +159,11 @@ impl ProfileCapabilities {
                 _ => DeclaredSourceStatus::Unsupported,
             },
             release_aliases: Vec::new(),
-            release_restriction: matches!(profile, ProfileId::DynamoKvbm)
-                .then_some("legacy Dynamo <=1.6.x only; later releases do not ship KVBM"),
+            release_restriction: matches!(
+                profile,
+                ProfileId::DynamoKvbm | ProfileId::Dynamo162Kvbm
+            )
+            .then_some("legacy Dynamo <=1.6.x only; later releases do not ship KVBM"),
             complete_profile_support: false,
             executable_version_verified: false,
             physical_tier_validation: false,
