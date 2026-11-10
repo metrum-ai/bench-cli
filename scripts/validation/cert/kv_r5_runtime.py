@@ -67,6 +67,19 @@ def expected_request(row, model):
         raise ValueError('invalid frozen source turn')
 
 
+def model_lock(data):
+    root = Path(data['model_snapshot'])
+    if not root.is_absolute() or str(root.resolve()) != str(root) or not root.is_dir():
+        raise ValueError('canonical staged model directory required')
+    files = list(root.rglob('*'))
+    if any(path.is_symlink() for path in files):
+        raise ValueError('staged model snapshot cannot contain symlinks')
+    actual = {path for path in files if path.is_file()}
+    locked = [Path(item['path']).resolve() for item in data['model_files']]
+    if not actual or len(set(locked)) != len(locked) or set(locked) != actual:
+        raise ValueError('model file lock must cover the complete staged snapshot')
+
+
 def validate(data, family):
     if data['schema_version'] != 'kv-r5-execution.v1' or data['case'] not in family.CASES:
         raise ValueError('unsupported r5 case')
@@ -77,9 +90,7 @@ def validate(data, family):
     execution_policy.validate_case_tools(data['tools'], kv_dispatch.CASE_LANES[data['case']])
     for item in [data['candidate'], data['oci_index'], data['oci_child'], *data['inputs'].values(), *data['tools'].values(), *data['model_files']]:
         pin(item)
-    model_root = Path(data['model_snapshot']).resolve()
-    if not data['model_files'] or any(not pin(p).resolve().is_relative_to(model_root) for p in data['model_files']):
-        raise ValueError('model snapshot file lock required')
+    model_lock(data)
     for tool in ('docker', 'nvidia-smi', 'python3'):
         if tool not in data['tools'] or not os.access(pin(data['tools'][tool]), os.X_OK):
             raise ValueError('pinned executable tool required')

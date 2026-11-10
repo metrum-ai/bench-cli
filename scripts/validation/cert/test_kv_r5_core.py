@@ -77,6 +77,21 @@ class WireControls(unittest.TestCase):
 
 
 class LifecycleControls(unittest.TestCase):
+    def test_unlisted_weights_cannot_hide_behind_a_pinned_model_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, weights = root/'config.json', root/'model.safetensors'
+            config.write_text('{}')
+            weights.write_bytes(b'synthetic weight bytes')
+            data = {'model_snapshot': str(root), 'model_files': [{'path': str(config)}]}
+            with self.assertRaisesRegex(ValueError, 'complete staged snapshot'):
+                runtime.model_lock(data)
+            data['model_files'].append({'path': str(weights)})
+            runtime.model_lock(data)
+            (root/'unfrozen-link').symlink_to(weights)
+            with self.assertRaisesRegex(ValueError, 'symlinks'):
+                runtime.model_lock(data)
+
     def test_owner_mismatch_prevents_removal(self):
         with tempfile.TemporaryDirectory() as tmp:
             data = {'timeout_seconds': 300, 'tools': {'docker': {'path': '/frozen/docker'}}}
