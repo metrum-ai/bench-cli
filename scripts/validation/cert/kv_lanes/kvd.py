@@ -13,3 +13,8 @@ def freeze(args):
 def main(argv):
     """Run with ['--case', ID, ...lane arguments]; return a process exit code."""
     raise ValueError('KVD: runner not yet available')
+
+
+def preflight(manifest):
+    """Validate frozen lane-specific identity, inputs and execution requirements."""
+    raise ValueError('KVD: runner not yet available')

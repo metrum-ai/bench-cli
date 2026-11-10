@@ -48,6 +48,9 @@ def check_input_origins(manifest, output):
 
 def preflight(manifest):
     require_python()
+    import kv_dispatch
+    if manifest.get('lane') in kv_dispatch.LANE_MODULES:
+        return kv_dispatch.preflight(manifest)
     if not re.fullmatch(r"[a-f0-9]{40}", manifest.get("candidate_sha", "")):
         raise ValueError("candidate_sha must be a full commit")
     check_harness(manifest)
@@ -183,6 +186,9 @@ def validate_execution_record(record, manifest_sha256, tools):
 
 
 def run_case(manifest_path, manifest, case):
+    import kv_dispatch
+    if manifest.get('lane') in kv_dispatch.LANE_MODULES:
+        return kv_dispatch.run_case(manifest_path, manifest, case)
     check_harness(manifest)
     build_roles.check_manifest(manifest)
     if case == 'BC-GPU-010':

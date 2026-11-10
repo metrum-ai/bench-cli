@@ -75,6 +75,35 @@ module and set `AVAILABLE = True` when reviewed offline tests cover it. No share
 registry edit is needed. `case_entry.sh` and `freeze_case.py` check the exact
 case/lane mapping before delegating. The common r4 adapter remains closed to KV.
 
+Each adapter also implements `preflight(manifest)` and calls
+`kv_envelope.validate(manifest, lane=...)` before checking its own execution
+specification. The shared [frozen envelope schema](../schemas/kv-r5-frozen.v1.json)
+is `kv-r5-frozen.v1`. It includes the existing `harness_repo` and
+`harness_closure` fields so final execution-index intake remains unchanged.
+The validator binds measured workflow artifacts, transitive source/input pins,
+the schema, build log, baseline `bash`/`env`/`python3` tools and exact command.
+Engine-specific tools, source and actual-host identity checks remain mandatory
+in each adapter. KV lanes do not require r4 serving-contract tools or probes.
+The KV exemption from the r4 `CASE_TOOLS` set retains the base `REQUIRED`
+tools and exact outer/inner tool-map equality. Each lane adapter's preflight
+must additionally enforce its own engine-specific required executables; the
+exemption never authorizes an incomplete engine tool map.
+
+`case_launcher.py` delegates only KV codes to the separate dispatcher. The
+dispatcher calls preflight and starts a separate process group through pinned
+`env -i`, inside a unique delegated cgroup. It bounds execution and cleanup by
+the inner spec's `timeout_seconds` and `cleanup_grace_seconds`, using its
+canonical `cgroup_root`. Missing delegation, timeout or surviving descendants
+blocks terminal acceptance. It supplies the outer envelope through
+`CERT_INPUT_MANIFEST`; the child case entry dispatches
+`main(['--case', ID, '--manifest', INNER_SPEC, '--manifest-sha256', HASH,
+'--out', NEW_DIRECTORY])`. Lane entry points also accept optional `--preflight`.
+Terminal records must bind the envelope, tools and complete evidence hashes;
+failed or absent records leave a launch-error marker. Marked smoke records stay
+ineligible for certification. Lifecycle events are recorded independently.
+`CERT_MANIFEST` and `CERT_LANE` are absent from the KV child environment. Only
+the existing explicit certification variables and pinned-tool PATH are supplied.
+
 Live KV execution requires image/GPU provenance, launcher terminal evidence,
 smoke-intake rejection, independently proven scoped cleanup and engine-specific
 source/runtime identity checks. Registration alone is not executable evidence.

@@ -61,7 +61,7 @@ def validate_tools(tools):
 
 def validate_case_tools(tools, lane):
     tools = validate_tools(tools)
-    required = REQUIRED | (CASE_TOOLS if lane != 'CLEANUP' else set())
+    required = REQUIRED | (CASE_TOOLS if lane not in {'CLEANUP', 'KVV', 'KVS', 'KVL', 'KVD', 'KVT', 'KVC'} else set())
     if lane in CARGO_LANES:
         required |= {'cargo', 'rustc', 'git'}
     missing = required - tools.keys()
