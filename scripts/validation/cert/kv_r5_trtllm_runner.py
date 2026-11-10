@@ -18,7 +18,7 @@ MODEL = 'Qwen/Qwen3-30B-A3B-Instruct-2507-FP8'
 MODEL_REVISION = '5a5a776300a41aaa681dd7ff0106608ef2bc90db'
 METRICS_PATH = '/prometheus/metrics'
 CASES = ('BC-KV-007',)
-LIMITS = {'BC-KV-007': 3000}
+LIMITS = {'BC-KV-007': None}  # Planning estimates are not execution caps.
 UNAVAILABLE = {'value': None, 'status': 'unknown', 'reason': 'not exported by 1.2.1'}
 CRITERIA = {'BC-KV-007': {'source_defined_families_complete': True, 'consistent_live_deltas': True,
                         'cached_tokens': UNAVAILABLE, 'kv_headroom_min_fraction': 0.25}}

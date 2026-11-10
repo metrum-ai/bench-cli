@@ -55,6 +55,9 @@ Each phase command invokes only the pinned candidate, uses concurrency one
 paths to workload/configuration files must appear in `inputs`. Freeze every
 command argument, generation option, tokenizer/template, seed and request order.
 Do not freeze credentials. The child environment excludes inherited API keys.
+Planning-duration estimates do not supply execution caps: freeze an explicit
+reviewed cap for each run. Only BC-KV-002 has the fixed 7200-second ceiling;
+other cases do not inherit that authorization.
 
 Every `expected_requests` entry contains `messages_sha256` (SHA256 of UTF-8
 JSON messages with sorted keys, compact separators and unescaped Unicode),

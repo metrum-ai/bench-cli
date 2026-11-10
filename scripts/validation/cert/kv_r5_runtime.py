@@ -103,7 +103,9 @@ def validate(data, family):
                                         index_digest=family.IMAGE.split('@')[1], child_digest=family.CHILD)
     if type(data.get('cleanup_grace_seconds')) is not int or data['cleanup_grace_seconds'] != 120:
         raise ValueError('freeze 120 seconds of cleanup grace inside the case envelope')
-    if type(data['timeout_seconds']) is not int or not 120 < data['timeout_seconds'] <= family.LIMITS[data['case']]:
+    cap = data['timeout_seconds']
+    maximum = family.LIMITS[data['case']]
+    if type(cap) is not int or cap <= 120 or (maximum is not None and cap > maximum):
         raise ValueError('case time envelope exceeded')
     if not data['source_files'] or not all(SHA.fullmatch(value) for value in data['source_files'].values()):
         raise ValueError('independently reviewed runtime source file pins required')
@@ -482,6 +484,7 @@ def main(family, argv=None):
     parser.add_argument('--preflight', action='store_true')
     args = parser.parse_args(argv)
     budget_start = time.monotonic()
+    started = dt.datetime.now(dt.timezone.utc).isoformat()
     runtime = None
     try:
         result_writer.require_python()
@@ -496,7 +499,6 @@ def main(family, argv=None):
         evidence.mkdir()
         save(evidence/'manifest.json', data)
         runtime = Runtime(data, evidence, family, budget_start=budget_start)
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
         passed, observed = False, {}
         try:
             runtime.start()
@@ -517,6 +519,7 @@ def main(family, argv=None):
         if time.monotonic() > runtime.total_deadline:
             passed = False
             observed['deadline_error'] = 'complete case including setup and cleanup exceeded its envelope'
+        observed['total_case_seconds'] = time.monotonic()-budget_start
         record = {'ID': data['case'], 'result': 'PASS' if passed else 'FAIL',
             'candidate_sha': data['candidate_sha'], 'attempt': 1, 'start_utc': started,
             'end_utc': dt.datetime.now(dt.timezone.utc).isoformat(), 'owner': data['owner'],
