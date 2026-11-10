@@ -61,6 +61,7 @@ def run_case(manifest_path, manifest, case):
         raise ValueError('KV manifest differs from preflight')
     manifest_hash = hashlib.sha256(raw).hexdigest()
     import time
+    import signal
     import execution_policy
     import execution_evidence
     import case_launcher
@@ -84,6 +85,9 @@ def run_case(manifest_path, manifest, case):
     group = None
     pending = None
     outcome = None
+    def interrupted(signum, _frame):
+        raise InterruptedError(f'KV launcher interrupted by signal {signum}')
+    previous_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         group = stage0_cgroup.create(spec['cgroup_root'])
         (lifecycle / 'cgroup.json').write_text(json.dumps({'parent': spec['cgroup_root'], 'name': group.name}) + '\n')
@@ -116,6 +120,8 @@ def run_case(manifest_path, manifest, case):
                     raise ValueError('KV process survived launcher exit')
             except BaseException as exc:
                 pending = exc
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
     try:
         if pending is not None:
             raise pending
